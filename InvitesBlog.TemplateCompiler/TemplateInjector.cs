@@ -52,26 +52,25 @@ public static class TemplateInjector
             startAnimation();
           }
 
-          function reveal(el) { el.classList.add('ib-visible', 'is-visible'); }
-          function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
-          function sections() { return document.querySelectorAll('.ib-section, [data-reveal]'); }
-
-          var animationStarted = false, io = null, parentDriven = false;
-
+          var animationStarted = false;
           function startAnimation() {
             if (animationStarted) return;
             animationStarted = true;
-            var secs = sections();
-            if (reduced()) { for (var k = 0; k < secs.length; k++) reveal(secs[k]); postHeight(); return; }
-
-            // Fallback path: works when THIS iframe is the scroll container (desktop).
+            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            var sections = document.querySelectorAll('.ib-section, [data-reveal]');
+            if (reduce) {
+              for (var k = 0; k < sections.length; k++) sections[k].classList.add('ib-visible', 'is-visible');
+              reportHeight(); return;
+            }
             if ('IntersectionObserver' in window) {
-              io = new IntersectionObserver(function (entries) {
-                entries.forEach(function (en) { if (en.isIntersecting) { reveal(en.target); io.unobserve(en.target); } });
+              var io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (en) {
+                  if (en.isIntersecting) { en.target.classList.add('ib-visible', 'is-visible'); io.unobserve(en.target); }
+                });
               }, { threshold: 0.15 });
-              for (var s = 0; s < secs.length; s++) io.observe(secs[s]);
+              for (var s = 0; s < sections.length; s++) io.observe(sections[s]);
             } else {
-              for (var s2 = 0; s2 < secs.length; s2++) reveal(secs[s2]);
+              for (var s2 = 0; s2 < sections.length; s2++) sections[s2].classList.add('ib-visible', 'is-visible');
             }
             var envelope = document.querySelector('.ib-envelope, [data-envelope]');
             if (envelope) {
@@ -79,31 +78,27 @@ public static class TemplateInjector
                 if (window.scrollY > window.innerHeight * 0.25) envelope.classList.add('ib-opened', 'is-open');
               }, { passive: true });
             }
-            postHeight();
+            reportHeight();
           }
 
-          // Parent-driven reveal: on iOS (and everywhere the host sizes the iframe to content and
-          // scrolls the PAGE) the host forwards its scroll geometry and we reveal from that. The first
-          // such message disables the IntersectionObserver so the two paths don't fight.
-          function onParentScroll(top, vh) {
-            parentDriven = true;
-            if (io) { io.disconnect(); io = null; }
-            if (reduced()) { var all = sections(); for (var a = 0; a < all.length; a++) reveal(all[a]); return; }
-            var secs = sections();
-            for (var i = 0; i < secs.length; i++) {
-              if (top + secs[i].getBoundingClientRect().top < vh * 0.85) reveal(secs[i]);
-            }
-            var envelope = document.querySelector('.ib-envelope, [data-envelope]');
-            if (envelope && top < -vh * 0.15) envelope.classList.add('ib-opened', 'is-open');
-          }
-
-          function postHeight() {
+          // Report our scrollable content height so the host can create a matching scroll spacer.
+          // The iframe stays a fixed 100vh box, so vh units (and this height) are stable.
+          function reportHeight() {
             try {
               if (window.parent && window.parent !== window) {
                 var h = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
-                window.parent.postMessage({ __inviteHeight: h }, '*');
+                window.parent.postMessage({ __inviteScrollHeight: h }, '*');
               }
             } catch (e) {}
+          }
+
+          // Drive our OWN internal scroll from the host page's scroll progress (0..1). Programmatic
+          // scroll works inside iframes on iOS Safari even though touch-scroll does not — this is what
+          // makes the reveal/envelope animation run on iPhone.
+          function applyProgress(p) {
+            if (p < 0) p = 0; else if (p > 1) p = 1;
+            var max = (document.documentElement.scrollHeight || 0) - window.innerHeight;
+            window.scrollTo(0, p * (max > 0 ? max : 0));
           }
 
           var dataEl = document.getElementById('invite-data');
@@ -114,12 +109,11 @@ public static class TemplateInjector
           window.addEventListener('message', function (e) {
             if (!e.data) return;
             if (e.data.__inviteData) apply(e.data.__inviteData);
-            if (e.data.__inviteScroll) onParentScroll(e.data.__inviteScroll.top, e.data.__inviteScroll.viewportH);
+            if (typeof e.data.__inviteProgress === 'number') applyProgress(e.data.__inviteProgress);
           });
-          window.addEventListener('resize', postHeight, { passive: true });
-          window.addEventListener('load', postHeight);
-          // Content height can settle after fonts/data — re-report a few times.
-          setTimeout(postHeight, 60); setTimeout(postHeight, 300); setTimeout(postHeight, 1200);
+          window.addEventListener('resize', reportHeight, { passive: true });
+          window.addEventListener('load', reportHeight);
+          setTimeout(reportHeight, 80); setTimeout(reportHeight, 400); setTimeout(reportHeight, 1400);
           try { if (window.parent && window.parent !== window) window.parent.postMessage({ __inviteReady: true }, '*'); } catch (e) {}
         })();
         """;
