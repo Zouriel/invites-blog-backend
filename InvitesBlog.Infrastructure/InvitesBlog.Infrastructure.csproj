@@ -20,5 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Seed\Scenes\*.json" />
+    <EmbeddedResource Include="RawTemplates\**\*.html" />
+    <EmbeddedResource Include="RawTemplates\**\*.css" />
+    <EmbeddedResource Include="RawTemplates\**\*.json" />
   </ItemGroup>
 </Project>

@@ -43,6 +43,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         await services.GetRequiredService<TemplateSeeder>().SeedAsync();
+        await services.GetRequiredService<RawTemplateSeeder>().SeedAsync();
         await services.GetRequiredService<RbacSeeder>().SeedAsync();
     }
     catch (Exception ex)

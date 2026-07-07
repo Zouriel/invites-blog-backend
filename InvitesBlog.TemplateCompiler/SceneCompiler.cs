@@ -77,7 +77,7 @@ public sealed partial class SceneCompiler
         };
 
         var css = RenderCss(scene.Theme, scene.Envelope);
-        var js = InjectorJs;
+        var js = TemplateInjector.Js;
         var html = RenderHtml(scene, body.ToString());
 
         var bytes = Encoding.UTF8.GetByteCount(html)
@@ -236,80 +236,4 @@ public sealed partial class SceneCompiler
         }
         """;
 
-    // ----- The one shared injector (§5.5). Trusted, platform-authored. -----
-
-    private const string InjectorJs = """
-        (function () {
-          'use strict';
-
-          function get(data, path) {
-            return path.split('.').reduce(function (o, k) {
-              return (o && o[k] !== undefined && o[k] !== null) ? o[k] : undefined;
-            }, data);
-          }
-
-          // Apply a payload: bind variables (textContent only) and prune unresolved blocks (§5.3 / §12).
-          function apply(data) {
-            data = data || {};
-            var slots = document.querySelectorAll('[data-var]');
-            for (var i = 0; i < slots.length; i++) {
-              var v = get(data, slots[i].getAttribute('data-var'));
-              slots[i].textContent = (v === undefined) ? '' : String(v); // text only, never markup
-            }
-            var resolved = Array.isArray(data.resolvedBlocks) ? data.resolvedBlocks : null;
-            if (resolved) {
-              var blocks = document.querySelectorAll('[data-block]');
-              for (var j = 0; j < blocks.length; j++) {
-                if (resolved.indexOf(blocks[j].getAttribute('data-block')) === -1 && blocks[j].parentNode) {
-                  blocks[j].parentNode.removeChild(blocks[j]);
-                }
-              }
-            }
-            startAnimation();
-          }
-
-          var animationStarted = false;
-          function startAnimation() {
-            if (animationStarted) return;
-            animationStarted = true;
-            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            var sections = document.querySelectorAll('.ib-section');
-            if (reduce) {
-              for (var k = 0; k < sections.length; k++) sections[k].classList.add('ib-visible');
-              return; // no scrubbing, content already reachable (§5.4)
-            }
-            if ('IntersectionObserver' in window) {
-              var io = new IntersectionObserver(function (entries) {
-                entries.forEach(function (en) {
-                  if (en.isIntersecting) { en.target.classList.add('ib-visible'); io.unobserve(en.target); }
-                });
-              }, { threshold: 0.15 });
-              for (var s = 0; s < sections.length; s++) io.observe(sections[s]);
-            } else {
-              for (var s2 = 0; s2 < sections.length; s2++) sections[s2].classList.add('ib-visible');
-            }
-            var envelope = document.querySelector('.ib-envelope');
-            if (envelope) {
-              window.addEventListener('scroll', function () {
-                if (window.scrollY > window.innerHeight * 0.25) envelope.classList.add('ib-opened');
-              }, { passive: true });
-            }
-          }
-
-          // Source 1: inline #invite-data (standalone / thumbnail render / preview).
-          var dataEl = document.getElementById('invite-data');
-          var inline = {};
-          try { inline = JSON.parse(dataEl.textContent || '{}'); } catch (e) { inline = {}; }
-          if (inline && (inline.event || inline.guest)) apply(inline);
-          else startAnimation();
-
-          // Source 2: postMessage from the host app (cross-origin sandboxed iframe, §5.5).
-          window.addEventListener('message', function (e) {
-            if (e.data && e.data.__inviteData) apply(e.data.__inviteData);
-          });
-
-          // Tell the host we're ready to receive data.
-          try { if (window.parent && window.parent !== window) window.parent.postMessage({ __inviteReady: true }, '*'); } catch (e) {}
-        })();
-        """;
 }

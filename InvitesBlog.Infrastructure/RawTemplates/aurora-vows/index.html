@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aurora Vows</title>
+</head>
+<body>
+  <!-- Envelope cover: opens on scroll (the injector adds .is-open) -->
+  <header class="envelope" data-envelope>
+    <div class="seal">✦</div>
+    <p class="eyebrow">You're invited</p>
+    <h1 class="cover-title" data-var="event.title">Our Wedding</h1>
+    <p class="cover-sub">Dear <span data-var="guest.name">Guest</span></p>
+    <p class="scroll-hint">Scroll to open ↓</p>
+  </header>
+
+  <main>
+    <section class="panel" data-reveal>
+      <p class="label">The celebration</p>
+      <h2 data-var="event.title">Aisha &amp; Adam</h2>
+      <p class="lead"><span data-var="event.date">The date</span> · <span data-var="event.time">The time</span></p>
+      <p class="host">With love, from <span data-var="inviter.name">your hosts</span></p>
+    </section>
+
+    <!-- Conditional block: shown only when the campaign's rules resolve "bridesmaidInstructions" -->
+    <section class="panel note" data-reveal data-block="bridesmaidInstructions">
+      <p class="label">For our bridesmaids</p>
+      <p>Please arrive one hour early for photos. Florals provided.</p>
+    </section>
+
+    <!-- Gender dress-code blocks -->
+    <section class="panel note" data-reveal data-block="maleDressCode">
+      <p class="label">Dress code</p>
+      <p>Gentlemen — formal suit, dark tones.</p>
+    </section>
+    <section class="panel note" data-reveal data-block="femaleDressCode">
+      <p class="label">Dress code</p>
+      <p>Ladies — evening formal, warm tones.</p>
+    </section>
+
+    <section class="panel" data-reveal>
+      <p class="label">Where</p>
+      <h3 data-var="event.venue.name">The venue</h3>
+      <p data-var="event.venue.address">The address</p>
+      <p><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open map</a></p>
+    </section>
+
+    <section class="panel rsvp" data-reveal>
+      <p class="label">Will you join us?</p>
+      <h2>RSVP</h2>
+      <p><a class="btn" data-href="rsvp.link" href="#">Respond now</a></p>
+    </section>
+
+    <footer class="foot" data-reveal>
+      <p>Sent with love via invites.blog</p>
+    </footer>
+  </main>
+</body>
+</html>

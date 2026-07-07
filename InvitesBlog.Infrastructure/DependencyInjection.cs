@@ -63,7 +63,9 @@ public static class DependencyInjection
             services.AddSingleton<IStorageService, LocalFileStorageService>();
 
         services.AddScoped<TemplatePackagePublisher>();
+        services.AddScoped<RawTemplatePackager>();
         services.AddScoped<TemplateSeeder>();
+        services.AddScoped<RawTemplateSeeder>();
         services.AddScoped<Rendering.InviteRenderService>();
         services.AddScoped<IInviteRenderer>(sp => sp.GetRequiredService<Rendering.InviteRenderService>());
 
