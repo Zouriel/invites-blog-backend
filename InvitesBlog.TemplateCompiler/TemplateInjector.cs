@@ -52,25 +52,26 @@ public static class TemplateInjector
             startAnimation();
           }
 
-          var animationStarted = false;
+          function reveal(el) { el.classList.add('ib-visible', 'is-visible'); }
+          function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+          function sections() { return document.querySelectorAll('.ib-section, [data-reveal]'); }
+
+          var animationStarted = false, io = null, parentDriven = false;
+
           function startAnimation() {
             if (animationStarted) return;
             animationStarted = true;
-            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            var sections = document.querySelectorAll('.ib-section, [data-reveal]');
-            if (reduce) {
-              for (var k = 0; k < sections.length; k++) sections[k].classList.add('ib-visible', 'is-visible');
-              return;
-            }
+            var secs = sections();
+            if (reduced()) { for (var k = 0; k < secs.length; k++) reveal(secs[k]); postHeight(); return; }
+
+            // Fallback path: works when THIS iframe is the scroll container (desktop).
             if ('IntersectionObserver' in window) {
-              var io = new IntersectionObserver(function (entries) {
-                entries.forEach(function (en) {
-                  if (en.isIntersecting) { en.target.classList.add('ib-visible', 'is-visible'); io.unobserve(en.target); }
-                });
+              io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (en) { if (en.isIntersecting) { reveal(en.target); io.unobserve(en.target); } });
               }, { threshold: 0.15 });
-              for (var s2 = 0; s2 < sections.length; s2++) io.observe(sections[s2]);
+              for (var s = 0; s < secs.length; s++) io.observe(secs[s]);
             } else {
-              for (var s3 = 0; s3 < sections.length; s3++) sections[s3].classList.add('ib-visible', 'is-visible');
+              for (var s2 = 0; s2 < secs.length; s2++) reveal(secs[s2]);
             }
             var envelope = document.querySelector('.ib-envelope, [data-envelope]');
             if (envelope) {
@@ -78,6 +79,31 @@ public static class TemplateInjector
                 if (window.scrollY > window.innerHeight * 0.25) envelope.classList.add('ib-opened', 'is-open');
               }, { passive: true });
             }
+            postHeight();
+          }
+
+          // Parent-driven reveal: on iOS (and everywhere the host sizes the iframe to content and
+          // scrolls the PAGE) the host forwards its scroll geometry and we reveal from that. The first
+          // such message disables the IntersectionObserver so the two paths don't fight.
+          function onParentScroll(top, vh) {
+            parentDriven = true;
+            if (io) { io.disconnect(); io = null; }
+            if (reduced()) { var all = sections(); for (var a = 0; a < all.length; a++) reveal(all[a]); return; }
+            var secs = sections();
+            for (var i = 0; i < secs.length; i++) {
+              if (top + secs[i].getBoundingClientRect().top < vh * 0.85) reveal(secs[i]);
+            }
+            var envelope = document.querySelector('.ib-envelope, [data-envelope]');
+            if (envelope && top < -vh * 0.15) envelope.classList.add('ib-opened', 'is-open');
+          }
+
+          function postHeight() {
+            try {
+              if (window.parent && window.parent !== window) {
+                var h = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+                window.parent.postMessage({ __inviteHeight: h }, '*');
+              }
+            } catch (e) {}
           }
 
           var dataEl = document.getElementById('invite-data');
@@ -86,8 +112,14 @@ public static class TemplateInjector
           if (inline && (inline.event || inline.guest)) apply(inline); else startAnimation();
 
           window.addEventListener('message', function (e) {
-            if (e.data && e.data.__inviteData) apply(e.data.__inviteData);
+            if (!e.data) return;
+            if (e.data.__inviteData) apply(e.data.__inviteData);
+            if (e.data.__inviteScroll) onParentScroll(e.data.__inviteScroll.top, e.data.__inviteScroll.viewportH);
           });
+          window.addEventListener('resize', postHeight, { passive: true });
+          window.addEventListener('load', postHeight);
+          // Content height can settle after fonts/data — re-report a few times.
+          setTimeout(postHeight, 60); setTimeout(postHeight, 300); setTimeout(postHeight, 1200);
           try { if (window.parent && window.parent !== window) window.parent.postMessage({ __inviteReady: true }, '*'); } catch (e) {}
         })();
         """;
