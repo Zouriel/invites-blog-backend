@@ -1,0 +1,8 @@
+bin/
+obj/
+*.user
+artifacts/
+.vs/
+wwwroot/assets/
+appsettings.*.local.json
+.env

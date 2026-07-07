@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="InvitesBlog.Api/InvitesBlog.Api.csproj" />
+  <Project Path="InvitesBlog.Application/InvitesBlog.Application.csproj" />
+  <Project Path="InvitesBlog.Domain/InvitesBlog.Domain.csproj" />
+  <Project Path="InvitesBlog.Infrastructure/InvitesBlog.Infrastructure.csproj" />
+  <Project Path="InvitesBlog.TemplateCompiler/InvitesBlog.TemplateCompiler.csproj" />
+  <Project Path="InvitesBlog.Tests/InvitesBlog.Tests.csproj" />
+</Solution>

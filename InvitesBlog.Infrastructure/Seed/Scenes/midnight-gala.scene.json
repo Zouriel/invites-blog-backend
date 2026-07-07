@@ -1,0 +1,41 @@
+{
+  "slug": "midnight-gala",
+  "version": "1.0.0",
+  "name": "Midnight Gala",
+  "category": "Corporate Event",
+  "theme": {
+    "primary": "#4c1d95",
+    "accent": "#a78bfa",
+    "background": "#0f0e17",
+    "surface": "#1a1826",
+    "text": "#efeef6",
+    "headingFont": "'Playfair Display', Georgia, serif",
+    "bodyFont": "'Inter', system-ui, sans-serif",
+    "intensity": "dramatic"
+  },
+  "envelope": { "style": "waxSeal", "label": "An evening awaits" },
+  "roles": ["vip", "speaker", "staff"],
+  "genderVariants": ["neutral"],
+  "sections": [
+    {
+      "id": "hero", "type": "hero", "layout": "fullBleed", "reveal": "fade-up",
+      "content": { "title": "{{event.title}}", "subtitle": "Hosted by {{inviter.name}}" },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "vipBlock", "type": "roleBlock", "layout": "centered", "reveal": "curtain",
+      "content": { "heading": "VIP schedule", "body": "Private reception at 7:00pm, seat {{guest.name}} at the head table." },
+      "visibility": { "type": "block", "block": "vipSchedule" }
+    },
+    {
+      "id": "details", "type": "story", "layout": "centered", "reveal": "colorWash",
+      "content": { "heading": "The evening", "body": "{{event.date}} at {{event.time}} · {{event.venue.name}}" },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "rsvp", "type": "rsvp", "layout": "centered", "reveal": "fade-up",
+      "content": { "heading": "Reserve your place", "body": "Seats are limited." },
+      "visibility": { "type": "always" }
+    }
+  ]
+}

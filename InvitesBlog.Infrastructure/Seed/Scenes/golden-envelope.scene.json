@@ -1,0 +1,70 @@
+{
+  "slug": "golden-envelope",
+  "version": "1.0.0",
+  "name": "Golden Envelope",
+  "category": "Wedding",
+  "theme": {
+    "primary": "#8a6d1a",
+    "accent": "#d4af37",
+    "background": "#faf7f0",
+    "surface": "#ffffff",
+    "text": "#2b2b2b",
+    "headingFont": "'Cormorant Garamond', Georgia, serif",
+    "bodyFont": "'Inter', system-ui, sans-serif",
+    "intensity": "balanced"
+  },
+  "envelope": { "style": "flapLift", "label": "You're invited" },
+  "roles": ["bridesmaid", "groomsman", "vip", "family"],
+  "genderVariants": ["male", "female", "neutral"],
+  "sections": [
+    {
+      "id": "hero", "type": "hero", "layout": "centered", "reveal": "fade-up",
+      "content": {
+        "title": "{{event.title}}",
+        "subtitle": "Together with their families, {{inviter.name}} invites {{guest.name}}"
+      },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "story", "type": "story", "layout": "centered", "reveal": "curtain",
+      "content": {
+        "heading": "Our celebration",
+        "body": "Join us for an evening of joy on {{event.date}} at {{event.time}}."
+      },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "bridesmaidBlock", "type": "roleBlock", "layout": "centered", "reveal": "fade-up",
+      "content": {
+        "heading": "For our bridesmaids",
+        "body": "Please arrive one hour early for photos. Florals will be provided."
+      },
+      "visibility": { "type": "block", "block": "bridesmaidInstructions" }
+    },
+    {
+      "id": "maleDress", "type": "dressCode", "layout": "centered", "reveal": "fade-up",
+      "content": { "heading": "Dress code", "body": "Gentlemen: formal suit, dark tones." },
+      "visibility": { "type": "block", "block": "maleDressCode" }
+    },
+    {
+      "id": "femaleDress", "type": "dressCode", "layout": "centered", "reveal": "fade-up",
+      "content": { "heading": "Dress code", "body": "Ladies: evening formal, warm tones." },
+      "visibility": { "type": "block", "block": "femaleDressCode" }
+    },
+    {
+      "id": "schedule", "type": "schedule", "layout": "centered", "reveal": "fade-up",
+      "content": { "heading": "Schedule", "body": "Ceremony 6:00pm · Dinner 7:30pm · Reception 9:00pm" },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "rsvp", "type": "rsvp", "layout": "centered", "reveal": "colorWash",
+      "content": { "heading": "Will you join us?", "body": "Tap below to let us know." },
+      "visibility": { "type": "always" }
+    },
+    {
+      "id": "venue", "type": "venue", "layout": "centered", "reveal": "fade-up",
+      "content": { "heading": "{{event.venue.name}}", "body": "{{event.venue.address}}" },
+      "visibility": { "type": "always" }
+    }
+  ]
+}

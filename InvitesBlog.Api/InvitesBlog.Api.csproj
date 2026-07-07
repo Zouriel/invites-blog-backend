@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.3.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\InvitesBlog.Domain\InvitesBlog.Domain.csproj" />
+    <ProjectReference Include="..\InvitesBlog.Application\InvitesBlog.Application.csproj" />
+    <ProjectReference Include="..\InvitesBlog.Infrastructure\InvitesBlog.Infrastructure.csproj" />
+    <ProjectReference Include="..\InvitesBlog.TemplateCompiler\InvitesBlog.TemplateCompiler.csproj" />
+  </ItemGroup>
+</Project>
