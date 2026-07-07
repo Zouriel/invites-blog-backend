@@ -49,6 +49,13 @@ public static class TemplateInjector
                 }
               }
             }
+            // Expose the resolved invite data to custom template scripts (window.invite.data + an event),
+            // so authors can build their own animations on top of the platform binding.
+            try {
+              window.invite = window.invite || {};
+              window.invite.data = data;
+              window.dispatchEvent(new CustomEvent('invite:data', { detail: data }));
+            } catch (e) {}
             startAnimation();
           }
 
@@ -99,6 +106,12 @@ public static class TemplateInjector
             if (p < 0) p = 0; else if (p > 1) p = 1;
             var max = (document.documentElement.scrollHeight || 0) - window.innerHeight;
             window.scrollTo(0, p * (max > 0 ? max : 0));
+            // Expose scroll progress (0..1) to custom template scripts for scroll-scrubbed animation.
+            try {
+              window.invite = window.invite || {};
+              window.invite.progress = p;
+              window.dispatchEvent(new CustomEvent('invite:progress', { detail: p }));
+            } catch (e) {}
           }
 
           var dataEl = document.getElementById('invite-data');

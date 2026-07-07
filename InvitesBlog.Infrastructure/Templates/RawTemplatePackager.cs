@@ -28,8 +28,13 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
     private static readonly JsonSerializerOptions JsonOut = new() { WriteIndented = false };
 
+    /// <param name="allowScripts">
+    /// Admin/first-party templates may ship their own JS for richer animation (kept as-is). Set false
+    /// for untrusted (e.g. community-submitted) authors to strip all &lt;script&gt; tags.
+    /// </param>
     public async Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, string? css, CancellationToken ct = default)
+        string slug, string version, string html, string? css,
+        bool allowScripts = true, CancellationToken ct = default)
     {
         var variables = Collect(VarAttrRegex(), html);
         var contentBlocks = Collect(BlockAttrRegex(), html);
@@ -45,7 +50,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             EditableAreas = new()
         };
 
-        var finalHtml = WireInjector(html, hasCss: !string.IsNullOrWhiteSpace(css));
+        var finalHtml = WireInjector(html, hasCss: !string.IsNullOrWhiteSpace(css), allowScripts);
         var basePath = $"templates/{slug}@{version}";
 
         await storage.PutAsync($"{basePath}/index.html", Bytes(finalHtml), "text/html", ct);
@@ -68,10 +73,13 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         return set;
     }
 
-    /// <summary>Strip author scripts, ensure the stylesheet link, and inject the trusted injector.</summary>
-    private static string WireInjector(string html, bool hasCss)
+    /// <summary>
+    /// Ensure the stylesheet link and inject the trusted injector. Author &lt;script&gt; tags are kept for
+    /// trusted (admin) templates and stripped otherwise.
+    /// </summary>
+    private static string WireInjector(string html, bool hasCss, bool allowScripts)
     {
-        var cleaned = ScriptTagRegex().Replace(html, "");
+        var cleaned = allowScripts ? html : ScriptTagRegex().Replace(html, "");
 
         if (hasCss && !cleaned.Contains("styles.css", StringComparison.OrdinalIgnoreCase))
         {

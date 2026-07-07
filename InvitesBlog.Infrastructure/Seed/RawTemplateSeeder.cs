@@ -44,7 +44,7 @@ public sealed class RawTemplateSeeder(
             var css = await ReadAsync(asm, prefix + ".styles.css", ct);
 
             // Always (re)publish so a fresh container's storage is populated.
-            var published = await packager.PublishAsync(meta.Slug, meta.Version, html, css, ct);
+            var published = await packager.PublishAsync(meta.Slug, meta.Version, html, css, ct: ct);
 
             if (await db.Templates.AnyAsync(t => t.Slug == meta.Slug && t.Version == meta.Version, ct))
             {

@@ -46,7 +46,7 @@ public sealed class AdminTemplatesController(
         var html = await ReadAsync(index, ct);
         var css = styles is { Length: > 0 } ? await ReadAsync(styles, ct) : null;
 
-        var published = await packager.PublishAsync(slug, version, html, css, ct);
+        var published = await packager.PublishAsync(slug, version, html, css, ct: ct);
 
         var existing = await templates.FirstOrDefaultAsync(t => t.Slug == slug && t.Version == version, ct);
         Template entity;
