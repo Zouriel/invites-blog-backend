@@ -23,7 +23,7 @@ public sealed class AdminTemplatesController(
 
     /// <summary>
     /// POST /api/admin/templates (multipart) — fields: name, slug, version?, category, description?;
-    /// files: index (HTML, required), styles (CSS, optional).
+    /// file: index (a single self-contained HTML file with inline CSS + JS, required).
     /// </summary>
     [HttpPost]
     [HasPermission(Permissions.Templates.Manage)]
@@ -34,7 +34,6 @@ public sealed class AdminTemplatesController(
         IFormFile index,
         [FromForm] string? version,
         [FromForm] string? description,
-        IFormFile? styles,
         CancellationToken ct)
     {
         if (index is null || index.Length == 0)
@@ -43,10 +42,9 @@ public sealed class AdminTemplatesController(
         version = string.IsNullOrWhiteSpace(version) ? "1.0.0" : version.Trim();
         slug = slug.Trim().ToLowerInvariant();
 
+        // A template is a single self-contained HTML file (CSS + JS inlined); enforced by the packager.
         var html = await ReadAsync(index, ct);
-        var css = styles is { Length: > 0 } ? await ReadAsync(styles, ct) : null;
-
-        var published = await packager.PublishAsync(slug, version, html, css, ct: ct);
+        var published = await packager.PublishAsync(slug, version, html, ct: ct);
 
         var existing = await templates.FirstOrDefaultAsync(t => t.Slug == slug && t.Version == version, ct);
         Template entity;

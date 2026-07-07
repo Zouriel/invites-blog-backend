@@ -41,10 +41,9 @@ public sealed class RawTemplateSeeder(
                 logger.LogWarning("Raw template {Slug} has no index.html — skipped.", meta.Slug);
                 continue;
             }
-            var css = await ReadAsync(asm, prefix + ".styles.css", ct);
 
             // Always (re)publish so a fresh container's storage is populated.
-            var published = await packager.PublishAsync(meta.Slug, meta.Version, html, css, ct: ct);
+            var published = await packager.PublishAsync(meta.Slug, meta.Version, html, ct: ct);
 
             if (await db.Templates.AnyAsync(t => t.Slug == meta.Slug && t.Version == meta.Version, ct))
             {

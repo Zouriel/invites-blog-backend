@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Exceptions;
 using InvitesBlog.TemplateCompiler;
 
 namespace InvitesBlog.Infrastructure.Templates;
@@ -9,11 +10,11 @@ namespace InvitesBlog.Infrastructure.Templates;
 public sealed record RawPublishedPackage(string PackageUrl, TemplateManifest Manifest, string ManifestJson);
 
 /// <summary>
-/// Publishes an admin-authored raw HTML/CSS template into the standard package layout
-/// (<c>templates/{slug}@{version}/</c>) so it renders through the exact same sandboxed pipeline as
-/// compiled templates. The author writes HTML + CSS only — never JS: any &lt;script&gt; is stripped and
-/// the single trusted <see cref="TemplateInjector"/> is wired in. The manifest is auto-derived by
-/// scanning the tags (<c>data-var/href/src</c> → variables, <c>data-block</c> → content blocks).
+/// Publishes an admin-authored template — a SINGLE self-contained <c>index.html</c> that inlines its
+/// own CSS (<c>&lt;style&gt;</c>) and JS (<c>&lt;script&gt;</c>). External or separate stylesheets/scripts are
+/// rejected (§ single-file rule). The trusted <see cref="TemplateInjector"/> is inlined too, so the
+/// served file is one document. The manifest is auto-derived by scanning the tags
+/// (<c>data-var/href/src</c> → variables, <c>data-block</c> → content blocks).
 /// </summary>
 public sealed partial class RawTemplatePackager(IStorageService storage)
 {
@@ -26,16 +27,24 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     [GeneratedRegex("<script\\b[^>]*>.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ScriptTagRegex();
 
+    // Single-file enforcement: an external/separate stylesheet or an external script are not allowed.
+    [GeneratedRegex("""<link\b[^>]*rel\s*=\s*["']?\s*stylesheet""", RegexOptions.IgnoreCase)]
+    private static partial Regex StylesheetLinkRegex();
+
+    [GeneratedRegex("""<script\b[^>]*\bsrc\s*=""", RegexOptions.IgnoreCase)]
+    private static partial Regex ExternalScriptRegex();
+
     private static readonly JsonSerializerOptions JsonOut = new() { WriteIndented = false };
 
     /// <param name="allowScripts">
-    /// Admin/first-party templates may ship their own JS for richer animation (kept as-is). Set false
-    /// for untrusted (e.g. community-submitted) authors to strip all &lt;script&gt; tags.
+    /// Admin/first-party templates may ship their own (inline) JS (kept). Set false for untrusted
+    /// (e.g. community) authors to strip all inline &lt;script&gt; tags.
     /// </param>
     public async Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, string? css,
-        bool allowScripts = true, CancellationToken ct = default)
+        string slug, string version, string html, bool allowScripts = true, CancellationToken ct = default)
     {
+        EnsureSelfContained(html);
+
         var variables = Collect(VarAttrRegex(), html);
         var contentBlocks = Collect(BlockAttrRegex(), html);
 
@@ -50,16 +59,28 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             EditableAreas = new()
         };
 
-        var finalHtml = WireInjector(html, hasCss: !string.IsNullOrWhiteSpace(css), allowScripts);
+        var finalHtml = WireInjector(html, allowScripts);
         var basePath = $"templates/{slug}@{version}";
 
+        // One self-contained document is served to the sandboxed iframe; the manifest is platform metadata.
         await storage.PutAsync($"{basePath}/index.html", Bytes(finalHtml), "text/html", ct);
-        await storage.PutAsync($"{basePath}/styles.css", Bytes(css ?? ""), "text/css", ct);
-        await storage.PutAsync($"{basePath}/template.js", Bytes(TemplateInjector.Js), "application/javascript", ct);
         var manifestJson = JsonSerializer.Serialize(manifest, JsonOut);
         await storage.PutAsync($"{basePath}/manifest.json", Bytes(manifestJson), "application/json", ct);
 
         return new RawPublishedPackage(storage.PublicUrl($"{basePath}/"), manifest, manifestJson);
+    }
+
+    /// <summary>Reject anything that isn't self-contained in the single HTML file.</summary>
+    private static void EnsureSelfContained(string html)
+    {
+        if (StylesheetLinkRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "A template must be one self-contained file — inline your CSS in a <style> tag (no <link rel=\"stylesheet\"> / separate .css).",
+                "template_not_self_contained");
+        if (ExternalScriptRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "A template must be one self-contained file — inline your JavaScript in a <script> tag (no external <script src>).",
+                "template_not_self_contained");
     }
 
     private static SortedSet<string> Collect(Regex regex, string html)
@@ -73,23 +94,11 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         return set;
     }
 
-    /// <summary>
-    /// Ensure the stylesheet link and inject the trusted injector. Author &lt;script&gt; tags are kept for
-    /// trusted (admin) templates and stripped otherwise.
-    /// </summary>
-    private static string WireInjector(string html, bool hasCss, bool allowScripts)
+    /// <summary>Strip author scripts only for untrusted authors, then inline the trusted injector.</summary>
+    private static string WireInjector(string html, bool allowScripts)
     {
         var cleaned = allowScripts ? html : ScriptTagRegex().Replace(html, "");
-
-        if (hasCss && !cleaned.Contains("styles.css", StringComparison.OrdinalIgnoreCase))
-        {
-            const string link = "<link rel=\"stylesheet\" href=\"styles.css\">";
-            cleaned = InsertBefore(cleaned, "</head>", link) is { } withLink
-                ? withLink
-                : link + cleaned;
-        }
-
-        var injection = TemplateInjector.InviteDataScript + "\n<script src=\"template.js\"></script>";
+        var injection = TemplateInjector.InviteDataScript + "\n<script>" + TemplateInjector.Js + "</script>";
         return InsertBefore(cleaned, "</body>", injection) ?? cleaned + "\n" + injection;
     }
 
