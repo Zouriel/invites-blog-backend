@@ -7,9 +7,9 @@ namespace InvitesBlog.Infrastructure.Templates;
 public sealed record PublishedPackage(string PackageUrl, CompiledTemplatePackage Compiled);
 
 /// <summary>
-/// Compiles a <see cref="Scene"/> and publishes its four files to storage under
-/// <c>templates/{slug}@{version}/</c> (§5.2), returning the package base URL. This is the single
-/// path used by seeding, admin template management, and (later) the designer compile-preview.
+/// Compiles a <see cref="Scene"/> and publishes it as a SINGLE self-contained <c>index.html</c> (the
+/// CSS and injector inlined) plus <c>manifest.json</c> under <c>templates/{slug}@{version}/</c>. One
+/// pipeline for seeding and admin/designer template management; every template is one file.
 /// </summary>
 public sealed class TemplatePackagePublisher(IStorageService storage)
 {
@@ -20,9 +20,11 @@ public sealed class TemplatePackagePublisher(IStorageService storage)
         var pkg = _compiler.Compile(scene);
         var basePath = $"templates/{scene.Slug}@{scene.Version}";
 
-        await storage.PutAsync($"{basePath}/index.html", Bytes(pkg.IndexHtml), "text/html", ct);
-        await storage.PutAsync($"{basePath}/styles.css", Bytes(pkg.StylesCss), "text/css", ct);
-        await storage.PutAsync($"{basePath}/template.js", Bytes(pkg.TemplateJs), "application/javascript", ct);
+        var singleFile = pkg.IndexHtml
+            .Replace("<link rel=\"stylesheet\" href=\"styles.css\">", $"<style>{pkg.StylesCss}</style>")
+            .Replace("<script src=\"template.js\"></script>", $"<script>{pkg.TemplateJs}</script>");
+
+        await storage.PutAsync($"{basePath}/index.html", Bytes(singleFile), "text/html", ct);
         await storage.PutAsync($"{basePath}/manifest.json", Bytes(pkg.ManifestJson), "application/json", ct);
 
         return new PublishedPackage(storage.PublicUrl($"{basePath}/"), pkg);
