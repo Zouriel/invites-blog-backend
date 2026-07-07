@@ -87,8 +87,8 @@ body {
     <section class="panel" data-reveal>
       <p class="label">The celebration</p>
       <h2 data-var="event.title">Aisha &amp; Adam</h2>
-      <p class="lead"><span data-var="event.date">The date</span> · <span data-var="event.time">The time</span></p>
-      <p class="host">With love, from <span data-var="inviter.name">your hosts</span></p>
+      <p class="lead"><span data-var="event.date">The date</span><span data-optional> · <span data-var="event.time">The time</span></span></p>
+      <p class="host" data-optional>With love, from <span data-var="inviter.name">your hosts</span></p>
     </section>
 
     <!-- Conditional block: shown only when the campaign's rules resolve "bridesmaidInstructions" -->
@@ -110,8 +110,8 @@ body {
     <section class="panel" data-reveal>
       <p class="label">Where</p>
       <h3 data-var="event.venue.name">The venue</h3>
-      <p data-var="event.venue.address">The address</p>
-      <p><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open map</a></p>
+      <p data-optional data-var="event.venue.address">The address</p>
+      <p data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open map</a></p>
     </section>
 
     <section class="panel rsvp" data-reveal>

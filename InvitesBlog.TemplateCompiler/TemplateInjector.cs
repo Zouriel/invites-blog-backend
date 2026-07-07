@@ -40,6 +40,34 @@ public static class TemplateInjector
               var sv = get(data, imgs[s].getAttribute('data-src'));
               if (sv !== undefined) imgs[s].setAttribute('src', String(sv));
             }
+            // Hide any element marked [data-optional] whose bound value(s) came back empty, so
+            // nullable/omitted fields don't leave stray labels, dead links, or blank rows.
+            function hasLink(node) {
+              if (node.hasAttribute('data-href')) {
+                var h = node.getAttribute('href');
+                if (h && h !== '#' && h.indexOf('javascript:') !== 0) return true;
+              }
+              if (node.hasAttribute('data-src')) {
+                var sc = node.getAttribute('src');
+                if (sc && sc.length > 0) return true;
+              }
+              return false;
+            }
+            var optional = document.querySelectorAll('[data-optional]');
+            for (var o = 0; o < optional.length; o++) {
+              var el = optional[o];
+              var filled = (el.hasAttribute('data-var') && el.textContent.trim().length > 0) || hasLink(el);
+              if (!filled) {
+                var inner = el.querySelectorAll('[data-var], [data-href], [data-src]');
+                for (var q = 0; q < inner.length && !filled; q++) {
+                  if ((inner[q].hasAttribute('data-var') && inner[q].textContent.trim().length > 0) || hasLink(inner[q])) {
+                    filled = true;
+                  }
+                }
+              }
+              el.style.display = filled ? '' : 'none';
+            }
+
             var resolved = Array.isArray(data.resolvedBlocks) ? data.resolvedBlocks : null;
             if (resolved) {
               var blocks = document.querySelectorAll('[data-block]');

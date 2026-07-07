@@ -9,6 +9,7 @@ namespace InvitesBlog.Infrastructure.Persistence;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<Template> Templates => Set<Template>();
+    public DbSet<TemplateType> TemplateTypes => Set<TemplateType>();
     public DbSet<CustomTemplate> CustomTemplates => Set<CustomTemplate>();
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
@@ -41,6 +42,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.Slug).HasDatabaseName("idx_templates_slug");
             e.Property(x => x.SceneJson).HasColumnType("jsonb");
             e.Property(x => x.ManifestJson).HasColumnType("jsonb");
+        });
+
+        b.Entity<TemplateType>(e =>
+        {
+            e.ToTable("template_types");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Slug).IsUnique().HasDatabaseName("idx_template_types_slug");
         });
 
         b.Entity<CustomTemplate>(e =>

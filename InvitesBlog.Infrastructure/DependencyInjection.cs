@@ -66,6 +66,7 @@ public static class DependencyInjection
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();
+        services.AddScoped<TemplateTypeSeeder>();
         services.AddScoped<Rendering.InviteRenderService>();
         services.AddScoped<IInviteRenderer>(sp => sp.GetRequiredService<Rendering.InviteRenderService>());
 
