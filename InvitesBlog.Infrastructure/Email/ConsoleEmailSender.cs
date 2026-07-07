@@ -5,13 +5,14 @@ namespace InvitesBlog.Infrastructure.Email;
 
 /// <summary>
 /// Dev email sender — logs the message instead of hitting a provider (Email__Provider=Console).
-/// Swap for a Resend/SES sender in production by implementing <see cref="IEmailSender"/>.
+/// The Resend sender (<see cref="ResendEmailSender"/>) replaces it when Email__Provider=Resend.
 /// </summary>
 public sealed class ConsoleEmailSender(ILogger<ConsoleEmailSender> logger) : IEmailSender
 {
-    public Task<DeliveryResult> SendAsync(string to, string subject, string htmlBody, CancellationToken ct)
+    public Task<DeliveryResult> SendAsync(EmailMessage message, CancellationToken ct)
     {
-        logger.LogInformation("📧 EMAIL → {To} | {Subject}\n{Body}", to, subject, htmlBody);
+        logger.LogInformation("📧 EMAIL [{Stream}] → {To} | {Subject}\n{Body}",
+            message.Stream, message.To, message.Subject, message.Html);
         return Task.FromResult(DeliveryResult.Ok($"console-{Guid.NewGuid():N}"));
     }
 }

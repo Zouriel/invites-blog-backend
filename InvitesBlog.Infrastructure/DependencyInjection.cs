@@ -69,20 +69,36 @@ public static class DependencyInjection
         services.AddScoped<Rendering.InviteRenderService>();
         services.AddScoped<IInviteRenderer>(sp => sp.GetRequiredService<Rendering.InviteRenderService>());
 
-        // Email
-        services.AddSingleton<IEmailSender, ConsoleEmailSender>();
+        // Email — Resend at launch (provider guide), Console for dev when no key is configured.
+        var emailProvider = config["Email:Provider"] ?? "Console";
+        if (emailProvider.Equals("Resend", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddHttpClient<Email.ResendClient>(c =>
+            {
+                c.BaseAddress = new Uri("https://api.resend.com");
+                var key = config["Email:ApiKey"];
+                if (!string.IsNullOrWhiteSpace(key))
+                    c.DefaultRequestHeaders.Authorization = new("Bearer", key);
+            }).AddStandardResilienceHandler(); // retries with backoff; respects 429 (guide §2.6)
+            services.AddScoped<IEmailSender, Email.ResendEmailSender>();
+        }
+        else
+        {
+            services.AddScoped<IEmailSender, ConsoleEmailSender>();
+        }
+        services.AddSingleton<Email.ResendWebhookVerifier>();
 
-        // OTP senders (sms + email), resolved by channel
-        services.AddSingleton<ConsoleSmsOtpSender>();
-        services.AddSingleton<EmailOtpSender>();
-        services.AddSingleton<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
-        services.AddSingleton<IOtpSender>(sp => sp.GetRequiredService<EmailOtpSender>());
+        // OTP senders (email + sms), resolved by channel. Only channels in Otp:Channels are enabled.
+        services.AddScoped<ConsoleSmsOtpSender>();
+        services.AddScoped<EmailOtpSender>();
+        services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
+        services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<EmailOtpSender>());
 
-        // Delivery providers (email real; others logged for now)
-        services.AddSingleton<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
-        services.AddSingleton<IInviteDeliveryProvider>(sp =>
+        // Delivery providers (email real; others logged until Telegram/SMS ship — guide §4).
+        services.AddScoped<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
+        services.AddScoped<IInviteDeliveryProvider>(sp =>
             new LogInviteDeliveryProvider("telegram", sp.GetRequiredService<ILoggerFactory>().CreateLogger("telegram")));
-        services.AddSingleton<IInviteDeliveryProvider>(sp =>
+        services.AddScoped<IInviteDeliveryProvider>(sp =>
             new LogInviteDeliveryProvider("sms", sp.GetRequiredService<ILoggerFactory>().CreateLogger("sms")));
         services.AddScoped<DispatchService>();
         services.AddScoped<IInviteDispatcher>(sp => sp.GetRequiredService<DispatchService>());

@@ -24,7 +24,11 @@ public class OtpServiceTests
     private IValidator<SendOtpRequest> _sendValidator = TestData.PassingValidator<SendOtpRequest>();
     private IValidator<VerifyOtpRequest> _verifyValidator = TestData.PassingValidator<VerifyOtpRequest>();
 
-    public OtpServiceTests() => _emailSender.Channel.Returns("email");
+    public OtpServiceTests()
+    {
+        _emailSender.Channel.Returns("email");
+        _config["Otp:Channels"].Returns("Email,Sms"); // both channels enabled for these unit tests
+    }
 
     private OtpService Sut() => new(
         _challenges, _uow, new[] { _emailSender }, _tokenIssuer,
@@ -36,6 +40,14 @@ public class OtpServiceTests
         _sendValidator = TestData.FailingValidator<SendOtpRequest>();
         await Assert.ThrowsAsync<ValidationException>(
             () => Sut().RequestAsync(new SendOtpRequest("email", null, "a@test.com", null)));
+    }
+
+    [Fact]
+    public async Task Request_sms_when_only_email_enabled_throws_channel_unavailable()
+    {
+        _config["Otp:Channels"].Returns("Email"); // launch config — email only
+        var req = new SendOtpRequest("sms", "7777777", null, "MV");
+        await Assert.ThrowsAsync<OtpChannelUnavailableException>(() => Sut().RequestAsync(req));
     }
 
     [Fact]

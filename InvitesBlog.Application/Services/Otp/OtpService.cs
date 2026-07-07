@@ -35,6 +35,13 @@ public sealed class OtpService(
         var channel = req.Channel.Equals("email", StringComparison.OrdinalIgnoreCase)
             ? OtpChannel.Email : OtpChannel.Sms;
 
+        // Email-only at launch; Telegram/SMS ship later without schema changes (provider guide §1/§4).
+        var configured = config["Otp:Channels"];
+        var enabled = (string.IsNullOrWhiteSpace(configured) ? "Email" : configured)
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (!enabled.Any(c => c.Equals(channel.ToString(), StringComparison.OrdinalIgnoreCase)))
+            throw new OtpChannelUnavailableException(channel.ToString());
+
         string? phone = null, email = null;
         string recipient;
         if (channel == OtpChannel.Sms)

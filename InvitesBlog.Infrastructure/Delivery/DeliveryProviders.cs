@@ -11,12 +11,28 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
     public async Task<DeliveryResult> SendAsync(InviteDeliveryMessage m, CancellationToken ct)
     {
         var subject = m.Subject ?? $"You're invited by {m.InviterName}";
+        var removal = m.RemovalLink ?? "https://invites.blog/privacy";
         var html =
             $"<p>{System.Net.WebUtility.HtmlEncode(m.MessageText)}</p>" +
             $"<p><a href=\"{m.InviteLink}\" style=\"background:#8a6d1a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Open Invite</a></p>" +
             $"<hr><p style=\"font-size:12px;color:#888\">Sent via invites.blog on behalf of {System.Net.WebUtility.HtmlEncode(m.InviterName)} · " +
-            "<a href=\"https://invites.blog/privacy\">Privacy</a> · Remove my data</p>"; // §15.2 footer
-        return await email.SendAsync(m.RecipientAddress, subject, html, ct);
+            $"<a href=\"https://invites.blog/privacy\">Privacy</a> · <a href=\"{removal}\">Remove my data</a></p>"; // §15.2 footer
+
+        var tags = new List<KeyValuePair<string, string>> { new("kind", "invite") };
+        if (m.CampaignId is { } cid) tags.Add(new("campaign_id", cid.ToString()));
+        if (m.InviteId is { } iid) tags.Add(new("invite_id", iid.ToString()));
+
+        // List-Unsubscribe → the guest's own data-removal link (provider guide §2.3).
+        var headers = new Dictionary<string, string> { ["List-Unsubscribe"] = $"<{removal}>" };
+
+        return await email.SendAsync(new EmailMessage(
+            To: m.RecipientAddress,
+            Subject: subject,
+            Html: html,
+            Stream: EmailStream.Invites,
+            ReplyTo: m.InviterEmail,
+            Tags: tags,
+            Headers: headers), ct);
     }
 }
 

@@ -141,7 +141,7 @@ public class CampaignServiceTests
         await Sut().UpdateInviterAsync(c.Id, req, "access-tok");
 
         await _inviters.Received(1).AddAsync(Arg.Any<Inviter>(), Arg.Any<CancellationToken>());
-        await _email.Received(1).SendAsync("host@test.com", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "host@test.com"), Arg.Any<CancellationToken>());
         Assert.NotNull(c.InviterId);
     }
 
@@ -211,7 +211,7 @@ public class CampaignServiceTests
     {
         _inviters.GetByEmailAsync("ghost@test.com", Arg.Any<CancellationToken>()).Returns((Inviter?)null);
         await Sut().ResendLinkAsync(new ResendLinkRequest("Ghost@Test.com"));
-        await _email.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public class CampaignServiceTests
         await Sut().ResendLinkAsync(new ResendLinkRequest("host@test.com"));
 
         Assert.False(string.IsNullOrEmpty(owned.DashboardTokenHash));
-        await _email.Received(1).SendAsync("host@test.com", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "host@test.com"), Arg.Any<CancellationToken>());
     }
 
     // ----- Dashboard -----

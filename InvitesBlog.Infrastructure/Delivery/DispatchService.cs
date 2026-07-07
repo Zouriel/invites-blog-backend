@@ -62,7 +62,7 @@ public sealed class DispatchService(
                 continue; // already delivered — never double-send
             }
 
-            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviterName, ct);
+            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviterName, inviter?.Email, ct);
             if (ok) sent++; else failed++;
         }
 
@@ -88,12 +88,12 @@ public sealed class DispatchService(
         var inviter = campaign.InviterId is null ? null
             : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
         var settings = Deserialize(campaign.DeliverySettingsJson);
-        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name ?? "your host", ct);
+        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name ?? "your host", inviter?.Email, ct);
     }
 
     /// <summary>Mint token, build message, deliver with fallback, update the invite. Shared by dispatch + resend.</summary>
     private async Task<bool> DeliverToGuestAsync(
-        Campaign campaign, Guest guest, DeliverySettings settings, string inviterName, CancellationToken ct)
+        Campaign campaign, Guest guest, DeliverySettings settings, string inviterName, string? inviterEmail, CancellationToken ct)
     {
         var invite = await db.Invites.FirstOrDefaultAsync(i => i.GuestId == guest.Id, ct);
         var rawToken = TokenService.GenerateToken();
@@ -114,11 +114,13 @@ public sealed class DispatchService(
         invite.TokenHash = TokenService.Hash(rawToken);
 
         var link = $"{InviteeBase}/i/{rawToken}";
+        var removalLink = $"{InviteeBase}/privacy/remove/{rawToken}";
         var messageText = settings.MessageTemplate
             .Replace("{{inviter.name}}", inviterName)
             .Replace("{{invite.link}}", link);
 
-        var ok = await TryDeliverAsync(invite, guest, settings, inviterName, link, messageText, ct);
+        var ok = await TryDeliverAsync(invite, campaign.Id, guest, settings,
+            inviterName, inviterEmail, link, removalLink, messageText, ct);
         invite.Status = ok ? InviteStatus.Sent : InviteStatus.Failed;
         await db.SaveChangesAsync(ct);
         return ok;
@@ -126,8 +128,8 @@ public sealed class DispatchService(
 
     /// <summary>Try the configured channels in order, then the fallback, per §13.2.</summary>
     private async Task<bool> TryDeliverAsync(
-        Invite invite, Guest guest, DeliverySettings settings,
-        string inviterName, string link, string messageText, CancellationToken ct)
+        Invite invite, Guid campaignId, Guest guest, DeliverySettings settings,
+        string inviterName, string? inviterEmail, string link, string removalLink, string messageText, CancellationToken ct)
     {
         var order = new List<string>(settings.Channels);
         if (settings.FallbackChannel is not null && !order.Contains(settings.FallbackChannel))
@@ -143,7 +145,8 @@ public sealed class DispatchService(
             if (provider is null) continue;
 
             var result = await provider.SendAsync(
-                new InviteDeliveryMessage(channel, address, inviterName, link, messageText), ct);
+                new InviteDeliveryMessage(channel, address, inviterName, link, messageText,
+                    CampaignId: campaignId, InviteId: invite.Id, InviterEmail: inviterEmail, RemovalLink: removalLink), ct);
 
             db.DeliveryAttempts.Add(new DeliveryAttempt
             {

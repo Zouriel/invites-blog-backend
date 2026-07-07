@@ -17,7 +17,11 @@ public sealed record InviteDeliveryMessage(
     string InviteLink,
     string MessageText,
     string? Subject = null,
-    bool IsOtp = false);
+    bool IsOtp = false,
+    Guid? CampaignId = null,
+    Guid? InviteId = null,
+    string? InviterEmail = null,
+    string? RemovalLink = null);
 
 public sealed record DeliveryResult(bool Success, string? ProviderMessageId, string? Error)
 {
@@ -41,9 +45,33 @@ public interface IOtpSender
     Task<DeliveryResult> SendCodeAsync(string recipient, string code, CancellationToken ct);
 }
 
+/// <summary>Which reputation stream / from-identity an email is sent on (provider guide §2.5).</summary>
+public enum EmailStream
+{
+    /// <summary>no-reply@ — OTP codes, magic links, receipts.</summary>
+    System,
+    /// <summary>invites@ — guest invite delivery, cancellation notices.</summary>
+    Invites
+}
+
+/// <summary>A single transactional email (provider guide §2.3).</summary>
+public sealed record EmailMessage(
+    string To,
+    string Subject,
+    string Html,
+    EmailStream Stream = EmailStream.System,
+    string? Text = null,
+    string? ReplyTo = null,
+    IReadOnlyList<KeyValuePair<string, string>>? Tags = null,
+    IReadOnlyDictionary<string, string>? Headers = null);
+
 public interface IEmailSender
 {
-    Task<DeliveryResult> SendAsync(string to, string subject, string htmlBody, CancellationToken ct);
+    Task<DeliveryResult> SendAsync(EmailMessage message, CancellationToken ct);
+
+    /// <summary>Convenience overload — sends on the System identity with no tags.</summary>
+    Task<DeliveryResult> SendAsync(string to, string subject, string htmlBody, CancellationToken ct)
+        => SendAsync(new EmailMessage(to, subject, htmlBody), ct);
 }
 
 // ----- Payments (§14.1) -----

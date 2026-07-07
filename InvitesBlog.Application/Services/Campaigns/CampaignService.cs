@@ -81,7 +81,21 @@ public sealed class CampaignService(
         if (req.CustomContentJson is not null) campaign.CustomContentJson = req.CustomContentJson;
         if (req.ThemeOverridesJson is not null) campaign.ThemeOverridesJson = req.ThemeOverridesJson;
         if (req.RulesJson is not null) campaign.RulesJson = req.RulesJson;
-        if (req.IsSensitive is not null) campaign.IsSensitive = req.IsSensitive.Value;
+        if (req.IsSensitive is not null)
+        {
+            // Sensitive invites are OTP-gated, and OTP is email-only at launch — so every guest must
+            // have an email or they could never open the invite (provider guide §1).
+            if (req.IsSensitive.Value && !campaign.IsSensitive)
+            {
+                var list = await guests.ListByCampaignAsync(id, includeOptedOut: false, ct) ?? Array.Empty<Domain.Entities.Guest>();
+                var withoutEmail = list.Count(g => string.IsNullOrWhiteSpace(g.Email));
+                if (withoutEmail > 0)
+                    throw new Exceptions.BusinessRuleException(
+                        $"{withoutEmail} guest(s) have no email. Sensitive invites require OTP, which is email-only at launch — add emails for every guest first.",
+                        "sensitive_requires_email");
+            }
+            campaign.IsSensitive = req.IsSensitive.Value;
+        }
         if (req.EventStartAt is not null) campaign.EventStartAt = req.EventStartAt.Value;
         if (req.EventEndAt is not null) campaign.EventEndAt = req.EventEndAt;
         if (req.EventType is not null) campaign.EventType = req.EventType;
@@ -151,9 +165,13 @@ public sealed class CampaignService(
         // Resume-your-invite magic link carries the caller's own access token (recovery path, §4.6.2 #4).
         var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
         var resumeLink = $"{inviterBase}/create/{campaign.Id}/editor?resume={accessToken}";
-        await email.SendAsync(normEmail, "Resume your invite",
-            $"<p>Hi {System.Net.WebUtility.HtmlEncode(req.Name)},</p><p>Continue your invite any time:</p>" +
-            $"<p><a href=\"{resumeLink}\">Resume your invite</a></p>", ct);
+        await email.SendAsync(new Application.Abstractions.EmailMessage(
+            To: normEmail,
+            Subject: "Resume your invite",
+            Html: $"<p>Hi {System.Net.WebUtility.HtmlEncode(req.Name)},</p><p>Continue your invite any time:</p>" +
+                  $"<p><a href=\"{resumeLink}\">Resume your invite</a></p>",
+            Stream: Application.Abstractions.EmailStream.System,
+            Tags: new[] { new KeyValuePair<string, string>("kind", "magic_link") }), ct);
     }
 
     public async Task UpdateDeliverySettingsAsync(Guid id, UpdateDeliverySettingsRequest req, CancellationToken ct = default)
@@ -211,9 +229,13 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
 
         if (links.Count > 0)
-            await email.SendAsync(normEmail, "Your invites.blog links",
-                "<p>Here are your campaign links:</p><ul>" +
-                string.Join("", links.Select(l => $"<li><a href=\"{l}\">{l}</a></li>")) + "</ul>", ct);
+            await email.SendAsync(new Application.Abstractions.EmailMessage(
+                To: normEmail,
+                Subject: "Your invites.blog links",
+                Html: "<p>Here are your campaign links:</p><ul>" +
+                      string.Join("", links.Select(l => $"<li><a href=\"{l}\">{l}</a></li>")) + "</ul>",
+                Stream: Application.Abstractions.EmailStream.System,
+                Tags: new[] { new KeyValuePair<string, string>("kind", "magic_link") }), ct);
     }
 
     public async Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default)

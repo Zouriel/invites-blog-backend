@@ -17,3 +17,11 @@ public sealed class OtpTooManyAttemptsException()
 
 public sealed class OtpRateLimitException()
     : InvalidStateException("Too many codes requested. Try again later.", "otp_rate_limited");
+
+/// <summary>The requested OTP channel isn't enabled at launch (email-only; §Provider guide §1/§4).</summary>
+public sealed class OtpChannelUnavailableException(string channel)
+    : BusinessRuleException(
+        channel.Equals("Sms", StringComparison.OrdinalIgnoreCase)
+            ? "Phone sign-in isn't available yet — verify with your email address instead. Your invite links always work without signing in."
+            : $"The '{channel}' verification channel isn't available.",
+        "otp_channel_unavailable");
