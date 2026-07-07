@@ -13,7 +13,8 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
 {
     public async Task<PagedResult<TemplateListItemDto>> ListAsync(TemplateFilter filter, CancellationToken ct = default)
     {
-        var query = templates.Query().Where(t => t.IsActive);
+        // Gallery shows only public templates; dedicated ones are reached via the request flow.
+        var query = templates.Query().Where(t => t.IsActive && t.Visibility == TemplateVisibility.Public);
 
         if (!string.IsNullOrWhiteSpace(filter.Category))
             query = query.Where(t => t.Category == filter.Category);
@@ -42,8 +43,19 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
     }
 
     public async Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken ct = default) =>
-        await templates.Query().Where(t => t.IsActive)
+        await templates.Query().Where(t => t.IsActive && t.Visibility == TemplateVisibility.Public)
             .Select(t => t.Category).Distinct().OrderBy(c => c).ToListAsync(ct);
+
+    public async Task<IReadOnlyList<TemplateListItemDto>> GetDedicatedForAsync(string email, CancellationToken ct = default)
+    {
+        var normalized = (email ?? "").Trim().ToLowerInvariant();
+        if (normalized.Length == 0) return [];
+        return await templates.Query()
+            .Where(t => t.IsActive && t.Visibility == TemplateVisibility.Dedicated && t.AssignedEmail == normalized)
+            .OrderByDescending(t => t.CreatedAt)
+            .Select(t => ToListItem(t))
+            .ToListAsync(ct);
+    }
 
     private static TemplateListItemDto ToListItem(Template t) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description,

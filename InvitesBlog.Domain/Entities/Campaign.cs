@@ -25,6 +25,7 @@ public sealed class Campaign
     public string ThemeOverridesJson { get; set; } = "{}";
     public string DeliverySettingsJson { get; set; } = "{}";
     public string RulesJson { get; set; } = "{\"rules\":[]}"; // §12 personalization rules
+    public string RolesJson { get; set; } = "{\"roles\":[]}"; // guest roles → content-block mapping
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

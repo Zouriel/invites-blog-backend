@@ -42,6 +42,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.Slug).HasDatabaseName("idx_templates_slug");
             e.Property(x => x.SceneJson).HasColumnType("jsonb");
             e.Property(x => x.ManifestJson).HasColumnType("jsonb");
+            e.Property(x => x.Visibility).HasDefaultValue("Public");
+            e.HasIndex(x => x.AssignedEmail).HasDatabaseName("idx_templates_assigned_email");
         });
 
         b.Entity<TemplateType>(e =>
@@ -77,6 +79,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.ThemeOverridesJson).HasColumnType("jsonb");
             e.Property(x => x.DeliverySettingsJson).HasColumnType("jsonb");
             e.Property(x => x.RulesJson).HasColumnType("jsonb");
+            // Valid JSON default so adding this NOT NULL jsonb column to existing rows succeeds.
+            e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
         });
 
         b.Entity<Guest>(e =>

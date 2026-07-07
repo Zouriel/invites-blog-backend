@@ -55,6 +55,14 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return SuccessMessage("Delivery settings updated.");
     }
 
+    [HttpPut("{id:guid}/roles")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> SetRoles(Guid id, [FromBody] SetRolesRequest req, CancellationToken ct)
+    {
+        await campaigns.SetRolesAsync(id, req, ct);
+        return SuccessMessage("Roles updated.");
+    }
+
     [HttpGet("{id:guid}/summary")]
     [HasPermission(Permissions.Campaigns.Read)]
     public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>

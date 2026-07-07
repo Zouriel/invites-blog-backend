@@ -18,7 +18,20 @@ public sealed class Template
     public string ManifestJson { get; set; } = default!;
     public string PackageUrl { get; set; } = default!;   // compiled package on assets CDN
     public bool IsActive { get; set; } = true;
+
+    /// <summary>"Public" (listed in the gallery) or "Dedicated" (only the assigned requester sees it).</summary>
+    public string Visibility { get; set; } = TemplateVisibility.Public;
+    /// <summary>Lowercased email the dedicated template is reserved for; null for public templates.</summary>
+    public string? AssignedEmail { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>Template visibility modes (§dedicated templates).</summary>
+public static class TemplateVisibility
+{
+    public const string Public = "Public";
+    public const string Dedicated = "Dedicated";
 }
 
 /// <summary>A designer's declarative custom template (§6.3).</summary>

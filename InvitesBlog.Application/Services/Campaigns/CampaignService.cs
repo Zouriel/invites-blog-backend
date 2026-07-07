@@ -183,6 +183,38 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
+    public async Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+
+        // Clean the incoming roles (drop blank names/blocks, trim, dedupe blocks).
+        var roles = (req.Roles ?? Array.Empty<RoleDefinitionDto>())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .Select(r => new RoleDefinitionDto(
+                r.Name.Trim(),
+                (r.ContentBlocks ?? Array.Empty<string>())
+                    .Where(b => !string.IsNullOrWhiteSpace(b)).Select(b => b.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
+            .ToList();
+
+        // Persist the roles as authored…
+        campaign.RolesJson = JsonSerializer.Serialize(new { roles });
+
+        // …and regenerate the §12 personalization rules so a guest holding a role sees its blocks.
+        var rulesArray = new JsonArray();
+        foreach (var role in roles)
+            foreach (var block in role.ContentBlocks)
+                rulesArray.Add(new JsonObject
+                {
+                    ["condition"] = new JsonObject { ["field"] = "role", ["operator"] = "equals", ["value"] = role.Name },
+                    ["contentBlock"] = block
+                });
+        campaign.RulesJson = new JsonObject { ["rules"] = rulesArray }.ToJsonString();
+
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+    }
+
     public async Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);
@@ -195,7 +227,7 @@ public sealed class CampaignService(
             campaign.Id, campaign.Title, campaign.Slug, campaign.Status.ToString(),
             campaign.EventType, campaign.EventStartAt, campaign.EventEndAt,
             campaign.PaidInviteCapacity, campaign.HasDesignerDiscount, campaign.IsSensitive,
-            campaign.CustomContentJson, campaign.ThemeOverridesJson, campaign.RulesJson, campaign.DeliverySettingsJson,
+            campaign.CustomContentJson, campaign.ThemeOverridesJson, campaign.RulesJson, campaign.RolesJson, campaign.DeliverySettingsJson,
             guestCount,
             template is null ? null : new CampaignSummaryTemplateDto(template.Name, template.Slug, template.PackageUrl, template.ManifestJson),
             price);

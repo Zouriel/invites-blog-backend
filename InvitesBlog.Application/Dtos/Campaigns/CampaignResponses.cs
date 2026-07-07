@@ -26,6 +26,7 @@ public sealed record CampaignSummaryDto(
     string CustomContentJson,
     string ThemeOverridesJson,
     string RulesJson,
+    string RolesJson,
     string DeliverySettingsJson,
     int GuestCount,
     CampaignSummaryTemplateDto? Template,

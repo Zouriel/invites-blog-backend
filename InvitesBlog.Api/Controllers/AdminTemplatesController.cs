@@ -34,10 +34,18 @@ public sealed class AdminTemplatesController(
         IFormFile index,
         [FromForm] string? version,
         [FromForm] string? description,
+        [FromForm] string? visibility,
+        [FromForm] string? assignedEmail,
         CancellationToken ct)
     {
         if (index is null || index.Length == 0)
             return BadRequest(Application.Common.ApiResponse<object?>.Fail("An index.html file is required."));
+
+        // Public (gallery) vs Dedicated (reserved for one requester's email).
+        var isDedicated = string.Equals(visibility, TemplateVisibility.Dedicated, StringComparison.OrdinalIgnoreCase);
+        var normalizedEmail = isDedicated ? (assignedEmail ?? "").Trim().ToLowerInvariant() : null;
+        if (isDedicated && string.IsNullOrWhiteSpace(normalizedEmail))
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail("A dedicated template requires an assigned email."));
 
         version = string.IsNullOrWhiteSpace(version) ? "1.0.0" : version.Trim();
         slug = slug.Trim().ToLowerInvariant();
@@ -58,6 +66,8 @@ public sealed class AdminTemplatesController(
             entity.PackageUrl = published.PackageUrl;
             entity.PreviewImageUrl = $"{published.PackageUrl}index.html";
             entity.IsActive = true;
+            entity.Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public;
+            entity.AssignedEmail = normalizedEmail;
             templates.Update(entity);
         }
         else
@@ -77,6 +87,8 @@ public sealed class AdminTemplatesController(
                 ManifestJson = published.ManifestJson,
                 PackageUrl = published.PackageUrl,
                 IsActive = true,
+                Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public,
+                AssignedEmail = normalizedEmail,
                 CreatedAt = DateTimeOffset.UtcNow
             };
             await templates.AddAsync(entity, ct);

@@ -41,5 +41,12 @@ public sealed record UpdateInviterRequest(
 /// <summary>Replace the campaign delivery settings JSON.</summary>
 public sealed record UpdateDeliverySettingsRequest(string DeliverySettingsJson);
 
+/// <summary>One guest role and the template content blocks it unlocks (dress code, message, etc.).</summary>
+public sealed record RoleDefinitionDto(string Name, IReadOnlyList<string> ContentBlocks);
+
+/// <summary>Set the campaign's guest roles (§roles step). The server also regenerates RulesJson so
+/// each role's content blocks are shown to guests holding that role.</summary>
+public sealed record SetRolesRequest(IReadOnlyList<RoleDefinitionDto> Roles);
+
 /// <summary>Request the dashboard links for an inviter's email (§4.6 recovery path).</summary>
 public sealed record ResendLinkRequest(string Email);
