@@ -68,13 +68,15 @@ public static class TemplateInjector
               el.style.display = filled ? '' : 'none';
             }
 
+            // Show the blocks the server resolved for this guest, hide the rest. NON-destructive
+            // (display, not removeChild) so a later apply() with the real payload corrects an earlier
+            // pass — the inert placeholder must never permanently strip a guest's role sections.
             var resolved = Array.isArray(data.resolvedBlocks) ? data.resolvedBlocks : null;
             if (resolved) {
               var blocks = document.querySelectorAll('[data-block]');
               for (var b = 0; b < blocks.length; b++) {
-                if (resolved.indexOf(blocks[b].getAttribute('data-block')) === -1 && blocks[b].parentNode) {
-                  blocks[b].parentNode.removeChild(blocks[b]);
-                }
+                blocks[b].style.display =
+                  resolved.indexOf(blocks[b].getAttribute('data-block')) === -1 ? 'none' : '';
               }
             }
             // Expose the resolved invite data to custom template scripts (window.invite.data + an event),
@@ -88,25 +90,31 @@ public static class TemplateInjector
           }
 
           var animationStarted = false;
+          var revealSections = [];
+          // Reveal any section scrolled into view. Position-based (not IntersectionObserver), so a fast
+          // or jumpy programmatic scroll can never "skip" a section and leave it stuck invisible.
+          function revealInView() {
+            var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+            for (var i = 0; i < revealSections.length; i++) {
+              var el = revealSections[i];
+              if (el.__ibShown) continue;
+              if (el.getBoundingClientRect().top < vh * 0.9) {
+                el.classList.add('ib-visible', 'is-visible');
+                el.__ibShown = true;
+              }
+            }
+          }
           function startAnimation() {
             if (animationStarted) return;
             animationStarted = true;
+            revealSections = Array.prototype.slice.call(document.querySelectorAll('.ib-section, [data-reveal]'));
             var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            var sections = document.querySelectorAll('.ib-section, [data-reveal]');
             if (reduce) {
-              for (var k = 0; k < sections.length; k++) sections[k].classList.add('ib-visible', 'is-visible');
+              for (var k = 0; k < revealSections.length; k++) { revealSections[k].classList.add('ib-visible', 'is-visible'); revealSections[k].__ibShown = true; }
               reportHeight(); return;
             }
-            if ('IntersectionObserver' in window) {
-              var io = new IntersectionObserver(function (entries) {
-                entries.forEach(function (en) {
-                  if (en.isIntersecting) { en.target.classList.add('ib-visible', 'is-visible'); io.unobserve(en.target); }
-                });
-              }, { threshold: 0.15 });
-              for (var s = 0; s < sections.length; s++) io.observe(sections[s]);
-            } else {
-              for (var s2 = 0; s2 < sections.length; s2++) sections[s2].classList.add('ib-visible', 'is-visible');
-            }
+            revealInView(); // reveal whatever is already on-screen
+            window.addEventListener('scroll', revealInView, { passive: true });
             var envelope = document.querySelector('.ib-envelope, [data-envelope]');
             if (envelope) {
               window.addEventListener('scroll', function () {
@@ -134,6 +142,7 @@ public static class TemplateInjector
             if (p < 0) p = 0; else if (p > 1) p = 1;
             var max = (document.documentElement.scrollHeight || 0) - window.innerHeight;
             window.scrollTo(0, p * (max > 0 ? max : 0));
+            revealInView(); // catch every section the jump scrolled past
             // Expose scroll progress (0..1) to custom template scripts for scroll-scrubbed animation.
             try {
               window.invite = window.invite || {};
@@ -145,7 +154,11 @@ public static class TemplateInjector
           var dataEl = document.getElementById('invite-data');
           var inline = {};
           try { inline = JSON.parse((dataEl && dataEl.textContent) || '{}'); } catch (e) { inline = {}; }
-          if (inline && (inline.event || inline.guest)) apply(inline); else startAnimation();
+          function hasKeys(o) { if (!o) return false; for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) return true; } return false; }
+          // Only bind the inline payload if it actually carries data — the inert placeholder
+          // (empty event/guest, empty resolvedBlocks) must NOT run apply(), or it would hide every
+          // conditional block before the host's real postMessage arrives.
+          if (hasKeys(inline.event) || hasKeys(inline.guest) || (Array.isArray(inline.resolvedBlocks) && inline.resolvedBlocks.length)) apply(inline); else startAnimation();
 
           window.addEventListener('message', function (e) {
             if (!e.data) return;
