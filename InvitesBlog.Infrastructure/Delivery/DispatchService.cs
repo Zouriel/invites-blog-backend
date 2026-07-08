@@ -115,7 +115,11 @@ public sealed class DispatchService(
 
         var link = $"{InviteeBase}/i/{rawToken}";
         var removalLink = $"{InviteeBase}/privacy/remove/{rawToken}";
+        // Personalize the delivery message. {{name}} / {{guest.name}} → this guest; {{inviter.name}} → host.
+        var guestName = string.IsNullOrWhiteSpace(guest.Name) ? "there" : guest.Name.Trim();
         var messageText = settings.MessageTemplate
+            .Replace("{{name}}", guestName)
+            .Replace("{{guest.name}}", guestName)
             .Replace("{{inviter.name}}", inviterName)
             .Replace("{{invite.link}}", link);
 
