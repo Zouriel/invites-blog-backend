@@ -7,7 +7,9 @@ public sealed class UpdateVenueRequestValidator : AbstractValidator<UpdateVenueR
 {
     public UpdateVenueRequestValidator()
     {
-        RuleFor(x => x.VenueType).NotEmpty().MaximumLength(100);
-        RuleFor(x => x.VenueName).NotEmpty().MaximumLength(200);
+        // Venue is an optional wizard step — a guest can be invited without one. Only cap lengths;
+        // don't force a type/name, or the step 400s when the inviter leaves details blank.
+        RuleFor(x => x.VenueType).MaximumLength(100);
+        RuleFor(x => x.VenueName).MaximumLength(200);
     }
 }

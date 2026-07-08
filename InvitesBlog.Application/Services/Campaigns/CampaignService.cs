@@ -124,7 +124,7 @@ public sealed class CampaignService(
             ["dressCode"] = req.DressCode
         };
         campaign.CustomContentJson = content.ToJsonString();
-        campaign.EventType = req.VenueType;
+        if (!string.IsNullOrWhiteSpace(req.VenueType)) campaign.EventType = req.VenueType;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
     }
@@ -144,7 +144,7 @@ public sealed class CampaignService(
                 Id = Guid.NewGuid(),
                 Email = normEmail,
                 Name = req.Name,
-                PhoneE164 = phone.E164 ?? req.Phone,
+                PhoneE164 = phone.E164 ?? req.Phone ?? string.Empty,
                 Organization = req.Organization,
                 BillingName = req.BillingName,
                 BillingCountry = req.BillingCountry,
@@ -155,7 +155,7 @@ public sealed class CampaignService(
         else
         {
             inviter.Name = req.Name;
-            inviter.PhoneE164 = phone.E164 ?? req.Phone;
+            inviter.PhoneE164 = phone.E164 ?? req.Phone ?? string.Empty;
             inviter.Organization = req.Organization ?? inviter.Organization;
             inviters.Update(inviter);
         }
