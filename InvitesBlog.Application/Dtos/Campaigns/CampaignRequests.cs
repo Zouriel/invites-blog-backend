@@ -18,8 +18,9 @@ public sealed record UpdateContentRequest(
 
 /// <summary>Set the venue block (stored inside CustomContentJson.venue).</summary>
 public sealed record UpdateVenueRequest(
-    string VenueType,
-    string VenueName,
+    // Nullable so an optional/blank venue step binds — non-nullable ref-type params are implicitly required.
+    string? VenueType,
+    string? VenueName,
     string? Address,
     string? MapLink,
     string? City,
@@ -31,7 +32,8 @@ public sealed record UpdateVenueRequest(
 /// <summary>Inviter details — deduplicated by normalized email (§4.6.2).</summary>
 public sealed record UpdateInviterRequest(
     string Name,
-    string Phone,
+    // Nullable so a phone-less (email-only) host binds — non-nullable ref-type params are implicitly required.
+    string? Phone,
     string Email,
     string? Organization,
     string? BillingName,
