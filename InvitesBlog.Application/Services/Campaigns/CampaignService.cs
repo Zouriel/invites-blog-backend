@@ -198,8 +198,8 @@ public sealed class CampaignService(
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
             .ToList();
 
-        // Persist the roles as authored…
-        campaign.RolesJson = JsonSerializer.Serialize(new { roles });
+        // Persist the roles as authored — camelCase to match the API wire convention the apps read.
+        campaign.RolesJson = JsonSerializer.Serialize(new { roles }, CamelCaseJson);
 
         // …and regenerate the §12 personalization rules so a guest holding a role sees its blocks.
         var rulesArray = new JsonArray();
@@ -248,6 +248,8 @@ public sealed class CampaignService(
 
         return new CampaignImageDto(url);
     }
+
+    private static readonly JsonSerializerOptions CamelCaseJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private const long MaxImageBytes = 5 * 1024 * 1024;
 
