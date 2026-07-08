@@ -63,6 +63,12 @@ body {
   background: var(--gold); color: var(--bg); text-decoration: none; font-weight: 600; letter-spacing: .02em;
 }
 .btn.ghost { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+
+/* Inviter-supplied images (data-src slots). data-optional collapses them when left empty. */
+.cover-photo { width: clamp(150px, 40vw, 260px); aspect-ratio: 1; object-fit: cover; border-radius: 50%;
+  margin-bottom: 1.4rem; box-shadow: 0 0 0 6px rgba(216,178,90,.14); }
+.couple-photo { width: 100%; max-width: 460px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 14px;
+  margin-top: 1.2rem; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
 .rsvp { background: linear-gradient(180deg, transparent, rgba(216,178,90,.08)); }
 .foot { padding: 8vh 6vw; text-align: center; color: var(--muted); font-size: .85rem; }
 
@@ -77,6 +83,7 @@ body {
   <!-- Envelope cover: opens on scroll (the injector adds .is-open) -->
   <header class="envelope" data-envelope>
     <div class="seal">✦</div>
+    <span data-optional><img class="cover-photo" data-src="event.coverImage" data-slot-label="Cover photo" alt=""></span>
     <p class="eyebrow">You're invited</p>
     <h1 class="cover-title" data-var="event.title">Our Wedding</h1>
     <p class="cover-sub">Dear <span data-var="guest.name">Guest</span></p>
@@ -89,6 +96,7 @@ body {
       <h2 data-var="event.title">Aisha &amp; Adam</h2>
       <p class="lead"><span data-var="event.date">The date</span><span data-optional> · <span data-var="event.time">The time</span></span></p>
       <p class="host" data-optional>With love, from <span data-var="inviter.name">your hosts</span></p>
+      <span data-optional><img class="couple-photo" data-src="event.couplePhoto" data-slot-label="Couple photo" alt=""></span>
     </section>
 
     <!-- Conditional block: shown only when the campaign's rules resolve "bridesmaidInstructions" -->

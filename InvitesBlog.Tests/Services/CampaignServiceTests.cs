@@ -30,6 +30,7 @@ public class CampaignServiceTests
     private readonly IRepository<Refund> _refunds = Substitute.For<IRepository<Refund>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IEmailSender _email = Substitute.For<IEmailSender>();
+    private readonly IStorageService _storage = Substitute.For<IStorageService>();
     private readonly IPaymentProvider _provider = Substitute.For<IPaymentProvider>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
 
@@ -41,7 +42,7 @@ public class CampaignServiceTests
 
     private CampaignService Sut() => new(
         _currentUser, _campaigns, _inviters, _guests, _invites, _payments, _templates,
-        _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _provider,
+        _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _contentV, _venueV, _inviterV, _deliveryV);
 
     private void Own(Campaign c)

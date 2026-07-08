@@ -1,162 +1,195 @@
-# Creating invites.blog Templates (raw HTML/CSS)
+# Making an invites.blog template
 
-A template is **one self-contained `index.html`** you write by hand — your markup, your CSS in an inline
-`<style>`, and (optionally) your JS in an inline `<script>`, all in that single file. Since only you
-upload them, you **may include your own `<script>`** for custom animation (see "Custom JavaScript" below).
-Separate `.css` files and external `<link>`/`<script src>` are rejected on upload — everything lives in
-the one file.
-The platform injects a trusted script that fills in the data. You place special **`data-*` tags** on
-elements; at send time the system finds those tags and injects each guest's personalized info into them,
-inside a sandboxed iframe.
+A template is **one HTML file**. You write the markup, put your CSS in a `<style>` tag and (if you
+want) your JavaScript in a `<script>` tag — all in that single file. That's it.
 
-Only an admin (you) can add templates. Once added, they appear in the public gallery for inviters to pick.
+You mark the spots that should be filled in with little `data-*` tags. When an invite is sent, the
+platform fills those spots with the event's details and each guest's personal info, inside a safe
+sandboxed frame. Only you (admin) can add templates; once added they show up in the gallery.
 
-A template's **category** is now a managed **template type** (an entity, not free text). Manage the list
-in the admin templates page (add / deactivate), and pick a type when uploading. The seeded types are
-Wedding, Engagement, Anniversary, Birthday, Baby Shower, Graduation, Ceremony, Religious Event, Corporate
-Event, Conference, Workshop, Launch Event, Private Dinner, Custom Event — add your own any time.
+**The big idea:** the builder is now driven by *your* template. It shows the inviter **exactly the
+fields your template declares** — no more, no less. Add a `data-var` for `event.hashtag` and a
+"Hashtag" box appears in the builder automatically. Add an `<img data-src>` and an image upload slot
+appears. You never touch any other code.
 
 ---
 
-## The tags (this is the whole contract)
+## The tags
 
 | Tag | What it does | Example |
 |---|---|---|
-| `data-var="PATH"` | Sets the element's **text** to the value at `PATH` | `<h1 data-var="event.title"></h1>` |
-| `data-href="PATH"` | Sets the element's **href** (links) | `<a data-href="rsvp.link">RSVP</a>` |
-| `data-src="PATH"` | Sets the element's **src** (images) | `<img data-src="event.coverImage">` |
-| `data-block="ID"` | Marks a **conditional section** shown only to matching guests (role/gender). Sections whose `ID` no rule references are treated as neutral and **always shown**. | `<section data-block="maleDressCode">…</section>` |
-| `data-optional` | Marks a wrapper that is **auto-hidden when its field is empty**. Put it on the element (or a wrapper around a label + `data-var`) for any field the inviter might leave blank — if the bound value is empty the whole element is `display:none`, so no stray label/blank row shows. | `<p data-optional>Dress code: <span data-var="event.dressCode"></span></p>` |
-| `data-reveal` | Element gets the class **`is-visible`** when scrolled into view — animate it in your CSS via a transition on `.is-visible` | `<section data-reveal>…</section>` |
-| `data-envelope` | The cover element gets the class **`is-open`** after the first scroll — animate a seal/flap opening | `<header data-envelope>…</header>` |
+| `data-var="PATH"` | Fills the element's **text** | `<h1 data-var="event.title">`
+| `data-href="PATH"` | Fills a **link** (href) | `<a data-href="rsvp.link">RSVP</a>`
+| `data-src="PATH"` | Fills an **image** (src) — becomes an upload slot in the builder | `<img data-src="event.coverImage">`
+| `data-block="ID"` | A **section shown only to some guests** (by role/gender). A block no rule mentions is shown to everyone. | `<section data-block="maleDressCode">`
+| `data-optional` | **Hides the element when its value is empty** — put it on anything that might be left blank so no empty label shows | `<p data-optional>Dress code: <span data-var="event.dressCode"></span></p>`
+| `data-reveal` | Gets the class `is-visible` when scrolled into view — animate it in your CSS | `<section data-reveal>`
+| `data-envelope` | The cover gets `is-open` after the first scroll — animate a seal/flap | `<header data-envelope>`
 
-You style everything else yourself. Use a `transition` + the `.is-visible` / `.is-open` classes for
-animation, and a `@media (prefers-reduced-motion: reduce)` block that turns motion off (required for
-accessibility).
+### Optional hints to make the builder nicer
 
----
+These are optional — the builder works without them, but they polish the inviter's experience:
 
-## Available data paths (use these in `data-var` / `data-href` / `data-src`)
+| Hint | Put it on | Does |
+|---|---|---|
+| `data-field-label="Gift note"` | a `data-var`/`data-href` element | Sets the box's label (otherwise it's guessed from the path) |
+| `data-field-type="textarea"` | a `data-var` element | Forces the input kind: `text`, `textarea`, `date`, `time`, or `url` |
+| `data-slot-label="Cover photo"` | a `data-src` image | Names the image slot in the builder |
 
-```
-event.title            event.subtitle          event.description
-event.date             event.time              event.schedule        event.dressCode
-event.venue.name       event.venue.address     event.venue.mapLink
-guest.name             guest.role              guest.gender
-inviter.name           inviter.phone           inviter.email
-invite.link            rsvp.link               rsvp.status
-```
-
-Any path missing for a given guest simply renders empty — always write sensible fallback text between
-the tags (e.g. `<h1 data-var="event.title">Our Celebration</h1>`), which shows until data loads and if a
-value is absent.
-
-**Most fields are now optional** — inviters can leave things blank in the builder. So a good template
-gives *every* field a place, and wraps the ones that may be empty in **`data-optional`** so blank values
-disappear cleanly instead of leaving a dangling label. Rule of thumb: only `event.title` and `event.date`
-are effectively always present; wrap the rest (dress code, schedule, subtitle, venue address/map, second
-host, etc.) in `data-optional`.
+If you don't set `data-field-type`, the builder guesses well: paths containing *date* get a date
+picker, *time* a time picker, *description/schedule/note/message/address* a multi-line box, links a
+URL box, everything else a normal text box.
 
 ---
 
-## Conditional blocks (role / gender content)
+## Who fills what
 
-Put a `data-block="someId"` on a section. Whether a guest sees it is decided by the **campaign's rules**
-(set by the inviter or an admin default), which map a guest attribute to a block id, e.g.:
+Not everything is filled by the inviter. Some things are personal to each guest and are added
+automatically at send time. This is why the split matters when you choose your paths:
+
+- **Inviter fills these in the builder** → any `event.*` path (and its images). Example:
+  `event.title`, `event.date`, `event.dressCode`, `event.hashtag`, `event.coverImage`.
+- **Personal to each guest, added automatically** → `guest.name`, `guest.role`, `guest.gender`.
+  Don't expect the inviter to type these.
+- **Generated by the platform** → `rsvp.link`, `rsvp.status`, `invite.link`.
+- **Have their own builder steps** → `event.venue.*` (the Venue step) and `inviter.*` (the Inviter
+  step). Use these paths freely; the inviter fills them elsewhere, not in the main field list.
+- **Role-based content** → use `data-block` sections (see below). The inviter maps roles to blocks
+  in the Roles step, and each guest sees the blocks for their role.
+
+### The data paths you can use
+
+```
+event.title          event.subtitle       event.description
+event.date           event.time           event.schedule       event.dressCode
+event.coverImage     event.couplePhoto    (any image path you invent, via data-src)
+event.<anything>     (any custom field you invent, via data-var/href)
+event.venue.name     event.venue.address  event.venue.mapLink
+guest.name           guest.role           guest.gender
+inviter.name         inviter.phone        inviter.email
+invite.link          rsvp.link            rsvp.status
+```
+
+Always write sensible fallback text between the tags (e.g. `<h1 data-var="event.title">Our
+Celebration</h1>`). It shows until the real value loads, and if a value is left blank. For anything
+optional, wrap it in `data-optional` so a blank value disappears cleanly instead of leaving a
+dangling label.
+
+---
+
+## Images
+
+Every `<img data-src="...">` becomes an **upload slot** in the builder. Want three photos? Add three
+`<img data-src>` tags. The inviter uploads a picture for each and sees them in the live preview.
+Wrap an image in `data-optional` if it's fine to leave empty:
+
+```html
+<span data-optional>
+  <img class="cover" data-src="event.coverImage" data-slot-label="Cover photo" alt="">
+</span>
+```
+
+---
+
+## Role-based content (dress codes, special messages)
+
+Put a `data-block="someId"` on a section. Whether a guest sees it is decided by the campaign's
+**roles** (set by the inviter in the Roles step), which map a guest's role to block ids:
 
 ```json
 { "rules": [
-  { "condition": { "field": "role",   "operator": "equals", "value": "bridesmaid" }, "contentBlock": "bridesmaidInstructions" },
-  { "condition": { "field": "gender", "operator": "equals", "value": "male" },       "contentBlock": "maleDressCode" },
-  { "condition": { "field": "gender", "operator": "equals", "value": "female" },     "contentBlock": "femaleDressCode" }
+  { "condition": { "field": "role", "operator": "equals", "value": "bridesmaid" }, "contentBlock": "bridesmaidInstructions" },
+  { "condition": { "field": "gender", "operator": "equals", "value": "male" },     "contentBlock": "maleDressCode" }
 ] }
 ```
 
-Operators: `equals`, `notEquals`, `in`, `notIn`, `exists`, `notExists`. **A block that no rule mentions
-is always shown** — so put universal content in blocks with no rule (or in no block at all), and always
-give every guest a complete invite.
-
-Suggested block ids (just conventions — you can name them anything, then map rules to them):
-`bridesmaidInstructions`, `groomsmenInstructions`, `maleDressCode`, `femaleDressCode`, `vipSchedule`,
-`familyNote`.
+Operators: `equals`, `notEquals`, `in`, `notIn`, `exists`, `notExists`. **A block no rule mentions is
+shown to everyone** — so put universal content in unmentioned blocks (or in no block), and always
+give every guest a complete invite. Common ids: `bridesmaidInstructions`, `groomsmenInstructions`,
+`maleDressCode`, `femaleDressCode`, `vipSchedule`, `familyNote` (just conventions — name them
+anything and map rules to them).
 
 ---
 
-## Custom JavaScript & animation (allowed for your templates)
+## Your own animation (allowed)
 
-Because only you (admin) upload templates, **you can include your own `<script>`** for richer animation
-(GSAP, canvas, WebGL, custom scroll-scrubbing, etc.). The platform still binds your `data-*` tags and
-handles the iOS-safe scroll — your JS runs alongside it. Two hooks are provided:
+Because only you upload templates, you may include your own `<script>` for richer motion (GSAP,
+canvas, custom scroll effects…). The platform still fills your `data-*` tags and drives an iOS-safe
+scroll; your JS runs alongside via two events:
 
 ```html
 <script>
-  // 1) React to the guest's data (fires once it's injected; also on window.invite.data).
+  // Fires once the guest's data is injected.
   window.addEventListener('invite:data', (e) => {
-    const d = e.detail;            // { event, guest, venue, inviter, rsvp, resolvedBlocks, ... }
-    // e.g. start a name-reveal animation for d.guest.name
+    const d = e.detail;   // { event, guest, venue, inviter, rsvp, resolvedBlocks, ... }
   });
-
-  // 2) React to scroll progress 0..1 (the platform scrolls the page; you scrub your animation).
+  // Fires as the page scrolls, 0 (top) → 1 (end).
   window.addEventListener('invite:progress', (e) => {
-    const p = e.detail;           // 0 (top) .. 1 (end)
-    // e.g. gsap.to('.hero', { opacity: 1 - p }) or drive a canvas frame
+    const p = e.detail;   // scrub an animation with p
   });
 </script>
 ```
 
-> If you ever open **community** template submissions, uploads from non-admins are stripped of JS
-> automatically — the JS freedom applies to trusted/admin templates only.
-
-## Rules & constraints (the sandbox)
-
-- **One self-contained file — inline everything.** The template runs under a strict CSP in a sandboxed
-  iframe, and separate/external files are rejected: put CSS in a `<style>` tag, JS in a `<script>` tag,
-  paste library code inline (e.g. minified GSAP), and embed images as `data:` URIs. (Want a specific CDN allow-listed
-  instead? Ask and I'll add it to the CSP.)
-- **Keep it light.** Aim to keep the package under ~300KB critical path; lazy-load / keep images small.
-- **Respect reduced motion** with a `@media (prefers-reduced-motion: reduce)` block (and check
-  `matchMedia('(prefers-reduced-motion: reduce)')` in JS).
-- **Guest/inviter values are injected as text** (never HTML) via `data-var`, so they can't inject markup —
-  keep using the tags for content and your JS for motion.
+> If community submissions are ever opened, non-admin uploads have their JS stripped automatically.
 
 ---
 
-## How to add a template
+## The rules (the sandbox)
 
-### Option A — commit it to the repo (recommended for you)
-In `invites-blog-backend`, create a folder `InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` with:
+- **One self-contained file.** Inline your CSS in `<style>`, your JS in `<script>`, paste library
+  code inline, embed images as `data:` URIs. External `<link rel="stylesheet">` / `<script src>` are
+  rejected. (Need a CDN allow-listed? Ask and I'll add it.)
+- **Keep it light** — aim under ~300KB critical path; keep images small.
+- **Respect reduced motion** with a `@media (prefers-reduced-motion: reduce)` block.
+- **Guest text is inserted as text, never HTML** — safe by design. Use the tags for content, your JS
+  for motion.
+
+---
+
+## Adding a template
+
+### Option A — commit it (recommended)
+In `invites-blog-backend`, add a folder
+`InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` with:
+
 ```
-RawTemplates/aurora-vows/
-  index.html     # the whole template: markup + inline <style> + optional inline <script>
-  meta.json      # { "name","slug","version","category","description" }
+index.html     # the whole template: markup + inline <style> + optional <script>
+meta.json      # { "name","slug","version","category","description" }
 ```
-`meta.json` example:
+
+`meta.json`:
 ```json
 { "name": "Aurora Vows", "slug": "aurora-vows", "version": "1.0.0",
   "category": "Wedding", "description": "A warm gold-on-ink wedding invite." }
 ```
-Commit + push, then on the server: `git -C /opt/apps/invites-blog-backend pull && \
-cd /opt/apps/invites-blog-deploy && docker compose -f compose.prod.yml up -d --build api`.
-The template is packaged, its manifest auto-derived from your tags, and it appears in the gallery.
-**A full working reference lives at `RawTemplates/aurora-vows/`** — copy it to start.
+
+Commit + push, then on the server:
+```bash
+git -C /opt/apps/invites-blog-backend pull && \
+cd /opt/apps/invites-blog-deploy && docker compose -f compose.prod.yml up -d --build api
+```
+The template is packaged, its fields and image slots are auto-detected from your tags, and it shows
+up in the gallery. **A full working example lives at `RawTemplates/aurora-vows/` — copy it to start.**
 
 ### Option B — upload at runtime (admin API)
 ```bash
-# 1) get an admin token
 TOKEN=$(curl -s -X POST https://invites.blog/api/admin/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@invites.blog","password":"YOUR_ADMIN_PASSWORD"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["token"])')
 
-# 2) upload the template (a single self-contained index.html)
 curl -s -X POST https://invites.blog/api/admin/templates \
   -H "Authorization: Bearer $TOKEN" \
   -F name="Aurora Vows" -F slug="aurora-vows" -F version="1.0.0" \
   -F category="Wedding" -F description="A warm gold-on-ink wedding invite." \
   -F index=@index.html
 ```
-The response lists the `variables` and `contentBlocks` the system detected from your tags — a quick way
-to confirm your tags are right. Re-uploading the same `slug`+`version` updates it in place.
+The response lists the `variables`, `fields`, `imageSlots`, and `contentBlocks` it detected — a quick
+way to confirm your tags are right. Re-uploading the same slug+version updates it in place.
+
+> **Public vs Dedicated:** add `-F visibility=Dedicated -F assignedEmail=someone@example.com` to make
+> a template reserved for one person (they claim it via "Did you request a template?" with an email
+> code). Leave it off for a normal public gallery template.
 
 ---
 
@@ -172,27 +205,26 @@ to confirm your tags are right. Re-uploading the same `slug`+`version` updates i
   <style>
     .panel{opacity:0;transform:translateY(40px);transition:opacity .8s,transform .8s}
     .panel.is-visible{opacity:1;transform:none}
-    .cover.is-open{/* animate your seal/flap */}
     @media (prefers-reduced-motion: reduce){.panel{opacity:1;transform:none;transition:none}}
   </style>
 </head>
 <body>
   <header class="cover" data-envelope>
+    <span data-optional><img data-src="event.coverImage" data-slot-label="Cover photo" alt=""></span>
     <h1 data-var="event.title">Our Celebration</h1>
     <p>Dear <span data-var="guest.name">Guest</span></p>
-    <p class="hint">Scroll ↓</p>
+    <p>Scroll ↓</p>
   </header>
 
   <section class="panel" data-reveal>
     <p data-var="event.date">The date</p>
-    <p data-var="event.venue.name">The venue</p>
-    <a class="btn" data-href="rsvp.link" href="#">RSVP</a>
+    <p data-optional data-var="event.dressCode">Dress code</p>
+    <a data-href="rsvp.link" href="#">RSVP</a>
   </section>
 
   <section class="panel" data-reveal data-block="maleDressCode"><p>Gentlemen: formal suit.</p></section>
   <section class="panel" data-reveal data-block="femaleDressCode"><p>Ladies: evening formal.</p></section>
 
-  <!-- optional: your own animation -->
   <script>
     window.addEventListener('invite:progress', (e) => { /* scrub with e.detail (0..1) */ });
   </script>
@@ -200,5 +232,5 @@ to confirm your tags are right. Re-uploading the same `slug`+`version` updates i
 </html>
 ```
 
-That's it — one `index.html` with inline `<style>` (and optional `<script>`), drop in the `data-*` tags,
-add it, and it's live in the gallery.
+Add the `data-*` tags, drop it in, and it's live — with the builder showing exactly the fields you
+declared.

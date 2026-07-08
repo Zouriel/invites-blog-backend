@@ -36,6 +36,7 @@ public sealed class CampaignService(
     IRepository<Refund> refunds,
     IUnitOfWork uow,
     IEmailSender email,
+    IStorageService storage,
     IPaymentProvider paymentProvider,
     PhoneNormalizer phones,
     IConfiguration config,
@@ -214,6 +215,52 @@ public sealed class CampaignService(
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
     }
+
+    public async Task<CampaignImageDto> AddImageAsync(
+        Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);   // possession-token ownership check (§11.2)
+
+        if (content.Length == 0)
+            throw new Exceptions.BusinessRuleException("The image file is empty.", "empty_image");
+        if (content.Length > MaxImageBytes)
+            throw new Exceptions.BusinessRuleException("Images must be 5 MB or smaller.", "image_too_large");
+        if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            throw new Exceptions.BusinessRuleException("Only image files can be uploaded here.", "not_an_image");
+
+        var ext = System.IO.Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
+        var key = $"campaigns/{campaign.Id:N}/images/{Guid.NewGuid():N}{ext}";
+        var url = await storage.PutAsync(key, content, contentType, ct);
+
+        await campaignAssets.AddAsync(new CampaignAsset
+        {
+            Id = Guid.NewGuid(),
+            CampaignId = campaign.Id,
+            Url = url,
+            ContentType = contentType,
+            SizeBytes = content.Length,
+            Slot = string.IsNullOrWhiteSpace(slot) ? null : slot.Trim(),
+            CreatedAt = DateTimeOffset.UtcNow
+        }, ct);
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+
+        return new CampaignImageDto(url);
+    }
+
+    private const long MaxImageBytes = 5 * 1024 * 1024;
+
+    private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        "image/avif" => ".avif",
+        "image/svg+xml" => ".svg",
+        _ => ".img"
+    };
 
     public async Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default)
     {

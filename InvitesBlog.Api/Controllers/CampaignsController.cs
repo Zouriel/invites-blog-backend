@@ -63,6 +63,21 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return SuccessMessage("Roles updated.");
     }
 
+    // Inviter uploads an image for a template image slot (multipart). Ownership is enforced in the service.
+    [HttpPost("{id:guid}/images")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> UploadImage(Guid id, IFormFile file, [FromForm] string? slot, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail("An image file is required."));
+
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+
+        return Created(await campaigns.AddImageAsync(id, buffer.ToArray(), file.ContentType, file.FileName, slot, ct));
+    }
+
     [HttpGet("{id:guid}/summary")]
     [HasPermission(Permissions.Campaigns.Read)]
     public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>

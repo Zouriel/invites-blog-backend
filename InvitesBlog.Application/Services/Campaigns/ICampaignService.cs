@@ -16,6 +16,7 @@ public interface ICampaignService
     Task UpdateInviterAsync(Guid id, UpdateInviterRequest req, string? accessToken, CancellationToken ct = default);
     Task UpdateDeliverySettingsAsync(Guid id, UpdateDeliverySettingsRequest req, CancellationToken ct = default);
     Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default);
+    Task<CampaignImageDto> AddImageAsync(Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default);
     Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default);
     Task<PriceBreakdown> GetPricingAsync(Guid id, int? inviteCount, CancellationToken ct = default);
     Task ResendLinkAsync(ResendLinkRequest req, CancellationToken ct = default);

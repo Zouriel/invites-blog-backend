@@ -77,7 +77,39 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             ["resolvedBlocks"] = new JsonArray(resolved.Select(b => (JsonNode)b!).ToArray())
         };
 
+        // Inviter-filled dynamic fields + images: flat { "data-var/href/src path": value } maps saved by
+        // the builder. Each value is placed at its path, so any field an author adds to a template just
+        // resolves — no server-side whitelist. The whitelisted event object above stays as the default.
+        ApplyPathMap(data, content["fields"] as JsonObject);
+        ApplyPathMap(data, content["imageSlots"] as JsonObject);
+
         return new InviteRenderPayload(template.PackageUrl, data, invite.RequiresOtp, campaign.Status.ToString());
+    }
+
+    /// <summary>Overlays a flat { path: value } map onto <paramref name="data"/>, each at its dot-path.</summary>
+    private static void ApplyPathMap(JsonObject data, JsonObject? map)
+    {
+        if (map is null) return;
+        foreach (var (path, node) in map)
+        {
+            var value = node?.ToString();
+            if (!string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(value))
+                SetPath(data, path, value!);
+        }
+    }
+
+    /// <summary>Assigns <paramref name="value"/> into <paramref name="root"/> at a dot-path, creating objects as needed.</summary>
+    private static void SetPath(JsonObject root, string dotPath, string value)
+    {
+        var parts = dotPath.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return;
+        var node = root;
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            if (node[parts[i]] is JsonObject child) { node = child; }
+            else { var created = new JsonObject(); node[parts[i]] = created; node = created; }
+        }
+        node[parts[^1]] = value;
     }
 
     private static JsonObject ParseObject(string json)

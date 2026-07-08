@@ -32,6 +32,9 @@ public sealed record CampaignSummaryDto(
     CampaignSummaryTemplateDto? Template,
     PriceBreakdown Price);
 
+/// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
+public sealed record CampaignImageDto(string Url);
+
 /// <summary>Result of cancelling a campaign (§14.3).</summary>
 public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, string? Note = null);
 
