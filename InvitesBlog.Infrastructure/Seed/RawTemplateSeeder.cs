@@ -45,9 +45,19 @@ public sealed class RawTemplateSeeder(
             // Always (re)publish so a fresh container's storage is populated.
             var published = await packager.PublishAsync(meta.Slug, meta.Version, html, ct: ct);
 
-            if (await db.Templates.AnyAsync(t => t.Slug == meta.Slug && t.Version == meta.Version, ct))
+            // If it already exists, refresh the package AND its manifest — editing a raw template's HTML
+            // (new fields, image slots, blocks) must flow into the stored manifest, not just storage.
+            var existing = await db.Templates.FirstOrDefaultAsync(t => t.Slug == meta.Slug && t.Version == meta.Version, ct);
+            if (existing is not null)
             {
-                logger.LogInformation("Raw template {Slug}@{Version} package refreshed.", meta.Slug, meta.Version);
+                existing.Name = meta.Name;
+                existing.Category = meta.Category;
+                existing.Description = meta.Description ?? existing.Description;
+                existing.ManifestJson = published.ManifestJson;
+                existing.PackageUrl = published.PackageUrl;
+                existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
+                existing.IsActive = true;
+                logger.LogInformation("Raw template {Slug}@{Version} refreshed (package + manifest).", meta.Slug, meta.Version);
                 continue;
             }
 
