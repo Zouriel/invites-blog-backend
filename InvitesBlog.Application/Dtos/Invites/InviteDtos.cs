@@ -15,6 +15,12 @@ public sealed record InviteCancelledResponse(bool Cancelled, string Message);
 public sealed record InviteRequiresOtpResponse(bool RequiresOtp);
 public sealed record InviteViewResponse(string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus);
 
+/// <summary>
+/// The rendered invite for an OTP-authenticated guest opening the shared campaign link
+/// (<c>/e/{campaignId}</c>). Carries the invite id + current RSVP so the client can RSVP.
+/// </summary>
+public sealed record MyInviteResponse(string PackageUrl, JsonObject Data, string CampaignStatus, Guid InviteId, string RsvpStatus);
+
 // ----- other responses -----
 
 public sealed record RsvpResultResponse(string Rsvp);

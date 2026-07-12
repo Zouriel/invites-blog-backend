@@ -15,6 +15,8 @@ public interface ICampaignService
     Task UpdateVenueAsync(Guid id, UpdateVenueRequest req, CancellationToken ct = default);
     Task UpdateInviterAsync(Guid id, UpdateInviterRequest req, string? accessToken, CancellationToken ct = default);
     Task UpdateDeliverySettingsAsync(Guid id, UpdateDeliverySettingsRequest req, CancellationToken ct = default);
+    /// <summary>Finalize the campaign (no payment): returns the shareable /e/{id} link and emails it if chosen.</summary>
+    Task<FinalizeResponse> FinalizeAsync(Guid id, CancellationToken ct = default);
     Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default);
     Task<CampaignImageDto> AddImageAsync(Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default);
     Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default);

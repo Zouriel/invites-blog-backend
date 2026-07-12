@@ -55,6 +55,12 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return SuccessMessage("Delivery settings updated.");
     }
 
+    // Finalize (no payment): mark ready, return the shareable /e/{id} link, email it to guests if chosen.
+    [HttpPost("{id:guid}/finalize")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> Finalize(Guid id, CancellationToken ct) =>
+        Success(await campaigns.FinalizeAsync(id, ct));
+
     [HttpPut("{id:guid}/roles")]
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> SetRoles(Guid id, [FromBody] SetRolesRequest req, CancellationToken ct)

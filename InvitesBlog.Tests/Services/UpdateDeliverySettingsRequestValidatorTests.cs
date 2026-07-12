@@ -9,9 +9,9 @@ public class UpdateDeliverySettingsRequestValidatorTests
     private readonly UpdateDeliverySettingsRequestValidator _sut = new();
 
     [Theory]
-    [InlineData("{\"channels\":[\"viber\"],\"fallbackChannel\":\"email\"}")]
+    [InlineData("{\"channels\":[\"share\"]}")]
     [InlineData("{\"channels\":[\"email\"],\"fallbackChannel\":null}")]
-    [InlineData("{\"channels\":[\"direct\"]}")]
+    [InlineData("{\"channels\":[\"email\",\"share\"]}")]
     [InlineData("{}")]
     public void Accepts_allowed_channels(string json)
     {
@@ -20,10 +20,10 @@ public class UpdateDeliverySettingsRequestValidatorTests
     }
 
     [Theory]
+    [InlineData("{\"channels\":[\"viber\"]}")]
     [InlineData("{\"channels\":[\"whatsapp\"]}")]
-    [InlineData("{\"channels\":[\"viber\",\"telegram\"]}")]
     [InlineData("{\"channels\":[\"email\"],\"fallbackChannel\":\"sms\"}")]
-    public void Rejects_log_only_channels(string json)
+    public void Rejects_disabled_channels(string json)
     {
         Assert.False(_sut.Validate(new UpdateDeliverySettingsRequest(json)).IsValid);
     }

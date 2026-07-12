@@ -13,16 +13,6 @@ public interface IDeliveryEventService
 }
 
 /// <summary>
-/// Applies Infobip Viber delivery reports (§13.3). Implemented in Infrastructure because it reads the
-/// invite/guest graph and re-delivers via email when a Viber message comes back undeliverable.
-/// </summary>
-public interface IInfobipReportHandler
-{
-    /// <summary>Parse a raw Infobip delivery-report body and apply every result. Idempotent.</summary>
-    Task HandleReportAsync(string rawBody, CancellationToken ct = default);
-}
-
-/// <summary>
 /// Applies Resend delivery webhook events to our records (provider guide §2.6). Idempotent: a repeated
 /// event is a no-op once the attempt already reflects it. Bounces mark the attempt Failed (surfaced in
 /// the campaign report); complaints also add the contact to the hashed suppression list (§15.3).

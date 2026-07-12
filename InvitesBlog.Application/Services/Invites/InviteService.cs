@@ -109,6 +109,65 @@ public sealed class InviteService(
         return await RecordRsvpAsync(invite, req, ct);
     }
 
+    /// <summary>
+    /// Resolve the OTP-authenticated caller's invite for a shared campaign link (<c>/e/{campaignId}</c>).
+    /// Guest-list-only: the verified email must match a guest on the campaign, otherwise access is refused.
+    /// The invite row is created on first view (no upfront dispatch needed). Returns the rendered invite.
+    /// </summary>
+    public async Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default)
+    {
+        var contact = currentUser.Contact;
+        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
+
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+            ?? throw new InviteNotFoundException();
+        if (campaign.Status == CampaignStatus.Cancelled)
+            return new InviteCancelledResponse(true, "This event has been cancelled.");
+
+        // Match the verified email to a guest on this campaign (guest-list-only access).
+        var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        var guest = guestList.FirstOrDefault(g =>
+            !string.IsNullOrWhiteSpace(g.Email) && string.Equals(g.Email, contact, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InviteNotFoundException(); // this email isn't on the guest list
+
+        // Get-or-create this guest's invite (lazy — created on first authenticated view).
+        var invite = await invites.GetByGuestIdAsync(guest.Id, ct);
+        if (invite is null)
+        {
+            invite = new Invite
+            {
+                Id = Guid.NewGuid(),
+                CampaignId = campaignId,
+                GuestId = guest.Id,
+                // token_hash is NOT NULL; viewing no longer uses it (access is by OTP match), but keep it random.
+                TokenHash = TokenService.Hash(TokenService.GenerateToken()),
+                Status = InviteStatus.Sent,
+                RsvpStatus = RsvpStatus.NoResponse,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            await invites.AddAsync(invite, ct);
+        }
+
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct)
+            ?? throw new InviteNotFoundException();
+        var inviter = campaign.InviterId is null
+            ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
+
+        if (invite.ViewedAt is null)
+        {
+            invite.ViewedAt = DateTimeOffset.UtcNow;
+            if (invite.Status != InviteStatus.Viewed) invite.Status = InviteStatus.Viewed;
+        }
+
+        var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
+        var link = $"{inviteeBase}/e/{campaignId}";
+        var payload = render(campaign, template, guest, invite, link, inviter?.Name, inviter?.PhoneE164, inviter?.Email);
+        await uow.SaveChangesAsync(ct);
+
+        return new MyInviteResponse(payload.PackageUrl, payload.Data, payload.CampaignStatus,
+            invite.Id, invite.RsvpStatus.ToString());
+    }
+
     /// <summary>Shared RSVP write path for the token and authenticated flows.</summary>
     private async Task<RsvpResultResponse> RecordRsvpAsync(Invite invite, RsvpRequest req, CancellationToken ct)
     {

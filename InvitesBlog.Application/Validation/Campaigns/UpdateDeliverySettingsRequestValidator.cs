@@ -6,10 +6,10 @@ namespace InvitesBlog.Application.Validation.Campaigns;
 
 public sealed class UpdateDeliverySettingsRequestValidator : AbstractValidator<UpdateDeliverySettingsRequest>
 {
-    // Only channels with a real (or intentionally log-only) provider may be selected from the UI.
-    // whatsapp/telegram/sms are log-only and must not be pickable in production.
+    // Current mechanism: a single OTP-gated share link (/e/{id}). "share" = give the inviter the link;
+    // "email" = also mail that link to guests. Viber/whatsapp/telegram/sms are disabled for now.
     private static readonly HashSet<string> Allowed =
-        new(StringComparer.OrdinalIgnoreCase) { "viber", "email", "direct" };
+        new(StringComparer.OrdinalIgnoreCase) { "email", "share" };
 
     public UpdateDeliverySettingsRequestValidator()
     {

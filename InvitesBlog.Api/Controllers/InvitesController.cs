@@ -38,6 +38,13 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
     public async Task<IActionResult> Inbox(CancellationToken ct) =>
         Success(await invites.GetInboxAsync(ct));
 
+    // Shared campaign link (/e/{campaignId}): the OTP-verified caller's personalized invite, if their
+    // email is on the guest list. Authenticated (email OTP) — guest-list-only access.
+    [HttpGet("/api/campaigns/{campaignId:guid}/my-invite")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> MyInvite(Guid campaignId, CancellationToken ct) =>
+        Success(await invites.GetMyInviteAsync(campaignId, Render, ct));
+
     // Claim by possession of the raw token (not by invite id — see ClaimAsync).
     [HttpPost("by-token/{token}/claim")]
     [HasPermission(Permissions.Invites.Claim)]

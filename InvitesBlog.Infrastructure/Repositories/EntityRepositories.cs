@@ -48,6 +48,9 @@ public sealed class InviteRepository(AppDbContext db) : BaseRepository<Invite>(d
     public Task<Invite?> GetByTokenHashAsync(string tokenHash, CancellationToken ct = default) =>
         Set.FirstOrDefaultAsync(i => i.TokenHash == tokenHash, ct);
 
+    public Task<Invite?> GetByGuestIdAsync(Guid guestId, CancellationToken ct = default) =>
+        Set.FirstOrDefaultAsync(i => i.GuestId == guestId, ct);
+
     public async Task<IReadOnlyList<Invite>> ListByCampaignAsync(Guid campaignId, CancellationToken ct = default) =>
         await Set.AsNoTracking().Where(i => i.CampaignId == campaignId).ToListAsync(ct);
 }

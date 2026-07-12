@@ -11,6 +11,8 @@ public interface IInviteService
     /// supplies <paramref name="render"/> so the payload can be built in Infrastructure.
     /// </summary>
     Task<object> GetByTokenAsync(string token, InviteRenderer render, CancellationToken ct = default);
+    /// <summary>Rendered invite for the OTP-authenticated caller via the shared campaign link (<c>/e/{id}</c>).</summary>
+    Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default);
 
     Task<RsvpResultResponse> RsvpAsync(string token, RsvpRequest req, CancellationToken ct = default);
     /// <summary>Authenticated RSVP from the inbox (by invite id, ownership-checked).</summary>

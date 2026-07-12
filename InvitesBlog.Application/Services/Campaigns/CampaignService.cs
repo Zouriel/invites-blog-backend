@@ -184,6 +184,78 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Finalize the campaign (replaces the old pay→dispatch step). Marks it ready and returns the single
+    /// shareable link <c>/e/{id}</c>. If the inviter chose the "email" channel, emails that link to every
+    /// guest who has an email. No per-guest tokens or payment — guests open the link and verify by email.
+    /// </summary>
+    public async Task<FinalizeResponse> FinalizeAsync(Guid id, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+        var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: false, ct);
+        if (guestList.Count == 0) throw new CampaignHasNoGuestsException();
+
+        var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
+        var shareLink = $"{inviteeBase}/e/{id}";
+        var (channels, messageTemplate) = DeliverySettings(campaign.DeliverySettingsJson);
+
+        campaign.Status = CampaignStatus.Dispatched;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
+        var emailed = 0;
+        if (channels.Contains("email"))
+        {
+            foreach (var g in guestList)
+            {
+                if (string.IsNullOrWhiteSpace(g.Email)) continue;
+                var name = string.IsNullOrWhiteSpace(g.Name) ? "there" : g.Name.Trim();
+                var message = (messageTemplate ?? "You're warmly invited! Tap below to open your invitation.")
+                    .Replace("{{name}}", name).Replace("{{guest.name}}", name);
+                await email.SendAsync(BuildShareEmail(g.Email, name, campaign.Title, message, shareLink), ct);
+                emailed++;
+            }
+        }
+
+        await uow.SaveChangesAsync(ct);
+        return new FinalizeResponse(shareLink, guestList.Count, emailed);
+    }
+
+    private static (HashSet<string> Channels, string? MessageTemplate) DeliverySettings(string json)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? message = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Array)
+                    foreach (var c in ch.EnumerateArray())
+                        if (c.ValueKind == JsonValueKind.String && c.GetString() is { } s) set.Add(s);
+                if (root.TryGetProperty("messageTemplate", out var mt) && mt.ValueKind == JsonValueKind.String)
+                    message = mt.GetString();
+            }
+        }
+        catch (JsonException) { /* fall through to defaults */ }
+        return (set, message);
+    }
+
+    private static Application.Abstractions.EmailMessage BuildShareEmail(string to, string guestName, string eventTitle, string message, string link)
+    {
+        var name = System.Net.WebUtility.HtmlEncode(guestName);
+        var body = System.Net.WebUtility.HtmlEncode(message);
+        var html =
+            "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#2a1420\">" +
+            $"<p style=\"font-size:16px;line-height:1.6\">Dear {name},</p>" +
+            $"<p style=\"font-size:16px;line-height:1.6\">{body}</p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open your invitation</a></p>" +
+            $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">You'll verify your email to view it. Or open this link:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
+        return new Application.Abstractions.EmailMessage(
+            To: to, Subject: $"You're invited — {(string.IsNullOrWhiteSpace(eventTitle) ? "invites.blog" : eventTitle)}",
+            Html: html, Stream: Application.Abstractions.EmailStream.Invites);
+    }
+
     public async Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);

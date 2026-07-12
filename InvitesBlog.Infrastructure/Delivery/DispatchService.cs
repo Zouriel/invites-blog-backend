@@ -13,9 +13,9 @@ namespace InvitesBlog.Infrastructure.Delivery;
 
 public sealed class DeliverySettings
 {
-    // Product rule: nothing selected → Viber first, email fallback (guests without a phone get email).
-    [JsonPropertyName("channels")] public List<string> Channels { get; set; } = new() { "viber" };
-    [JsonPropertyName("fallbackChannel")] public string? FallbackChannel { get; set; } = "email";
+    // Current mechanism: default to a shareable OTP-gated link (/e/{id}); "email" also mails it to guests.
+    [JsonPropertyName("channels")] public List<string> Channels { get; set; } = new() { "share" };
+    [JsonPropertyName("fallbackChannel")] public string? FallbackChannel { get; set; }
     [JsonPropertyName("messageTemplate")] public string MessageTemplate { get; set; } =
         "You have a new invite from {{inviter.name}}. Open it here: {{invite.link}}";
 }
@@ -198,40 +198,6 @@ public sealed class DispatchService(
             });
         }
         return false;
-    }
-
-    /// <summary>
-    /// Async fallback (§13.2): a channel's delivery report came back undeliverable. If the invite has
-    /// no successful attempt yet and the guest has an email, deliver via email and record the attempt.
-    /// Idempotent — a second call after email already went out is a no-op (an email attempt exists).
-    /// </summary>
-    public async Task<bool> FallbackToEmailAsync(Guid inviteId, CancellationToken ct = default)
-    {
-        var invite = await db.Invites.FirstOrDefaultAsync(i => i.Id == inviteId, ct);
-        if (invite is null) return false;
-
-        var alreadyDelivered = await db.DeliveryAttempts.AnyAsync(
-            a => a.InviteId == inviteId &&
-                 (a.Status == DeliveryStatus.Sent || a.Status == DeliveryStatus.Delivered), ct);
-        if (alreadyDelivered) return false;
-
-        var guest = await db.Guests.FirstOrDefaultAsync(g => g.Id == invite.GuestId, ct);
-        if (guest is null || string.IsNullOrWhiteSpace(guest.Email)) return false;
-
-        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == invite.CampaignId, ct);
-        if (campaign is null) return false;
-        var inviter = campaign.InviterId is null ? null
-            : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
-
-        var baseSettings = Deserialize(campaign.DeliverySettingsJson);
-        // Force email-only so we don't re-attempt the channel that just failed (avoids report loops).
-        var emailOnly = new DeliverySettings
-        {
-            Channels = new() { "email" },
-            FallbackChannel = null,
-            MessageTemplate = baseSettings.MessageTemplate
-        };
-        return await DeliverToGuestAsync(campaign, guest, emailOnly, inviter?.Name ?? "your host", inviter?.Email, ct);
     }
 
     private static string? AddressFor(string channel, Guest g) => channel.ToLowerInvariant() switch

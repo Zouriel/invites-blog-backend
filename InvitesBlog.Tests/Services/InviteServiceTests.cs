@@ -69,6 +69,42 @@ public class InviteServiceTests
         Assert.IsType<InviteRequiresOtpResponse>(res);
     }
 
+    // ----- GetMyInvite (shared /e/{id} link, guest-list-only) -----
+
+    [Fact]
+    public async Task GetMyInvite_matched_email_renders_personalized_invite()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "guest@test.com");
+        var template = TestData.Template();
+        _currentUser.Contact.Returns("guest@test.com");
+        _currentUser.ContactType.Returns("email");
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.ListByCampaignAsync(campaign.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { guest });
+        _invites.GetByGuestIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns((Invite?)null); // created lazily
+        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+
+        var res = await Sut().GetMyInviteAsync(campaign.Id, Renderer);
+
+        var view = Assert.IsType<MyInviteResponse>(res);
+        Assert.Equal(template.PackageUrl, view.PackageUrl);
+        await _invites.Received(1).AddAsync(Arg.Any<Invite>(), Arg.Any<CancellationToken>());
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetMyInvite_email_not_on_guest_list_is_refused()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "someone@test.com");
+        _currentUser.Contact.Returns("notlisted@test.com");
+        _currentUser.ContactType.Returns("email");
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.ListByCampaignAsync(campaign.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { guest });
+
+        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().GetMyInviteAsync(campaign.Id, Renderer));
+    }
+
     [Fact]
     public async Task GetByToken_success_marks_viewed_and_returns_view()
     {

@@ -41,6 +41,9 @@ public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, strin
 /// <summary>Result of hard-deleting a campaign (§15.5).</summary>
 public sealed record DeleteCampaignResponse(bool Deleted);
 
+/// <summary>Result of finalizing a campaign: the shareable link + how many guests were emailed it.</summary>
+public sealed record FinalizeResponse(string ShareLink, int GuestCount, int Emailed);
+
 // ----- Dashboard (§4.7.4 / §13.3) -----
 
 public sealed record DashboardCampaignDto(Guid Id, string Title, string Status, int PaidInviteCapacity);
