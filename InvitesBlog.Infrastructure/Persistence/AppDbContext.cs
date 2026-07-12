@@ -25,6 +25,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CampaignAsset> CampaignAssets => Set<CampaignAsset>();
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Inquiry> Inquiries => Set<Inquiry>();
 
     // RBAC (full authorization model)
     public DbSet<AppUser> Users => Set<AppUser>();
@@ -45,6 +46,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Visibility).HasDefaultValue("Public");
             e.Property(x => x.IsUsed).HasDefaultValue(false);
             e.HasIndex(x => x.AssignedEmail).HasDatabaseName("idx_templates_assigned_email");
+        });
+
+        b.Entity<Inquiry>(e =>
+        {
+            e.ToTable("inquiries");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.HasAttended).HasDefaultValue(false);
+            e.Property(x => x.TemplateIssued).HasDefaultValue(false);
+            // Admin list ordering: unattended first, then oldest first.
+            e.HasIndex(x => new { x.HasAttended, x.CreatedAt }).HasDatabaseName("idx_inquiries_queue");
+            e.HasIndex(x => x.Email).HasDatabaseName("idx_inquiries_email");
         });
 
         b.Entity<TemplateType>(e =>
