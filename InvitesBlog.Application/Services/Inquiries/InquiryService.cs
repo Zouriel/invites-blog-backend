@@ -1,8 +1,10 @@
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Inquiries;
 using InvitesBlog.Application.Exceptions.Inquiries;
+using InvitesBlog.Application.Filters.Inquiries;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -41,13 +43,38 @@ public sealed class InquiryService(
         return new SubmitInquiryResponse(inquiry.Id);
     }
 
-    public async Task<IReadOnlyList<InquiryListItemDto>> ListAsync(CancellationToken ct = default) =>
-        await inquiries.Query()
+    public async Task<PagedResult<InquiryListItemDto>> ListAsync(InquiryFilter filter, CancellationToken ct = default)
+    {
+        var query = inquiries.Query();
+
+        // Pipeline tab.
+        query = filter.Status?.Trim().ToLowerInvariant() switch
+        {
+            "unattended" => query.Where(i => !i.HasAttended),
+            "attended-unissued" => query.Where(i => i.HasAttended && !i.TemplateIssued),
+            _ => query, // "all" (or unset)
+        };
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            query = query.Where(i =>
+                i.Name.ToLower().Contains(term) ||
+                i.Email.ToLower().Contains(term) ||
+                i.Occasion.ToLower().Contains(term));
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(i => i.HasAttended)   // unattended (false) first
             .ThenBy(i => i.CreatedAt)      // then oldest first
+            .Skip(filter.Skip).Take(filter.PageSize)
             .Select(i => new InquiryListItemDto(
                 i.Id, i.Name, i.Email, i.Occasion, i.HasAttended, i.TemplateIssued, i.CreatedAt))
             .ToListAsync(ct);
+
+        return PagedResult<InquiryListItemDto>.Create(items, total, filter);
+    }
 
     public async Task<InquiryDetailDto> GetAsync(Guid id, CancellationToken ct = default)
     {

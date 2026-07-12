@@ -2,6 +2,7 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Inquiries;
+using InvitesBlog.Application.Filters.Inquiries;
 using InvitesBlog.Application.Services.Inquiries;
 using InvitesBlog.Domain.Entities;
 using Microsoft.Extensions.Configuration;
@@ -64,10 +65,51 @@ public class InquiryServiceTests
         var oldUnattended = Inquiry(); oldUnattended.CreatedAt = DateTimeOffset.UtcNow.AddDays(-3);
         _inquiries.Query().Returns(new[] { oldAttended, newUnattended, oldUnattended }.AsAsyncQueryable());
 
-        var list = await Sut().ListAsync();
+        var page = await Sut().ListAsync(new InquiryFilter());
 
         // Unattended first (oldest→newest among them), then attended.
-        Assert.Equal(new[] { oldUnattended.Id, newUnattended.Id, oldAttended.Id }, list.Select(i => i.Id).ToArray());
+        Assert.Equal(3, page.TotalCount);
+        Assert.Equal(new[] { oldUnattended.Id, newUnattended.Id, oldAttended.Id }, page.Items.Select(i => i.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task List_status_attended_unissued_filters_to_met_but_unissued()
+    {
+        var newOne = Inquiry();                                              // unattended
+        var attendedUnissued = Inquiry(attended: true);                     // attended, not issued
+        var issued = Inquiry(attended: true); issued.TemplateIssued = true; // attended + issued
+        _inquiries.Query().Returns(new[] { newOne, attendedUnissued, issued }.AsAsyncQueryable());
+
+        var page = await Sut().ListAsync(new InquiryFilter { Status = "attended-unissued" });
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(attendedUnissued.Id, page.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task List_status_unattended_filters_to_new()
+    {
+        var newOne = Inquiry();
+        var attended = Inquiry(attended: true);
+        _inquiries.Query().Returns(new[] { newOne, attended }.AsAsyncQueryable());
+
+        var page = await Sut().ListAsync(new InquiryFilter { Status = "unattended" });
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(newOne.Id, page.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task List_search_matches_name_email_or_occasion()
+    {
+        var a = Inquiry(); a.Name = "Aisha"; a.Email = "aisha@test.com"; a.Occasion = "Wedding";
+        var b = Inquiry(); b.Name = "Bilal"; b.Email = "bilal@test.com"; b.Occasion = "Birthday";
+        _inquiries.Query().Returns(new[] { a, b }.AsAsyncQueryable());
+
+        var page = await Sut().ListAsync(new InquiryFilter { Search = "wedding" });
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(a.Id, page.Items[0].Id);
     }
 
     [Fact]

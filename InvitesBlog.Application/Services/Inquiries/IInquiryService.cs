@@ -1,4 +1,6 @@
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Inquiries;
+using InvitesBlog.Application.Filters.Inquiries;
 
 namespace InvitesBlog.Application.Services.Inquiries;
 
@@ -6,7 +8,7 @@ namespace InvitesBlog.Application.Services.Inquiries;
 public interface IInquiryService
 {
     Task<SubmitInquiryResponse> SubmitAsync(SubmitInquiryRequest req, CancellationToken ct = default);
-    Task<IReadOnlyList<InquiryListItemDto>> ListAsync(CancellationToken ct = default);
+    Task<PagedResult<InquiryListItemDto>> ListAsync(InquiryFilter filter, CancellationToken ct = default);
     Task<InquiryDetailDto> GetAsync(Guid id, CancellationToken ct = default);
     Task UpdateAsync(Guid id, UpdateInquiryRequest req, CancellationToken ct = default);
     Task<InquiryIssuedResponse> IssueTemplateAsync(Guid id, IssueTemplateData data, CancellationToken ct = default);

@@ -1,5 +1,6 @@
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Inquiries;
+using InvitesBlog.Application.Filters.Inquiries;
 using InvitesBlog.Application.Services.Inquiries;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Infrastructure.Templates;
@@ -18,8 +19,8 @@ public sealed class AdminInquiriesController(
 {
     [HttpGet]
     [HasPermission(Permissions.Templates.Manage)]
-    public async Task<IActionResult> List(CancellationToken ct) =>
-        Success(await inquiries.ListAsync(ct));
+    public async Task<IActionResult> List([FromQuery] InquiryFilter filter, CancellationToken ct) =>
+        Paged(await inquiries.ListAsync(filter, ct));
 
     [HttpGet("{id:guid}")]
     [HasPermission(Permissions.Templates.Manage)]
