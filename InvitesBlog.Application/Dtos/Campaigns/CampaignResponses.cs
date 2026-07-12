@@ -47,7 +47,7 @@ public sealed record DashboardCampaignDto(Guid Id, string Title, string Status, 
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 
-public sealed record DashboardReportDto(int Total, int Sent, int Failed, int Viewed, DashboardRsvpDto Rsvp);
+public sealed record DashboardReportDto(int Total, int Sent, int Failed, int Viewed, int NotSent, DashboardRsvpDto Rsvp);
 
 public sealed record DashboardGuestDto(
     Guid Id,
@@ -59,7 +59,8 @@ public sealed record DashboardGuestDto(
     bool OptedOut,
     string InviteStatus,
     string RsvpStatus,
-    DateTimeOffset? ViewedAt);
+    DateTimeOffset? ViewedAt,
+    string? DeliveryChannel);   // channel of the latest delivery attempt ("viber" / "email" / …)
 
 public sealed record DashboardResponse(
     DashboardCampaignDto Campaign,

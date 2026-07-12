@@ -255,6 +255,7 @@ public class CampaignServiceTests
         _campaigns.GetByDashboardTokenHashAsync(c.Id, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(c);
         _guests.ListByCampaignAsync(c.Id, true, Arg.Any<CancellationToken>()).Returns(new[] { guest });
         _invites.ListByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(new[] { invite });
+        _attempts.Query().Returns(Array.Empty<DeliveryAttempt>().AsAsyncQueryable());
 
         var res = await Sut().GetDashboardAsync(c.Id, "good");
 

@@ -95,14 +95,36 @@ public static class DependencyInjection
         services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
         services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<EmailOtpSender>());
 
-        // Delivery providers (email real; others logged until Telegram/SMS ship — guide §4).
+        // Delivery providers (§4.8.1): email real; viber real when configured, else logged;
+        // telegram/sms remain logged until they ship (provider guide §4).
         services.AddScoped<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
+
+        if (!string.IsNullOrWhiteSpace(config["Infobip:ApiKey"]))
+        {
+            services.AddHttpClient<InfobipViberSender>(c =>
+            {
+                c.BaseAddress = new Uri(config["Infobip:BaseUrl"]!);
+                c.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("App", config["Infobip:ApiKey"]);
+                c.Timeout = TimeSpan.FromSeconds(15);
+            });
+            services.AddScoped<IInviteDeliveryProvider>(sp => sp.GetRequiredService<InfobipViberSender>());
+        }
+        else
+        {
+            // Empty API key ⇒ viber stays log-only, so dev and CI keep working with no Infobip account.
+            services.AddScoped<IInviteDeliveryProvider>(sp =>
+                new LogInviteDeliveryProvider("viber", sp.GetRequiredService<ILoggerFactory>().CreateLogger("viber")));
+        }
+
         services.AddScoped<IInviteDeliveryProvider>(sp =>
             new LogInviteDeliveryProvider("telegram", sp.GetRequiredService<ILoggerFactory>().CreateLogger("telegram")));
         services.AddScoped<IInviteDeliveryProvider>(sp =>
             new LogInviteDeliveryProvider("sms", sp.GetRequiredService<ILoggerFactory>().CreateLogger("sms")));
+
         services.AddScoped<DispatchService>();
         services.AddScoped<IInviteDispatcher>(sp => sp.GetRequiredService<DispatchService>());
+        services.AddScoped<Application.Services.Delivery.IInfobipReportHandler, InfobipReportHandler>();
 
         // Payments
         services.AddSingleton<IPaymentProvider, FakePaymentProvider>();

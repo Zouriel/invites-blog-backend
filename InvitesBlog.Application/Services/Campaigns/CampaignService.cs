@@ -334,19 +334,32 @@ public sealed class CampaignService(
             Sent: inviteList.Count(i => i.Status is InviteStatus.Sent or InviteStatus.Viewed),
             Failed: inviteList.Count(i => i.Status == InviteStatus.Failed),
             Viewed: inviteList.Count(i => i.ViewedAt != null),
+            NotSent: inviteList.Count(i => i.Status == InviteStatus.NotSent),
             Rsvp: new DashboardRsvpDto(
                 Going: inviteList.Count(i => i.RsvpStatus == RsvpStatus.Going),
                 Maybe: inviteList.Count(i => i.RsvpStatus == RsvpStatus.Maybe),
                 NotGoing: inviteList.Count(i => i.RsvpStatus == RsvpStatus.NotGoing)));
 
+        // Latest real delivery channel per invite ("viber"/"email"), so the dashboard can show
+        // "via Viber" / "via email". The "none" placeholder channel (not-sent) is excluded.
+        var inviteIds = inviteList.Select(i => i.Id).ToList();
+        var attemptList = await deliveryAttempts.Query()
+            .Where(a => inviteIds.Contains(a.InviteId) && a.Channel != "none")
+            .ToListAsync(ct);
+        var latestChannel = attemptList
+            .GroupBy(a => a.InviteId)
+            .ToDictionary(grp => grp.Key, grp => grp.OrderByDescending(a => a.AttemptedAt).First().Channel);
+
         var guestRows = guestList.Select(g =>
         {
             var inv = inviteList.FirstOrDefault(i => i.GuestId == g.Id);
+            var channel = inv is not null && latestChannel.TryGetValue(inv.Id, out var ch) ? ch : null;
             return new DashboardGuestDto(
                 g.Id, g.Name, g.Email, g.PhoneE164, g.Role, g.Gender, g.OptedOut,
                 inv?.Status.ToString() ?? "None",
                 inv?.RsvpStatus.ToString() ?? "NoResponse",
-                inv?.ViewedAt);
+                inv?.ViewedAt,
+                channel);
         }).ToList();
 
         return new DashboardResponse(

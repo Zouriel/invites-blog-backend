@@ -22,7 +22,8 @@ public enum InviteStatus
     Sent,
     Failed,
     Viewed,
-    Cancelled
+    Cancelled,
+    NotSent   // no deliverable contact (no phone for Viber and no email) — appended; EF stores ints
 }
 
 public enum RsvpStatus
@@ -40,7 +41,8 @@ public enum DeliveryStatus
     Sent,
     Delivered,
     Failed,
-    Bounced
+    Bounced,
+    Skipped   // no channel was attemptable for the guest — appended; EF stores ints
 }
 
 public enum PaymentKind

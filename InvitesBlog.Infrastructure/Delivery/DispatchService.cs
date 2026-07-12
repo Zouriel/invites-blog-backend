@@ -13,7 +13,8 @@ namespace InvitesBlog.Infrastructure.Delivery;
 
 public sealed class DeliverySettings
 {
-    [JsonPropertyName("channels")] public List<string> Channels { get; set; } = new() { "email" };
+    // Product rule: nothing selected → Viber first, email fallback (guests without a phone get email).
+    [JsonPropertyName("channels")] public List<string> Channels { get; set; } = new() { "viber" };
     [JsonPropertyName("fallbackChannel")] public string? FallbackChannel { get; set; } = "email";
     [JsonPropertyName("messageTemplate")] public string MessageTemplate { get; set; } =
         "You have a new invite from {{inviter.name}}. Open it here: {{invite.link}}";
@@ -51,7 +52,7 @@ public sealed class DispatchService(
         campaign.Status = CampaignStatus.Dispatching;
         await db.SaveChangesAsync(ct);
 
-        int sent = 0, failed = 0;
+        int sent = 0, failed = 0, notSent = 0;
 
         foreach (var guest in guests)
         {
@@ -63,16 +64,21 @@ public sealed class DispatchService(
             }
 
             var ok = await DeliverToGuestAsync(campaign, guest, settings, inviterName, inviter?.Email, ct);
-            if (ok) sent++; else failed++;
+            if (ok) sent++;
+            else if (HasAnyContact(guest, settings)) failed++;
+            else notSent++;   // §product rule: no phone (Viber) and no email — recorded, not a failure
         }
 
+        // A "not sent — no contact" guest is not a delivery failure: a campaign where every
+        // reachable guest got their invite still rolls up to Dispatched (with N not-sent).
         campaign.Status = failed == 0
             ? CampaignStatus.Dispatched
             : (sent > 0 ? CampaignStatus.PartiallyDispatched : CampaignStatus.PaymentFailed);
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Dispatch for {CampaignId}: {Sent} sent, {Failed} failed.", campaignId, sent, failed);
+        logger.LogInformation("Dispatch for {CampaignId}: {Sent} sent, {Failed} failed, {NotSent} not sent (no contact).",
+            campaignId, sent, failed, notSent);
     }
 
     /// <summary>
@@ -125,10 +131,17 @@ public sealed class DispatchService(
 
         var ok = await TryDeliverAsync(invite, campaign.Id, guest, settings,
             inviterName, inviterEmail, link, removalLink, messageText, ct);
-        invite.Status = ok ? InviteStatus.Sent : InviteStatus.Failed;
+        // Distinguish "not sent — no deliverable contact" from a provider failure (§product rule).
+        invite.Status = ok
+            ? InviteStatus.Sent
+            : (HasAnyContact(guest, settings) ? InviteStatus.Failed : InviteStatus.NotSent);
         await db.SaveChangesAsync(ct);
         return ok;
     }
+
+    /// <summary>True if any configured/fallback channel could reach this guest (has the contact it needs).</summary>
+    private static bool HasAnyContact(Guest g, DeliverySettings s) =>
+        !string.IsNullOrWhiteSpace(g.Email) || !string.IsNullOrWhiteSpace(g.PhoneE164);
 
     /// <summary>Try the configured channels in order, then the fallback, per §13.2.</summary>
     private async Task<bool> TryDeliverAsync(
@@ -139,6 +152,8 @@ public sealed class DispatchService(
         if (settings.FallbackChannel is not null && !order.Contains(settings.FallbackChannel))
             order.Add(settings.FallbackChannel);
 
+        var anyAddressable = false;
+
         foreach (var channel in order)
         {
             var address = AddressFor(channel, guest);
@@ -148,6 +163,7 @@ public sealed class DispatchService(
                 p.Channel.Equals(channel, StringComparison.OrdinalIgnoreCase));
             if (provider is null) continue;
 
+            anyAddressable = true;
             var result = await provider.SendAsync(
                 new InviteDeliveryMessage(channel, address, inviterName, link, messageText,
                     CampaignId: campaignId, InviteId: invite.Id, InviterEmail: inviterEmail, RemovalLink: removalLink), ct);
@@ -166,7 +182,56 @@ public sealed class DispatchService(
 
             if (result.Success) return true;
         }
+
+        if (!anyAddressable)
+        {
+            // §product rule: no phone for Viber AND no email → do nothing, but say so on the dashboard.
+            db.DeliveryAttempts.Add(new DeliveryAttempt
+            {
+                Id = Guid.NewGuid(),
+                InviteId = invite.Id,
+                Channel = "none",
+                RecipientAddress = "-",
+                Status = DeliveryStatus.Skipped,
+                ErrorMessage = "Not sent: guest has no phone number (Viber) and no email address.",
+                AttemptedAt = DateTimeOffset.UtcNow
+            });
+        }
         return false;
+    }
+
+    /// <summary>
+    /// Async fallback (§13.2): a channel's delivery report came back undeliverable. If the invite has
+    /// no successful attempt yet and the guest has an email, deliver via email and record the attempt.
+    /// Idempotent — a second call after email already went out is a no-op (an email attempt exists).
+    /// </summary>
+    public async Task<bool> FallbackToEmailAsync(Guid inviteId, CancellationToken ct = default)
+    {
+        var invite = await db.Invites.FirstOrDefaultAsync(i => i.Id == inviteId, ct);
+        if (invite is null) return false;
+
+        var alreadyDelivered = await db.DeliveryAttempts.AnyAsync(
+            a => a.InviteId == inviteId &&
+                 (a.Status == DeliveryStatus.Sent || a.Status == DeliveryStatus.Delivered), ct);
+        if (alreadyDelivered) return false;
+
+        var guest = await db.Guests.FirstOrDefaultAsync(g => g.Id == invite.GuestId, ct);
+        if (guest is null || string.IsNullOrWhiteSpace(guest.Email)) return false;
+
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == invite.CampaignId, ct);
+        if (campaign is null) return false;
+        var inviter = campaign.InviterId is null ? null
+            : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
+
+        var baseSettings = Deserialize(campaign.DeliverySettingsJson);
+        // Force email-only so we don't re-attempt the channel that just failed (avoids report loops).
+        var emailOnly = new DeliverySettings
+        {
+            Channels = new() { "email" },
+            FallbackChannel = null,
+            MessageTemplate = baseSettings.MessageTemplate
+        };
+        return await DeliverToGuestAsync(campaign, guest, emailOnly, inviter?.Name ?? "your host", inviter?.Email, ct);
     }
 
     private static string? AddressFor(string channel, Guest g) => channel.ToLowerInvariant() switch
