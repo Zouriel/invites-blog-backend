@@ -143,6 +143,8 @@ public class InquiryServiceTests
 
         Assert.True(i.TemplateIssued);
         Assert.NotNull(i.TemplateIssuedAt);
+        Assert.True(i.HasAttended); // issuing implies attended
+        Assert.NotNull(i.AttendedAt);
         Assert.NotNull(added);
         Assert.Equal(TemplateVisibility.Dedicated, added!.Visibility);
         Assert.Equal("aisha@test.com", added.AssignedEmail); // reserved for the inquiry's email

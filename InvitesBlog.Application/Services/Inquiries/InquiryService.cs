@@ -145,9 +145,13 @@ public sealed class InquiryService(
             await templates.AddAsync(template, ct);
         }
 
+        var now = DateTimeOffset.UtcNow;
         inquiry.TemplateIssued = true;
-        inquiry.TemplateIssuedAt = DateTimeOffset.UtcNow;
+        inquiry.TemplateIssuedAt = now;
         inquiry.IssuedTemplateId = template.Id;
+        // Issuing implies the customer was consulted — keep the pipeline consistent so an issued
+        // inquiry never reads as "not attended".
+        if (!inquiry.HasAttended) { inquiry.HasAttended = true; inquiry.AttendedAt = now; }
         await uow.SaveChangesAsync(ct);
 
         // Notify the customer their invitation is ready. Non-fatal if the email provider hiccups —
