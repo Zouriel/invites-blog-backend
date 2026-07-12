@@ -1,6 +1,8 @@
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.TemplateTypes;
 using InvitesBlog.Application.Exceptions;
+using InvitesBlog.Application.Filters.TemplateTypes;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,6 +11,7 @@ namespace InvitesBlog.Application.Services.TemplateTypes;
 public interface ITemplateTypeService
 {
     Task<IReadOnlyList<TemplateTypeDto>> ListAsync(bool includeInactive, CancellationToken ct = default);
+    Task<PagedResult<TemplateTypeDto>> ListPagedAsync(TemplateTypeFilter filter, CancellationToken ct = default);
     Task<TemplateTypeDto> CreateAsync(CreateTemplateTypeRequest req, CancellationToken ct = default);
     Task DeactivateAsync(Guid id, CancellationToken ct = default);
 }
@@ -23,6 +26,25 @@ public sealed class TemplateTypeService(IRepository<TemplateType> types, IUnitOf
         return await query.OrderBy(t => t.SortOrder).ThenBy(t => t.Name)
             .Select(t => new TemplateTypeDto(t.Id, t.Name, t.Slug, t.SortOrder, t.IsActive))
             .ToListAsync(ct);
+    }
+
+    public async Task<PagedResult<TemplateTypeDto>> ListPagedAsync(TemplateTypeFilter filter, CancellationToken ct = default)
+    {
+        var query = types.Query(); // admin view: includes inactive
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            query = query.Where(t => t.Name.ToLower().Contains(term) || t.Slug.ToLower().Contains(term));
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderBy(t => t.SortOrder).ThenBy(t => t.Name)
+            .Skip(filter.Skip).Take(filter.PageSize)
+            .Select(t => new TemplateTypeDto(t.Id, t.Name, t.Slug, t.SortOrder, t.IsActive))
+            .ToListAsync(ct);
+
+        return PagedResult<TemplateTypeDto>.Create(items, total, filter);
     }
 
     public async Task<TemplateTypeDto> CreateAsync(CreateTemplateTypeRequest req, CancellationToken ct = default)

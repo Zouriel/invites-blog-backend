@@ -1,9 +1,12 @@
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
+using InvitesBlog.Application.Filters.Templates;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Templates;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Api.Controllers;
 
@@ -30,20 +33,44 @@ public sealed class AdminTemplatesController(
 
     public sealed record DeleteResultDto(bool Deleted, bool Deactivated, int CampaignCount);
 
-    /// <summary>GET /api/admin/templates — every template for the management list (newest first).</summary>
+    /// <summary>
+    /// GET /api/admin/templates — the management list (newest first). Paged, searchable (name/slug),
+    /// filterable by category, and split by <c>status</c> tab: <c>active</c> (default), <c>inactive</c>, <c>all</c>.
+    /// </summary>
     [HttpGet]
     [HasPermission(Permissions.Templates.Manage)]
-    public async Task<IActionResult> List(CancellationToken ct)
+    public async Task<IActionResult> List([FromQuery] AdminTemplateFilter filter, CancellationToken ct)
     {
-        var all = await templates.ListAsync(ct: ct);
-        var items = new List<AdminTemplateDto>(all.Count);
-        foreach (var t in all.OrderByDescending(x => x.CreatedAt))
+        var query = templates.Query();
+
+        query = filter.Status?.Trim().ToLowerInvariant() switch
+        {
+            "inactive" => query.Where(t => !t.IsActive),
+            "all" => query,
+            _ => query.Where(t => t.IsActive), // default: active only
+        };
+        if (!string.IsNullOrWhiteSpace(filter.Category))
+            query = query.Where(t => t.Category == filter.Category);
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            query = query.Where(t => t.Name.ToLower().Contains(term) || t.Slug.ToLower().Contains(term));
+        }
+
+        var total = await query.CountAsync(ct);
+        var page = await query
+            .OrderByDescending(t => t.CreatedAt)
+            .Skip(filter.Skip).Take(filter.PageSize)
+            .ToListAsync(ct);
+
+        var items = new List<AdminTemplateDto>(page.Count);
+        foreach (var t in page)
         {
             var count = await campaigns.CountAsync(c => c.TemplateId == t.Id, ct);
             items.Add(new AdminTemplateDto(t.Id, t.Name, t.Slug, t.Category, t.Version, t.PackageUrl,
                 t.Visibility, t.IsActive, t.AssignedEmail, count));
         }
-        return Success(items);
+        return Paged(PagedResult<AdminTemplateDto>.Create(items, total, filter));
     }
 
     /// <summary>
