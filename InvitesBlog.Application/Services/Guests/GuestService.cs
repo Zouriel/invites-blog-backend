@@ -84,10 +84,22 @@ public sealed class GuestService(
 
         // The accepted guest list is stored; export it as a convenience report (§4.4.6).
         var parsed = JsonSerializer.Deserialize<List<ParsedGuest>>(upload.ResultJson) ?? new();
-        var sb = new StringBuilder("email,phone,name,role,gender\n");
+        var sb = new StringBuilder("email,phone,name,role,gender\r\n");
         foreach (var g in parsed)
-            sb.AppendLine($"{g.Email},{g.PhoneE164},{g.Name},{g.Role},{g.Gender}");
+            sb.Append(Csv(g.Email)).Append(',').Append(Csv(g.PhoneE164)).Append(',')
+              .Append(Csv(g.Name)).Append(',').Append(Csv(g.Role)).Append(',')
+              .Append(Csv(g.Gender)).Append("\r\n");
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    /// <summary>RFC-4180 quoting + neutralizes spreadsheet formula injection (=/+/-/@ leading values).</summary>
+    private static string Csv(string? field)
+    {
+        var s = field ?? "";
+        if (s.Length > 0 && (s[0] is '=' or '+' or '-' or '@')) s = "'" + s;
+        if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0)
+            s = "\"" + s.Replace("\"", "\"\"") + "\"";
+        return s;
     }
 
     public async Task<ConfirmUploadResultDto> ConfirmUploadAsync(

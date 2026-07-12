@@ -20,15 +20,11 @@ public sealed class PaymentService(
     ICampaignRepository campaigns,
     IPaymentRepository payments,
     IGuestRepository guests,
-    IRepository<Refund> refunds,
     IUnitOfWork unitOfWork,
     IPaymentProvider provider,
     IConfiguration config,
     ICurrentUser currentUser) : IPaymentService
 {
-    // Injected per the slice contract; refunds are written on the cancel path (owned by another slice).
-    private readonly IRepository<Refund> _refunds = refunds;
-
     private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";
 

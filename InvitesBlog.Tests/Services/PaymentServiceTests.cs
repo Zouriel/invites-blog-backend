@@ -15,7 +15,6 @@ public class PaymentServiceTests
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IPaymentRepository _payments = Substitute.For<IPaymentRepository>();
     private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
-    private readonly IRepository<Refund> _refunds = Substitute.For<IRepository<Refund>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IPaymentProvider _provider = Substitute.For<IPaymentProvider>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
@@ -24,7 +23,7 @@ public class PaymentServiceTests
     public PaymentServiceTests() => _provider.Name.Returns("Fake");
 
     private PaymentService Sut() => new(
-        _campaigns, _payments, _guests, _refunds, _uow, _provider, _config, _currentUser);
+        _campaigns, _payments, _guests, _uow, _provider, _config, _currentUser);
 
     private void Authorize(Campaign c)
     {

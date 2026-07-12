@@ -76,6 +76,42 @@ public sealed class InviteService(
         var invite = await invites.GetByTokenHashAsync(hash, ct)
             ?? throw new InviteNotFoundException();
 
+        // Sensitive invites gate viewing behind OTP (§4.9.1); gate RSVP too. An OTP-verified session
+        // carries the contact on the (optional) JWT, so an authenticated holder can still RSVP.
+        if (invite.RequiresOtp && string.IsNullOrEmpty(currentUser.Contact))
+            throw new UnauthorizedException();
+
+        return await RecordRsvpAsync(invite, req, ct);
+    }
+
+    /// <summary>
+    /// Authenticated RSVP from the inbox (§10.8). The caller is OTP-verified; the invite is addressed
+    /// by id, so verify the caller owns it (the guest's contact matches the verified identity) before
+    /// recording — otherwise any authenticated user who learned an invite id could RSVP for it.
+    /// </summary>
+    public async Task<RsvpResultResponse> RsvpByInviteIdAsync(Guid inviteId, RsvpRequest req, CancellationToken ct = default)
+    {
+        await rsvpValidator.ValidateAndThrowAsync(req, ct);
+
+        var contact = currentUser.Contact;
+        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
+
+        var invite = await invites.GetByIdAsync(inviteId, ct)
+            ?? throw new InviteNotFoundException();
+        var guest = await guests.GetByIdAsync(invite.GuestId, ct)
+            ?? throw new InviteNotFoundException();
+
+        var owns = currentUser.ContactType == "phone"
+            ? string.Equals(guest.PhoneE164, contact, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(guest.Email, contact, StringComparison.OrdinalIgnoreCase);
+        if (!owns) throw new InviteNotFoundException(); // don't reveal existence to non-owners
+
+        return await RecordRsvpAsync(invite, req, ct);
+    }
+
+    /// <summary>Shared RSVP write path for the token and authenticated flows.</summary>
+    private async Task<RsvpResultResponse> RecordRsvpAsync(Invite invite, RsvpRequest req, CancellationToken ct)
+    {
         if (!Enum.TryParse<RsvpStatus>(req.Status, true, out var status))
             throw new InvalidRsvpStatusException(req.Status);
 
@@ -127,13 +163,15 @@ public sealed class InviteService(
         }).ToList();
     }
 
-    public async Task<ClaimResponse> ClaimAsync(Guid inviteId, CancellationToken ct = default)
+    public async Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default)
     {
         var contact = currentUser.Contact;
         var type = currentUser.ContactType;
         if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
 
-        var invite = await invites.GetByIdAsync(inviteId, ct)
+        // Possession of the raw invite token is the authorization to claim it — otherwise any
+        // authenticated user who guessed/learned an invite id could hijack it onto their inbox.
+        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
             ?? throw new InviteNotFoundException();
         var guest = await guests.GetByIdAsync(invite.GuestId, ct)
             ?? throw new InviteNotFoundException();

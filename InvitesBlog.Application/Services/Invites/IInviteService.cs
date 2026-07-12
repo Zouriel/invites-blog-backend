@@ -13,6 +13,9 @@ public interface IInviteService
     Task<object> GetByTokenAsync(string token, InviteRenderer render, CancellationToken ct = default);
 
     Task<RsvpResultResponse> RsvpAsync(string token, RsvpRequest req, CancellationToken ct = default);
+    /// <summary>Authenticated RSVP from the inbox (by invite id, ownership-checked).</summary>
+    Task<RsvpResultResponse> RsvpByInviteIdAsync(Guid inviteId, RsvpRequest req, CancellationToken ct = default);
     Task<IReadOnlyList<InboxCardResponse>> GetInboxAsync(CancellationToken ct = default);
-    Task<ClaimResponse> ClaimAsync(Guid inviteId, CancellationToken ct = default);
+    /// <summary>Claim an invite to the caller's inbox — authorized by possession of the raw token.</summary>
+    Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default);
 }

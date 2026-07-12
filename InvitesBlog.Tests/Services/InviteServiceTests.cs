@@ -163,7 +163,7 @@ public class InviteServiceTests
     public async Task Claim_no_contact_throws_Unauthorized()
     {
         _currentUser.Contact.Returns((string?)null);
-        await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().ClaimAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().ClaimAsync("tok"));
     }
 
     [Fact]
@@ -171,8 +171,8 @@ public class InviteServiceTests
     {
         _currentUser.Contact.Returns("me@test.com");
         _currentUser.ContactType.Returns("email");
-        _invites.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
-        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().ClaimAsync(Guid.NewGuid()));
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
+        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().ClaimAsync("tok"));
     }
 
     [Fact]
@@ -183,13 +183,47 @@ public class InviteServiceTests
         var invite = TestData.Invite(campaign.Id, guest.Id);
         _currentUser.Contact.Returns("me@test.com");
         _currentUser.ContactType.Returns("email");
-        _invites.GetByIdAsync(invite.Id, Arg.Any<CancellationToken>()).Returns(invite);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
 
-        var res = await Sut().ClaimAsync(invite.Id);
+        var res = await Sut().ClaimAsync("raw-token");
 
         Assert.True(res.Claimed);
         Assert.Equal("me@test.com", guest.Email);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RsvpByInviteId_rejects_non_owner()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "owner@test.com", phone: null);
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        _currentUser.Contact.Returns("someone-else@test.com");
+        _currentUser.ContactType.Returns("email");
+        _invites.GetByIdAsync(invite.Id, Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+
+        await Assert.ThrowsAsync<InviteNotFoundException>(
+            () => Sut().RsvpByInviteIdAsync(invite.Id, new RsvpRequest("Going", 1, null, null, null, null)));
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RsvpByInviteId_owner_records_rsvp()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "owner@test.com", phone: null);
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        _currentUser.Contact.Returns("owner@test.com");
+        _currentUser.ContactType.Returns("email");
+        _invites.GetByIdAsync(invite.Id, Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+
+        var res = await Sut().RsvpByInviteIdAsync(invite.Id, new RsvpRequest("Going", 1, null, null, null, null));
+
+        Assert.Equal("Going", res.Rsvp);
+        Assert.Equal(RsvpStatus.Going, invite.RsvpStatus);
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 }

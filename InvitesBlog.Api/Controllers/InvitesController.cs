@@ -27,15 +27,22 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
     public async Task<IActionResult> Rsvp(string token, [FromBody] RsvpRequest req, CancellationToken ct) =>
         Success(await invites.RsvpAsync(token, req, ct));
 
+    // Authenticated RSVP from the inbox (ownership-checked by verified contact).
+    [HttpPost("{inviteId:guid}/rsvp")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> RsvpByInviteId(Guid inviteId, [FromBody] RsvpRequest req, CancellationToken ct) =>
+        Success(await invites.RsvpByInviteIdAsync(inviteId, req, ct));
+
     [HttpGet("/api/me/invites")]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> Inbox(CancellationToken ct) =>
         Success(await invites.GetInboxAsync(ct));
 
-    [HttpPost("{inviteId:guid}/claim")]
+    // Claim by possession of the raw token (not by invite id — see ClaimAsync).
+    [HttpPost("by-token/{token}/claim")]
     [HasPermission(Permissions.Invites.Claim)]
-    public async Task<IActionResult> Claim(Guid inviteId, CancellationToken ct) =>
-        Success(await invites.ClaimAsync(inviteId, ct));
+    public async Task<IActionResult> Claim(string token, CancellationToken ct) =>
+        Success(await invites.ClaimAsync(token, ct));
 
     // Bridges the Infrastructure renderer into the Application service without a layer dependency.
     private InviteRenderData Render(

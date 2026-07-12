@@ -73,7 +73,7 @@ public sealed class DispatchService(
         // reachable guest got their invite still rolls up to Dispatched (with N not-sent).
         campaign.Status = failed == 0
             ? CampaignStatus.Dispatched
-            : (sent > 0 ? CampaignStatus.PartiallyDispatched : CampaignStatus.PaymentFailed);
+            : (sent > 0 ? CampaignStatus.PartiallyDispatched : CampaignStatus.DispatchFailed);
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 

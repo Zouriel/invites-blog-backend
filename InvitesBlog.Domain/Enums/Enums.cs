@@ -12,7 +12,8 @@ public enum CampaignStatus
     PartiallyDispatched,
     Cancelled,
     Refunded,
-    PartiallyRefunded
+    PartiallyRefunded,
+    DispatchFailed   // paid, but every delivery failed — appended; EF stores ints
 }
 
 public enum InviteStatus

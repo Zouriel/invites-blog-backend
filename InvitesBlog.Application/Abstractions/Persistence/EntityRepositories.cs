@@ -31,7 +31,6 @@ public interface IGuestRepository : IRepository<Guest>
 public interface IInviteRepository : IRepository<Invite>
 {
     Task<Invite?> GetByTokenHashAsync(string tokenHash, CancellationToken ct = default);
-    Task<Invite?> GetByGuestIdAsync(Guid guestId, CancellationToken ct = default);
     Task<IReadOnlyList<Invite>> ListByCampaignAsync(Guid campaignId, CancellationToken ct = default);
 }
 

@@ -41,7 +41,10 @@ public sealed class PaymentsController(IPaymentService payments, DispatchService
         var result = await payments.HandleWebhookAsync(body, signature, ct);
         if (!result.Handled) throw new PaymentWebhookInvalidException();
         if (result.DispatchCampaignId is Guid campaignId)
-            await dispatch.DispatchCampaignAsync(campaignId, ct);
+            // Use None, not the request token: a payment provider disconnecting/retrying must not
+            // cancel a partially-completed dispatch (the retry short-circuits on Status==Paid and
+            // would leave the campaign stuck in Dispatching with only some guests sent).
+            await dispatch.DispatchCampaignAsync(campaignId, CancellationToken.None);
 
         return Success(new WebhookAckResponse(true));
     }
