@@ -16,10 +16,63 @@ namespace InvitesBlog.Api.Controllers;
 public sealed class AdminTemplatesController(
     RawTemplatePackager packager,
     ITemplateRepository templates,
+    ICampaignRepository campaigns,
     IUnitOfWork uow) : BaseApiController
 {
     public sealed record UploadResultDto(Guid Id, string Slug, string Version, string PackageUrl,
         IReadOnlyList<string> Variables, IReadOnlyList<string> ContentBlocks);
+
+    /// <summary>An admin management row — every template (incl. inactive/dedicated) plus how many
+    /// campaigns already use it, so the admin knows whether a delete will hard-delete or deactivate.</summary>
+    public sealed record AdminTemplateDto(
+        Guid Id, string Name, string Slug, string Category, string Version, string PackageUrl,
+        string Visibility, bool IsActive, string? AssignedEmail, int CampaignCount);
+
+    public sealed record DeleteResultDto(bool Deleted, bool Deactivated, int CampaignCount);
+
+    /// <summary>GET /api/admin/templates — every template for the management list (newest first).</summary>
+    [HttpGet]
+    [HasPermission(Permissions.Templates.Manage)]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        var all = await templates.ListAsync(ct: ct);
+        var items = new List<AdminTemplateDto>(all.Count);
+        foreach (var t in all.OrderByDescending(x => x.CreatedAt))
+        {
+            var count = await campaigns.CountAsync(c => c.TemplateId == t.Id, ct);
+            items.Add(new AdminTemplateDto(t.Id, t.Name, t.Slug, t.Category, t.Version, t.PackageUrl,
+                t.Visibility, t.IsActive, t.AssignedEmail, count));
+        }
+        return Success(items);
+    }
+
+    /// <summary>
+    /// DELETE /api/admin/templates/{id} — removes a template. If any campaign already uses it, the row
+    /// is DEACTIVATED (hidden from the gallery) instead of hard-deleted, so invites already created from
+    /// it keep rendering their stored package. Unused templates are hard-deleted.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [HasPermission(Permissions.Templates.Manage)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var entity = await templates.GetByIdAsync(id, ct);
+        if (entity is null)
+            return NotFound(Application.Common.ApiResponse<object?>.Fail("Template not found."));
+
+        var campaignCount = await campaigns.CountAsync(c => c.TemplateId == id, ct);
+        if (campaignCount > 0)
+        {
+            entity.IsActive = false;
+            templates.Update(entity);
+            await uow.SaveChangesAsync(ct);
+            return Success(new DeleteResultDto(false, true, campaignCount),
+                $"“{entity.Name}” is used by {campaignCount} campaign(s), so it was deactivated (hidden from the gallery) rather than deleted.");
+        }
+
+        templates.Remove(entity);
+        await uow.SaveChangesAsync(ct);
+        return Success(new DeleteResultDto(true, false, 0), $"“{entity.Name}” was deleted.");
+    }
 
     /// <summary>
     /// POST /api/admin/templates (multipart) — fields: name, slug, version?, category, description?;

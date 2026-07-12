@@ -44,6 +44,7 @@ using (var scope = app.Services.CreateScope())
     {
         await services.GetRequiredService<TemplateSeeder>().SeedAsync();
         await services.GetRequiredService<RawTemplateSeeder>().SeedAsync();
+        await services.GetRequiredService<TemplateManifestRefresher>().RefreshAsync();
         await services.GetRequiredService<TemplateTypeSeeder>().SeedAsync();
         await services.GetRequiredService<RbacSeeder>().SeedAsync();
     }

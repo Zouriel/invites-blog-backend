@@ -356,4 +356,56 @@ public class CampaignServiceTests
         await _auditLogs.Received(1).AddAsync(Arg.Any<AuditLog>(), Arg.Any<CancellationToken>());
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
+
+    // ----- Finalize (share button link vs per-guest emailed link) -----
+
+    [Fact]
+    public async Task Finalize_no_guests_throws()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(Array.Empty<Guest>());
+        await Assert.ThrowsAsync<CampaignHasNoGuestsException>(() => Sut().FinalizeAsync(c.Id));
+    }
+
+    [Fact]
+    public async Task Finalize_email_channel_emails_each_guest_a_per_guest_tokenized_link()
+    {
+        var c = TestData.Campaign();
+        c.DeliverySettingsJson = "{\"channels\":[\"email\",\"share\"]}";
+        Own(c);
+        var g1 = TestData.Guest(c.Id, email: "a@test.com");
+        var g2 = TestData.Guest(c.Id, email: "b@test.com");
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { g1, g2 });
+        _invites.GetByGuestIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        // The SHARE button link is the gated campaign link; the EMAILS carry per-guest tokenized links.
+        Assert.Equal($"https://me.example.com/e/{c.Id}", res.ShareLink);
+        Assert.Equal(2, res.Emailed);
+        Assert.Equal(CampaignStatus.Dispatched, c.Status);
+        await _invites.Received(2).AddAsync(
+            Arg.Is<Invite>(i => !string.IsNullOrEmpty(i.TokenHash)), Arg.Any<CancellationToken>());
+        await _email.Received(2).SendAsync(
+            Arg.Is<EmailMessage>(m => m.Html.Contains("/i/")), Arg.Any<CancellationToken>());
+        await _email.DidNotReceive().SendAsync(
+            Arg.Is<EmailMessage>(m => m.Html.Contains("/e/")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Finalize_without_email_channel_sends_no_emails()
+    {
+        var c = TestData.Campaign();
+        c.DeliverySettingsJson = "{\"channels\":[\"share\"]}";
+        Own(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: "a@test.com") });
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        Assert.Equal(0, res.Emailed);
+        await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
+    }
 }

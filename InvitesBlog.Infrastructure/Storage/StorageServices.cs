@@ -30,6 +30,12 @@ public sealed class LocalFileStorageService : IStorageService
         return PublicUrl(key);
     }
 
+    public async Task<byte[]?> GetAsync(string key, CancellationToken ct = default)
+    {
+        var path = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
+    }
+
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";
 }
 
@@ -64,6 +70,21 @@ public sealed class S3StorageService : IStorageService
             ContentType = contentType
         }, ct);
         return PublicUrl(key);
+    }
+
+    public async Task<byte[]?> GetAsync(string key, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = _bucket, Key = key }, ct);
+            using var ms = new MemoryStream();
+            await res.ResponseStream.CopyToAsync(ms, ct);
+            return ms.ToArray();
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
     }
 
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";

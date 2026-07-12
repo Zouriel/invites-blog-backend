@@ -76,23 +76,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     {
         EnsureSelfContained(html);
 
-        var variables = Collect(VarAttrRegex(), html);
-        var contentBlocks = Collect(BlockAttrRegex(), html);
-        var imageSlots = CollectImageSlots(html);
-        var fields = CollectFields(html);
-
-        var manifest = new TemplateManifest
-        {
-            Slug = slug,
-            Version = version,
-            Variables = variables.ToList(),
-            ContentBlocks = contentBlocks.ToList(),
-            ImageSlots = imageSlots,
-            Fields = fields,
-            Roles = new(),
-            GenderVariants = new(),
-            EditableAreas = new()
-        };
+        var manifest = BuildManifest(slug, version, html);
 
         var finalHtml = WireInjector(html, allowScripts);
         var basePath = $"templates/{slug}@{version}";
@@ -104,6 +88,25 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
         return new RawPublishedPackage(storage.PublicUrl($"{basePath}/"), manifest, manifestJson);
     }
+
+    /// <summary>
+    /// Derives the platform manifest (variables, content blocks, image slots, fillable fields) by
+    /// scanning the template's tags — no storage writes, no injector wiring. Used both when publishing
+    /// and when re-deriving an already-stored template's manifest (idempotent: the inlined injector
+    /// script carries no <c>data-var/href/src="…"</c> attributes, so re-scanning served HTML is safe).
+    /// </summary>
+    public TemplateManifest BuildManifest(string slug, string version, string html) => new()
+    {
+        Slug = slug,
+        Version = version,
+        Variables = Collect(VarAttrRegex(), html).ToList(),
+        ContentBlocks = Collect(BlockAttrRegex(), html).ToList(),
+        ImageSlots = CollectImageSlots(html),
+        Fields = CollectFields(html),
+        Roles = new(),
+        GenderVariants = new(),
+        EditableAreas = new()
+    };
 
     /// <summary>Reject anything that isn't self-contained in the single HTML file.</summary>
     private static void EnsureSelfContained(string html)
@@ -118,36 +121,52 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 "template_not_self_contained");
     }
 
+    private readonly record struct SlotOccurrence(string Key, string? Label);
+    private readonly record struct FieldOccurrence(string Key, bool IsHref, string? Label, string? Type);
+
     /// <summary>
-    /// One image slot per distinct <c>data-src</c> path. The label comes from an optional
-    /// <c>data-slot-label</c> on the same element, otherwise it's derived from the path.
+    /// One image slot per distinct <c>data-src</c> path (case-insensitive). The same path used on many
+    /// elements yields ONE slot; filling it feeds every element carrying that path. The label comes from
+    /// an optional <c>data-slot-label</c> — when occurrences differ, the labeled one wins (else derived).
     /// </summary>
     private static List<TemplateImageSlot> CollectImageSlots(string html)
     {
-        var byKey = new Dictionary<string, TemplateImageSlot>(StringComparer.Ordinal);
+        var occurrences = new List<SlotOccurrence>();
         foreach (Match tag in ImageTagRegex().Matches(html))
         {
             var src = DataSrcRegex().Match(tag.Value);
             if (!src.Success) continue;
             var key = (src.Groups[1].Success ? src.Groups[1].Value : src.Groups[2].Value).Trim();
-            if (string.IsNullOrWhiteSpace(key) || byKey.ContainsKey(key)) continue;
+            if (string.IsNullOrWhiteSpace(key)) continue;
 
             var lbl = SlotLabelRegex().Match(tag.Value);
             var label = lbl.Success
                 ? (lbl.Groups[1].Success ? lbl.Groups[1].Value : lbl.Groups[2].Value).Trim()
-                : Prettify(key);
-            byKey[key] = new TemplateImageSlot { Key = key, Label = string.IsNullOrWhiteSpace(label) ? Prettify(key) : label };
+                : null;
+            occurrences.Add(new SlotOccurrence(key, string.IsNullOrWhiteSpace(label) ? null : label));
         }
-        return byKey.Values.OrderBy(s => s.Key, StringComparer.Ordinal).ToList();
+
+        return occurrences
+            .GroupBy(o => o.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var key = g.First().Key; // first-seen casing is canonical
+                var label = g.Select(o => o.Label).FirstOrDefault(l => l is not null) ?? Prettify(key);
+                return new TemplateImageSlot { Key = key, Label = label };
+            })
+            .OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>
-    /// One field per distinct <c>data-var</c>/<c>data-href</c> path. Label comes from an optional
-    /// <c>data-field-label</c>, and the widget type from an optional <c>data-field-type</c> (else inferred).
+    /// One field per distinct <c>data-var</c>/<c>data-href</c> path (case-insensitive). A path repeated
+    /// across elements is asked for ONCE; the renderer then fills every element carrying it. When
+    /// occurrences differ in metadata, the one carrying <c>data-field-label</c> wins for the label and the
+    /// one carrying <c>data-field-type</c> wins for the type (each defaulted independently when absent).
     /// </summary>
     private static List<TemplateFieldSlot> CollectFields(string html)
     {
-        var byKey = new Dictionary<string, TemplateFieldSlot>(StringComparer.Ordinal);
+        var occurrences = new List<FieldOccurrence>();
         foreach (Match tag in FieldTagRegex().Matches(html))
         {
             var varMatch = DataVarRegex().Match(tag.Value);
@@ -167,26 +186,42 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             }
             else continue;
 
-            if (string.IsNullOrWhiteSpace(key) || byKey.ContainsKey(key)) continue;
+            if (string.IsNullOrWhiteSpace(key)) continue;
 
             var lbl = FieldLabelRegex().Match(tag.Value);
             var label = lbl.Success
                 ? (lbl.Groups[1].Success ? lbl.Groups[1].Value : lbl.Groups[2].Value).Trim()
-                : Prettify(key);
+                : null;
 
             var explicitType = FieldTypeRegex().Match(tag.Value);
             var type = explicitType.Success
                 ? (explicitType.Groups[1].Success ? explicitType.Groups[1].Value : explicitType.Groups[2].Value).Trim().ToLowerInvariant()
-                : InferFieldType(key, isHref);
+                : null;
 
-            byKey[key] = new TemplateFieldSlot
-            {
-                Key = key,
-                Label = string.IsNullOrWhiteSpace(label) ? Prettify(key) : label,
-                Type = string.IsNullOrWhiteSpace(type) ? "text" : type
-            };
+            occurrences.Add(new FieldOccurrence(
+                key, isHref,
+                string.IsNullOrWhiteSpace(label) ? null : label,
+                string.IsNullOrWhiteSpace(type) ? null : type));
         }
-        return byKey.Values.OrderBy(f => f.Key, StringComparer.Ordinal).ToList();
+
+        return occurrences
+            .GroupBy(o => o.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var first = g.First();
+                var key = first.Key; // first-seen casing is canonical
+                var label = g.Select(o => o.Label).FirstOrDefault(l => l is not null) ?? Prettify(key);
+                var type = g.Select(o => o.Type).FirstOrDefault(t => t is not null)
+                           ?? InferFieldType(key, first.IsHref);
+                return new TemplateFieldSlot
+                {
+                    Key = key,
+                    Label = string.IsNullOrWhiteSpace(label) ? Prettify(key) : label,
+                    Type = string.IsNullOrWhiteSpace(type) ? "text" : type
+                };
+            })
+            .OrderBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>Guesses a widget type from the field's leaf name (date/time/textarea/url/text).</summary>
@@ -212,7 +247,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
     private static SortedSet<string> Collect(Regex regex, string html)
     {
-        var set = new SortedSet<string>(StringComparer.Ordinal);
+        var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in regex.Matches(html))
         {
             var value = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;

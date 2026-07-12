@@ -5,6 +5,8 @@ public interface IStorageService
 {
     /// <summary>Stores an object and returns its public URL.</summary>
     Task<string> PutAsync(string key, byte[] content, string contentType, CancellationToken ct = default);
+    /// <summary>Reads a stored object's bytes, or null if it doesn't exist.</summary>
+    Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
     string PublicUrl(string key);
 }
 

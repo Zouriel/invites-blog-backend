@@ -24,4 +24,17 @@ public sealed class OtpController(IOtpService otp) : BaseApiController
     [HasPermission(Permissions.Otp.Verify)]
     public async Task<IActionResult> Verify([FromBody] VerifyOtpRequest req, CancellationToken ct) =>
         Success(await otp.VerifyAsync(req, ct));
+
+    /// <summary>
+    /// POST /api/campaigns/{campaignId}/request-otp — guest-list-gated OTP for the shared campaign link.
+    /// Only sends a code (and returns a challenge) if the email is on the campaign's guest list, so an
+    /// uninvited address is told "not invited" and no email is wasted.
+    /// </summary>
+    [HttpPost("/api/campaigns/{campaignId:guid}/request-otp")]
+    [AllowAnonymous]
+    [HasPermission(Permissions.Otp.Request)]
+    [EnableRateLimiting("otp")]
+    public async Task<IActionResult> RequestForCampaign(
+        Guid campaignId, [FromBody] CampaignOtpRequest req, CancellationToken ct) =>
+        Success(await otp.RequestForCampaignAsync(campaignId, req.Email, ct));
 }

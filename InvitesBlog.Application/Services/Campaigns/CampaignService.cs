@@ -186,8 +186,9 @@ public sealed class CampaignService(
 
     /// <summary>
     /// Finalize the campaign (replaces the old pay→dispatch step). Marks it ready and returns the single
-    /// shareable link <c>/e/{id}</c>. If the inviter chose the "email" channel, emails that link to every
-    /// guest who has an email. No per-guest tokens or payment — guests open the link and verify by email.
+    /// shareable link <c>/e/{id}</c> for the SHARE button — that link is email-OTP-gated (guest-list only).
+    /// If the inviter chose the "email" channel, each guest is instead emailed their own PER-GUEST
+    /// tokenized link <c>/i/{token}</c>, which opens their invite directly (no OTP). No payment.
     /// </summary>
     public async Task<FinalizeResponse> FinalizeAsync(Guid id, CancellationToken ct = default)
     {
@@ -211,7 +212,37 @@ public sealed class CampaignService(
                 var name = string.IsNullOrWhiteSpace(g.Name) ? "there" : g.Name.Trim();
                 var message = (messageTemplate ?? "You're warmly invited! Tap below to open your invitation.")
                     .Replace("{{name}}", name).Replace("{{guest.name}}", name);
-                await email.SendAsync(BuildShareEmail(g.Email, name, campaign.Title, message, shareLink), ct);
+
+                // Emailed links are per-guest tokenized: clicking opens the invite directly — the raw
+                // token IS the key, no OTP. (The SHARE button link, by contrast, is the gated /e/{id}.)
+                // We can't recover a raw token from its stored hash, so mint a fresh one each finalize.
+                var rawToken = TokenService.GenerateToken();
+                var invite = await invites.GetByGuestIdAsync(g.Id, ct);
+                if (invite is null)
+                {
+                    invite = new Invite
+                    {
+                        Id = Guid.NewGuid(),
+                        CampaignId = id,
+                        GuestId = g.Id,
+                        TokenHash = TokenService.Hash(rawToken),
+                        RequiresOtp = campaign.IsSensitive, // sensitive campaigns still gate behind OTP
+                        Status = InviteStatus.Sent,
+                        RsvpStatus = RsvpStatus.NoResponse,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    };
+                    await invites.AddAsync(invite, ct);
+                }
+                else
+                {
+                    invite.TokenHash = TokenService.Hash(rawToken);
+                    invite.RequiresOtp = campaign.IsSensitive;
+                    if (invite.Status == InviteStatus.Created || invite.Status == InviteStatus.Queued)
+                        invite.Status = InviteStatus.Sent;
+                }
+
+                var personalLink = $"{inviteeBase}/i/{rawToken}";
+                await email.SendAsync(BuildShareEmail(g.Email, name, campaign.Title, message, personalLink), ct);
                 emailed++;
             }
         }
@@ -250,7 +281,7 @@ public sealed class CampaignService(
             $"<p style=\"font-size:16px;line-height:1.6\">Dear {name},</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\">{body}</p>" +
             $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open your invitation</a></p>" +
-            $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">You'll verify your email to view it. Or open this link:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
+            $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">This is your personal invitation link — open it anytime:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
         return new Application.Abstractions.EmailMessage(
             To: to, Subject: $"You're invited — {(string.IsNullOrWhiteSpace(eventTitle) ? "invites.blog" : eventTitle)}",
             Html: html, Stream: Application.Abstractions.EmailStream.Invites);

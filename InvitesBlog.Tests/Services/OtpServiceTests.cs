@@ -17,6 +17,8 @@ namespace InvitesBlog.Tests.Services;
 public class OtpServiceTests
 {
     private readonly IOtpChallengeRepository _challenges = Substitute.For<IOtpChallengeRepository>();
+    private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
+    private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IOtpSender _emailSender = Substitute.For<IOtpSender>();
     private readonly IInviteeTokenIssuer _tokenIssuer = Substitute.For<IInviteeTokenIssuer>();
@@ -31,7 +33,7 @@ public class OtpServiceTests
     }
 
     private OtpService Sut() => new(
-        _challenges, _uow, new[] { _emailSender }, _tokenIssuer,
+        _challenges, _guests, _campaigns, _uow, new[] { _emailSender }, _tokenIssuer,
         new PhoneNormalizer(), _config, _sendValidator, _verifyValidator);
 
     [Fact]
@@ -144,6 +146,67 @@ public class OtpServiceTests
         Assert.Equal("jwt-token", res.AccessToken);
         Assert.NotNull(c.VerifiedAt);
         _tokenIssuer.Received(1).Issue("email", "verify@test.com", Arg.Any<TimeSpan>());
+    }
+
+    // ----- Guest-list-gated campaign OTP -----
+
+    [Fact]
+    public async Task RequestForCampaign_email_not_on_guest_list_returns_not_invited_and_sends_nothing()
+    {
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: "invited@test.com") });
+
+        var res = await Sut().RequestForCampaignAsync(c.Id, "stranger@test.com");
+
+        Assert.False(res.Invited);
+        Assert.False(res.Cancelled);
+        Assert.Null(res.ChallengeId);
+        await _challenges.DidNotReceive().AddAsync(Arg.Any<OtpChallenge>(), Arg.Any<CancellationToken>());
+        await _emailSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_email_on_guest_list_creates_challenge_and_sends_code()
+    {
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: "invited@test.com") });
+
+        // Match is case-insensitive and trimmed.
+        var res = await Sut().RequestForCampaignAsync(c.Id, "  Invited@Test.com ");
+
+        Assert.True(res.Invited);
+        Assert.NotNull(res.ChallengeId);
+        await _challenges.Received(1).AddAsync(Arg.Any<OtpChallenge>(), Arg.Any<CancellationToken>());
+        await _emailSender.Received(1).SendCodeAsync("invited@test.com", Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_cancelled_campaign_returns_cancelled_without_sending()
+    {
+        var c = TestData.Campaign(status: CampaignStatus.Cancelled);
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+
+        var res = await Sut().RequestForCampaignAsync(c.Id, "invited@test.com");
+
+        Assert.False(res.Invited);
+        Assert.True(res.Cancelled);
+        await _emailSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_unknown_campaign_returns_not_invited_without_leaking()
+    {
+        _campaigns.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Campaign?)null);
+
+        var res = await Sut().RequestForCampaignAsync(Guid.NewGuid(), "anyone@test.com");
+
+        Assert.False(res.Invited);
+        Assert.False(res.Cancelled);
+        await _emailSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     private static OtpChallenge Challenge() => new()

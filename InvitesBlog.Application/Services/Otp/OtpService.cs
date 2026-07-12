@@ -17,6 +17,8 @@ namespace InvitesBlog.Application.Services.Otp;
 /// </summary>
 public sealed class OtpService(
     IOtpChallengeRepository challenges,
+    IGuestRepository guests,
+    ICampaignRepository campaigns,
     IUnitOfWork uow,
     IEnumerable<IOtpSender> senders,
     IInviteeTokenIssuer tokenIssuer,
@@ -83,6 +85,27 @@ public sealed class OtpService(
         await sender.SendCodeAsync(recipient, code, ct);
 
         return new OtpChallengeResponse(challenge.Id, expiryMinutes * 60);
+    }
+
+    public async Task<CampaignOtpResponse> RequestForCampaignAsync(Guid campaignId, string email, CancellationToken ct = default)
+    {
+        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
+
+        // Never leak whether the campaign exists — an unknown/cancelled campaign reads as "not invited".
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null) return new CampaignOtpResponse(false, false, null, 0);
+        if (campaign.Status == CampaignStatus.Cancelled) return new CampaignOtpResponse(false, true, null, 0);
+
+        // Only email addresses actually on this campaign's guest list get a code — no blind sends. Uses
+        // the same includeOptedOut:false view as the my-invite render, so an opted-out guest is refused too.
+        var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        var invited = !string.IsNullOrWhiteSpace(normalized) && guestList.Any(g =>
+            !string.IsNullOrWhiteSpace(g.Email) &&
+            string.Equals(g.Email!.Trim(), normalized, StringComparison.OrdinalIgnoreCase));
+        if (!invited) return new CampaignOtpResponse(false, false, null, 0);
+
+        var challenge = await RequestAsync(new SendOtpRequest("email", null, normalized, null), ct);
+        return new CampaignOtpResponse(true, false, challenge.ChallengeId, challenge.ExpiresInSeconds);
     }
 
     public async Task<OtpTokensResponse> VerifyAsync(VerifyOtpRequest req, CancellationToken ct = default)
