@@ -54,13 +54,14 @@ public sealed class S3StorageService : IStorageService
     public async Task<string> PutAsync(string key, byte[] content, string contentType, CancellationToken ct = default)
     {
         using var ms = new MemoryStream(content);
+        // NB: no DisablePayloadSigning — the AWS SDK v4 rejects that over plain HTTP, and MinIO is
+        // reached internally over http://. Normal SigV4 payload signing works fine against MinIO.
         await _s3.PutObjectAsync(new PutObjectRequest
         {
             BucketName = _bucket,
             Key = key,
             InputStream = ms,
-            ContentType = contentType,
-            DisablePayloadSigning = true
+            ContentType = contentType
         }, ct);
         return PublicUrl(key);
     }
