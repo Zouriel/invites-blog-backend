@@ -24,6 +24,11 @@ public sealed class Template
     /// <summary>Lowercased email the dedicated template is reserved for; null for public templates.</summary>
     public string? AssignedEmail { get; set; }
 
+    /// <summary>Set true on the FIRST use of a <see cref="TemplateVisibility.Dedicated"/> template. A used
+    /// dedicated template becomes a read-only gallery showcase — listed but not selectable. Always false
+    /// for public templates (they stay freely usable).</summary>
+    public bool IsUsed { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }
 

@@ -53,6 +53,11 @@ public sealed class CampaignService(
         var template = await templates.GetActiveByIdAsync(req.TemplateId, ct)
                        ?? throw new UnknownTemplateException();
 
+        // A dedicated template is single-use: once used it becomes a read-only gallery showcase and can
+        // no longer start a campaign (matches the disabled card shown in the gallery).
+        if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
+            throw new TemplateNotAvailableException();
+
         var rawToken = TokenService.GenerateToken();
         var now = DateTimeOffset.UtcNow;
         var campaign = new Campaign
@@ -69,6 +74,12 @@ public sealed class CampaignService(
             UpdatedAt = now
         };
         await campaigns.AddAsync(campaign, ct);
+
+        // First use of a dedicated template flips it to a showcase (still listed in the gallery, but
+        // view-only). `template` is tracked, so this persists in the SaveChanges below.
+        if (template.Visibility == TemplateVisibility.Dedicated && !template.IsUsed)
+            template.IsUsed = true;
+
         await uow.SaveChangesAsync(ct);
 
         return new CreateCampaignResponse(campaign.Id, campaign.Status.ToString(), rawToken);

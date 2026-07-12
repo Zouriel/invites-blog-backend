@@ -13,8 +13,11 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
 {
     public async Task<PagedResult<TemplateListItemDto>> ListAsync(TemplateFilter filter, CancellationToken ct = default)
     {
-        // Gallery shows only public templates; dedicated ones are reached via the request flow.
-        var query = templates.Query().Where(t => t.IsActive && t.Visibility == TemplateVisibility.Public);
+        // Gallery shows public templates, PLUS dedicated templates that have been used — those appear as
+        // read-only showcases (IsShowcase). Unused dedicated templates stay private to the request flow.
+        var query = templates.Query().Where(t => t.IsActive &&
+            (t.Visibility == TemplateVisibility.Public ||
+             (t.Visibility == TemplateVisibility.Dedicated && t.IsUsed)));
 
         if (!string.IsNullOrWhiteSpace(filter.Category))
             query = query.Where(t => t.Category == filter.Category);
@@ -39,7 +42,8 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
         var t = await templates.GetActiveBySlugAsync(slug, ct)
                 ?? throw new TemplateNotFoundException(slug);
         return new TemplateDetailDto(t.Id, t.Name, t.Slug, t.Category, t.Description, t.Version,
-            t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.ManifestJson);
+            t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.ManifestJson,
+            t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);
     }
 
     public async Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken ct = default) =>
@@ -59,5 +63,6 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
 
     private static TemplateListItemDto ToListItem(Template t) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description,
-        t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.Version);
+        t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.Version,
+        t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);
 }

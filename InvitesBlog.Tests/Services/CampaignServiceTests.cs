@@ -83,6 +83,43 @@ public class CampaignServiceTests
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Create_public_template_does_not_flip_IsUsed()
+    {
+        var template = TestData.Template(); // Public by default
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        await Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event"));
+
+        Assert.False(template.IsUsed);
+    }
+
+    [Fact]
+    public async Task Create_dedicated_template_first_use_flips_IsUsed()
+    {
+        var template = TestData.Template();
+        template.Visibility = Domain.Entities.TemplateVisibility.Dedicated;
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        await Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event"));
+
+        Assert.True(template.IsUsed); // tracked entity flipped, persisted by SaveChanges
+        await _campaigns.Received(1).AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Create_from_used_dedicated_template_is_refused()
+    {
+        var template = TestData.Template();
+        template.Visibility = Domain.Entities.TemplateVisibility.Dedicated;
+        template.IsUsed = true;
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        await Assert.ThrowsAsync<TemplateNotAvailableException>(
+            () => Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event")));
+        await _campaigns.DidNotReceive().AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>());
+    }
+
     // ----- Ownership enforcement (LoadOwnedAsync) -----
 
     [Fact]

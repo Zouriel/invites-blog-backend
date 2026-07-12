@@ -19,3 +19,7 @@ public sealed class InvalidDashboardTokenException()
 /// <summary>The referenced template does not exist or is not active (§10.3 create).</summary>
 public sealed class UnknownTemplateException()
     : BusinessRuleException("Unknown template.", "campaign_unknown_template");
+
+/// <summary>A dedicated template already used once — it's now a read-only gallery showcase.</summary>
+public sealed class TemplateNotAvailableException()
+    : BusinessRuleException("This template is no longer available.", "campaign_template_unavailable");

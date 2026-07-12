@@ -43,6 +43,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.SceneJson).HasColumnType("jsonb");
             e.Property(x => x.ManifestJson).HasColumnType("jsonb");
             e.Property(x => x.Visibility).HasDefaultValue("Public");
+            e.Property(x => x.IsUsed).HasDefaultValue(false);
             e.HasIndex(x => x.AssignedEmail).HasDatabaseName("idx_templates_assigned_email");
         });
 
