@@ -108,11 +108,9 @@ public static class TemplateInjector
             if (animationStarted) return;
             animationStarted = true;
             revealSections = Array.prototype.slice.call(document.querySelectorAll('.ib-section, [data-reveal]'));
-            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            if (reduce) {
-              for (var k = 0; k < revealSections.length; k++) { revealSections[k].classList.add('ib-visible', 'is-visible'); revealSections[k].__ibShown = true; }
-              reportHeight(); return;
-            }
+            // Animation-first: the invitation reveal plays even under reduced-motion (a one-shot
+            // fade as each section scrolls in). The template's own CSS may still soften individual
+            // motions, but we never freeze the whole invite.
             revealInView(); // reveal whatever is already on-screen
             window.addEventListener('scroll', revealInView, { passive: true });
             var envelope = document.querySelector('.ib-envelope, [data-envelope]');
@@ -150,6 +148,24 @@ public static class TemplateInjector
               window.dispatchEvent(new CustomEvent('invite:progress', { detail: p }));
             } catch (e) {}
           }
+
+          // Animation-first: an invitation's whole value is its animation, so we neutralize any
+          // `prefers-reduced-motion: reduce` CSS the template ships — otherwise reduced-motion or
+          // iOS Low-Power-Mode users get a frozen, lifeless invite. (Continuous/looping effects a
+          // template wants to calm can still key off the platform's own .ib-* classes.)
+          try {
+            var sheets = document.styleSheets;
+            for (var si = 0; si < sheets.length; si++) {
+              var rules; try { rules = sheets[si].cssRules; } catch (e) { continue; }
+              if (!rules) continue;
+              for (var ri = rules.length - 1; ri >= 0; ri--) {
+                var rule = rules[ri];
+                if (rule.type === 4 && rule.media && /prefers-reduced-motion\s*:\s*reduce/i.test(rule.media.mediaText)) {
+                  try { sheets[si].deleteRule(ri); } catch (e) {}
+                }
+              }
+            }
+          } catch (e) {}
 
           var dataEl = document.getElementById('invite-data');
           var inline = {};
