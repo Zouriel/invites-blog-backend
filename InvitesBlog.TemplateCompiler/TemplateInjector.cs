@@ -10,6 +10,7 @@ namespace InvitesBlog.TemplateCompiler;
 ///                                                            element is cloned once per photo)
 ///   data-block="id"    → section kept only if the server resolved that block for this guest
 ///   themeVars          → the inviter's --ib-* overrides, set on :root (author defaults win otherwise)
+///   --ib-progress      → scroll position 0..1, set on :root so CSS can scrub without any JS
 ///   data-reveal / .ib-section → gets .is-visible when scrolled into view (author styles the rest)
 ///   [data-envelope] / .ib-envelope → gets .is-open after the first scroll
 /// Data arrives inline (#invite-data) or via postMessage({__inviteData}) from the host app.
@@ -149,7 +150,13 @@ public static class TemplateInjector
             // fade as each section scrolls in). The template's own CSS may still soften individual
             // motions, but we never freeze the whole invite.
             revealInView(); // reveal whatever is already on-screen
-            window.addEventListener('scroll', revealInView, { passive: true });
+            window.addEventListener('scroll', function () {
+              revealInView();
+              // Opened directly rather than driven by the host: derive progress from our own scroll.
+              var max = (document.documentElement.scrollHeight || 0) - window.innerHeight;
+              publishProgress(max > 0 ? window.scrollY / max : 0);
+            }, { passive: true });
+            publishProgress(0);
             var envelope = document.querySelector('.ib-envelope, [data-envelope]');
             if (envelope) {
               window.addEventListener('scroll', function () {
@@ -173,11 +180,18 @@ public static class TemplateInjector
           // Drive our OWN internal scroll from the host page's scroll progress (0..1). Programmatic
           // scroll works inside iframes on iOS Safari even though touch-scroll does not — this is what
           // makes the reveal/envelope animation run on iPhone.
+          // Publish scroll progress as a CSS custom property so a template can scrub an animation
+          // with plain CSS — calc(var(--ib-progress) * …) — now that authors write no JavaScript.
+          function publishProgress(p) {
+            document.documentElement.style.setProperty('--ib-progress', p.toFixed(4));
+          }
+
           function applyProgress(p) {
             if (p < 0) p = 0; else if (p > 1) p = 1;
             var max = (document.documentElement.scrollHeight || 0) - window.innerHeight;
             window.scrollTo(0, p * (max > 0 ? max : 0));
             revealInView(); // catch every section the jump scrolled past
+            publishProgress(p);
             // Expose scroll progress (0..1) to custom template scripts for scroll-scrubbed animation.
             try {
               window.invite = window.invite || {};

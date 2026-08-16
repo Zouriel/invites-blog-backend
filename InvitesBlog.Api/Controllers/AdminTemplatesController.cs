@@ -141,7 +141,10 @@ public sealed class AdminTemplatesController(
         var previewUrl = await StorePreviewAsync(slug, version, preview, ct)
                          ?? $"{published.PackageUrl}index.html";
 
-        var existing = await templates.FirstOrDefaultAsync(t => t.Slug == slug && t.Version == version, ct);
+        // Match on SLUG alone, not slug+version: a gallery card is one template, and uploading a new
+        // version SUPERSEDES it rather than adding a second card for the same design. The previous
+        // version's package stays on disk, and campaigns pinned to it keep serving it.
+        var existing = await templates.FirstOrDefaultAsync(t => t.Slug == slug, ct);
         Template entity;
         if (existing is not null)
         {
@@ -149,6 +152,7 @@ public sealed class AdminTemplatesController(
             entity.Name = name;
             entity.Category = category;
             entity.Description = description ?? entity.Description;
+            entity.Version = version;
             entity.ManifestJson = published.ManifestJson;
             entity.PackageUrl = published.PackageUrl;
             // Keep an already-uploaded static preview when this upload didn't bring a new one.

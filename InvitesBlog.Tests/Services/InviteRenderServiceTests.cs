@@ -137,6 +137,42 @@ public class InviteRenderServiceTests
         Assert.Equal("#abc", theme["accentColor"]!.ToString());
     }
 
+    [Fact]
+    public void The_invite_serves_the_package_the_campaign_pinned_not_the_templates_newest()
+    {
+        // An approved edit moves the live Template row to the new version's package. A campaign
+        // pinned to the old version — and every invite already sent from it — must keep rendering
+        // the markup it was built on, not silently pick up the new one.
+        var template = TestData.Template();
+        template.Version = "1.0.4";
+        template.PackageUrl = "https://cdn.test/templates/golden-bloom@1.0.4/";
+
+        var campaign = Campaign("{}");
+        campaign.TemplateVersion = "1.0.0";
+        campaign.TemplatePackageUrl = "https://cdn.test/templates/golden-bloom@1.0.0/";
+
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.NoResponse };
+        var payload = Sut().Build(
+            campaign, template, Guest("Family"), invite, "https://invites.blog/i/abc", "Aisha", null, null);
+
+        Assert.Equal("https://cdn.test/templates/golden-bloom@1.0.0/", payload.PackageUrl);
+    }
+
+    [Fact]
+    public void A_campaign_created_before_the_package_was_pinned_falls_back_to_the_live_template()
+    {
+        var template = TestData.Template();
+        template.PackageUrl = "https://cdn.test/templates/golden-bloom@1.0.0/";
+        var campaign = Campaign("{}");
+        campaign.TemplatePackageUrl = string.Empty;
+
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.NoResponse };
+        var payload = Sut().Build(
+            campaign, template, Guest("Family"), invite, "https://invites.blog/i/abc", "Aisha", null, null);
+
+        Assert.Equal("https://cdn.test/templates/golden-bloom@1.0.0/", payload.PackageUrl);
+    }
+
     // --- Theme → CSS custom properties -----------------------------------------------------------
 
     [Fact]

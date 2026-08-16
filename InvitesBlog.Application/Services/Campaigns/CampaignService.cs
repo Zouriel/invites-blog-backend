@@ -68,6 +68,8 @@ public sealed class CampaignService(
             // Freeze the version's structure here — everything downstream reads this snapshot, so
             // re-reviewing or editing the template later cannot change what this campaign renders.
             TemplateManifestJson = string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson,
+            // …and the package the pinned version serves, so an approved edit can't re-serve new markup.
+            TemplatePackageUrl = template.PackageUrl,
             // The designer's per-use fee is frozen with it, so a later price change can't reach this campaign.
             DesignerFee = template.UsagePrice ?? 0m,
             DesignerFeeName = template.UsagePrice > 0m ? template.DesignerName : null,
@@ -401,7 +403,8 @@ public sealed class CampaignService(
             guestCount,
             // The manifest served to the wizard is the campaign's frozen snapshot, never the live template's.
             template is null ? null : new CampaignSummaryTemplateDto(
-                template.Name, template.Slug, template.PackageUrl, SnapshotManifest(campaign, template)),
+                template.Name, template.Slug, SnapshotPackageUrl(campaign, template),
+                SnapshotManifest(campaign, template)),
             price);
     }
 
@@ -409,6 +412,13 @@ public sealed class CampaignService(
     /// The campaign's frozen manifest, falling back to the live template's only for campaigns created
     /// before the snapshot column existed and never backfilled (defensive — the migration backfills them).
     /// </summary>
+    /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
+    /// created before it was stored (the migration backfills those).</summary>
+    private static string SnapshotPackageUrl(Campaign campaign, Template template) =>
+        string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)
+            ? template.PackageUrl
+            : campaign.TemplatePackageUrl;
+
     private static string SnapshotManifest(Campaign campaign, Template template) =>
         string.IsNullOrWhiteSpace(campaign.TemplateManifestJson) || campaign.TemplateManifestJson.Trim() is "{}"
             ? template.ManifestJson

@@ -114,6 +114,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
             e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
             e.Property(x => x.DesignerFee).HasColumnType("numeric(12,2)").HasDefaultValue(0m);
+            e.Property(x => x.TemplatePackageUrl).HasDefaultValue(string.Empty);
         });
 
         b.Entity<Guest>(e =>

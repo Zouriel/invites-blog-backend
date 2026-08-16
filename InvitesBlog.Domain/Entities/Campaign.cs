@@ -17,6 +17,13 @@ public sealed class Campaign
     public string TemplateManifestJson { get; set; } = "{}";
 
     /// <summary>
+    /// The pinned version's package URL, frozen at creation. The live <c>Template</c> row's PackageUrl
+    /// moves to the newest version whenever an edit is approved, so rendering from it would serve
+    /// already-sent invites brand-new markup. Empty only for campaigns created before this was stored.
+    /// </summary>
+    public string TemplatePackageUrl { get; set; } = string.Empty;
+
+    /// <summary>
     /// The community designer's per-use fee, frozen from the template at creation time along with the
     /// manifest. Read live it would let a designer change the price of a campaign already in progress;
     /// frozen, the inviter pays what they were quoted. Zero for platform templates.

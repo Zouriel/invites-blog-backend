@@ -15,6 +15,7 @@ namespace InvitesBlog.Application.Services.Designers;
 /// </summary>
 public sealed class TemplateReleaseService(
     ICurrentUser currentUser,
+    IRepository<AppUser> users,
     ITemplateRepository templates,
     IUnitOfWork uow) : ITemplateReleaseService
 {
@@ -29,6 +30,11 @@ public sealed class TemplateReleaseService(
     {
         var template = await LoadAsync(templateId, ct);
         var designerId = currentUser.UserId ?? throw new UnauthorizedException();
+
+        // A suspended designer can't release work either — enforced per request, since their token
+        // stays valid until it expires.
+        var user = await users.GetByIdAsync(designerId, ct) ?? throw new UnauthorizedException();
+        if (!user.IsActive) throw new Exceptions.Designers.DesignerSuspendedException();
 
         if (template.DesignerUserId != designerId)
             throw new ForbiddenException("This isn't your template.", "not_your_template");

@@ -20,6 +20,7 @@ public class DesignerTemplateServiceTests
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IRepository<CustomTemplate> _submissions = Substitute.For<IRepository<CustomTemplate>>();
     private readonly IRepository<Inquiry> _inquiries = Substitute.For<IRepository<Inquiry>>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly ITemplatePackager _packager = Substitute.For<ITemplatePackager>();
     private readonly IStorageService _storage = Substitute.For<IStorageService>();
@@ -39,10 +40,12 @@ public class DesignerTemplateServiceTests
         _storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => $"https://cdn.test/{ci.ArgAt<string>(0)}");
         _templates.Query(Arg.Any<bool>()).Returns(Array.Empty<Template>().AsAsyncQueryable());
+        _users.GetByIdAsync(_designerId, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _designerId, Email = "d@test.com", DisplayName = "D", IsActive = true });
     }
 
     private DesignerTemplateService Sut() =>
-        new(_currentUser, _submissions, _inquiries, _templates, _packager, _storage, _uow);
+        new(_currentUser, _submissions, _inquiries, _users, _templates, _packager, _storage, _uow);
 
     private static SubmitTemplateRequest Request(string html = "<html><body></body></html>") =>
         new("Aurora Vows", "Wedding", "A warm invite.", html,
@@ -198,6 +201,20 @@ public class DesignerTemplateServiceTests
         Assert.True(dto.RequesterConsentToPublish);
         Assert.Equal(TemplateVisibility.Dedicated, dto.PublishedVisibility);
         Assert.Equal("aisha@example.com", dto.RequestedByEmail);
+    }
+
+    [Fact]
+    public async Task A_suspended_designer_cannot_submit_even_with_a_token_issued_before_suspension()
+    {
+        // Their JWT stays cryptographically valid for its full lifetime, so suspension has to be
+        // enforced per request — otherwise "suspend" wouldn't actually stop anything for days.
+        _users.GetByIdAsync(_designerId, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _designerId, Email = "d@test.com", DisplayName = "D", IsActive = false });
+
+        await Assert.ThrowsAsync<InvitesBlog.Application.Exceptions.Designers.DesignerSuspendedException>(
+            () => Sut().SubmitAsync(Request()));
+
+        await _submissions.DidNotReceive().AddAsync(Arg.Any<CustomTemplate>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

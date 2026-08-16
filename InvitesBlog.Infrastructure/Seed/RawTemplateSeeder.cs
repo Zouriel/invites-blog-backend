@@ -45,20 +45,31 @@ public sealed class RawTemplateSeeder(
             // Always (re)publish so a fresh container's storage is populated.
             var published = await packager.PublishAsync(meta.Slug, meta.Version, html, ct: ct);
 
-            // If it already exists, refresh the package AND its manifest — editing a raw template's HTML
-            // (new fields, image slots, blocks) must flow into the stored manifest, not just storage.
-            var existing = await db.Templates.FirstOrDefaultAsync(t => t.Slug == meta.Slug && t.Version == meta.Version, ct);
+            // Match on SLUG alone. Matching slug+version would treat a version bump as a brand-new
+            // template and leave TWO cards for the same design in the gallery; a bump SUPERSEDES.
+            // The previous version's package stays in storage, and campaigns pinned to it keep
+            // serving it via the package URL they froze at creation.
+            var existing = await db.Templates.FirstOrDefaultAsync(t => t.Slug == meta.Slug, ct);
             if (existing is not null)
             {
+                var superseded = existing.Version != meta.Version;
                 existing.Name = meta.Name;
                 existing.Category = meta.Category;
                 existing.Description = meta.Description ?? existing.Description;
+                existing.Version = meta.Version;
                 existing.ManifestJson = published.ManifestJson;
                 existing.PackageUrl = published.PackageUrl;
-                existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
+                // Keep a real uploaded card image; only replace the live-page stand-in.
+                if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
+                    || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
+                    existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
                 existing.IsActive = true;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
-                logger.LogInformation("Raw template {Slug}@{Version} refreshed (package + manifest).", meta.Slug, meta.Version);
+                logger.LogInformation(
+                    superseded
+                        ? "Raw template {Slug} superseded to @{Version} (package + manifest)."
+                        : "Raw template {Slug}@{Version} refreshed (package + manifest).",
+                    meta.Slug, meta.Version);
                 continue;
             }
 

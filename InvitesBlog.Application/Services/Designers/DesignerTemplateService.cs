@@ -2,6 +2,7 @@ using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Designers;
 using InvitesBlog.Application.Exceptions;
+using InvitesBlog.Application.Exceptions.Designers;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ public sealed class DesignerTemplateService(
     ICurrentUser currentUser,
     IRepository<CustomTemplate> submissions,
     IRepository<Inquiry> inquiries,
+    IRepository<AppUser> users,
     ITemplateRepository templates,
     ITemplatePackager packager,
     IStorageService storage,
@@ -62,7 +64,7 @@ public sealed class DesignerTemplateService(
 
     public async Task<DesignerTemplateDto> SubmitAsync(SubmitTemplateRequest request, CancellationToken ct = default)
     {
-        var designerId = DesignerId();
+        var designerId = await ActiveDesignerIdAsync(ct);
         Validate(request);
 
         var commission = await ResolveCommissionAsync(request.CommissionInquiryId, designerId, ct);
@@ -96,6 +98,7 @@ public sealed class DesignerTemplateService(
     public async Task<DesignerTemplateDto> ResubmitAsync(
         Guid id, SubmitTemplateRequest request, CancellationToken ct = default)
     {
+        await ActiveDesignerIdAsync(ct);
         var entity = await LoadMineAsync(id, ct);
         Validate(request);
 
@@ -235,6 +238,20 @@ public sealed class DesignerTemplateService(
     }
 
     private Guid DesignerId() => currentUser.UserId ?? throw new UnauthorizedException();
+
+    /// <summary>
+    /// The signed-in designer, confirmed to still be active. Suspension has to be enforced on the
+    /// REQUEST, not just at sign-in: a token issued before an admin suspended the account stays
+    /// cryptographically valid for its whole lifetime, so checking only at login would let a
+    /// suspended designer keep submitting for days — exactly what suspending is meant to stop.
+    /// </summary>
+    private async Task<Guid> ActiveDesignerIdAsync(CancellationToken ct)
+    {
+        var id = DesignerId();
+        var user = await users.GetByIdAsync(id, ct) ?? throw new UnauthorizedException();
+        if (!user.IsActive) throw new DesignerSuspendedException();
+        return id;
+    }
 
     internal static DesignerTemplateDto ToDto(CustomTemplate t, Template? published = null) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description, t.Status.ToString(), t.RejectionReason,

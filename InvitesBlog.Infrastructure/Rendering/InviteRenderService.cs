@@ -94,7 +94,14 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
         ApplyPathMap(data, content["fields"] as JsonObject, guest.Role);
         ApplyPathMap(data, content["imageSlots"] as JsonObject, guest.Role);
 
-        return new InviteRenderPayload(template.PackageUrl, data, invite.RequiresOtp, campaign.Status.ToString());
+        // Serve the package the campaign PINNED, not whatever the template points at now — an
+        // approved edit moves the live row to a new version, and an already-sent invite must not
+        // silently start rendering different markup.
+        var packageUrl = string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)
+            ? template.PackageUrl
+            : campaign.TemplatePackageUrl;
+
+        return new InviteRenderPayload(packageUrl, data, invite.RequiresOtp, campaign.Status.ToString());
     }
 
     /// <summary>
