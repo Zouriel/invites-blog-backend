@@ -54,6 +54,13 @@ public static class DependencyInjection
         services.AddSingleton<Security.InviteeJwt>();
         services.AddSingleton<IInviteeTokenIssuer>(sp => sp.GetRequiredService<Security.InviteeJwt>());
 
+        // Designer OAuth sign-in. Registered unconditionally — each provider reports itself
+        // unconfigured until its OAuth:<Provider>:ClientId is set, so email + password works regardless.
+        // Singletons so the providers' fetched signing keys are cached across requests.
+        services.AddHttpClient();
+        services.AddSingleton<IExternalAuthProvider, Security.GoogleAuthProvider>();
+        services.AddSingleton<IExternalAuthProvider, Security.MicrosoftAuthProvider>();
+
         // Storage (Local by default; MinIO/S3 when configured)
         var storageProvider = config["Storage:Provider"] ?? "Local";
         if (storageProvider.Equals("Minio", StringComparison.OrdinalIgnoreCase) ||
@@ -64,6 +71,7 @@ public static class DependencyInjection
 
         services.AddScoped<TemplatePackagePublisher>();
         services.AddScoped<RawTemplatePackager>();
+        services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();
         services.AddScoped<TemplateManifestRefresher>();

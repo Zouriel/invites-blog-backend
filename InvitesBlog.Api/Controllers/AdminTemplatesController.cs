@@ -20,6 +20,7 @@ public sealed class AdminTemplatesController(
     RawTemplatePackager packager,
     ITemplateRepository templates,
     ICampaignRepository campaigns,
+    Application.Abstractions.IStorageService storage,
     IUnitOfWork uow) : BaseApiController
 {
     public sealed record UploadResultDto(Guid Id, string Slug, string Version, string PackageUrl,
@@ -103,7 +104,8 @@ public sealed class AdminTemplatesController(
 
     /// <summary>
     /// POST /api/admin/templates (multipart) — fields: name, slug, version?, category, description?;
-    /// file: index (a single self-contained HTML file with inline CSS + JS, required).
+    /// files: index (a single self-contained HTML file with inline CSS, required) and preview (a static
+    /// card image, optional — without one the gallery falls back to rendering the live page).
     /// </summary>
     [HttpPost]
     [HasPermission(Permissions.Templates.Manage)]
@@ -112,6 +114,7 @@ public sealed class AdminTemplatesController(
         [FromForm] string slug,
         [FromForm] string category,
         IFormFile index,
+        IFormFile? preview,
         [FromForm] string? version,
         [FromForm] string? description,
         [FromForm] string? visibility,
@@ -134,6 +137,10 @@ public sealed class AdminTemplatesController(
         var html = await ReadAsync(index, ct);
         var published = await packager.PublishAsync(slug, version, html, ct: ct);
 
+        // A real static image beats pointing the card at the live page — see the gallery's fallback.
+        var previewUrl = await StorePreviewAsync(slug, version, preview, ct)
+                         ?? $"{published.PackageUrl}index.html";
+
         var existing = await templates.FirstOrDefaultAsync(t => t.Slug == slug && t.Version == version, ct);
         Template entity;
         if (existing is not null)
@@ -144,7 +151,9 @@ public sealed class AdminTemplatesController(
             entity.Description = description ?? entity.Description;
             entity.ManifestJson = published.ManifestJson;
             entity.PackageUrl = published.PackageUrl;
-            entity.PreviewImageUrl = $"{published.PackageUrl}index.html";
+            // Keep an already-uploaded static preview when this upload didn't bring a new one.
+            if (preview is not null || entity.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase))
+                entity.PreviewImageUrl = previewUrl;
             entity.IsActive = true;
             entity.Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public;
             entity.AssignedEmail = normalizedEmail;
@@ -161,7 +170,7 @@ public sealed class AdminTemplatesController(
                 Version = version,
                 Category = category,
                 Description = description ?? $"A {category.ToLowerInvariant()} invitation template.",
-                PreviewImageUrl = $"{published.PackageUrl}index.html",
+                PreviewImageUrl = previewUrl,
                 IsPremium = false,
                 DesignerName = "invites.blog",
                 SceneJson = "{}",
@@ -179,6 +188,25 @@ public sealed class AdminTemplatesController(
 
         return Created(new UploadResultDto(entity.Id, slug, version, published.PackageUrl,
             published.Manifest.Variables, published.Manifest.ContentBlocks));
+    }
+
+    /// <summary>Stores an uploaded card image beside the template package; null when none was sent.</summary>
+    private async Task<string?> StorePreviewAsync(string slug, string version, IFormFile? preview, CancellationToken ct)
+    {
+        if (preview is null || preview.Length == 0) return null;
+        if (!preview.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            throw new Application.Exceptions.BusinessRuleException(
+                "The preview must be an image (PNG or JPEG).", "template_preview_not_an_image");
+
+        await using var stream = preview.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+
+        var extension = Path.GetExtension(preview.FileName);
+        if (string.IsNullOrWhiteSpace(extension)) extension = ".png";
+        return await storage.PutAsync(
+            $"templates/{slug}@{version}/preview{extension.ToLowerInvariant()}",
+            buffer.ToArray(), preview.ContentType, ct);
     }
 
     private static async Task<string> ReadAsync(IFormFile file, CancellationToken ct)

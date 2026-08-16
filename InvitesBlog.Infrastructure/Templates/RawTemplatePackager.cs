@@ -10,10 +10,11 @@ namespace InvitesBlog.Infrastructure.Templates;
 public sealed record RawPublishedPackage(string PackageUrl, TemplateManifest Manifest, string ManifestJson);
 
 /// <summary>
-/// Publishes an admin-authored template — a SINGLE self-contained <c>index.html</c> that inlines its
-/// own CSS (<c>&lt;style&gt;</c>) and JS (<c>&lt;script&gt;</c>). External or separate stylesheets/scripts are
-/// rejected (§ single-file rule). The trusted <see cref="TemplateInjector"/> is inlined too, so the
-/// served file is one document. The manifest is auto-derived by scanning the tags
+/// Publishes a template — a SINGLE self-contained <c>index.html</c> that inlines its own CSS
+/// (<c>&lt;style&gt;</c>). Separate stylesheets are rejected (§ single-file rule) and so is ALL author
+/// JavaScript, for every author including admins (§ HTML/CSS-only). The trusted
+/// <see cref="TemplateInjector"/> is inlined, so the served file is one document whose only script is
+/// ours. The manifest is auto-derived by scanning the tags
 /// (<c>data-var/href/src</c> → variables, <c>data-block</c> → content blocks).
 /// </summary>
 public sealed partial class RawTemplatePackager(IStorageService storage)
@@ -88,31 +89,44 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     [GeneratedRegex("""^\s*(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|color\()""")]
     private static partial Regex ColorValueRegex();
 
-    [GeneratedRegex("<script\\b[^>]*>.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
-    private static partial Regex ScriptTagRegex();
-
-    // Single-file enforcement: an external/separate stylesheet or an external script are not allowed.
+    // Single-file enforcement: an external/separate stylesheet is not allowed.
     [GeneratedRegex("""<link\b[^>]*rel\s*=\s*["']?\s*stylesheet""", RegexOptions.IgnoreCase)]
     private static partial Regex StylesheetLinkRegex();
 
-    [GeneratedRegex("""<script\b[^>]*\bsrc\s*=""", RegexOptions.IgnoreCase)]
-    private static partial Regex ExternalScriptRegex();
+    // --- Safety scan (§HTML/CSS-only platform-wide) ---------------------------------------------
+    [GeneratedRegex("""<script\b""", RegexOptions.IgnoreCase)]
+    private static partial Regex AnyScriptRegex();
+
+    // on<event>= as a real ATTRIBUTE — preceded by whitespace so "on" inside a word can't trip it.
+    [GeneratedRegex("""\s\bon[a-z]+\s*=""", RegexOptions.IgnoreCase)]
+    private static partial Regex InlineHandlerRegex();
+
+    [GeneratedRegex("""javascript\s*:""", RegexOptions.IgnoreCase)]
+    private static partial Regex JavascriptUriRegex();
+
+    [GeneratedRegex("""<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*refresh""", RegexOptions.IgnoreCase)]
+    private static partial Regex MetaRefreshRegex();
 
     private static readonly JsonSerializerOptions JsonOut = new() { WriteIndented = false };
 
-    /// <param name="allowScripts">
-    /// Admin/first-party templates may ship their own (inline) JS (kept). Set false for untrusted
-    /// (e.g. community) authors to strip all inline &lt;script&gt; tags.
-    /// </param>
-    public async Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, bool allowScripts = true, CancellationToken ct = default)
+    /// <summary>Publishes to the live template path — <c>templates/{slug}@{version}/</c>.</summary>
+    public Task<RawPublishedPackage> PublishAsync(
+        string slug, string version, string html, CancellationToken ct = default) =>
+        PublishToAsync($"templates/{slug}@{version}", slug, version, html, ct);
+
+    /// <summary>
+    /// Publishes to an arbitrary base path. The review pipeline uses this to stage a submission
+    /// somewhere reviewable (<c>submissions/{id}/</c>) WITHOUT it becoming a live gallery template —
+    /// promotion to <c>templates/…</c> happens only on approval.
+    /// </summary>
+    public async Task<RawPublishedPackage> PublishToAsync(
+        string basePath, string slug, string version, string html, CancellationToken ct = default)
     {
-        EnsureSelfContained(html);
+        EnsureSelfContainedAndSafe(html);
 
         var manifest = BuildManifest(slug, version, html);
 
-        var finalHtml = WireInjector(html, allowScripts);
-        var basePath = $"templates/{slug}@{version}";
+        var finalHtml = WireInjector(html);
 
         // One self-contained document is served to the sandboxed iframe; the manifest is platform metadata.
         await storage.PutAsync($"{basePath}/index.html", Bytes(finalHtml), "text/html", ct);
@@ -158,16 +172,57 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         };
     }
 
+    /// <summary>The hard ceiling a submission may not exceed. The recommended budget is much lower.</summary>
+    public const int MaxTemplateBytes = 800 * 1024;
+
+    /// <summary>The soft budget shown to designers — over this is a warning, not a rejection.</summary>
+    public const int RecommendedTemplateBytes = 300 * 1024;
+
+    /// <summary>
+    /// Rejects anything that isn't self-contained AND anything that could execute. The product decision
+    /// is HTML/CSS-only platform-wide, so there is deliberately NO trusted-author exemption: an admin
+    /// upload is scanned exactly like a community submission. This throws rather than silently
+    /// stripping, so an author learns their template was changed instead of discovering it in production.
+    /// </summary>
+    public static void EnsureSelfContainedAndSafe(string html)
+    {
+        EnsureSelfContained(html);
+
+        var bytes = Encoding.UTF8.GetByteCount(html);
+        if (bytes > MaxTemplateBytes)
+            throw new BusinessRuleException(
+                $"This template is {bytes / 1024}KB — the hard limit is {MaxTemplateBytes / 1024}KB. " +
+                $"Compress or drop some embedded images (we recommend staying under {RecommendedTemplateBytes / 1024}KB).",
+                "template_too_large");
+
+        if (AnyScriptRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "Templates are HTML and CSS only — remove the <script> tag. Use CSS animations and the "
+                + "data-reveal / data-envelope hooks for motion.",
+                "template_script_not_allowed");
+
+        if (InlineHandlerRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "Inline event handlers (onclick, onload, …) aren't allowed — remove them and use CSS instead.",
+                "template_inline_handler_not_allowed");
+
+        if (JavascriptUriRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "A javascript: URL isn't allowed — links must point at a real address.",
+                "template_javascript_uri_not_allowed");
+
+        if (MetaRefreshRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "<meta http-equiv=\"refresh\"> isn't allowed — a template must not navigate on its own.",
+                "template_meta_refresh_not_allowed");
+    }
+
     /// <summary>Reject anything that isn't self-contained in the single HTML file.</summary>
     private static void EnsureSelfContained(string html)
     {
         if (StylesheetLinkRegex().IsMatch(html))
             throw new BusinessRuleException(
                 "A template must be one self-contained file — inline your CSS in a <style> tag (no <link rel=\"stylesheet\"> / separate .css).",
-                "template_not_self_contained");
-        if (ExternalScriptRegex().IsMatch(html))
-            throw new BusinessRuleException(
-                "A template must be one self-contained file — inline your JavaScript in a <script> tag (no external <script src>).",
                 "template_not_self_contained");
     }
 
@@ -313,7 +368,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             {
                 Key = key,
                 CssVar = $"--ib-{cssName}",
-                Label = Prettify(cssName),
+                Label = ThemeKeyLabel(key, cssName),
                 Type = ColorValueRegex().IsMatch(value) ? "color"
                      : cssName.Contains("font", StringComparison.OrdinalIgnoreCase) ? "font"
                      : "text",
@@ -425,6 +480,15 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         _ => CamelCase(cssName)
     };
 
+    /// <summary>The three documented keys read better spelled out than prettified ("Bg" → "Background").</summary>
+    private static string ThemeKeyLabel(string key, string cssName) => key switch
+    {
+        "accentColor" => "Accent colour",
+        "backgroundColor" => "Background",
+        "textColor" => "Text colour",
+        _ => Prettify(cssName)
+    };
+
     private static string CamelCase(string kebab)
     {
         var parts = kebab.Split('-', StringSplitOptions.RemoveEmptyEntries);
@@ -467,12 +531,14 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         return set;
     }
 
-    /// <summary>Strip author scripts only for untrusted authors, then inline the trusted injector.</summary>
-    private static string WireInjector(string html, bool allowScripts)
+    /// <summary>
+    /// Inlines the trusted injector. The author's own HTML is already script-free — the scan rejects
+    /// any <c>&lt;script&gt;</c> before we get here — so the served document's ONLY script is ours.
+    /// </summary>
+    private static string WireInjector(string html)
     {
-        var cleaned = allowScripts ? html : ScriptTagRegex().Replace(html, "");
         var injection = TemplateInjector.InviteDataScript + "\n<script>" + TemplateInjector.Js + "</script>";
-        return InsertBefore(cleaned, "</body>", injection) ?? cleaned + "\n" + injection;
+        return InsertBefore(html, "</body>", injection) ?? html + "\n" + injection;
     }
 
     private static string? InsertBefore(string html, string marker, string insertion)

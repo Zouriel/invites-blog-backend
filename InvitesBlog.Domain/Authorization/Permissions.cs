@@ -119,6 +119,7 @@ public static class Permissions
 public static class Roles
 {
     public const string Admin = "Admin";
+    public const string Designer = "Designer";     // community template authors (account-backed)
     public const string Inviter = "Inviter";       // possession-token principals
     public const string Invitee = "Invitee";       // OTP-JWT principals
     public const string Public = "Public";         // anonymous callers
@@ -126,6 +127,13 @@ public static class Roles
     public static IReadOnlyDictionary<string, string[]> Definitions { get; } = new Dictionary<string, string[]>
     {
         [Admin] = Permissions.All.Select(p => p.Name).ToArray(), // all permissions
+
+        // A designer authors and submits templates. Reviewing them is an ADMIN act
+        // (Designer.Review), deliberately withheld here so no one approves their own work.
+        [Designer] = new[]
+        {
+            Permissions.Templates.Read, Permissions.Designer.Manage,
+        },
 
         [Inviter] = new[]
         {

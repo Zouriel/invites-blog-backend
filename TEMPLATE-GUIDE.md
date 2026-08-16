@@ -1,11 +1,12 @@
 # Making an invites.blog template
 
-A template is **one HTML file**. You write the markup, put your CSS in a `<style>` tag and (if you
-want) your JavaScript in a `<script>` tag — all in that single file. That's it.
+A template is **one HTML file**. You write the markup and put your CSS in a `<style>` tag — all in
+that single file. That's it. (No JavaScript — see *Animation* below; the platform handles motion.)
 
 You mark the spots that should be filled in with little `data-*` tags. When an invite is sent, the
 platform fills those spots with the event's details and each guest's personal info, inside a safe
-sandboxed frame. Only you (admin) can add templates; once added they show up in the gallery.
+sandboxed frame. Admins upload templates directly; community designers submit them for review
+(see *Submitting as a designer* below). Either way they show up in the gallery once published.
 
 **The big idea:** the builder is now driven by *your* template. It shows the inviter **exactly the
 fields your template declares** — no more, no less. Add a `data-var` for `event.hashtag` and a
@@ -220,38 +221,39 @@ anything and map rules to them).
 
 ---
 
-## Your own animation (allowed)
+## Animation (CSS only)
 
-Because only you upload templates, you may include your own `<script>` for richer motion (GSAP,
-canvas, custom scroll effects…). The platform still fills your `data-*` tags and drives an iOS-safe
-scroll; your JS runs alongside via two events:
+Templates are **HTML and CSS — no JavaScript**. Every upload is scanned and any `<script>`, inline
+`onclick=`/`onload=` handler, `javascript:` URL or `<meta http-equiv="refresh">` is **rejected
+outright**, for every author including admins. Nothing is silently stripped; you'll get a clear error
+naming what to remove.
 
-```html
-<script>
-  // Fires once the guest's data is injected.
-  window.addEventListener('invite:data', (e) => {
-    const d = e.detail;   // { event, guest, venue, inviter, rsvp, resolvedBlocks, ... }
-  });
-  // Fires as the page scrolls, 0 (top) → 1 (end).
-  window.addEventListener('invite:progress', (e) => {
-    const p = e.detail;   // scrub an animation with p
-  });
-</script>
+You don't need JS for motion. The platform drives it for you:
+
+- `data-reveal` gets the class `is-visible` when the element scrolls into view — animate that class.
+- `data-envelope` gets `is-open` after the first scroll — animate a seal or flap opening.
+- The whole invite is scroll-driven, so CSS transitions and keyframes on those two classes cover
+  cover reveals, parallax-feel fades, staggered entrances and envelope openings.
+
+```css
+.panel{opacity:0; transform:translateY(40px); transition:opacity .8s, transform .8s}
+.panel.is-visible{opacity:1; transform:none}
+.envelope .flap{transform-origin:top; transition:transform 1s}
+.envelope.is-open .flap{transform:rotateX(-180deg)}
+@media (prefers-reduced-motion: reduce){ .panel,.flap{transition:none; opacity:1; transform:none} }
 ```
-
-> If community submissions are ever opened, non-admin uploads have their JS stripped automatically.
 
 ---
 
 ## The rules (the sandbox)
 
-- **One self-contained file.** Inline your CSS in `<style>`, your JS in `<script>`, paste library
-  code inline, embed images as `data:` URIs. External `<link rel="stylesheet">` / `<script src>` are
-  rejected. (Need a CDN allow-listed? Ask and I'll add it.)
-- **Keep it light** — aim under ~300KB critical path; keep images small.
+- **One self-contained file.** Inline your CSS in `<style>` and embed images as `data:` URIs.
+  External `<link rel="stylesheet">` is rejected. (Need a CDN allow-listed? Ask and I'll add it.)
+- **No JavaScript at all** — see above. Use CSS with `data-reveal` / `data-envelope` for motion.
+- **Keep it light** — aim under ~300KB; **800KB is a hard limit** and an upload over it is rejected.
+  Keep embedded images small.
 - **Respect reduced motion** with a `@media (prefers-reduced-motion: reduce)` block.
-- **Guest text is inserted as text, never HTML** — safe by design. Use the tags for content, your JS
-  for motion.
+- **Guest text is inserted as text, never HTML** — safe by design.
 
 ---
 
@@ -262,7 +264,7 @@ In `invites-blog-backend`, add a folder
 `InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` with:
 
 ```
-index.html     # the whole template: markup + inline <style> + optional <script>
+index.html     # the whole template: markup + inline <style>
 meta.json      # { "name","slug","version","category","description" }
 ```
 
@@ -295,6 +297,33 @@ curl -s -X POST https://invites.blog/api/admin/templates \
 ```
 The response lists the `variables`, `fields`, `imageSlots`, and `contentBlocks` it detected — a quick
 way to confirm your tags are right. Re-uploading the same slug+version updates it in place.
+
+### Option C — submit it as a community designer
+
+Make a designer account at `/designer/register` (email + password, or Google/Microsoft if the server
+has them configured), then submit from `/designer/submit`. You upload two files:
+
+```
+index.html     # the template
+preview.png    # a static preview image — REQUIRED, it's the card art in the gallery
+```
+
+What happens next:
+
+1. **The automatic scan runs immediately.** Scripts, inline handlers, `javascript:` URLs, meta
+   refresh, an external stylesheet, anything over 800KB, or a `select` with no `data-options` are
+   rejected on the spot — nothing reaches a human. You can dry-run it with the **Check** button on
+   the form, which also shows every field, image slot, role and theme key we detected.
+2. **It enters the review queue** as `Submitted`. An admin sees your markup and a plain-language
+   summary of what it declares, and either approves it or rejects it with a reason you'll see on
+   your submissions list.
+3. **On approval it's published** — a real gallery template at version `1.0.0`.
+
+Editing an already-published template works the same way: submit the change and it goes through
+review again. Approval bumps the version; **the old version stays exactly as it was**, so invitations
+already built on it never change.
+
+---
 
 > **Public vs Dedicated:** add `-F visibility=Dedicated -F assignedEmail=someone@example.com` to make
 > a template reserved for one person (they claim it via "Did you request a template?" with an email
@@ -333,10 +362,6 @@ way to confirm your tags are right. Re-uploading the same slug+version updates i
 
   <section class="panel" data-reveal data-block="maleDressCode"><p>Gentlemen: formal suit.</p></section>
   <section class="panel" data-reveal data-block="femaleDressCode"><p>Ladies: evening formal.</p></section>
-
-  <script>
-    window.addEventListener('invite:progress', (e) => { /* scrub with e.detail (0..1) */ });
-  </script>
 </body>
 </html>
 ```

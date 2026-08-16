@@ -33,6 +33,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -199,6 +200,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("users");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_users_email");
+        });
+
+        b.Entity<UserExternalLogin>(e =>
+        {
+            e.ToTable("user_external_logins");
+            e.HasKey(x => x.Id);
+            // One external identity maps to exactly one account.
+            e.HasIndex(x => new { x.Provider, x.ExternalSubjectId }).IsUnique()
+                .HasDatabaseName("idx_user_external_logins_provider_subject");
+            e.HasOne(x => x.User).WithMany(u => u.ExternalLogins)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Role>(e =>

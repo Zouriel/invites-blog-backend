@@ -220,6 +220,7 @@ public class RawTemplatePackagerTests
         var heading = m.Theme.Keys.Single(k => k.Key == "headingFont");
         Assert.Equal("font", heading.Type);
         Assert.Equal("Heading font", heading.Label);
+        Assert.Equal("Accent colour", accent.Label);
     }
 
     [Fact]
@@ -241,6 +242,50 @@ public class RawTemplatePackagerTests
 
         Assert.All(m.RoleDefinitions,
             r => Assert.Equal(new[] { "accentColor", "backgroundColor" }, r.ThemeKeys));
+    }
+
+    // --- Safety scan: HTML/CSS only, for EVERY author including admins -------------------------
+
+    [Theory]
+    [InlineData("<script>alert(1)</script>", "template_script_not_allowed")]
+    [InlineData("<script src=\"https://cdn.example/x.js\"></script>", "template_script_not_allowed")]
+    [InlineData("<button onclick=\"go()\">x</button>", "template_inline_handler_not_allowed")]
+    [InlineData("<body ONLOAD='go()'></body>", "template_inline_handler_not_allowed")]
+    [InlineData("<a href=\"javascript:alert(1)\">x</a>", "template_javascript_uri_not_allowed")]
+    [InlineData("<meta http-equiv=\"refresh\" content=\"0;url=/x\">", "template_meta_refresh_not_allowed")]
+    [InlineData("<link rel=\"stylesheet\" href=\"x.css\">", "template_not_self_contained")]
+    public void The_scan_hard_rejects_anything_executable(string markup, string expectedCode)
+    {
+        var ex = Assert.Throws<BusinessRuleException>(
+            () => RawTemplatePackager.EnsureSelfContainedAndSafe(Page(markup)));
+
+        Assert.Equal(expectedCode, ex.ErrorCode);
+    }
+
+    [Fact]
+    public void A_plain_html_and_css_template_passes_the_scan()
+    {
+        // "on" inside an ordinary word or attribute value must not be mistaken for a handler.
+        RawTemplatePackager.EnsureSelfContainedAndSafe(
+            Page("<p class=\"lonely\" data-var=\"event.season\">A long onward journey</p>"));
+    }
+
+    [Fact]
+    public void A_template_over_the_hard_size_limit_is_rejected()
+    {
+        var huge = Page(new string('x', RawTemplatePackager.MaxTemplateBytes + 1));
+
+        var ex = Assert.Throws<BusinessRuleException>(() => RawTemplatePackager.EnsureSelfContainedAndSafe(huge));
+
+        Assert.Equal("template_too_large", ex.ErrorCode);
+    }
+
+    [Fact]
+    public void A_template_over_the_soft_budget_but_under_the_ceiling_still_passes()
+    {
+        var big = Page(new string('x', RawTemplatePackager.RecommendedTemplateBytes + 1));
+
+        RawTemplatePackager.EnsureSelfContainedAndSafe(big);
     }
 
     [Fact]

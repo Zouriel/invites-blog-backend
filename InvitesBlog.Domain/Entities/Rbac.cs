@@ -15,6 +15,26 @@ public sealed class AppUser
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
+    public ICollection<UserExternalLogin> ExternalLogins { get; set; } = new List<UserExternalLogin>();
+}
+
+/// <summary>
+/// An external identity (Google, Microsoft) linked to an <see cref="AppUser"/>. Kept as its own row
+/// rather than columns on the user so one account can link several providers — a designer who signed
+/// up with email + password can add Google later instead of ending up with a duplicate account.
+/// </summary>
+public sealed class UserExternalLogin
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = default!;
+    /// <summary>Provider key, lowercased: <c>google</c> | <c>microsoft</c>.</summary>
+    public string Provider { get; set; } = default!;
+    /// <summary>The provider's immutable subject id for this user — never the email, which can change.</summary>
+    public string ExternalSubjectId { get; set; } = default!;
+    /// <summary>The email the provider asserted at link time, for support/audit.</summary>
+    public string Email { get; set; } = default!;
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 /// <summary>A named role that groups permissions (e.g. Admin, Inviter, Invitee).</summary>
