@@ -61,6 +61,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             ["phone"] = guest.PhoneE164
         };
         var resolved = ruleEngine.Resolve(campaign.RulesJson, attrs, manifest?.ContentBlocks);
+        var theme = ResolveTheme(campaign.ThemeOverridesJson, guest.Role);
 
         var data = new JsonObject
         {
@@ -79,7 +80,11 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
                 ["status"] = invite.RsvpStatus.ToString()
             },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
-            ["theme"] = ResolveTheme(campaign.ThemeOverridesJson, guest.Role),
+            ["theme"] = theme,
+            // The same overrides keyed by the CSS custom property each one drives, which is what the
+            // injector actually sets on the document. Resolved here because the manifest — the only
+            // place a theme key's cssVar is recorded — lives server-side.
+            ["themeVars"] = ThemeVars(theme, manifest),
             ["resolvedBlocks"] = new JsonArray(resolved.Select(b => (JsonNode)b!).ToArray())
         };
 
@@ -154,6 +159,46 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
 
         return resolved;
     }
+
+    /// <summary>
+    /// Maps the resolved theme onto the CSS custom properties it drives, e.g.
+    /// <c>accentColor</c> → <c>--ib-accent</c>. The manifest is authoritative (it records each key's
+    /// <c>cssVar</c> as the template declared it); a key the manifest doesn't know — an override left
+    /// over from an earlier version of the template — falls back to the documented naming convention
+    /// rather than being silently dropped.
+    /// </summary>
+    private static JsonObject ThemeVars(JsonObject theme, TemplateManifest? manifest)
+    {
+        var vars = new JsonObject();
+        var declared = manifest?.Theme?.Keys?
+            .Where(k => !string.IsNullOrWhiteSpace(k.Key) && !string.IsNullOrWhiteSpace(k.CssVar))
+            .ToDictionary(k => k.Key, k => k.CssVar, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, node) in theme)
+        {
+            var value = node?.ToString();
+            if (string.IsNullOrWhiteSpace(value)) continue;
+
+            var cssVar = declared is not null && declared.TryGetValue(key, out var declaredVar)
+                ? declaredVar
+                : ConventionalCssVar(key);
+            if (cssVar is not null) vars[cssVar] = value;
+        }
+
+        return vars;
+    }
+
+    /// <summary>The documented fallback naming: <c>accentColor</c>/<c>backgroundColor</c>/<c>textColor</c>
+    /// map to the three required properties, anything else camelCase → <c>--ib-kebab-case</c>.</summary>
+    private static string? ConventionalCssVar(string key) => key switch
+    {
+        "accentColor" => "--ib-accent",
+        "backgroundColor" => "--ib-bg",
+        "textColor" => "--ib-text",
+        _ => string.IsNullOrWhiteSpace(key)
+            ? null
+            : "--ib-" + string.Concat(key.Select(c => char.IsUpper(c) ? "-" + char.ToLowerInvariant(c) : c.ToString()))
+    };
 
     /// <summary>Assigns <paramref name="value"/> into <paramref name="root"/> at a dot-path, creating objects as needed.</summary>
     private static void SetPath(JsonObject root, string dotPath, JsonNode value)

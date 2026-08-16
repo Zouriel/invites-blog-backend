@@ -9,6 +9,7 @@ namespace InvitesBlog.TemplateCompiler;
 ///   data-src="path"    → element src attribute              (images; an array = a gallery, and the
 ///                                                            element is cloned once per photo)
 ///   data-block="id"    → section kept only if the server resolved that block for this guest
+///   themeVars          → the inviter's --ib-* overrides, set on :root (author defaults win otherwise)
 ///   data-reveal / .ib-section → gets .is-visible when scrolled into view (author styles the rest)
 ///   [data-envelope] / .ib-envelope → gets .is-open after the first scroll
 /// Data arrives inline (#invite-data) or via postMessage({__inviteData}) from the host app.
@@ -24,8 +25,27 @@ public static class TemplateInjector
             }, data);
           }
 
+          // The inviter's theme choices, as the CSS custom properties the author declared. Set on
+          // :root so every var(--ib-*) in the template picks them up; anything the inviter left alone
+          // simply isn't sent, so the author's own default keeps applying.
+          function applyTheme(vars) {
+            if (!vars || typeof vars !== 'object') return;
+            var root = document.documentElement;
+            for (var name in vars) {
+              if (!Object.prototype.hasOwnProperty.call(vars, name)) continue;
+              var value = vars[name];
+              // Only ever set custom properties, and never let a value close the declaration and
+              // start another — the value reaches us as data and must stay data.
+              if (name.indexOf('--') !== 0 || value == null) continue;
+              value = String(value);
+              if (value.indexOf(';') !== -1 || value.indexOf('}') !== -1) continue;
+              root.style.setProperty(name, value);
+            }
+          }
+
           function apply(data) {
             data = data || {};
+            applyTheme(data.themeVars);
             var vars = document.querySelectorAll('[data-var]');
             for (var i = 0; i < vars.length; i++) {
               var v = get(data, vars[i].getAttribute('data-var'));
@@ -208,6 +228,7 @@ public static class TemplateInjector
     /// <summary>The inert JSON payload placeholder the host app fills (inline or via postMessage).</summary>
     public const string InviteDataScript =
         "<script id=\"invite-data\" type=\"application/json\">" +
-        "{\"event\":{},\"guest\":{},\"venue\":{},\"inviter\":{},\"rsvp\":{},\"invite\":{},\"theme\":{},\"resolvedBlocks\":[]}" +
+        "{\"event\":{},\"guest\":{},\"venue\":{},\"inviter\":{},\"rsvp\":{},\"invite\":{}," +
+        "\"theme\":{},\"themeVars\":{},\"resolvedBlocks\":[]}" +
         "</script>";
 }

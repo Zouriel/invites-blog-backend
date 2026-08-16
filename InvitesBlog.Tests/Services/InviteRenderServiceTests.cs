@@ -3,6 +3,7 @@ using InvitesBlog.Application.Rules;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using InvitesBlog.Infrastructure.Rendering;
+using InvitesBlog.TemplateCompiler;
 using Xunit;
 
 namespace InvitesBlog.Tests.Services;
@@ -134,6 +135,74 @@ public class InviteRenderServiceTests
         var theme = (JsonObject)Render(Campaign("{}", """{"accentColor":"#abc"}"""), Guest("Family"))["theme"]!;
 
         Assert.Equal("#abc", theme["accentColor"]!.ToString());
+    }
+
+    // --- Theme → CSS custom properties -----------------------------------------------------------
+
+    [Fact]
+    public void Theme_overrides_are_emitted_as_the_css_properties_the_template_declared()
+    {
+        // The manifest is what records which custom property each theme key drives.
+        const string manifest = """
+            {"theme":{"keys":[
+                {"key":"accentColor","cssVar":"--ib-accent","type":"color","label":"Accent","default":"#000"},
+                {"key":"headingFont","cssVar":"--ib-heading-font","type":"font","label":"Heading","default":"serif"}
+            ]}}
+            """;
+        const string theme = """{"shared":{"accentColor":"#c9a227","headingFont":"Lora"},"roles":{}}""";
+
+        var vars = (JsonObject)Render(Campaign("{}", theme, manifest), Guest("Family"))["themeVars"]!;
+
+        Assert.Equal("#c9a227", vars["--ib-accent"]!.ToString());
+        Assert.Equal("Lora", vars["--ib-heading-font"]!.ToString());
+    }
+
+    [Fact]
+    public void A_roles_theme_override_reaches_that_role_as_a_css_property()
+    {
+        const string manifest = """
+            {"theme":{"keys":[{"key":"accentColor","cssVar":"--ib-accent","type":"color","label":"A","default":"#000"}]}}
+            """;
+        const string theme = """{"shared":{"accentColor":"#c9a227"},"roles":{"Bride":{"accentColor":"#f2c9d4"}}}""";
+
+        var bride = (JsonObject)Render(Campaign("{}", theme, manifest), Guest("Bride"))["themeVars"]!;
+        var family = (JsonObject)Render(Campaign("{}", theme, manifest), Guest("Family"))["themeVars"]!;
+
+        Assert.Equal("#f2c9d4", bride["--ib-accent"]!.ToString());
+        Assert.Equal("#c9a227", family["--ib-accent"]!.ToString());
+    }
+
+    [Fact]
+    public void An_override_whose_key_the_manifest_no_longer_declares_falls_back_to_the_naming_convention()
+    {
+        // The template dropped the key in a later version; a campaign's saved override shouldn't
+        // silently vanish — the documented --ib-* naming still resolves it.
+        const string theme =
+            """{"shared":{"accentColor":"#c9a227","backgroundColor":"#111","headingFont":"Lora"},"roles":{}}""";
+
+        var vars = (JsonObject)Render(Campaign("{}", theme, "{}"), Guest("Family"))["themeVars"]!;
+
+        Assert.Equal("#c9a227", vars["--ib-accent"]!.ToString());
+        Assert.Equal("#111", vars["--ib-bg"]!.ToString());
+        Assert.Equal("Lora", vars["--ib-heading-font"]!.ToString());
+    }
+
+    [Fact]
+    public void A_campaign_with_no_overrides_sends_no_css_properties_so_the_authors_defaults_stand()
+    {
+        var vars = (JsonObject)Render(Campaign("{}"), Guest("Family"))["themeVars"]!;
+
+        Assert.Empty(vars);
+    }
+
+    [Fact]
+    public void The_injector_applies_theme_vars_to_the_document_root()
+    {
+        // Without this the whole theming step is inert — the values ship and nothing reads them.
+        Assert.Contains("applyTheme(data.themeVars)", TemplateInjector.Js);
+        Assert.Contains("root.style.setProperty(name, value)", TemplateInjector.Js);
+        // …and only ever as a custom property, never as arbitrary CSS.
+        Assert.Contains("name.indexOf('--') !== 0", TemplateInjector.Js);
     }
 
     [Fact]

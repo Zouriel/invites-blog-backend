@@ -44,6 +44,9 @@ using (var scope = app.Services.CreateScope())
     {
         await services.GetRequiredService<TemplateSeeder>().SeedAsync();
         await services.GetRequiredService<RawTemplateSeeder>().SeedAsync();
+        // Community packages carry an inlined copy of the injector, so a fix to it only reaches them
+        // by re-publishing — this runs before the manifest refresh so both read the same bytes.
+        await services.GetRequiredService<TemplateInjectorRefresher>().RefreshAsync();
         await services.GetRequiredService<TemplateManifestRefresher>().RefreshAsync();
         await services.GetRequiredService<TemplateTypeSeeder>().SeedAsync();
         await services.GetRequiredService<RbacSeeder>().SeedAsync();
