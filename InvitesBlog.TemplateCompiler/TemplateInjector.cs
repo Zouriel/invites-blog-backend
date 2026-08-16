@@ -6,7 +6,8 @@ namespace InvitesBlog.TemplateCompiler;
 /// is the only script that runs in the sandbox. Binding contract:
 ///   data-var="path"    → element.textContent = value        (text, never markup)
 ///   data-href="path"   → element href attribute             (links: rsvp.link, invite.link, map)
-///   data-src="path"    → element src attribute              (images)
+///   data-src="path"    → element src attribute              (images; an array = a gallery, and the
+///                                                            element is cloned once per photo)
 ///   data-block="id"    → section kept only if the server resolved that block for this guest
 ///   data-reveal / .ib-section → gets .is-visible when scrolled into view (author styles the rest)
 ///   [data-envelope] / .ib-envelope → gets .is-open after the first scroll
@@ -37,8 +38,24 @@ public static class TemplateInjector
             }
             var imgs = document.querySelectorAll('[data-src]');
             for (var s = 0; s < imgs.length; s++) {
-              var sv = get(data, imgs[s].getAttribute('data-src'));
-              if (sv !== undefined) imgs[s].setAttribute('src', String(sv));
+              var img = imgs[s];
+              var sv = get(data, img.getAttribute('data-src'));
+              if (sv === undefined) continue;
+              if (Object.prototype.toString.call(sv) === '[object Array]') {
+                // A gallery slot: the authored element is the template for the first photo and is
+                // cloned for the rest, so the author's markup and styling carry to every image.
+                if (!sv.length) continue;
+                img.setAttribute('src', String(sv[0]));
+                var anchor = img;
+                for (var g = 1; g < sv.length; g++) {
+                  var clone = img.cloneNode(true);
+                  clone.setAttribute('src', String(sv[g]));
+                  anchor.parentNode.insertBefore(clone, anchor.nextSibling);
+                  anchor = clone;
+                }
+              } else {
+                img.setAttribute('src', String(sv));
+              }
             }
             // Hide any element marked [data-optional] whose bound value(s) came back empty, so
             // nullable/omitted fields don't leave stray labels, dead links, or blank rows.

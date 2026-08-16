@@ -68,6 +68,9 @@ public sealed class CampaignService(
             // Freeze the version's structure here — everything downstream reads this snapshot, so
             // re-reviewing or editing the template later cannot change what this campaign renders.
             TemplateManifestJson = string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson,
+            // The designer's per-use fee is frozen with it, so a later price change can't reach this campaign.
+            DesignerFee = template.UsagePrice ?? 0m,
+            DesignerFeeName = template.UsagePrice > 0m ? template.DesignerName : null,
             AccessTokenHash = TokenService.Hash(rawToken),
             Title = req.Title,
             Slug = Slugify(req.Title),
@@ -387,7 +390,8 @@ public sealed class CampaignService(
         var guestCount = await guests.CountByCampaignAsync(id, ct);
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         var price = PricingCalculator.CalculateInitial(
-            Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount);
+            Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount,
+            campaign.DesignerFee, campaign.DesignerFeeName);
 
         return new CampaignSummaryDto(
             campaign.Id, campaign.Title, campaign.Slug, campaign.Status.ToString(),
@@ -414,7 +418,8 @@ public sealed class CampaignService(
     {
         var campaign = await LoadOwnedAsync(id, ct);
         var count = inviteCount ?? await guests.CountByCampaignAsync(id, ct);
-        return PricingCalculator.CalculateInitial(count, campaign.HasDesignerDiscount);
+        return PricingCalculator.CalculateInitial(
+            count, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName);
     }
 
     public async Task ResendLinkAsync(ResendLinkRequest req, CancellationToken ct = default)

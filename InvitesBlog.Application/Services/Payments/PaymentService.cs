@@ -36,7 +36,8 @@ public sealed class PaymentService(
         if (guestCount == 0) throw new CampaignHasNoGuestsException();
 
         var inviteCount = Math.Max(guestCount, PricingCalculator.IncludedInvites);
-        var price = PricingCalculator.CalculateInitial(inviteCount, campaign.HasDesignerDiscount);
+        var price = PricingCalculator.CalculateInitial(
+            inviteCount, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName);
         var capacity = price.IncludedInvites + price.ExtraBlocks * price.BlockSize;
 
         var payment = new Payment

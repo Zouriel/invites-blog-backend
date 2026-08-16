@@ -70,18 +70,36 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
     }
 
     // Inviter uploads an image for a template image slot (multipart). Ownership is enforced in the service.
+    /// <summary>
+    /// Uploads one or more images for a slot. A gallery slot (<c>data-multiple</c>) sends several at
+    /// once and gets a result per file, in the order they were picked; a single slot sends one.
+    /// </summary>
     [HttpPost("{id:guid}/images")]
     [HasPermission(Permissions.Campaigns.Write)]
-    public async Task<IActionResult> UploadImage(Guid id, IFormFile file, [FromForm] string? slot, CancellationToken ct)
+    public async Task<IActionResult> UploadImage(
+        Guid id, [FromForm] IFormFileCollection? files, IFormFile? file, [FromForm] string? slot, CancellationToken ct)
     {
-        if (file is null || file.Length == 0)
+        // `file` is the long-standing single-image field; `files` is the multi-image one. Accept both.
+        var uploads = (files is { Count: > 0 } ? files.AsEnumerable() : [])
+            .Concat(file is not null ? [file] : Array.Empty<IFormFile>())
+            .Where(f => f.Length > 0)
+            .ToList();
+
+        if (uploads.Count == 0)
             return BadRequest(Application.Common.ApiResponse<object?>.Fail("An image file is required."));
 
-        await using var stream = file.OpenReadStream();
-        using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, ct);
+        var results = new List<Application.Dtos.Campaigns.CampaignImageDto>();
+        foreach (var upload in uploads)
+        {
+            await using var stream = upload.OpenReadStream();
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, ct);
+            results.Add(await campaigns.AddImageAsync(
+                id, buffer.ToArray(), upload.ContentType, upload.FileName, slot, ct));
+        }
 
-        return Created(await campaigns.AddImageAsync(id, buffer.ToArray(), file.ContentType, file.FileName, slot, ct));
+        // One file still returns the single object the existing builder expects.
+        return Created(results.Count == 1 ? results[0] : (object)results);
     }
 
     [HttpGet("{id:guid}/summary")]

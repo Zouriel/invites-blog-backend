@@ -35,6 +35,13 @@ public sealed class AdminInquiriesController(
         return SuccessMessage("Inquiry updated.");
     }
 
+    /// <summary>Hands this request to a designer at an agreed commission + per-use price.</summary>
+    [HttpPost("{id:guid}/commission")]
+    [HasPermission(Permissions.Designer.Review)]
+    public async Task<IActionResult> AssignCommission(
+        Guid id, [FromBody] AssignCommissionRequest request, CancellationToken ct) =>
+        Success(await inquiries.AssignCommissionAsync(id, request, ct));
+
     /// <summary>
     /// POST /api/admin/inquiries/{id}/issue (multipart) — fields: name, slug, category, version?,
     /// description?; file: index (the self-contained HTML). Packages it, issues it as a dedicated template

@@ -16,6 +16,8 @@ namespace InvitesBlog.Application.Services.Designers;
 public sealed class DesignerTemplateService(
     ICurrentUser currentUser,
     IRepository<CustomTemplate> submissions,
+    IRepository<Inquiry> inquiries,
+    ITemplateRepository templates,
     ITemplatePackager packager,
     IStorageService storage,
     IUnitOfWork uow) : IDesignerTemplateService
@@ -63,6 +65,8 @@ public sealed class DesignerTemplateService(
         var designerId = DesignerId();
         Validate(request);
 
+        var commission = await ResolveCommissionAsync(request.CommissionInquiryId, designerId, ct);
+
         var now = DateTimeOffset.UtcNow;
         var entity = new CustomTemplate
         {
@@ -75,9 +79,9 @@ public sealed class DesignerTemplateService(
             Slug = Slugify(request.Name),
             Status = CustomTemplateStatus.Submitted,
             PublishedTemplateId = request.PublishedTemplateId,
-            RequestedByEmail = request.RequestedByEmail?.Trim().ToLowerInvariant(),
-            CommissionPrice = request.CommissionPrice,
-            UsagePrice = request.UsagePrice,
+            RequestedByEmail = commission?.Email,
+            CommissionPrice = commission?.CommissionPrice,
+            UsagePrice = commission?.UsagePrice ?? request.UsagePrice,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -122,11 +126,34 @@ public sealed class DesignerTemplateService(
             .OrderByDescending(t => t.UpdatedAt)
             .ToListAsync(ct);
 
-        return list.Select(ToDto).ToList();
+        return await WithReleaseStateAsync(list, ct);
     }
 
     public async Task<DesignerTemplateDto> GetMineAsync(Guid id, CancellationToken ct = default) =>
-        ToDto(await LoadMineAsync(id, ct));
+        (await WithReleaseStateAsync([await LoadMineAsync(id, ct)], ct))[0];
+
+    /// <summary>
+    /// Overlays the live release state from the published <c>Template</c>, which is where consent
+    /// actually lives — the submission row's own flags are only what the designer set at submit time
+    /// and go stale the moment either party consents afterwards.
+    /// </summary>
+    private async Task<IReadOnlyList<DesignerTemplateDto>> WithReleaseStateAsync(
+        IReadOnlyList<CustomTemplate> list, CancellationToken ct)
+    {
+        var publishedIds = list.Select(t => t.PublishedTemplateId).OfType<Guid>().Distinct().ToList();
+        if (publishedIds.Count == 0) return list.Select(t => ToDto(t)).ToList();
+
+        var published = await templates.Query()
+            .Where(t => publishedIds.Contains(t.Id))
+            .ToDictionaryAsync(t => t.Id, ct);
+
+        return list.Select(t =>
+        {
+            if (t.PublishedTemplateId is { } id && published.TryGetValue(id, out var live))
+                return ToDto(t, live);
+            return ToDto(t);
+        }).ToList();
+    }
 
     public async Task<DesignerTemplateDto> ConsentToPublishAsync(Guid id, CancellationToken ct = default)
     {
@@ -136,6 +163,24 @@ public sealed class DesignerTemplateService(
         submissions.Update(entity);
         await uow.SaveChangesAsync(ct);
         return ToDto(entity);
+    }
+
+    /// <summary>
+    /// Resolves the commission a submission answers, from the inquiry rather than from the request
+    /// body: only an inquiry actually assigned to THIS designer can set a requester email or a price.
+    /// </summary>
+    private async Task<Inquiry?> ResolveCommissionAsync(Guid? inquiryId, Guid designerId, CancellationToken ct)
+    {
+        if (inquiryId is not { } id) return null;
+
+        var inquiry = await inquiries.FirstOrDefaultAsync(i => i.Id == id, ct)
+                      ?? throw new NotFoundException("That commission doesn't exist.", "commission_not_found");
+
+        if (inquiry.AssignedDesignerUserId != designerId)
+            throw new ForbiddenException(
+                "That commission wasn't assigned to you.", "commission_not_assigned_to_you");
+
+        return inquiry;
     }
 
     /// <summary>
@@ -191,11 +236,15 @@ public sealed class DesignerTemplateService(
 
     private Guid DesignerId() => currentUser.UserId ?? throw new UnauthorizedException();
 
-    internal static DesignerTemplateDto ToDto(CustomTemplate t) => new(
+    internal static DesignerTemplateDto ToDto(CustomTemplate t, Template? published = null) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description, t.Status.ToString(), t.RejectionReason,
         t.PreviewImageUrl, t.PackageUrl, t.ManifestJson, t.PublishedTemplateId,
-        t.CommissionPrice, t.UsagePrice, t.RequestedByEmail,
-        t.RequesterConsentToPublish, t.DesignerConsentToPublish, t.CreatedAt, t.UpdatedAt);
+        published?.CommissionPrice ?? t.CommissionPrice,
+        published?.UsagePrice ?? t.UsagePrice,
+        published?.RequestedByEmail ?? t.RequestedByEmail,
+        published?.RequesterConsentToPublish ?? t.RequesterConsentToPublish,
+        published?.DesignerConsentToPublish ?? t.DesignerConsentToPublish,
+        t.CreatedAt, t.UpdatedAt, published?.Visibility);
 
     /// <summary>A URL-safe slug from the template's name, suffixed so two "Aurora" submissions can't collide.</summary>
     private static string Slugify(string name)

@@ -15,6 +15,15 @@ public sealed class Campaign
     /// so re-reviewing or editing a template can't retroactively change an in-progress campaign.
     /// </summary>
     public string TemplateManifestJson { get; set; } = "{}";
+
+    /// <summary>
+    /// The community designer's per-use fee, frozen from the template at creation time along with the
+    /// manifest. Read live it would let a designer change the price of a campaign already in progress;
+    /// frozen, the inviter pays what they were quoted. Zero for platform templates.
+    /// </summary>
+    public decimal DesignerFee { get; set; }
+    /// <summary>Who the fee is owed to, for the checkout line item and the payouts report.</summary>
+    public string? DesignerFeeName { get; set; }
     public Guid? InviterId { get; set; }                      // set at inviter-details step
     public string AccessTokenHash { get; set; } = default!;   // §4.6.2 possession token
     public string? DashboardTokenHash { get; set; }           // §4.6.2 post-payment dashboard link

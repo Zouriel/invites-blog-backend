@@ -13,7 +13,9 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/designer/templates")]
 [HasPermission(Permissions.Designer.Manage)]
-public sealed class DesignerTemplatesController(IDesignerTemplateService designer) : BaseApiController
+public sealed class DesignerTemplatesController(
+    IDesignerTemplateService designer,
+    Application.Services.Inquiries.IInquiryService inquiries) : BaseApiController
 {
     /// <summary>Dry-run the scan so the designer sees what we detected before they commit to submitting.</summary>
     [HttpPost("scan")]
@@ -23,6 +25,11 @@ public sealed class DesignerTemplatesController(IDesignerTemplateService designe
     [HttpGet]
     public async Task<IActionResult> Mine(CancellationToken ct) =>
         Success(await designer.ListMineAsync(ct));
+
+    /// <summary>Requests an admin has handed to this designer, with the brief to work from.</summary>
+    [HttpGet("/api/designer/commissions")]
+    public async Task<IActionResult> Commissions(CancellationToken ct) =>
+        Success(await inquiries.ListCommissionsForDesignerAsync(ct));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id, CancellationToken ct) =>
@@ -36,13 +43,12 @@ public sealed class DesignerTemplatesController(IDesignerTemplateService designe
         IFormFile index,
         IFormFile preview,
         [FromForm] Guid? publishedTemplateId,
-        [FromForm] string? requestedByEmail,
-        [FromForm] decimal? commissionPrice,
+        [FromForm] Guid? commissionInquiryId,
         [FromForm] decimal? usagePrice,
         CancellationToken ct) =>
         Created(await designer.SubmitAsync(
             await BuildAsync(name, category, description, index, preview,
-                publishedTemplateId, requestedByEmail, commissionPrice, usagePrice, ct), ct));
+                publishedTemplateId, commissionInquiryId, usagePrice, ct), ct));
 
     [HttpPost("{id:guid}/resubmit")]
     public async Task<IActionResult> Resubmit(
@@ -54,7 +60,7 @@ public sealed class DesignerTemplatesController(IDesignerTemplateService designe
         IFormFile preview,
         CancellationToken ct) =>
         Success(await designer.ResubmitAsync(
-            id, await BuildAsync(name, category, description, index, preview, null, null, null, null, ct), ct));
+            id, await BuildAsync(name, category, description, index, preview, null, null, null, ct), ct));
 
     /// <summary>The designer's half of the two-party consent that releases a commission to the gallery.</summary>
     [HttpPost("{id:guid}/consent-to-publish")]
@@ -63,11 +69,11 @@ public sealed class DesignerTemplatesController(IDesignerTemplateService designe
 
     private static async Task<SubmitTemplateRequest> BuildAsync(
         string name, string category, string? description, IFormFile index, IFormFile preview,
-        Guid? publishedTemplateId, string? requestedByEmail, decimal? commissionPrice, decimal? usagePrice,
+        Guid? publishedTemplateId, Guid? commissionInquiryId, decimal? usagePrice,
         CancellationToken ct) =>
         new(name, category, description ?? string.Empty,
             await ReadTextAsync(index, ct), await ReadFileAsync(preview, ct),
-            publishedTemplateId, requestedByEmail, commissionPrice, usagePrice);
+            publishedTemplateId, commissionInquiryId, usagePrice);
 
     private static async Task<string> ReadTextAsync(IFormFile? file, CancellationToken ct)
     {

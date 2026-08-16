@@ -45,7 +45,13 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             ["gender"] = guest.Gender
         };
 
-        var manifest = JsonSerializer.Deserialize<TemplateManifest>(template.ManifestJson, JsonOpts);
+        // The campaign's FROZEN manifest, not the live template's — a template edited since this
+        // campaign was created must not change what its guests receive.
+        var manifestJson = string.IsNullOrWhiteSpace(campaign.TemplateManifestJson)
+                           || campaign.TemplateManifestJson.Trim() is "{}"
+            ? template.ManifestJson
+            : campaign.TemplateManifestJson;
+        var manifest = JsonSerializer.Deserialize<TemplateManifest>(manifestJson, JsonOpts);
         var attrs = new Dictionary<string, string?>
         {
             ["role"] = guest.Role,
@@ -73,33 +79,84 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
                 ["status"] = invite.RsvpStatus.ToString()
             },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
-            ["theme"] = ParseObject(campaign.ThemeOverridesJson),
+            ["theme"] = ResolveTheme(campaign.ThemeOverridesJson, guest.Role),
             ["resolvedBlocks"] = new JsonArray(resolved.Select(b => (JsonNode)b!).ToArray())
         };
 
-        // Inviter-filled dynamic fields + images: flat { "data-var/href/src path": value } maps saved by
-        // the builder. Each value is placed at its path, so any field an author adds to a template just
-        // resolves — no server-side whitelist. The whitelisted event object above stays as the default.
-        ApplyPathMap(data, content["fields"] as JsonObject);
-        ApplyPathMap(data, content["imageSlots"] as JsonObject);
+        // Inviter-filled dynamic fields + images, keyed by their data-var/href/src path. Each value is
+        // placed at its path, so any field an author adds to a template just resolves — no server-side
+        // whitelist. The whitelisted event object above stays as the default.
+        ApplyPathMap(data, content["fields"] as JsonObject, guest.Role);
+        ApplyPathMap(data, content["imageSlots"] as JsonObject, guest.Role);
 
         return new InviteRenderPayload(template.PackageUrl, data, invite.RequiresOtp, campaign.Status.ToString());
     }
 
-    /// <summary>Overlays a flat { path: value } map onto <paramref name="data"/>, each at its dot-path.</summary>
-    private static void ApplyPathMap(JsonObject data, JsonObject? map)
+    /// <summary>
+    /// Overlays a { path: value } map onto <paramref name="data"/>, each at its dot-path. An entry is
+    /// either a bare value (applies to everyone — the shape saved before per-role scoping existed) or
+    /// <c>{ "value": …, "roles": [...] }</c>, in which case an empty/absent role list still means
+    /// everyone and a populated one means only those roles. A value may be an array (a gallery slot).
+    /// </summary>
+    private static void ApplyPathMap(JsonObject data, JsonObject? map, string? guestRole)
     {
         if (map is null) return;
         foreach (var (path, node) in map)
         {
-            var value = node?.ToString();
-            if (!string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(value))
-                SetPath(data, path, value!);
+            if (string.IsNullOrWhiteSpace(path) || node is null) continue;
+
+            var (value, roles) = node is JsonObject scoped && scoped.ContainsKey("value")
+                ? (scoped["value"], scoped["roles"] as JsonArray)
+                : (node, null);
+
+            if (value is null || !AppliesTo(roles, guestRole)) continue;
+
+            // A gallery slot keeps its array so the template can repeat over it; anything else is text.
+            if (value is JsonArray gallery)
+            {
+                if (gallery.Count > 0) SetPath(data, path, gallery.DeepClone());
+                continue;
+            }
+
+            var text = value.ToString();
+            if (!string.IsNullOrWhiteSpace(text)) SetPath(data, path, text);
         }
     }
 
+    /// <summary>An empty or absent role list means "everyone"; otherwise the guest's role must be listed.</summary>
+    private static bool AppliesTo(JsonArray? roles, string? guestRole)
+    {
+        if (roles is null || roles.Count == 0) return true;
+        return roles.Any(r => string.Equals(r?.ToString(), guestRole, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The theme this guest sees: the shared overrides, with their role's overrides layered on top.
+    /// A flat object (the shape saved before per-role theming) is treated entirely as shared.
+    /// </summary>
+    private static JsonObject ResolveTheme(string themeJson, string? guestRole)
+    {
+        var theme = ParseObject(themeJson);
+        if (theme["shared"] is not JsonObject && theme["roles"] is not JsonObject) return theme;
+
+        var resolved = theme["shared"] is JsonObject shared
+            ? shared.DeepClone().AsObject()
+            : new JsonObject();
+
+        if (!string.IsNullOrWhiteSpace(guestRole) && theme["roles"] is JsonObject byRole)
+        {
+            var match = byRole.FirstOrDefault(kv =>
+                string.Equals(kv.Key, guestRole, StringComparison.OrdinalIgnoreCase)).Value;
+            if (match is JsonObject overrides)
+                foreach (var (key, value) in overrides)
+                    if (value is not null) resolved[key] = value.DeepClone();
+        }
+
+        return resolved;
+    }
+
     /// <summary>Assigns <paramref name="value"/> into <paramref name="root"/> at a dot-path, creating objects as needed.</summary>
-    private static void SetPath(JsonObject root, string dotPath, string value)
+    private static void SetPath(JsonObject root, string dotPath, JsonNode value)
     {
         var parts = dotPath.Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return;

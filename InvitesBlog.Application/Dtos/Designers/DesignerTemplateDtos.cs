@@ -8,6 +8,15 @@ namespace InvitesBlog.Application.Dtos.Designers;
 /// Set when this submission EDITS an already-published template — approval then bumps that template's
 /// version instead of creating a new one. Null for a brand-new template.
 /// </param>
+/// <param name="CommissionInquiryId">
+/// Set when this answers a commission. The requester's email and the agreed prices are read from that
+/// inquiry SERVER-SIDE after checking it was assigned to this designer — never taken from the client,
+/// or a designer could reserve a template against someone else's email.
+/// </param>
+/// <param name="UsagePrice">
+/// The per-use fee the designer proposes for a public template. Advisory: an admin sees it in the
+/// review screen and it only takes effect once they approve.
+/// </param>
 public sealed record SubmitTemplateRequest(
     string Name,
     string Category,
@@ -15,8 +24,7 @@ public sealed record SubmitTemplateRequest(
     string Html,
     UploadedFile PreviewImage,
     Guid? PublishedTemplateId = null,
-    string? RequestedByEmail = null,
-    decimal? CommissionPrice = null,
+    Guid? CommissionInquiryId = null,
     decimal? UsagePrice = null);
 
 /// <summary>An uploaded file's bytes plus what it claims to be.</summary>
@@ -41,7 +49,9 @@ public sealed record DesignerTemplateDto(
     bool RequesterConsentToPublish,
     bool DesignerConsentToPublish,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>The published template's visibility, once there is one. Null while unpublished.</summary>
+    string? PublishedVisibility = null);
 
 /// <summary>
 /// One submission as the admin review queue sees it — adds who submitted it and the raw source, which
@@ -70,3 +80,50 @@ public sealed record TemplateScanResultDto(
     IReadOnlyList<string> ImageSlots,
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> ThemeKeys);
+
+/// <summary>
+/// The state of a commissioned template's release to the public gallery — what each party has agreed
+/// to so far, and whether that's enough to make it public.
+/// </summary>
+public sealed record TemplateReleaseDto(
+    Guid TemplateId,
+    string Name,
+    string Slug,
+    string? PreviewImageUrl,
+    string Visibility,
+    string? RequestedByEmail,
+    string? DesignerName,
+    decimal? UsagePrice,
+    bool RequesterConsentToPublish,
+    bool DesignerConsentToPublish,
+    bool IsPublic);
+
+/// <summary>A designer as the admin list shows them, with what they've got in flight.</summary>
+public sealed record DesignerAdminDto(
+    Guid UserId,
+    string Email,
+    string DisplayName,
+    bool IsActive,
+    IReadOnlyList<string> LinkedProviders,
+    int PublishedTemplates,
+    int PendingSubmissions,
+    DateTimeOffset JoinedAt);
+
+/// <summary>
+/// One designer's earnings. Commissions are what was agreed for bespoke work; usage fees are the
+/// per-use fee accrued each time an inviter started a campaign on one of their public templates.
+/// </summary>
+public sealed record DesignerEarningsDto(
+    Guid UserId,
+    string Email,
+    string DisplayName,
+    decimal CommissionTotal,
+    int CommissionCount,
+    decimal UsageFeeTotal,
+    int UsageFeeCampaigns,
+    decimal Total,
+    IReadOnlyList<DesignerTemplateEarningsDto> ByTemplate);
+
+/// <summary>The per-template split behind a designer's usage-fee total.</summary>
+public sealed record DesignerTemplateEarningsDto(
+    Guid TemplateId, string Name, string Slug, decimal? UsagePrice, int Campaigns, decimal Total);

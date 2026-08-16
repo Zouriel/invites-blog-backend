@@ -17,7 +17,9 @@ namespace InvitesBlog.Application.Services.Inquiries;
 /// reserved for the customer's email and emails them a "your invitation is ready" link.
 /// </summary>
 public sealed class InquiryService(
+    ICurrentUser currentUser,
     IRepository<Inquiry> inquiries,
+    IRepository<AppUser> users,
     ITemplateRepository templates,
     IUnitOfWork uow,
     IEmailSender email,
@@ -79,9 +81,48 @@ public sealed class InquiryService(
     public async Task<InquiryDetailDto> GetAsync(Guid id, CancellationToken ct = default)
     {
         var i = await inquiries.GetByIdAsync(id, ct) ?? throw new InquiryNotFoundException(id);
+        return await ToDetailAsync(i, ct);
+    }
+
+    public async Task<InquiryDetailDto> AssignCommissionAsync(
+        Guid id, AssignCommissionRequest req, CancellationToken ct = default)
+    {
+        var i = await inquiries.GetByIdAsync(id, ct) ?? throw new InquiryNotFoundException(id);
+
+        if (req.DesignerUserId is { } designerId
+            && !await users.AnyAsync(u => u.Id == designerId && u.IsActive, ct))
+            throw new Exceptions.BusinessRuleException(
+                "That designer account doesn't exist or has been suspended.", "unknown_designer");
+
+        i.AssignedDesignerUserId = req.DesignerUserId;
+        i.CommissionPrice = req.CommissionPrice;
+        i.UsagePrice = req.UsagePrice;
+        await uow.SaveChangesAsync(ct);
+
+        return await ToDetailAsync(i, ct);
+    }
+
+    public async Task<IReadOnlyList<DesignerCommissionDto>> ListCommissionsForDesignerAsync(
+        CancellationToken ct = default)
+    {
+        var designerId = currentUser.UserId ?? throw new Exceptions.UnauthorizedException();
+        var list = await inquiries.Query()
+            .Where(i => i.AssignedDesignerUserId == designerId)
+            .OrderByDescending(i => i.CreatedAt)
+            .ToListAsync(ct);
+
+        return list.Select(i => new DesignerCommissionDto(
+            i.Id, i.Name, i.Email, i.Occasion, i.Message, i.Colors, i.References, i.Notes,
+            i.CommissionPrice, i.UsagePrice, i.TemplateIssued, i.CreatedAt)).ToList();
+    }
+
+    private async Task<InquiryDetailDto> ToDetailAsync(Inquiry i, CancellationToken ct)
+    {
+        var designer = i.AssignedDesignerUserId is { } id ? await users.GetByIdAsync(id, ct) : null;
         return new InquiryDetailDto(
             i.Id, i.Name, i.Email, i.Occasion, i.Message, i.Colors, i.References, i.Notes,
-            i.HasAttended, i.AttendedAt, i.TemplateIssued, i.TemplateIssuedAt, i.IssuedTemplateId, i.CreatedAt);
+            i.HasAttended, i.AttendedAt, i.TemplateIssued, i.TemplateIssuedAt, i.IssuedTemplateId, i.CreatedAt,
+            i.AssignedDesignerUserId, designer?.DisplayName, i.CommissionPrice, i.UsagePrice);
     }
 
     public async Task UpdateAsync(Guid id, UpdateInquiryRequest req, CancellationToken ct = default)

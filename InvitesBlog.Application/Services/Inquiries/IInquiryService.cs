@@ -12,4 +12,10 @@ public interface IInquiryService
     Task<InquiryDetailDto> GetAsync(Guid id, CancellationToken ct = default);
     Task UpdateAsync(Guid id, UpdateInquiryRequest req, CancellationToken ct = default);
     Task<InquiryIssuedResponse> IssueTemplateAsync(Guid id, IssueTemplateData data, CancellationToken ct = default);
+
+    /// <summary>Hands the request to a designer at an agreed price, or clears the assignment.</summary>
+    Task<InquiryDetailDto> AssignCommissionAsync(Guid id, AssignCommissionRequest req, CancellationToken ct = default);
+
+    /// <summary>The commissions handed to the signed-in designer, with the brief they need to work from.</summary>
+    Task<IReadOnlyList<DesignerCommissionDto>> ListCommissionsForDesignerAsync(CancellationToken ct = default);
 }

@@ -13,14 +13,17 @@ namespace InvitesBlog.Tests.Services;
 
 public class InquiryServiceTests
 {
+    private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IRepository<Inquiry> _inquiries = Substitute.For<IRepository<Inquiry>>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IEmailSender _email = Substitute.For<IEmailSender>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
     private IValidator<SubmitInquiryRequest> _submitV = TestData.PassingValidator<SubmitInquiryRequest>();
 
-    private InquiryService Sut() => new(_inquiries, _templates, _uow, _email, _config, _submitV);
+    private InquiryService Sut() =>
+        new(_currentUser, _inquiries, _users, _templates, _uow, _email, _config, _submitV);
 
     private static Inquiry Inquiry(bool attended = false) => new()
     {

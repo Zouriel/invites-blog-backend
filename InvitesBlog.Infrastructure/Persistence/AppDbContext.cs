@@ -63,6 +63,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // Admin list ordering: unattended first, then oldest first.
             e.HasIndex(x => new { x.HasAttended, x.CreatedAt }).HasDatabaseName("idx_inquiries_queue");
             e.HasIndex(x => x.Email).HasDatabaseName("idx_inquiries_email");
+            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
+            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
+            // A designer's commission list: what has been handed to them.
+            e.HasIndex(x => x.AssignedDesignerUserId).HasDatabaseName("idx_inquiries_assigned_designer");
         });
 
         b.Entity<TemplateType>(e =>
@@ -109,6 +113,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // Valid JSON default so adding this NOT NULL jsonb column to existing rows succeeds.
             e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
             e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
+            e.Property(x => x.DesignerFee).HasColumnType("numeric(12,2)").HasDefaultValue(0m);
         });
 
         b.Entity<Guest>(e =>

@@ -19,6 +19,8 @@ public class DesignerTemplateServiceTests
 {
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IRepository<CustomTemplate> _submissions = Substitute.For<IRepository<CustomTemplate>>();
+    private readonly IRepository<Inquiry> _inquiries = Substitute.For<IRepository<Inquiry>>();
+    private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly ITemplatePackager _packager = Substitute.For<ITemplatePackager>();
     private readonly IStorageService _storage = Substitute.For<IStorageService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -36,9 +38,11 @@ public class DesignerTemplateServiceTests
                 $"https://cdn.test/{ci.ArgAt<string>(0)}/", "{}", new TemplateStructure([], [], [], [])));
         _storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => $"https://cdn.test/{ci.ArgAt<string>(0)}");
+        _templates.Query(Arg.Any<bool>()).Returns(Array.Empty<Template>().AsAsyncQueryable());
     }
 
-    private DesignerTemplateService Sut() => new(_currentUser, _submissions, _packager, _storage, _uow);
+    private DesignerTemplateService Sut() =>
+        new(_currentUser, _submissions, _inquiries, _templates, _packager, _storage, _uow);
 
     private static SubmitTemplateRequest Request(string html = "<html><body></body></html>") =>
         new("Aurora Vows", "Wedding", "A warm invite.", html,
@@ -161,6 +165,39 @@ public class DesignerTemplateServiceTests
 
         Assert.Equal(nameof(CustomTemplateStatus.Submitted), dto.Status);
         Assert.Null(dto.RejectionReason);
+    }
+
+    [Fact]
+    public async Task Release_state_comes_from_the_published_template_not_the_stale_submission_row()
+    {
+        // Consent is recorded on the Template when either party agrees, so the submission row's own
+        // flags go stale the moment that happens — the designer's dashboard must not show them.
+        var live = TestData.Template();
+        live.Visibility = TemplateVisibility.Dedicated;
+        live.DesignerConsentToPublish = true;
+        live.RequesterConsentToPublish = true;
+        live.RequestedByEmail = "aisha@example.com";
+        _templates.Query(Arg.Any<bool>()).Returns(new[] { live }.AsAsyncQueryable());
+
+        var submission = new CustomTemplate
+        {
+            Id = Guid.NewGuid(),
+            DesignerUserId = _designerId,
+            Status = CustomTemplateStatus.Published,
+            PublishedTemplateId = live.Id,
+            Slug = "s",
+            Html = "",
+            DesignerConsentToPublish = false,   // stale
+            RequesterConsentToPublish = false,  // stale
+        };
+        _submissions.Query(Arg.Any<bool>()).Returns(new[] { submission }.AsAsyncQueryable());
+
+        var dto = Assert.Single(await Sut().ListMineAsync());
+
+        Assert.True(dto.DesignerConsentToPublish);
+        Assert.True(dto.RequesterConsentToPublish);
+        Assert.Equal(TemplateVisibility.Dedicated, dto.PublishedVisibility);
+        Assert.Equal("aisha@example.com", dto.RequestedByEmail);
     }
 
     [Fact]

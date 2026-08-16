@@ -33,5 +33,13 @@ public sealed class Inquiry
     /// <summary>The dedicated <see cref="Template"/> issued for this inquiry, if any.</summary>
     public Guid? IssuedTemplateId { get; set; }
 
+    // ----- Commission (§Phase 5) -----
+    /// <summary>The designer this request was handed to, once one has been assigned.</summary>
+    public Guid? AssignedDesignerUserId { get; set; }
+    /// <summary>The one-time fee agreed for the bespoke work.</summary>
+    public decimal? CommissionPrice { get; set; }
+    /// <summary>The per-use fee agreed for if it later goes public.</summary>
+    public decimal? UsagePrice { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }
