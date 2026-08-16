@@ -110,6 +110,13 @@ public sealed class OtpService(
 
     public async Task<OtpTokensResponse> VerifyAsync(VerifyOtpRequest req, CancellationToken ct = default)
     {
+        var verified = await VerifyContactAsync(req, ct);
+        var accessToken = tokenIssuer.Issue(verified.ContactType, verified.Contact, TimeSpan.FromDays(30));
+        return new OtpTokensResponse(accessToken, TokenService.GenerateToken());
+    }
+
+    public async Task<VerifiedContact> VerifyContactAsync(VerifyOtpRequest req, CancellationToken ct = default)
+    {
         await verifyValidator.ValidateAndThrowAsync(req, ct);
 
         var challenge = await challenges.GetByIdAsync(req.ChallengeId, ct)
@@ -128,9 +135,8 @@ public sealed class OtpService(
         challenge.VerifiedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
 
-        var contactType = challenge.Channel == OtpChannel.Sms ? "phone" : "email";
-        var contact = challenge.Channel == OtpChannel.Sms ? challenge.PhoneE164! : challenge.Email!;
-        var accessToken = tokenIssuer.Issue(contactType, contact, TimeSpan.FromDays(30));
-        return new OtpTokensResponse(accessToken, TokenService.GenerateToken());
+        return challenge.Channel == OtpChannel.Sms
+            ? new VerifiedContact("phone", challenge.PhoneE164!)
+            : new VerifiedContact("email", challenge.Email!);
     }
 }

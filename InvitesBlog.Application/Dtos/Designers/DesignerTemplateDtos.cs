@@ -127,3 +127,37 @@ public sealed record DesignerEarningsDto(
 /// <summary>The per-template split behind a designer's usage-fee total.</summary>
 public sealed record DesignerTemplateEarningsDto(
     Guid TemplateId, string Name, string Slug, decimal? UsagePrice, int Campaigns, decimal Total);
+
+/// <summary>One row of the templates table.</summary>
+/// <param name="CanEditDirectly">
+/// True for an admin: their edit publishes immediately. For a designer it's false — their edit
+/// becomes a submission for review, which the UI says plainly rather than pretending otherwise.
+/// </param>
+public sealed record MyTemplateRowDto(
+    Guid Id,
+    string Name,
+    string Slug,
+    string Category,
+    string Version,
+    string Visibility,
+    bool IsActive,
+    string? PreviewImageUrl,
+    string? DesignerName,
+    Guid? DesignerUserId,
+    decimal? UsagePrice,
+    decimal? CommissionPrice,
+    int CampaignCount,
+    bool CanEditDirectly,
+    bool PendingReview,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>The table plus the context the screen needs to title and explain itself.</summary>
+/// <param name="Scope">"system" when an admin is looking at everything, "mine" for a designer's own.</param>
+public sealed record MyTemplatesPageDto(
+    string Scope, string Title, IReadOnlyList<MyTemplateRowDto> Templates);
+
+/// <summary>A price change from the table. Null clears the fee.</summary>
+public sealed record SetTemplatePricingRequest(decimal? UsagePrice, decimal? CommissionPrice);
+
+/// <summary>What a delete actually did — unlisting is not the same as removing.</summary>
+public sealed record DeleteTemplateResultDto(bool Deleted, bool Unlisted, int CampaignCount, string Message);

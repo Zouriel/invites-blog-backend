@@ -100,10 +100,21 @@ public static class DependencyInjection
         services.AddSingleton<Email.ResendWebhookVerifier>();
 
         // OTP senders (email + sms), resolved by channel. Only channels in Otp:Channels are enabled.
-        services.AddScoped<ConsoleSmsOtpSender>();
+        // SMS goes through MsgOwl once Sms:MsgOwl:ApiKey is set; without a key we fall back to the
+        // console sender so local development still shows the code instead of failing.
         services.AddScoped<EmailOtpSender>();
-        services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
         services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<EmailOtpSender>());
+
+        if (!string.IsNullOrWhiteSpace(config[$"{MsgOwlSmsOtpSender.ConfigSection}:ApiKey"]))
+        {
+            services.AddScoped<MsgOwlSmsOtpSender>();
+            services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<MsgOwlSmsOtpSender>());
+        }
+        else
+        {
+            services.AddScoped<ConsoleSmsOtpSender>();
+            services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
+        }
 
         // Delivery: email only for now. The current mechanism shares a single OTP-gated campaign link
         // (/e/{id}); guests open it and verify their email, and the "email" channel just mails that link.

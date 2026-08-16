@@ -20,7 +20,29 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
         await SeedPermissionsAsync(ct);
         await SeedRolesAsync(ct);
         await SeedAdminAsync(ct);
+        await GrantDesignersCustomerRoleAsync(ct);
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Everyone with an account is also a customer: one person can commission an invitation and
+    /// design templates, and the unified sign-in shows both halves off the same roles. Existing
+    /// accounts predate the Customer role, so they're granted it once here.
+    /// </summary>
+    private async Task GrantDesignersCustomerRoleAsync(CancellationToken ct)
+    {
+        var customer = await db.Roles.FirstOrDefaultAsync(r => r.Name == Roles.Customer, ct);
+        if (customer is null) return;
+
+        var missing = await db.Users
+            .Where(u => !u.UserRoles.Any(ur => ur.RoleId == customer.Id))
+            .ToListAsync(ct);
+
+        foreach (var user in missing)
+            db.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = customer.Id });
+
+        if (missing.Count > 0)
+            logger.LogInformation("Granted the Customer role to {Count} existing account(s).", missing.Count);
     }
 
     private async Task SeedPermissionsAsync(CancellationToken ct)

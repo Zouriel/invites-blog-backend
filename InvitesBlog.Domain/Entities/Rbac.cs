@@ -8,9 +8,19 @@ namespace InvitesBlog.Domain.Entities;
 public sealed class AppUser
 {
     public Guid Id { get; set; }
-    public string Email { get; set; } = default!;        // unique, lowercased
+
+    /// <summary>
+    /// Lowercased email, unique when set. NULL for a customer who has only ever signed in with their
+    /// phone — one account can be reached by either identifier, and linking the second one merges the
+    /// two histories rather than leaving a person with two accounts.
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>E.164 phone, unique when set. NULL until the person links or signs in with one.</summary>
+    public string? PhoneE164 { get; set; }
+
     public string DisplayName { get; set; } = default!;
-    public string? PasswordHash { get; set; }            // admins only; null for token principals
+    public string? PasswordHash { get; set; }            // null for OTP-only accounts
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
 

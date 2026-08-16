@@ -43,8 +43,12 @@ public sealed class AppAuthenticationHandler(
         }
         else if (token.Count(c => c == '.') == 2 && TryReadJwt(token, out var jwtClaims))
         {
-            var role = jwtClaims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value ?? Roles.Invitee;
-            identity = BuildIdentity(role, authenticated: true, extra: jwtClaims);
+            // A token may carry SEVERAL roles — one person can be an admin, a designer and a
+            // customer at once — so the identity holds the union of what they all grant.
+            var roles = jwtClaims.Where(c => c.Type == ClaimTypes.Role)
+                .Select(c => c.Value).Distinct(StringComparer.Ordinal).ToList();
+            if (roles.Count == 0) roles.Add(Roles.Invitee);
+            identity = BuildIdentity(roles, authenticated: true, extra: jwtClaims);
         }
         else
         {
@@ -59,16 +63,26 @@ public sealed class AppAuthenticationHandler(
         return AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName));
     }
 
-    private static ClaimsIdentity BuildIdentity(string role, bool authenticated, IEnumerable<Claim>? extra = null)
+    private static ClaimsIdentity BuildIdentity(string role, bool authenticated, IEnumerable<Claim>? extra = null) =>
+        BuildIdentity([role], authenticated, extra);
+
+    private static ClaimsIdentity BuildIdentity(
+        IReadOnlyCollection<string> roles, bool authenticated, IEnumerable<Claim>? extra = null)
     {
         // Only give a real authentication type when a token actually authenticated the caller,
         // so anonymous Public callers report IsAuthenticated == false while still holding the
         // Public permission set that gates open endpoints.
         var identity = new ClaimsIdentity(authenticated ? SchemeName : null);
-        identity.AddClaim(new Claim(ClaimTypes.Role, role));
-        if (Roles.Definitions.TryGetValue(role, out var perms))
-            foreach (var p in perms)
-                identity.AddClaim(new Claim(AppClaims.Permission, p));
+
+        var granted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var role in roles)
+        {
+            // The role claim may already be among `extra` (it came off the JWT); adding it twice
+            // would duplicate it, so only synthesize roles for the non-JWT paths.
+            if (extra is null) identity.AddClaim(new Claim(ClaimTypes.Role, role));
+            if (Roles.Definitions.TryGetValue(role, out var perms)) granted.UnionWith(perms);
+        }
+        foreach (var p in granted) identity.AddClaim(new Claim(AppClaims.Permission, p));
         if (extra is not null) identity.AddClaims(extra);
         return identity;
     }

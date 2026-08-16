@@ -120,6 +120,7 @@ public static class Roles
 {
     public const string Admin = "Admin";
     public const string Designer = "Designer";     // community template authors (account-backed)
+    public const string Customer = "Customer";     // account-backed inviters: their own history
     public const string Inviter = "Inviter";       // possession-token principals
     public const string Invitee = "Invitee";       // OTP-JWT principals
     public const string Public = "Public";         // anonymous callers
@@ -133,6 +134,15 @@ public static class Roles
         [Designer] = new[]
         {
             Permissions.Templates.Read, Permissions.Designer.Manage,
+        },
+
+        // A signed-in customer sees the invitations and template requests already tied to their
+        // email or phone. Everything they can do without an account still works without one — the
+        // account only adds history, so this grants read access, not new powers.
+        [Customer] = new[]
+        {
+            Permissions.Templates.Read, Permissions.Dashboard.Read,
+            Permissions.Campaigns.Read, Permissions.Inbox.Read,
         },
 
         [Inviter] = new[]

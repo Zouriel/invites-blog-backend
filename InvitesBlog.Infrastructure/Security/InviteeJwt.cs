@@ -38,11 +38,19 @@ public sealed class InviteeJwt(IConfiguration config) : IInviteeTokenIssuer
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public string IssueForRole(string role, IReadOnlyDictionary<string, string> claims, TimeSpan lifetime)
+    public string IssueForRole(string role, IReadOnlyDictionary<string, string> claims, TimeSpan lifetime) =>
+        IssueForRoles([role], claims, lifetime);
+
+    public string IssueForRoles(
+        IReadOnlyCollection<string> roles, IReadOnlyDictionary<string, string> claims, TimeSpan lifetime)
     {
         var creds = new SigningCredentials(
             new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Key)), SecurityAlgorithms.HmacSha256);
-        var claimList = new List<Claim> { new(ClaimTypes.Role, role) };
+        // One role claim per role — the auth handler unions the permissions of all of them.
+        var claimList = roles.Where(r => !string.IsNullOrWhiteSpace(r))
+            .Distinct(StringComparer.Ordinal)
+            .Select(r => new Claim(ClaimTypes.Role, r))
+            .ToList();
         claimList.AddRange(claims.Select(kv => new Claim(kv.Key, kv.Value)));
         var token = new JwtSecurityToken(
             issuer: Issuer, audience: Audience, claims: claimList,

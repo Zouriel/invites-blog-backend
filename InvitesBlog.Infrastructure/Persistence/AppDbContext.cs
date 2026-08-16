@@ -205,7 +205,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.ToTable("users");
             e.HasKey(x => x.Id);
+            // Unique WHEN SET: Postgres allows many NULLs in a unique index, which is what lets a
+            // phone-only customer and an email-only designer coexist until they're linked.
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_users_email");
+            e.HasIndex(x => x.PhoneE164).IsUnique().HasDatabaseName("idx_users_phone_e164");
         });
 
         b.Entity<UserExternalLogin>(e =>
