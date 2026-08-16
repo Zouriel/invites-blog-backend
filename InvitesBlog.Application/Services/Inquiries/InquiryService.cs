@@ -119,6 +119,7 @@ public sealed class InquiryService(
             template.Visibility = TemplateVisibility.Dedicated;
             template.AssignedEmail = inquiry.Email;
             template.IsActive = true;
+            template.UpdatedAt = DateTimeOffset.UtcNow;
             templates.Update(template);
         }
         else
@@ -140,7 +141,8 @@ public sealed class InquiryService(
                 IsActive = true,
                 Visibility = TemplateVisibility.Dedicated,
                 AssignedEmail = inquiry.Email,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
             };
             await templates.AddAsync(template, ct);
         }

@@ -33,12 +33,121 @@ These are optional — the builder works without them, but they polish the invit
 | Hint | Put it on | Does |
 |---|---|---|
 | `data-field-label="Gift note"` | a `data-var`/`data-href` element | Sets the box's label (otherwise it's guessed from the path) |
-| `data-field-type="textarea"` | a `data-var` element | Forces the input kind: `text`, `textarea`, `date`, `time`, or `url` |
+| `data-type="textarea"` | a `data-var` element | Forces the input kind — see the table below |
+| `data-options="Formal,Casual"` | a `data-type="select"` element | The allowed values of the dropdown (**required** for `select`) |
 | `data-slot-label="Cover photo"` | a `data-src` image | Names the image slot in the builder |
+| `data-multiple="true"` | a `data-src` image | Makes the slot a **gallery** — the inviter adds/reorders/removes a list of photos |
+| `data-min-images="2"` / `data-max-images="8"` | a `data-multiple` image | Bounds the gallery (both optional, unbounded by default) |
+| `data-role-scope="groom"` | any `data-var`/`data-href`/`data-src` element | Marks the field/slot as belonging to **one role** instead of being shared by all |
 
-If you don't set `data-field-type`, the builder guesses well: paths containing *date* get a date
+`data-field-type` is the old name for `data-type` and still works; if an element carries both,
+`data-type` wins. If you set neither, the builder guesses well: paths containing *date* get a date
 picker, *time* a time picker, *description/schedule/note/message/address* a multi-line box, links a
 URL box, everything else a normal text box.
+
+#### The input kinds (`data-type`)
+
+| `data-type` | Inviter gets |
+|---|---|
+| `text` | a single-line box |
+| `textarea` | a multi-line box |
+| `date` | a date picker |
+| `time` | a time picker |
+| `url` | a link box |
+| `color` | a colour picker |
+| `select` | a dropdown of your `data-options` — **must** be paired with `data-options` or the upload is rejected |
+| `image` | an upload slot (usually you just use `data-src` instead) |
+
+`data-options` takes either a comma list (`data-options="Formal,Casual,Black Tie"`) or a JSON array
+(`data-options='["Formal","Casual"]'`).
+
+```html
+<span data-var="event.dressCode" data-type="select" data-options="Formal,Casual,Black Tie">Formal</span>
+```
+
+---
+
+## Galleries (several photos in one slot)
+
+A normal `<img data-src>` is **one** photo. Add `data-multiple="true"` and the same slot becomes a
+gallery — the inviter uploads as many pictures as they like and every image carrying that path is
+repeated for them:
+
+```html
+<div class="photo-strip">
+  <img data-src="event.gallery" data-multiple="true" data-min-images="2" data-max-images="8"
+       data-slot-label="Photo strip" alt="">
+</div>
+```
+
+`data-min-images` / `data-max-images` are optional — leave them off for unbounded. They're ignored
+unless `data-multiple` is set.
+
+---
+
+## Theming (`--ib-*`)
+
+Declare your palette as CSS custom properties named `--ib-…` in `:root`, with the value you want as
+the default. The platform reads them out of your file and offers each one as a real control in the
+inviter's **Theming** step, pre-filled with your default — so an inviter can recolour your template
+without you writing any extra code. Use the variables everywhere in your CSS instead of hardcoding
+colours.
+
+Every template should expose at least these three:
+
+| Property | Becomes | Meaning |
+|---|---|---|
+| `--ib-accent` | `accentColor` | Highlights, rules, buttons |
+| `--ib-bg` | `backgroundColor` | Page background |
+| `--ib-text` | `textColor` | Body text |
+
+Any other `--ib-*` you declare shows up too — `--ib-heading-font` becomes `headingFont`, and so on.
+A property whose value looks like a colour gets a colour picker; one whose name contains *font* gets
+a font control; anything else gets a text box. **The first declaration wins**, so write your
+defaults in `:root` before any `@media` override.
+
+```html
+<style>
+  :root{
+    --ib-accent:#c9a227;
+    --ib-bg:#0b0b0f;
+    --ib-text:#f6f2e8;
+    --ib-heading-font:"Playfair Display", serif;
+  }
+  body{background:var(--ib-bg); color:var(--ib-text); }
+  h1{font-family:var(--ib-heading-font); color:var(--ib-accent); }
+</style>
+```
+
+Offer a font menu with a meta tag:
+
+```html
+<meta name="ib-fonts" content="Playfair Display, Cormorant, Inter">
+```
+
+---
+
+## Roles
+
+An invitation can have several **roles** (bride's side / groom's side, VIPs, family…). The inviter
+picks and names them in the wizard's first step, then themes and fills each one.
+
+Declare the roles your template understands with a meta tag — and/or just scope something to a role
+and it counts as declared:
+
+```html
+<meta name="ib-roles" content="bride, groom">
+...
+<img data-src="bride.photo" data-role-scope="bride" data-slot-label="Bride's photo" alt="">
+<h2 data-var="groom.name" data-role-scope="groom">The groom</h2>
+```
+
+Anything **without** `data-role-scope` is shared: the inviter fills it once and every role sees it.
+Anything **with** it belongs to that role only. Every role can independently override every `--ib-*`
+theme key, so a bride's side in blush and a groom's side in navy costs you nothing.
+
+> `data-role-scope` is about *who fills what*. `data-block` (below) is about *who sees what* at send
+> time. They're complementary — use both.
 
 ---
 

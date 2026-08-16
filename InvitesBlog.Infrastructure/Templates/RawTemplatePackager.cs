@@ -55,6 +55,39 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     [GeneratedRegex("""\bdata-field-type\s*=\s*"([^"]*)"|\bdata-field-type\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
     private static partial Regex FieldTypeRegex();
 
+    // data-type is the canonical authoring attribute; data-field-type stays supported as its legacy alias.
+    [GeneratedRegex("""\bdata-type\s*=\s*"([^"]*)"|\bdata-type\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex DataTypeRegex();
+
+    [GeneratedRegex("""\bdata-options\s*=\s*"([^"]*)"|\bdata-options\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex DataOptionsRegex();
+
+    [GeneratedRegex("""\bdata-role-scope\s*=\s*"([^"]*)"|\bdata-role-scope\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex RoleScopeRegex();
+
+    [GeneratedRegex("""\bdata-multiple\s*=\s*"([^"]*)"|\bdata-multiple\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex MultipleRegex();
+
+    [GeneratedRegex("""\bdata-min-images\s*=\s*"([^"]*)"|\bdata-min-images\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex MinImagesRegex();
+
+    [GeneratedRegex("""\bdata-max-images\s*=\s*"([^"]*)"|\bdata-max-images\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex MaxImagesRegex();
+
+    // Theming: every --ib-* custom property the author declares, with the value they defaulted it to.
+    [GeneratedRegex("""--ib-([a-zA-Z0-9-]+)\s*:\s*([^;}]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex ThemeVarRegex();
+
+    // <meta name="ib-roles" content="bride,groom"> / <meta name="ib-fonts" content="Lora, Inter">
+    [GeneratedRegex("""<meta\b[^>]*\bname\s*=\s*["']ib-(roles|fonts)["'][^>]*>""", RegexOptions.IgnoreCase)]
+    private static partial Regex IbMetaRegex();
+
+    [GeneratedRegex("""\bcontent\s*=\s*"([^"]*)"|\bcontent\s*=\s*'([^']*)'""", RegexOptions.IgnoreCase)]
+    private static partial Regex MetaContentRegex();
+
+    [GeneratedRegex("""^\s*(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|color\()""")]
+    private static partial Regex ColorValueRegex();
+
     [GeneratedRegex("<script\\b[^>]*>.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ScriptTagRegex();
 
@@ -95,18 +128,35 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// and when re-deriving an already-stored template's manifest (idempotent: the inlined injector
     /// script carries no <c>data-var/href/src="…"</c> attributes, so re-scanning served HTML is safe).
     /// </summary>
-    public TemplateManifest BuildManifest(string slug, string version, string html) => new()
+    public TemplateManifest BuildManifest(string slug, string version, string html)
     {
-        Slug = slug,
-        Version = version,
-        Variables = Collect(VarAttrRegex(), html).ToList(),
-        ContentBlocks = Collect(BlockAttrRegex(), html).ToList(),
-        ImageSlots = CollectImageSlots(html),
-        Fields = CollectFields(html),
-        Roles = new(),
-        GenderVariants = new(),
-        EditableAreas = new()
-    };
+        var imageSlots = CollectImageSlots(html);
+        var fields = CollectFields(html);
+        var theme = CollectTheme(html);
+        var roles = CollectRoles(html, fields, imageSlots);
+
+        return new TemplateManifest
+        {
+            Slug = slug,
+            Version = version,
+            Variables = Collect(VarAttrRegex(), html).ToList(),
+            ContentBlocks = Collect(BlockAttrRegex(), html).ToList(),
+            ImageSlots = imageSlots,
+            Fields = fields,
+            Theme = theme,
+            Roles = roles.Select(r => r.Slug).ToList(),
+            RoleDefinitions = roles.Select(r => new TemplateRoleDefinition
+            {
+                Slug = r.Slug,
+                Label = r.Label,
+                ThemeKeys = theme.Keys.Select(k => k.Key).ToList(),
+                Fields = fields.Where(f => Same(f.RoleScope, r.Slug)).Select(f => f.Key).ToList(),
+                ImageSlots = imageSlots.Where(s => Same(s.RoleScope, r.Slug)).Select(s => s.Key).ToList()
+            }).ToList(),
+            GenderVariants = new(),
+            EditableAreas = new()
+        };
+    }
 
     /// <summary>Reject anything that isn't self-contained in the single HTML file.</summary>
     private static void EnsureSelfContained(string html)
@@ -121,8 +171,10 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 "template_not_self_contained");
     }
 
-    private readonly record struct SlotOccurrence(string Key, string? Label);
-    private readonly record struct FieldOccurrence(string Key, bool IsHref, string? Label, string? Type);
+    private readonly record struct SlotOccurrence(
+        string Key, string? Label, bool? Multiple, int? MinImages, int? MaxImages, string? RoleScope);
+    private readonly record struct FieldOccurrence(
+        string Key, bool IsHref, string? Label, string? Type, List<string>? Options, string? RoleScope);
 
     /// <summary>
     /// One image slot per distinct <c>data-src</c> path (case-insensitive). The same path used on many
@@ -139,11 +191,13 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             var key = (src.Groups[1].Success ? src.Groups[1].Value : src.Groups[2].Value).Trim();
             if (string.IsNullOrWhiteSpace(key)) continue;
 
-            var lbl = SlotLabelRegex().Match(tag.Value);
-            var label = lbl.Success
-                ? (lbl.Groups[1].Success ? lbl.Groups[1].Value : lbl.Groups[2].Value).Trim()
-                : null;
-            occurrences.Add(new SlotOccurrence(key, string.IsNullOrWhiteSpace(label) ? null : label));
+            occurrences.Add(new SlotOccurrence(
+                key,
+                Attr(tag.Value, SlotLabelRegex()),
+                ParseBool(Attr(tag.Value, MultipleRegex())),
+                ParseCount(Attr(tag.Value, MinImagesRegex())),
+                ParseCount(Attr(tag.Value, MaxImagesRegex())),
+                Slugify(Attr(tag.Value, RoleScopeRegex()))));
         }
 
         return occurrences
@@ -152,7 +206,17 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             {
                 var key = g.First().Key; // first-seen casing is canonical
                 var label = g.Select(o => o.Label).FirstOrDefault(l => l is not null) ?? Prettify(key);
-                return new TemplateImageSlot { Key = key, Label = label };
+                var multiple = g.Select(o => o.Multiple).FirstOrDefault(m => m is not null) ?? false;
+                return new TemplateImageSlot
+                {
+                    Key = key,
+                    Label = label,
+                    Multiple = multiple,
+                    // Count bounds only mean anything for a gallery slot.
+                    MinImages = multiple ? g.Select(o => o.MinImages).FirstOrDefault(v => v is not null) : null,
+                    MaxImages = multiple ? g.Select(o => o.MaxImages).FirstOrDefault(v => v is not null) : null,
+                    RoleScope = g.Select(o => o.RoleScope).FirstOrDefault(r => r is not null)
+                };
             })
             .OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -188,20 +252,15 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
             if (string.IsNullOrWhiteSpace(key)) continue;
 
-            var lbl = FieldLabelRegex().Match(tag.Value);
-            var label = lbl.Success
-                ? (lbl.Groups[1].Success ? lbl.Groups[1].Value : lbl.Groups[2].Value).Trim()
-                : null;
-
-            var explicitType = FieldTypeRegex().Match(tag.Value);
-            var type = explicitType.Success
-                ? (explicitType.Groups[1].Success ? explicitType.Groups[1].Value : explicitType.Groups[2].Value).Trim().ToLowerInvariant()
-                : null;
+            // data-type is canonical; data-field-type is its legacy alias.
+            var type = (Attr(tag.Value, DataTypeRegex()) ?? Attr(tag.Value, FieldTypeRegex()))?.ToLowerInvariant();
 
             occurrences.Add(new FieldOccurrence(
                 key, isHref,
-                string.IsNullOrWhiteSpace(label) ? null : label,
-                string.IsNullOrWhiteSpace(type) ? null : type));
+                Attr(tag.Value, FieldLabelRegex()),
+                type,
+                ParseOptions(Attr(tag.Value, DataOptionsRegex())),
+                Slugify(Attr(tag.Value, RoleScopeRegex()))));
         }
 
         return occurrences
@@ -213,16 +272,168 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 var label = g.Select(o => o.Label).FirstOrDefault(l => l is not null) ?? Prettify(key);
                 var type = g.Select(o => o.Type).FirstOrDefault(t => t is not null)
                            ?? InferFieldType(key, first.IsHref);
+                var options = g.Select(o => o.Options).FirstOrDefault(o => o is not null);
+
+                if (type == "select" && (options is null || options.Count == 0))
+                    throw new BusinessRuleException(
+                        $"The field \"{key}\" is data-type=\"select\" but declares no data-options — list the allowed values, e.g. data-options=\"Formal,Casual,Black Tie\".",
+                        "template_select_missing_options");
+
                 return new TemplateFieldSlot
                 {
                     Key = key,
                     Label = string.IsNullOrWhiteSpace(label) ? Prettify(key) : label,
-                    Type = string.IsNullOrWhiteSpace(type) ? "text" : type
+                    Type = string.IsNullOrWhiteSpace(type) ? "text" : type,
+                    Options = type == "select" ? options : null,
+                    RoleScope = g.Select(o => o.RoleScope).FirstOrDefault(r => r is not null)
                 };
             })
             .OrderBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    /// <summary>
+    /// The theming surface: every <c>--ib-*</c> custom property the author declares, with the value it is
+    /// defaulted to. The first declaration of a property wins (the <c>:root</c> defaults an author writes
+    /// before any media-query/theme override).
+    /// </summary>
+    private static TemplateTheme CollectTheme(string html)
+    {
+        var theme = new TemplateTheme { Fonts = SplitList(MetaContent(html, "ib-fonts")) };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Match m in ThemeVarRegex().Matches(html))
+        {
+            var cssName = m.Groups[1].Value.Trim();
+            var value = m.Groups[2].Value.Trim();
+            if (cssName.Length == 0 || value.Length == 0 || !seen.Add(cssName)) continue;
+
+            var key = ThemeKeyName(cssName);
+            theme.Keys.Add(new TemplateThemeKey
+            {
+                Key = key,
+                CssVar = $"--ib-{cssName}",
+                Label = Prettify(cssName),
+                Type = ColorValueRegex().IsMatch(value) ? "color"
+                     : cssName.Contains("font", StringComparison.OrdinalIgnoreCase) ? "font"
+                     : "text",
+                Default = value
+            });
+
+            switch (key)
+            {
+                case "accentColor": theme.AccentColor = value; break;
+                case "backgroundColor": theme.BackgroundColor = value; break;
+                case "textColor": theme.TextColor = value; break;
+            }
+        }
+
+        return theme;
+    }
+
+    private readonly record struct RoleOccurrence(string Slug, string Label);
+
+    /// <summary>
+    /// The roles the template supports: whatever it declares in <c>&lt;meta name="ib-roles"&gt;</c>, unioned
+    /// with every role named by a <c>data-role-scope</c> — so scoping a single field is enough to make the
+    /// role real without also having to remember the meta tag.
+    /// </summary>
+    private static List<RoleOccurrence> CollectRoles(
+        string html, List<TemplateFieldSlot> fields, List<TemplateImageSlot> slots)
+    {
+        var declared = SplitList(MetaContent(html, "ib-roles")).Select(Slugify).OfType<string>();
+        var scoped = fields.Select(f => f.RoleScope).Concat(slots.Select(s => s.RoleScope)).OfType<string>();
+
+        return declared.Concat(scoped)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(slug => new RoleOccurrence(slug, Prettify(slug)))
+            .ToList();
+    }
+
+    /// <summary>Reads an attribute off a captured opening tag; null when absent or blank.</summary>
+    private static string? Attr(string tag, Regex regex)
+    {
+        var m = regex.Match(tag);
+        if (!m.Success) return null;
+        var value = (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).Trim();
+        return value.Length == 0 ? null : value;
+    }
+
+    /// <summary>Reads a <c>&lt;meta name="…"&gt;</c>'s content out of the document; null when absent.</summary>
+    private static string? MetaContent(string html, string name)
+    {
+        foreach (Match tag in IbMetaRegex().Matches(html))
+            if (string.Equals($"ib-{tag.Groups[1].Value}", name, StringComparison.OrdinalIgnoreCase))
+                return Attr(tag.Value, MetaContentRegex());
+        return null;
+    }
+
+    /// <summary><c>data-options</c> accepts either a JSON array or a plain comma-separated list.</summary>
+    private static List<string>? ParseOptions(string? raw)
+    {
+        if (raw is null) return null;
+        var trimmed = raw.Trim();
+        if (trimmed.StartsWith('['))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<string>>(trimmed);
+                if (parsed is { Count: > 0 }) return parsed.Select(o => o.Trim()).Where(o => o.Length > 0).ToList();
+            }
+            catch (JsonException)
+            {
+                throw new BusinessRuleException(
+                    "data-options looks like JSON but isn't a valid array of strings — use data-options='[\"A\",\"B\"]' or data-options=\"A,B\".",
+                    "template_invalid_options");
+            }
+        }
+        var list = SplitList(trimmed);
+        return list.Count == 0 ? null : list;
+    }
+
+    private static List<string> SplitList(string? raw) =>
+        raw is null
+            ? new List<string>()
+            : raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+
+    private static bool? ParseBool(string? raw) =>
+        raw is null ? null : raw is "" or "true" or "True" or "TRUE" or "1" or "yes";
+
+    private static int? ParseCount(string? raw) =>
+        int.TryParse(raw, out var n) && n >= 0 ? n : null;
+
+    /// <summary>Normalizes an authored role name ("Bride & Groom") to a slug ("bride-groom").</summary>
+    private static string? Slugify(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var chars = raw.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+        return slug.Length == 0 ? null : slug;
+    }
+
+    /// <summary>
+    /// Maps a CSS custom-property name to its manifest key: the three required ones get their documented
+    /// names (<c>--ib-accent</c> → <c>accentColor</c>), everything else is camel-cased as authored.
+    /// </summary>
+    private static string ThemeKeyName(string cssName) => cssName.ToLowerInvariant() switch
+    {
+        "accent" => "accentColor",
+        "bg" => "backgroundColor",
+        "text" => "textColor",
+        _ => CamelCase(cssName)
+    };
+
+    private static string CamelCase(string kebab)
+    {
+        var parts = kebab.Split('-', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return kebab;
+        return parts[0].ToLowerInvariant() + string.Concat(parts.Skip(1)
+            .Select(p => char.ToUpperInvariant(p[0]) + p[1..].ToLowerInvariant()));
+    }
+
+    private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Guesses a widget type from the field's leaf name (date/time/textarea/url/text).</summary>
     private static string InferFieldType(string key, bool isHref)

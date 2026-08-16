@@ -29,6 +29,19 @@ public sealed class TemplateManifest
     /// so authors can add arbitrary fields without any code change (§ dynamic builder).
     /// </summary>
     [JsonPropertyName("fields")] public List<TemplateFieldSlot> Fields { get; set; } = new();
+
+    /// <summary>
+    /// The theming surface the template exposes as CSS custom properties (<c>--ib-accent</c>,
+    /// <c>--ib-bg</c>, <c>--ib-text</c>, …) plus any selectable fonts. The wizard's theming step renders
+    /// one control per <see cref="TemplateTheme.Keys"/> entry, pre-filled with the authored default.
+    /// </summary>
+    [JsonPropertyName("theme")] public TemplateTheme Theme { get; set; } = new();
+
+    /// <summary>
+    /// The formalized role list: one entry per slug in <see cref="Roles"/>, carrying which theme keys,
+    /// fields and image slots are scoped to that role (everything not listed here is shared across roles).
+    /// </summary>
+    [JsonPropertyName("roleDefinitions")] public List<TemplateRoleDefinition> RoleDefinitions { get; set; } = new();
 }
 
 /// <summary>One fillable text/link field on a template.</summary>
@@ -38,8 +51,18 @@ public sealed class TemplateFieldSlot
     [JsonPropertyName("key")] public string Key { get; set; } = default!;
     /// <summary>Label shown next to the input (from <c>data-field-label</c>, else derived from the key).</summary>
     [JsonPropertyName("label")] public string Label { get; set; } = default!;
-    /// <summary>Widget hint: <c>text</c> | <c>textarea</c> | <c>date</c> | <c>time</c> | <c>url</c>.</summary>
+    /// <summary>
+    /// Widget hint: <c>text</c> | <c>textarea</c> | <c>date</c> | <c>time</c> | <c>url</c> |
+    /// <c>color</c> | <c>select</c> | <c>image</c>. From <c>data-type</c> (or legacy
+    /// <c>data-field-type</c>), else inferred from the key.
+    /// </summary>
     [JsonPropertyName("type")] public string Type { get; set; } = "text";
+    /// <summary>Allowed values for <c>type="select"</c>, from <c>data-options</c>. Null for other types.</summary>
+    [JsonPropertyName("options")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Options { get; set; }
+    /// <summary>Role slug this field belongs to (from <c>data-role-scope</c>); null means shared by all roles.</summary>
+    [JsonPropertyName("roleScope")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RoleScope { get; set; }
 }
 
 /// <summary>One fillable image on a template — a <c>data-src</c> path plus a human label for the builder.</summary>
@@ -49,6 +72,72 @@ public sealed class TemplateImageSlot
     [JsonPropertyName("key")] public string Key { get; set; } = default!;
     /// <summary>Label shown next to the file picker (from <c>data-slot-label</c>, else derived from the key).</summary>
     [JsonPropertyName("label")] public string Label { get; set; } = default!;
+    /// <summary>
+    /// True when the slot accepts a GALLERY of images (<c>data-multiple="true"</c>) rather than exactly
+    /// one — the builder then manages an ordered list for this key.
+    /// </summary>
+    [JsonPropertyName("multiple")] public bool Multiple { get; set; }
+    /// <summary>Minimum images for a multi-image slot (<c>data-min-images</c>); null = unbounded.</summary>
+    [JsonPropertyName("minImages")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinImages { get; set; }
+    /// <summary>Maximum images for a multi-image slot (<c>data-max-images</c>); null = unbounded.</summary>
+    [JsonPropertyName("maxImages")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxImages { get; set; }
+    /// <summary>Role slug this slot belongs to (from <c>data-role-scope</c>); null means shared by all roles.</summary>
+    [JsonPropertyName("roleScope")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RoleScope { get; set; }
+}
+
+/// <summary>
+/// The template's declared theming surface. Every template exposes at minimum an accent, background and
+/// text colour as CSS custom properties; the packager extracts the declared properties and their authored
+/// defaults so the wizard can offer them as real controls without hardcoding any template's palette.
+/// </summary>
+public sealed class TemplateTheme
+{
+    /// <summary>Authored default of <c>--ib-accent</c>, when declared.</summary>
+    [JsonPropertyName("accentColor")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AccentColor { get; set; }
+    /// <summary>Authored default of <c>--ib-bg</c>, when declared.</summary>
+    [JsonPropertyName("backgroundColor")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BackgroundColor { get; set; }
+    /// <summary>Authored default of <c>--ib-text</c>, when declared.</summary>
+    [JsonPropertyName("textColor")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TextColor { get; set; }
+    /// <summary>Font families the inviter may choose between (from <c>&lt;meta name="ib-fonts"&gt;</c>).</summary>
+    [JsonPropertyName("fonts")] public List<string> Fonts { get; set; } = new();
+    /// <summary>Every declared <c>--ib-*</c> custom property, in author order — the wizard's control list.</summary>
+    [JsonPropertyName("keys")] public List<TemplateThemeKey> Keys { get; set; } = new();
+}
+
+/// <summary>One themable CSS custom property the template declares.</summary>
+public sealed class TemplateThemeKey
+{
+    /// <summary>Camel-cased manifest key the override is stored under, e.g. <c>accentColor</c>.</summary>
+    [JsonPropertyName("key")] public string Key { get; set; } = default!;
+    /// <summary>The CSS custom property it drives, e.g. <c>--ib-accent</c>.</summary>
+    [JsonPropertyName("cssVar")] public string CssVar { get; set; } = default!;
+    /// <summary>Human label for the theming step.</summary>
+    [JsonPropertyName("label")] public string Label { get; set; } = default!;
+    /// <summary>Control kind: <c>color</c> | <c>font</c> | <c>text</c>.</summary>
+    [JsonPropertyName("type")] public string Type { get; set; } = "color";
+    /// <summary>The value authored in the template — what the control is pre-filled with.</summary>
+    [JsonPropertyName("default")] public string Default { get; set; } = default!;
+}
+
+/// <summary>One role the template supports, plus everything scoped to it.</summary>
+public sealed class TemplateRoleDefinition
+{
+    /// <summary>Role slug, e.g. <c>bride</c>.</summary>
+    [JsonPropertyName("slug")] public string Slug { get; set; } = default!;
+    /// <summary>Human label derived from the slug.</summary>
+    [JsonPropertyName("label")] public string Label { get; set; } = default!;
+    /// <summary>Theme keys this role may override independently (all of <see cref="TemplateTheme.Keys"/> by default).</summary>
+    [JsonPropertyName("themeKeys")] public List<string> ThemeKeys { get; set; } = new();
+    /// <summary>Field keys scoped to this role via <c>data-role-scope</c>.</summary>
+    [JsonPropertyName("fields")] public List<string> Fields { get; set; } = new();
+    /// <summary>Image-slot keys scoped to this role via <c>data-role-scope</c>.</summary>
+    [JsonPropertyName("imageSlots")] public List<string> ImageSlots { get; set; } = new();
 }
 
 /// <summary>The compiled, ready-to-serve template package (§5.2).</summary>

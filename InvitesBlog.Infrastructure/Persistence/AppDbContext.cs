@@ -46,6 +46,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Visibility).HasDefaultValue("Public");
             e.Property(x => x.IsUsed).HasDefaultValue(false);
             e.HasIndex(x => x.AssignedEmail).HasDatabaseName("idx_templates_assigned_email");
+            e.Property(x => x.RequesterConsentToPublish).HasDefaultValue(false);
+            e.Property(x => x.DesignerConsentToPublish).HasDefaultValue(false);
+            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
+            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
+            e.HasIndex(x => x.DesignerUserId).HasDatabaseName("idx_templates_designer_user_id");
         });
 
         b.Entity<Inquiry>(e =>
@@ -70,7 +75,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.ToTable("custom_templates");
             e.HasKey(x => x.Id);
-            e.Property(x => x.SceneJson).HasColumnType("jsonb");
+            e.Property(x => x.ManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
+            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
+            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
+            e.Property(x => x.RequesterConsentToPublish).HasDefaultValue(false);
+            e.Property(x => x.DesignerConsentToPublish).HasDefaultValue(false);
+            // The review queue: pending submissions first, oldest first.
+            e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_custom_templates_queue");
+            e.HasIndex(x => x.DesignerUserId).HasDatabaseName("idx_custom_templates_designer_user_id");
+            e.HasIndex(x => x.Slug).HasDatabaseName("idx_custom_templates_slug");
         });
 
         b.Entity<Inviter>(e =>
@@ -94,6 +107,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.RulesJson).HasColumnType("jsonb");
             // Valid JSON default so adding this NOT NULL jsonb column to existing rows succeeds.
             e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
+            e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
         });
 
         b.Entity<Guest>(e =>

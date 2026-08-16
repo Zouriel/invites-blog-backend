@@ -57,6 +57,7 @@ public sealed class RawTemplateSeeder(
                 existing.PackageUrl = published.PackageUrl;
                 existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
                 existing.IsActive = true;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
                 logger.LogInformation("Raw template {Slug}@{Version} refreshed (package + manifest).", meta.Slug, meta.Version);
                 continue;
             }
@@ -76,7 +77,8 @@ public sealed class RawTemplateSeeder(
                 ManifestJson = published.ManifestJson,
                 PackageUrl = published.PackageUrl,
                 IsActive = true,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
             });
             logger.LogInformation("Seeded raw template {Slug}@{Version}.", meta.Slug, meta.Version);
         }

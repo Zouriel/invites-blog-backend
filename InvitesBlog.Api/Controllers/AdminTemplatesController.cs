@@ -148,6 +148,7 @@ public sealed class AdminTemplatesController(
             entity.IsActive = true;
             entity.Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public;
             entity.AssignedEmail = normalizedEmail;
+            entity.UpdatedAt = DateTimeOffset.UtcNow;
             templates.Update(entity);
         }
         else
@@ -169,7 +170,8 @@ public sealed class AdminTemplatesController(
                 IsActive = true,
                 Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public,
                 AssignedEmail = normalizedEmail,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
             };
             await templates.AddAsync(entity, ct);
         }

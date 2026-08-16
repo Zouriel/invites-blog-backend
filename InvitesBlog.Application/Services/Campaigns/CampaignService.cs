@@ -65,6 +65,9 @@ public sealed class CampaignService(
             Id = Guid.NewGuid(),
             TemplateId = template.Id,
             TemplateVersion = template.Version,
+            // Freeze the version's structure here — everything downstream reads this snapshot, so
+            // re-reviewing or editing the template later cannot change what this campaign renders.
+            TemplateManifestJson = string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson,
             AccessTokenHash = TokenService.Hash(rawToken),
             Title = req.Title,
             Slug = Slugify(req.Title),
@@ -392,9 +395,20 @@ public sealed class CampaignService(
             campaign.PaidInviteCapacity, campaign.HasDesignerDiscount, campaign.IsSensitive,
             campaign.CustomContentJson, campaign.ThemeOverridesJson, campaign.RulesJson, campaign.RolesJson, campaign.DeliverySettingsJson,
             guestCount,
-            template is null ? null : new CampaignSummaryTemplateDto(template.Name, template.Slug, template.PackageUrl, template.ManifestJson),
+            // The manifest served to the wizard is the campaign's frozen snapshot, never the live template's.
+            template is null ? null : new CampaignSummaryTemplateDto(
+                template.Name, template.Slug, template.PackageUrl, SnapshotManifest(campaign, template)),
             price);
     }
+
+    /// <summary>
+    /// The campaign's frozen manifest, falling back to the live template's only for campaigns created
+    /// before the snapshot column existed and never backfilled (defensive — the migration backfills them).
+    /// </summary>
+    private static string SnapshotManifest(Campaign campaign, Template template) =>
+        string.IsNullOrWhiteSpace(campaign.TemplateManifestJson) || campaign.TemplateManifestJson.Trim() is "{}"
+            ? template.ManifestJson
+            : campaign.TemplateManifestJson;
 
     public async Task<PriceBreakdown> GetPricingAsync(Guid id, int? inviteCount, CancellationToken ct = default)
     {

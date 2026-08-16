@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Infrastructure.Persistence;
 using InvitesBlog.Infrastructure.Templates;
 using Microsoft.EntityFrameworkCore;
@@ -44,8 +45,21 @@ public sealed class TemplateManifestRefresher(
                 continue;
             }
 
-            var manifest = packager.BuildManifest(t.Slug, t.Version, Encoding.UTF8.GetString(bytes));
-            var manifestJson = JsonSerializer.Serialize(manifest, JsonOut);
+            string manifestJson;
+            try
+            {
+                var manifest = packager.BuildManifest(t.Slug, t.Version, Encoding.UTF8.GetString(bytes));
+                manifestJson = JsonSerializer.Serialize(manifest, JsonOut);
+            }
+            catch (AppException ex)
+            {
+                // A stored template that violates a NEWER authoring rule must not take startup down with
+                // it — leave its existing manifest alone and surface it for the admin to fix.
+                logger.LogError(ex, "Template {Slug}@{Version} failed manifest re-derivation — keeping the stored manifest.",
+                    t.Slug, t.Version);
+                continue;
+            }
+
             if (string.Equals(manifestJson, t.ManifestJson, StringComparison.Ordinal)) continue;
 
             t.ManifestJson = manifestJson;

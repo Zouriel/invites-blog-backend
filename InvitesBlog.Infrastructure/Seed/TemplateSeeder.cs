@@ -69,7 +69,8 @@ public sealed class TemplateSeeder(
                 ManifestJson = published.Compiled.ManifestJson,
                 PackageUrl = published.PackageUrl,
                 IsActive = true,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
             });
             logger.LogInformation("Seeded template {Slug}@{Version}.", scene.Slug, scene.Version);
         }

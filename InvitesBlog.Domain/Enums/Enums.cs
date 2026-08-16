@@ -76,12 +76,20 @@ public enum OtpChannel
     Email
 }
 
+/// <summary>
+/// The review status machine a designer submission walks. Numeric values are pinned: the column is
+/// persisted as an int, so members may be appended but never reordered.
+/// </summary>
 public enum CustomTemplateStatus
 {
-    Private,
-    Submitted,
-    InReview,
-    Published,
-    Rejected,
-    Delisted
+    /// <summary>Saved by the designer, not yet submitted for review.</summary>
+    Draft = 0,
+    Submitted = 1,
+    InReview = 2,
+    /// <summary>Approved AND promoted into a live gallery <c>Template</c>.</summary>
+    Published = 3,
+    Rejected = 4,
+    Delisted = 5,
+    /// <summary>Passed review; promotion into a <c>Template</c> row is the next step.</summary>
+    Approved = 6
 }

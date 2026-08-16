@@ -8,6 +8,13 @@ public sealed class Campaign
     public Guid Id { get; set; }
     public Guid TemplateId { get; set; }
     public string TemplateVersion { get; set; } = default!;   // pinned (§5.6)
+
+    /// <summary>
+    /// The pinned template version's FULL manifest, frozen at creation time. Everything downstream (the
+    /// wizard's field/theme/role structure, render, send) reads this — never the live <c>Template</c> row —
+    /// so re-reviewing or editing a template can't retroactively change an in-progress campaign.
+    /// </summary>
+    public string TemplateManifestJson { get; set; } = "{}";
     public Guid? InviterId { get; set; }                      // set at inviter-details step
     public string AccessTokenHash { get; set; } = default!;   // §4.6.2 possession token
     public string? DashboardTokenHash { get; set; }           // §4.6.2 post-payment dashboard link

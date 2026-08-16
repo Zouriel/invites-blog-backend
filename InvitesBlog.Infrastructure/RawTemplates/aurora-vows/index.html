@@ -3,15 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="ib-fonts" content="Cormorant Garamond, Playfair Display, Georgia">
   <title>Aurora Vows</title>
   <style>
 :root {
-  --ink: #f4efe6;
-  --bg: #14100c;
+  /* Themable by the inviter — every --ib-* becomes a control in the Theming step. */
+  --ib-accent: #d8b25a;
+  --ib-bg: #14100c;
+  --ib-text: #f4efe6;
+  --ib-heading-font: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+
+  /* The template's own names alias the themable ones, so recolouring flows everywhere. */
+  --ink: var(--ib-text);
+  --bg: var(--ib-bg);
   --bg2: #241a10;
-  --gold: #d8b25a;
+  --gold: var(--ib-accent);
   --muted: #b9a88a;
-  --serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --serif: var(--ib-heading-font);
   --sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
