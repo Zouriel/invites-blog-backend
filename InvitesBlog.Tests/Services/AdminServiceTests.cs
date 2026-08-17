@@ -29,7 +29,7 @@ public class AdminServiceTests
         _users.Query().Returns(new[] { user }.AsAsyncQueryable());
 
         await Assert.ThrowsAsync<AdminLoginFailedException>(
-            () => Sut().LoginAsync(new AdminLoginRequest(user.Email, "wrong")));
+            () => Sut().LoginAsync(new AdminLoginRequest(user.Email!, "wrong")));
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class AdminServiceTests
         var user = TestData.AdminUser(isActive: false);
         _users.Query().Returns(new[] { user }.AsAsyncQueryable());
         await Assert.ThrowsAsync<AdminLoginFailedException>(
-            () => Sut().LoginAsync(new AdminLoginRequest(user.Email, "correct-horse")));
+            () => Sut().LoginAsync(new AdminLoginRequest(user.Email!, "correct-horse")));
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class AdminServiceTests
         var user = TestData.AdminUser(isAdmin: false); // valid password, but not an Admin
         _users.Query().Returns(new[] { user }.AsAsyncQueryable());
         await Assert.ThrowsAsync<AdminLoginFailedException>(
-            () => Sut().LoginAsync(new AdminLoginRequest(user.Email, "correct-horse")));
+            () => Sut().LoginAsync(new AdminLoginRequest(user.Email!, "correct-horse")));
     }
 
     [Fact]

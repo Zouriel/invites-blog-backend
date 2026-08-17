@@ -20,6 +20,7 @@ public sealed class MyTemplatesService(
     ITemplateRepository templates,
     ICampaignRepository campaigns,
     IRepository<CustomTemplate> submissions,
+    IRepository<Inquiry> inquiries,
     IStorageService storage,
     IUnitOfWork uow) : IMyTemplatesService
 {
@@ -88,11 +89,19 @@ public sealed class MyTemplatesService(
         await uow.SaveChangesAsync(ct);
 
         var count = await campaigns.CountAsync(c => c.TemplateId == template.Id, ct);
+
+        // Report the review state rather than assuming none: a price change doesn't clear a revision
+        // that is still waiting, and the row would lose its badge until the next full load.
+        var pendingReview = await submissions.Query()
+            .AnyAsync(sub => sub.PublishedTemplateId == template.Id
+                             && (sub.Status == CustomTemplateStatus.Submitted
+                                 || sub.Status == CustomTemplateStatus.InReview), ct);
+
         return new MyTemplateRowDto(
             template.Id, template.Name, template.Slug, template.Category, template.Version,
             template.Visibility, template.IsActive, StaticPreview(template.PreviewImageUrl),
             template.DesignerName, template.DesignerUserId, template.UsagePrice, template.CommissionPrice,
-            count, IsAdmin(), false, template.UpdatedAt);
+            count, IsAdmin(), pendingReview, template.UpdatedAt);
     }
 
     public async Task<DeleteTemplateResultDto> DeleteAsync(Guid templateId, CancellationToken ct = default)
@@ -100,7 +109,12 @@ public sealed class MyTemplatesService(
         var template = await LoadOwnedAsync(templateId, ct);
         var count = await campaigns.CountAsync(c => c.TemplateId == template.Id, ct);
 
-        if (count > 0)
+        // A template issued to a customer is promised to them: their "your invitation is ready" link
+        // resolves through this row, so it outlives the gallery listing exactly like a used one does.
+        var issued = await inquiries.Query()
+            .CountAsync(i => i.IssuedTemplateId == template.Id, ct);
+
+        if (count > 0 || issued > 0)
         {
             // Unlist, never delete: those campaigns still serve the package they pinned, and removing
             // the row would strand invitations that are already in people's inboxes.
@@ -109,9 +123,20 @@ public sealed class MyTemplatesService(
             templates.Update(template);
             await uow.SaveChangesAsync(ct);
 
+            var why = count > 0
+                ? $"is used by {count} invitation{(count == 1 ? "" : "s")}"
+                : $"was issued to {issued} customer{(issued == 1 ? "" : "s")}";
             return new DeleteTemplateResultDto(false, true, count,
-                $"“{template.Name}” is used by {count} invitation{(count == 1 ? "" : "s")}, so it was removed from the gallery rather than deleted. Those invitations are unaffected.");
+                $"“{template.Name}” {why}, so it was removed from the gallery rather than deleted. Those invitations are unaffected.");
         }
+
+        // Nothing points at it any more except the review row it was published from. Cut that link
+        // first — there are no foreign keys here, so a left-behind id would point at a ghost and the
+        // designer's dashboard would offer to revise a template that no longer exists.
+        var published = await submissions.Query(tracking: true)
+            .Where(s => s.PublishedTemplateId == template.Id)
+            .ToListAsync(ct);
+        foreach (var submission in published) submission.PublishedTemplateId = null;
 
         templates.Remove(template);
         await uow.SaveChangesAsync(ct);

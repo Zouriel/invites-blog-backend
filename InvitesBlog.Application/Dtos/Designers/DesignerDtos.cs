@@ -14,7 +14,7 @@ public sealed record DesignerOAuthRequest(string IdToken);
 
 /// <summary>The signed-in designer.</summary>
 public sealed record DesignerDto(
-    Guid Id, string Email, string DisplayName, bool IsActive, IReadOnlyList<string> LinkedProviders);
+    Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> LinkedProviders);
 
 /// <summary>A successful designer sign-in: the issued Designer JWT plus the account.</summary>
 public sealed record DesignerAuthResultDto(string Token, DateTimeOffset ExpiresAt, DesignerDto Designer);

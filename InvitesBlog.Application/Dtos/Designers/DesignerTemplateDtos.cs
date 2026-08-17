@@ -101,7 +101,8 @@ public sealed record TemplateReleaseDto(
 /// <summary>A designer as the admin list shows them, with what they've got in flight.</summary>
 public sealed record DesignerAdminDto(
     Guid UserId,
-    string Email,
+    /// <summary>Null for an account that only ever signed in with a phone number.</summary>
+    string? Email,
     string DisplayName,
     bool IsActive,
     IReadOnlyList<string> LinkedProviders,
@@ -115,7 +116,7 @@ public sealed record DesignerAdminDto(
 /// </summary>
 public sealed record DesignerEarningsDto(
     Guid UserId,
-    string Email,
+    string? Email,
     string DisplayName,
     decimal CommissionTotal,
     int CommissionCount,

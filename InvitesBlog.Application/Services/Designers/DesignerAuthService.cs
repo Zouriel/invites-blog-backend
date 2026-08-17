@@ -176,8 +176,8 @@ public sealed class DesignerAuthService(
         var claims = new Dictionary<string, string>
         {
             [ClaimTypes.NameIdentifier] = user.Id.ToString(),
-            ["email"] = user.Email
         };
+        if (user.Email is { Length: > 0 } signInEmail) claims["email"] = signInEmail;
         // Admins sign in here too; issuing under their own role keeps their wider permission set.
         var role = roleNames.Contains(Roles.Admin) ? Roles.Admin : Roles.Designer;
         var token = tokenIssuer.IssueForRole(role, claims, SessionLifetime);

@@ -94,18 +94,18 @@ public sealed class InviteService(
     {
         await rsvpValidator.ValidateAndThrowAsync(req, ct);
 
-        var contact = currentUser.Contact;
-        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
+        var (email, phone) = await IdentifiersAsync(ct);
+        if (email is null && phone is null) throw new UnauthorizedException();
 
         var invite = await invites.GetByIdAsync(inviteId, ct)
             ?? throw new InviteNotFoundException();
         var guest = await guests.GetByIdAsync(invite.GuestId, ct)
             ?? throw new InviteNotFoundException();
 
-        var owns = currentUser.ContactType == "phone"
-            ? string.Equals(guest.PhoneE164, contact, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(guest.Email, contact, StringComparison.OrdinalIgnoreCase);
-        if (!owns) throw new InviteNotFoundException(); // don't reveal existence to non-owners
+        // Every identifier the caller holds, matching the inbox that listed this invitation: an
+        // account merged from a phone and an email must be able to answer either invitation.
+        if (!Owns(guest, email, phone))
+            throw new InviteNotFoundException(); // don't reveal existence to non-owners
 
         return await RecordRsvpAsync(invite, req, ct);
     }
@@ -117,19 +117,20 @@ public sealed class InviteService(
     /// </summary>
     public async Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default)
     {
-        var contact = currentUser.Contact;
-        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
+        var (email, phone) = await IdentifiersAsync(ct);
+        if (email is null && phone is null) throw new UnauthorizedException();
 
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
             ?? throw new InviteNotFoundException();
         if (campaign.Status == CampaignStatus.Cancelled)
             return new InviteCancelledResponse(true, "This event has been cancelled.");
 
-        // Match the verified email to a guest on this campaign (guest-list-only access).
+        // Match the VERIFIED identifier to a guest on this campaign (guest-list-only access). Phone
+        // counts as well as email — the sign-in code can be sent to either, and a guest list of phone
+        // numbers would otherwise lock everyone out of the shared link.
         var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
-        var guest = guestList.FirstOrDefault(g =>
-            !string.IsNullOrWhiteSpace(g.Email) && string.Equals(g.Email, contact, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InviteNotFoundException(); // this email isn't on the guest list
+        var guest = guestList.FirstOrDefault(g => Owns(g, email, phone))
+            ?? throw new InviteNotFoundException(); // they aren't on the guest list
 
         // Get-or-create this guest's invite (lazy — created on first authenticated view).
         var invite = await invites.GetByGuestIdAsync(guest.Id, ct);
@@ -235,6 +236,13 @@ public sealed class InviteService(
             .OrderByDescending(i => i.EventDate)
             .ToList();
     }
+
+    /// <summary>Does this guest row belong to the caller, by either identifier?</summary>
+    private static bool Owns(Guest guest, string? email, string? phone) =>
+        (email is not null && !string.IsNullOrWhiteSpace(guest.Email)
+            && string.Equals(guest.Email, email, StringComparison.OrdinalIgnoreCase)) ||
+        (phone is not null && !string.IsNullOrWhiteSpace(guest.PhoneE164)
+            && string.Equals(guest.PhoneE164, phone, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Who the caller is reachable as. A signed-in account answers to both its email and its phone;

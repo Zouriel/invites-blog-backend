@@ -2,7 +2,7 @@ namespace InvitesBlog.Application.Dtos.Admin;
 
 /// <summary>An application user with the names of the roles assigned to them.</summary>
 public sealed record AdminUserDto(
-    Guid Id, string Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles);
+    Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles);
 
 /// <summary>A role with the names of the permissions it grants.</summary>
 public sealed record AdminRoleDto(

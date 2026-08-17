@@ -33,7 +33,9 @@ public sealed class DesignerAdminService(
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var term = filter.Search.ToLower();
-            query = query.Where(u => u.Email.ToLower().Contains(term) || u.DisplayName.ToLower().Contains(term));
+            query = query.Where(u =>
+                (u.Email != null && u.Email.ToLower().Contains(term)) ||
+                u.DisplayName.ToLower().Contains(term));
         }
 
         var total = await query.CountAsync(ct);

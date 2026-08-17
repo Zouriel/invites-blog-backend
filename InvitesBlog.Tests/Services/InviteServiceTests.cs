@@ -234,6 +234,58 @@ public class InviteServiceTests
         Assert.Equal(2, cards.Count);
     }
 
+    /// <summary>
+    /// The inbox lists an invitation matched on EITHER identifier, so answering it must accept
+    /// either too — otherwise a merged account sees an invitation it is told it cannot reply to.
+    /// </summary>
+    [Fact]
+    public async Task Rsvp_by_id_accepts_the_accounts_other_identifier()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "me@test.com", phone: null);
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        var accountId = Guid.NewGuid();
+
+        // Signed in by PHONE; the invitation was addressed to the account's email.
+        _currentUser.UserId.Returns(accountId);
+        _currentUser.Contact.Returns("+9607771234");
+        _currentUser.ContactType.Returns("phone");
+        _users.GetByIdAsync(accountId, Arg.Any<CancellationToken>()).Returns(new AppUser
+        {
+            Id = accountId, Email = "me@test.com", PhoneE164 = "+9607771234", DisplayName = "Me",
+        });
+        _invites.GetByIdAsync(invite.Id, Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _rsvp.Query(Arg.Any<bool>()).Returns(Array.Empty<RsvpResponse>().AsAsyncQueryable());
+
+        var result = await Sut().RsvpByInviteIdAsync(invite.Id, new RsvpRequest("Going", null, null, null, null, null));
+
+        Assert.Equal("Going", result.Rsvp);
+    }
+
+    [Fact]
+    public async Task Rsvp_by_id_still_refuses_someone_elses_invite()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id, email: "someone@else.com", phone: null);
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        var accountId = Guid.NewGuid();
+
+        _currentUser.UserId.Returns(accountId);
+        _currentUser.Contact.Returns("+9607771234");
+        _currentUser.ContactType.Returns("phone");
+        _users.GetByIdAsync(accountId, Arg.Any<CancellationToken>()).Returns(new AppUser
+        {
+            Id = accountId, Email = "me@test.com", PhoneE164 = "+9607771234", DisplayName = "Me",
+        });
+        _invites.GetByIdAsync(invite.Id, Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+
+        await Assert.ThrowsAsync<InviteNotFoundException>(() =>
+            Sut().RsvpByInviteIdAsync(invite.Id, new RsvpRequest("Going", null, null, null, null, null)));
+    }
+
     [Fact]
     public async Task Claim_no_contact_throws_Unauthorized()
     {

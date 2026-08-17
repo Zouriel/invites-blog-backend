@@ -35,7 +35,9 @@ public sealed class AdminService(
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var term = filter.Search.ToLower();
-            query = query.Where(u => u.Email.ToLower().Contains(term) || u.DisplayName.ToLower().Contains(term));
+            query = query.Where(u =>
+                (u.Email != null && u.Email.ToLower().Contains(term)) ||
+                u.DisplayName.ToLower().Contains(term));
         }
 
         var total = await query.CountAsync(ct);
@@ -132,8 +134,8 @@ public sealed class AdminService(
         var claims = new Dictionary<string, string>
         {
             [ClaimTypes.NameIdentifier] = user.Id.ToString(),
-            ["email"] = user.Email
         };
+        if (user.Email is { Length: > 0 } signInEmail) claims["email"] = signInEmail;
         var token = tokenIssuer.IssueForRole(Roles.Admin, claims, AdminSessionLifetime);
         var expiresAt = DateTimeOffset.UtcNow.Add(AdminSessionLifetime);
 

@@ -32,7 +32,17 @@ public sealed class RawTemplateSeeder(
         foreach (var metaResource in metas)
         {
             var prefix = metaResource[..^".meta.json".Length]; // ...RawTemplates.{slug}
-            var meta = JsonSerializer.Deserialize<RawMeta>(await ReadAsync(asm, metaResource, ct)!, JsonOpts);
+
+            // Skip rather than throw: this runs during startup, so an unreadable resource would turn
+            // a single bad template into a boot loop for the whole API.
+            var metaJson = await ReadAsync(asm, metaResource, ct);
+            if (metaJson is null)
+            {
+                logger.LogWarning("Raw template metadata {Resource} could not be read — skipped.", metaResource);
+                continue;
+            }
+
+            var meta = JsonSerializer.Deserialize<RawMeta>(metaJson, JsonOpts);
             if (meta is null) continue;
 
             var html = await ReadAsync(asm, prefix + ".index.html", ct);
