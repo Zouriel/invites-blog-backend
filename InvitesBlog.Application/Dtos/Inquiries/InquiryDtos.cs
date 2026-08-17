@@ -2,8 +2,15 @@ namespace InvitesBlog.Application.Dtos.Inquiries;
 
 // ----- Public submit -----
 
-/// <summary>The public "Start an inquiry" form.</summary>
-public sealed record SubmitInquiryRequest(string Name, string Email, string Occasion, string Message);
+/// <summary>
+/// The public "Start an inquiry" form. <paramref name="RequestedDesignerUserId"/> is optional — a
+/// customer may ask for a particular designer, or leave it to us.
+/// </summary>
+public sealed record SubmitInquiryRequest(
+    string Name, string Email, string Occasion, string Message, Guid? RequestedDesignerUserId = null);
+
+/// <summary>A designer a customer can ask for by name. Deliberately no email — this list is public.</summary>
+public sealed record PublicDesignerDto(Guid UserId, string DisplayName, int PublishedTemplates);
 
 public sealed record SubmitInquiryResponse(Guid Id);
 
@@ -20,7 +27,8 @@ public sealed record InquiryDetailDto(
     bool TemplateIssued, DateTimeOffset? TemplateIssuedAt, Guid? IssuedTemplateId,
     DateTimeOffset CreatedAt,
     Guid? AssignedDesignerUserId, string? AssignedDesignerName,
-    decimal? CommissionPrice, decimal? UsagePrice);
+    decimal? CommissionPrice, decimal? UsagePrice,
+    Guid? RequestedDesignerUserId, string? RequestedDesignerName);
 
 /// <summary>Owner-filled consultation fields + attended flag (colors/references/notes are all optional).</summary>
 public sealed record UpdateInquiryRequest(string? Colors, string? References, string? Notes, bool HasAttended);
@@ -29,12 +37,16 @@ public sealed record UpdateInquiryRequest(string? Colors, string? References, st
 public sealed record AssignCommissionRequest(
     Guid? DesignerUserId, decimal? CommissionPrice, decimal? UsagePrice);
 
-/// <summary>A commission as the designer it was handed to sees it.</summary>
+/// <summary>
+/// A request as the designer sees it. <paramref name="Assigned"/> separates work they've been put on
+/// from requests that merely NAMED them and are still waiting on terms.
+/// </summary>
 public sealed record DesignerCommissionDto(
     Guid InquiryId, string RequesterName, string RequesterEmail, string Occasion, string Brief,
     string? Colors, string? References, string? Notes,
     decimal? CommissionPrice, decimal? UsagePrice,
-    bool TemplateIssued, DateTimeOffset CreatedAt);
+    bool TemplateIssued, DateTimeOffset CreatedAt,
+    bool Assigned, bool RequestedMe);
 
 // ----- Issue a dedicated template for an inquiry -----
 

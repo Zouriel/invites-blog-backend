@@ -157,4 +157,69 @@ public class InquiryServiceTests
             Arg.Is<EmailMessage>(m => m.To == "aisha@test.com" && m.Html.Contains("/request-template")),
             Arg.Any<CancellationToken>());
     }
+    // ----- Requesting a designer by name -----
+
+    [Fact]
+    public async Task Submit_keeps_the_designer_the_customer_asked_for()
+    {
+        var designerId = Guid.NewGuid();
+        Inquiry? added = null;
+        await _inquiries.AddAsync(Arg.Do<Inquiry>(i => added = i), Arg.Any<CancellationToken>());
+
+        await Sut().SubmitAsync(new SubmitInquiryRequest(
+            "Aisha", "aisha@test.com", "Wedding", "Red curtains please", designerId));
+
+        Assert.NotNull(added);
+        Assert.Equal(designerId, added!.RequestedDesignerUserId);
+    }
+
+    /// <summary>
+    /// Being asked for by name must reach the designer. Otherwise a customer picks someone and that
+    /// someone never hears about it — but it stays flagged unassigned until an admin agrees terms.
+    /// </summary>
+    [Fact]
+    public async Task Commissions_include_requests_that_named_this_designer()
+    {
+        var me = Guid.NewGuid();
+        var assigned = Inquiry();
+        assigned.AssignedDesignerUserId = me;
+        var requested = Inquiry();
+        requested.RequestedDesignerUserId = me;
+        var other = Inquiry();
+        other.AssignedDesignerUserId = Guid.NewGuid();
+
+        _currentUser.UserId.Returns(me);
+        _inquiries.Query(Arg.Any<bool>()).Returns(new[] { assigned, requested, other }.AsAsyncQueryable());
+
+        var list = await Sut().ListCommissionsForDesignerAsync();
+
+        Assert.Equal(2, list.Count);
+        Assert.True(list.Single(c => c.InquiryId == assigned.Id).Assigned);
+        Assert.False(list.Single(c => c.InquiryId == requested.Id).Assigned);
+        Assert.True(list.Single(c => c.InquiryId == requested.Id).RequestedMe);
+    }
+
+    [Fact]
+    public async Task Public_designers_lists_only_active_authors_with_published_work()
+    {
+        var published = Guid.NewGuid();
+        var inactive = Guid.NewGuid();
+        _templates.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new Template { Id = Guid.NewGuid(), Name = "A", Slug = "a", IsActive = true, DesignerUserId = published },
+            new Template { Id = Guid.NewGuid(), Name = "B", Slug = "b", IsActive = true, DesignerUserId = inactive },
+            new Template { Id = Guid.NewGuid(), Name = "C", Slug = "c", IsActive = false, DesignerUserId = published },
+        }.AsAsyncQueryable());
+        _users.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new AppUser { Id = published, DisplayName = "Mira", Email = "mira@test.com", IsActive = true },
+            new AppUser { Id = inactive, DisplayName = "Gone", Email = "gone@test.com", IsActive = false },
+        }.AsAsyncQueryable());
+
+        var list = await Sut().ListPublicDesignersAsync();
+
+        var only = Assert.Single(list);
+        Assert.Equal("Mira", only.DisplayName);
+        Assert.Equal(1, only.PublishedTemplates);   // the inactive template does not count
+    }
 }

@@ -46,6 +46,7 @@ public class AccountServiceTests
         _inviters.Query(Arg.Any<bool>()).Returns(Array.Empty<Inviter>().AsAsyncQueryable());
         _inquiries.Query(Arg.Any<bool>()).Returns(Array.Empty<Inquiry>().AsAsyncQueryable());
         _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
+        _guests.Query(Arg.Any<bool>()).Returns(Array.Empty<Guest>().AsAsyncQueryable());
         _roles.FirstOrDefaultAsync(Arg.Any<System.Linq.Expressions.Expression<Func<Role, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(new Role { Id = _customerRoleId, Name = Roles.Customer, Description = "" });
         _tokens.IssueForRoles(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<TimeSpan>())

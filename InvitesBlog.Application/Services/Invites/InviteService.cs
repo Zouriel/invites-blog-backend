@@ -22,6 +22,7 @@ public sealed class InviteService(
     ICampaignRepository campaigns,
     ITemplateRepository templates,
     IInviterRepository inviters,
+    IRepository<AppUser> users,
     IRepository<RsvpResponse> rsvpResponses,
     IUnitOfWork uow,
     ICurrentUser currentUser,
@@ -195,31 +196,58 @@ public sealed class InviteService(
 
     public async Task<IReadOnlyList<InboxCardResponse>> GetInboxAsync(CancellationToken ct = default)
     {
-        var contact = currentUser.Contact;
-        var type = currentUser.ContactType;
-        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
+        var (email, phone) = await IdentifiersAsync(ct);
+        if (email is null && phone is null) throw new UnauthorizedException();
 
-        var guestIds = await (type == "phone"
-                ? guests.Query().Where(g => g.PhoneE164 == contact)
-                : guests.Query().Where(g => g.Email == contact))
+        // Every identifier, not just the one on the token: someone who signed in with their phone
+        // and later linked their email should find BOTH sets of invitations in one inbox.
+        var guestIds = await guests.Query()
+            .Where(g => (email != null && g.Email == email) || (phone != null && g.PhoneE164 == phone))
             .Select(g => g.Id).ToListAsync(ct);
+        if (guestIds.Count == 0) return [];
 
         var inviteList = await invites.Query()
             .Where(i => guestIds.Contains(i.GuestId)).ToListAsync(ct);
+        if (inviteList.Count == 0) return [];
 
         var campaignIds = inviteList.Select(i => i.CampaignId).Distinct().ToList();
         var campaignList = await campaigns.Query()
             .Where(c => campaignIds.Contains(c.Id)).ToListAsync(ct);
 
+        var inviterIds = campaignList.Select(c => c.InviterId).OfType<Guid>().Distinct().ToList();
+        var inviterNames = await inviters.Query()
+            .Where(i => inviterIds.Contains(i.Id))
+            .ToDictionaryAsync(i => i.Id, i => i.Name, ct);
+
         var now = DateTimeOffset.UtcNow;
-        return inviteList.Select(i =>
-        {
-            var c = campaignList.First(x => x.Id == i.CampaignId);
-            return new InboxCardResponse(
-                i.Id, c.Title, c.EventStartAt, c.EventType,
-                i.RsvpStatus.ToString(), i.ViewedAt is null,
-                c.EventStartAt < now, c.Status == CampaignStatus.Cancelled);
-        }).ToList();
+        return inviteList
+            .Select(i =>
+            {
+                var c = campaignList.FirstOrDefault(x => x.Id == i.CampaignId);
+                if (c is null) return null;
+                return new InboxCardResponse(
+                    i.Id, c.Title, c.EventStartAt, c.EventType,
+                    i.RsvpStatus.ToString(), i.ViewedAt is null,
+                    c.EventStartAt < now, c.Status == CampaignStatus.Cancelled,
+                    c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null);
+            })
+            .OfType<InboxCardResponse>()
+            .OrderByDescending(i => i.EventDate)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Who the caller is reachable as. A signed-in account answers to both its email and its phone;
+    /// an invitee who only verified a contact (no account) answers to that one contact.
+    /// </summary>
+    private async Task<(string? Email, string? Phone)> IdentifiersAsync(CancellationToken ct)
+    {
+        if (currentUser.UserId is { } id && await users.GetByIdAsync(id, ct) is { } account)
+            return (account.Email, account.PhoneE164);
+
+        var contact = currentUser.Contact;
+        if (string.IsNullOrEmpty(contact)) return (null, null);
+        return currentUser.ContactType == "phone" ? (null, contact) : (contact, null);
     }
 
     public async Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default)

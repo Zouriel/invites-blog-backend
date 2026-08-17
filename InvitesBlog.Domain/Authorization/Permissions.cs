@@ -131,9 +131,12 @@ public static class Roles
 
         // A designer authors and submits templates. Reviewing them is an ADMIN act
         // (Designer.Review), deliberately withheld here so no one approves their own work.
+        // They also get the customer's read permissions: a designer is a person who receives
+        // invitations too, and their account page would 403 without them.
         [Designer] = new[]
         {
             Permissions.Templates.Read, Permissions.Designer.Manage,
+            Permissions.Dashboard.Read, Permissions.Campaigns.Read, Permissions.Inbox.Read,
         },
 
         // A signed-in customer sees the invitations and template requests already tied to their

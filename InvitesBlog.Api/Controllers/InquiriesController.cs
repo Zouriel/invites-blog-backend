@@ -15,4 +15,13 @@ public sealed class InquiriesController(IInquiryService inquiries) : BaseApiCont
     [EnableRateLimiting("otp")]
     public async Task<IActionResult> Submit([FromBody] SubmitInquiryRequest req, CancellationToken ct) =>
         Created(await inquiries.SubmitAsync(req, ct));
+
+    /// <summary>
+    /// Designers the request form can offer. Public, so it carries names and nothing else — no
+    /// email addresses; the routing happens server-side from the id.
+    /// </summary>
+    [HttpGet("designers")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Designers(CancellationToken ct) =>
+        Success(await inquiries.ListPublicDesignersAsync(ct));
 }

@@ -22,6 +22,7 @@ public class InviteServiceTests
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IRepository<RsvpResponse> _rsvp = Substitute.For<IRepository<RsvpResponse>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
@@ -29,7 +30,8 @@ public class InviteServiceTests
     private IValidator<RsvpRequest> _rsvpValidator = TestData.PassingValidator<RsvpRequest>();
 
     private InviteService Sut() => new(
-        _invites, _guests, _campaigns, _templates, _inviters, _rsvp, _uow, _currentUser, _config, _rsvpValidator);
+        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _uow, _currentUser, _config,
+        _rsvpValidator);
 
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());
@@ -187,12 +189,49 @@ public class InviteServiceTests
         _guests.Query().Returns(new[] { guest }.AsAsyncQueryable());
         _invites.Query().Returns(new[] { invite }.AsAsyncQueryable());
         _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+        _inviters.Query().Returns(Array.Empty<Inviter>().AsAsyncQueryable());
 
         var cards = await Sut().GetInboxAsync();
 
         var card = Assert.Single(cards);
         Assert.Equal(campaign.Title, card.EventTitle);
         Assert.Equal("Going", card.RsvpStatus);
+    }
+
+    /// <summary>
+    /// A merged account answers to BOTH its identifiers, so an invitation sent to the phone and one
+    /// sent to the email belong in the same inbox — even though the token names only one of them.
+    /// </summary>
+    [Fact]
+    public async Task Inbox_for_signed_in_account_matches_both_identifiers()
+    {
+        var campaign = TestData.Campaign();
+        var byEmail = TestData.Guest(campaign.Id, email: "me@test.com", phone: null);
+        var byPhone = TestData.Guest(campaign.Id, email: null, phone: "+9607771234");
+        var stranger = TestData.Guest(campaign.Id, email: "someone@else.com", phone: null);
+        var accountId = Guid.NewGuid();
+
+        _currentUser.UserId.Returns(accountId);
+        _currentUser.Contact.Returns("me@test.com");   // the token names only the email
+        _currentUser.ContactType.Returns("email");
+        _users.GetByIdAsync(accountId, Arg.Any<CancellationToken>()).Returns(new AppUser
+        {
+            Id = accountId, Email = "me@test.com", PhoneE164 = "+9607771234", DisplayName = "Me",
+        });
+
+        _guests.Query().Returns(new[] { byEmail, byPhone, stranger }.AsAsyncQueryable());
+        _invites.Query().Returns(new[]
+        {
+            TestData.Invite(campaign.Id, byEmail.Id),
+            TestData.Invite(campaign.Id, byPhone.Id),
+            TestData.Invite(campaign.Id, stranger.Id),
+        }.AsAsyncQueryable());
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+        _inviters.Query().Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+
+        var cards = await Sut().GetInboxAsync();
+
+        Assert.Equal(2, cards.Count);
     }
 
     [Fact]

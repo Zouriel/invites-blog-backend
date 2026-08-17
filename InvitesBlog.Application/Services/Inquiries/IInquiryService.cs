@@ -16,6 +16,12 @@ public interface IInquiryService
     /// <summary>Hands the request to a designer at an agreed price, or clears the assignment.</summary>
     Task<InquiryDetailDto> AssignCommissionAsync(Guid id, AssignCommissionRequest req, CancellationToken ct = default);
 
-    /// <summary>The commissions handed to the signed-in designer, with the brief they need to work from.</summary>
+    /// <summary>
+    /// What the signed-in designer should see: requests they're assigned, plus requests that asked
+    /// for them by name and are still awaiting terms.
+    /// </summary>
     Task<IReadOnlyList<DesignerCommissionDto>> ListCommissionsForDesignerAsync(CancellationToken ct = default);
+
+    /// <summary>Designers a customer can ask for on the request form (public — names only).</summary>
+    Task<IReadOnlyList<PublicDesignerDto>> ListPublicDesignersAsync(CancellationToken ct = default);
 }

@@ -36,12 +36,27 @@ public sealed class InquiryService(
             Email = req.Email.Trim().ToLowerInvariant(),
             Occasion = req.Occasion.Trim(),
             Message = req.Message.Trim(),
+            RequestedDesignerUserId = req.RequestedDesignerUserId,
             HasAttended = false,
             TemplateIssued = false,
             CreatedAt = DateTimeOffset.UtcNow
         };
         await inquiries.AddAsync(inquiry, ct);
         await uow.SaveChangesAsync(ct);
+
+        // Being asked for by name should reach the designer the same day, not whenever they next
+        // open the site. Best-effort: a mail failure must never lose the request itself.
+        if (inquiry.RequestedDesignerUserId is { } requestedId)
+        {
+            try
+            {
+                var designer = await users.GetByIdAsync(requestedId, ct);
+                if (designer is { IsActive: true, Email: { Length: > 0 } to })
+                    await email.SendAsync(BuildRequestedEmail(to, designer.DisplayName, inquiry), ct);
+            }
+            catch { /* swallow — the request is safely stored and visible in their queue */ }
+        }
+
         return new SubmitInquiryResponse(inquiry.Id);
     }
 
@@ -106,23 +121,56 @@ public sealed class InquiryService(
         CancellationToken ct = default)
     {
         var designerId = currentUser.UserId ?? throw new Exceptions.UnauthorizedException();
+
+        // Work they're on, PLUS requests that asked for them by name — otherwise a customer could
+        // request a designer and that designer would never learn of it.
         var list = await inquiries.Query()
-            .Where(i => i.AssignedDesignerUserId == designerId)
+            .Where(i => i.AssignedDesignerUserId == designerId || i.RequestedDesignerUserId == designerId)
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync(ct);
 
         return list.Select(i => new DesignerCommissionDto(
             i.Id, i.Name, i.Email, i.Occasion, i.Message, i.Colors, i.References, i.Notes,
-            i.CommissionPrice, i.UsagePrice, i.TemplateIssued, i.CreatedAt)).ToList();
+            i.CommissionPrice, i.UsagePrice, i.TemplateIssued, i.CreatedAt,
+            Assigned: i.AssignedDesignerUserId == designerId,
+            RequestedMe: i.RequestedDesignerUserId == designerId)).ToList();
     }
 
     private async Task<InquiryDetailDto> ToDetailAsync(Inquiry i, CancellationToken ct)
     {
-        var designer = i.AssignedDesignerUserId is { } id ? await users.GetByIdAsync(id, ct) : null;
+        var assigned = i.AssignedDesignerUserId is { } id ? await users.GetByIdAsync(id, ct) : null;
+        var requested = i.RequestedDesignerUserId is { } rid ? await users.GetByIdAsync(rid, ct) : null;
         return new InquiryDetailDto(
             i.Id, i.Name, i.Email, i.Occasion, i.Message, i.Colors, i.References, i.Notes,
             i.HasAttended, i.AttendedAt, i.TemplateIssued, i.TemplateIssuedAt, i.IssuedTemplateId, i.CreatedAt,
-            i.AssignedDesignerUserId, designer?.DisplayName, i.CommissionPrice, i.UsagePrice);
+            i.AssignedDesignerUserId, assigned?.DisplayName, i.CommissionPrice, i.UsagePrice,
+            i.RequestedDesignerUserId, requested?.DisplayName);
+    }
+
+    /// <summary>
+    /// Designers a customer may ask for by name. Only active accounts with something published —
+    /// a name with no work behind it is noise on a request form, and the list is public so it
+    /// carries no email addresses.
+    /// </summary>
+    public async Task<IReadOnlyList<PublicDesignerDto>> ListPublicDesignersAsync(CancellationToken ct = default)
+    {
+        var published = await templates.Query()
+            .Where(t => t.IsActive && t.DesignerUserId != null)
+            .GroupBy(t => t.DesignerUserId!.Value)
+            .Select(g => new { UserId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        if (published.Count == 0) return [];
+
+        var ids = published.Select(p => p.UserId).ToList();
+        var designers = await users.Query()
+            .Where(u => ids.Contains(u.Id) && u.IsActive)
+            .ToListAsync(ct);
+
+        return designers
+            .Select(u => new PublicDesignerDto(
+                u.Id, u.DisplayName, published.First(p => p.UserId == u.Id).Count))
+            .OrderBy(d => d.DisplayName)
+            .ToList();
     }
 
     public async Task UpdateAsync(Guid id, UpdateInquiryRequest req, CancellationToken ct = default)
@@ -211,6 +259,25 @@ public sealed class InquiryService(
     }
 
     private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>Tells a designer that someone asked for them by name. No prices — terms come later.</summary>
+    private EmailMessage BuildRequestedEmail(string to, string designerName, Inquiry inquiry)
+    {
+        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var link = $"{inviterBase}/designer/requests";
+        var safeDesigner = System.Net.WebUtility.HtmlEncode(designerName);
+        var safeWho = System.Net.WebUtility.HtmlEncode(inquiry.Name);
+        var safeOccasion = System.Net.WebUtility.HtmlEncode(inquiry.Occasion);
+        var safeBrief = System.Net.WebUtility.HtmlEncode(inquiry.Message);
+        var html =
+            "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#2a1420\">" +
+            $"<p style=\"font-size:16px;line-height:1.6\">Hi {safeDesigner},</p>" +
+            $"<p style=\"font-size:16px;line-height:1.6\"><strong>{safeWho}</strong> asked for you by name for a {safeOccasion} invitation.</p>" +
+            $"<blockquote style=\"margin:18px 0;padding:12px 16px;border-left:3px solid #f0c8d8;color:#5a3547;font-size:15px;line-height:1.6\">{safeBrief}</blockquote>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See the request</a></p>" +
+            "<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">We'll agree the terms with them and hand it over — you'll see it move to \u201cTo build\u201d.<br>Sent via invites.blog</p></div>";
+        return new EmailMessage(To: to, Subject: $"{safeWho} asked for you \u2728", Html: html, Stream: EmailStream.System);
+    }
 
     private EmailMessage BuildReadyEmail(string to, string name, string templateName)
     {

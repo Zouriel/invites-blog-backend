@@ -67,6 +67,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
             // A designer's commission list: what has been handed to them.
             e.HasIndex(x => x.AssignedDesignerUserId).HasDatabaseName("idx_inquiries_assigned_designer");
+            // A designer also needs to find the requests that ASKED FOR THEM but aren't theirs yet.
+            e.HasIndex(x => x.RequestedDesignerUserId).HasDatabaseName("idx_inquiries_requested_designer");
         });
 
         b.Entity<TemplateType>(e =>

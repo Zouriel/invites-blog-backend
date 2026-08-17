@@ -34,6 +34,13 @@ public sealed class Inquiry
     public Guid? IssuedTemplateId { get; set; }
 
     // ----- Commission (§Phase 5) -----
+    /// <summary>
+    /// The designer the CUSTOMER asked for, chosen on the request form. A preference, not an
+    /// assignment: it tells us who the request is meant to reach, while the commercial terms are
+    /// still agreed before anyone is formally put on it.
+    /// </summary>
+    public Guid? RequestedDesignerUserId { get; set; }
+
     /// <summary>The designer this request was handed to, once one has been assigned.</summary>
     public Guid? AssignedDesignerUserId { get; set; }
     /// <summary>The one-time fee agreed for the bespoke work.</summary>

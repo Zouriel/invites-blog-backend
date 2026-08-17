@@ -26,7 +26,7 @@ public sealed record MyInviteResponse(string PackageUrl, JsonObject Data, string
 public sealed record RsvpResultResponse(string Rsvp);
 public sealed record InboxCardResponse(
     Guid InviteId, string EventTitle, DateTimeOffset EventDate, string VenueType,
-    string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled);
+    string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled, string? InviterName = null);
 public sealed record ClaimResponse(bool Claimed);
 
 /// <summary>
