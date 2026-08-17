@@ -44,7 +44,27 @@ public sealed record LinkResultDto(
 
 /// <summary>What the sign-in page needs to render itself honestly.</summary>
 /// <param name="SmsAvailable">False when no SMS provider is configured, so the phone tab can say so.</param>
-public sealed record AuthOptionsDto(bool SmsAvailable, IReadOnlyList<string> OAuthProviders);
+/// <param name="OAuthProviders">
+/// Everything the browser needs to start the OAuth dance itself — provider key, our public client id
+/// and the provider's authorize endpoint. Empty when no provider is configured, and the page then
+/// shows no buttons rather than buttons that cannot work.
+/// </param>
+public sealed record AuthOptionsDto(bool SmsAvailable, IReadOnlyList<OAuthProviderDto> OAuthProviders);
+
+/// <summary>One OAuth button the sign-in page can offer.</summary>
+public sealed record OAuthProviderDto(string Provider, string ClientId, string AuthorizeUrl);
+
+/// <summary>
+/// Signing in with an ID token the browser obtained from the provider. The token is verified
+/// server-side against the provider's published keys, so nothing here is trusted as sent.
+/// </summary>
+public sealed record OAuthLoginRequest(string IdToken);
+
+/// <summary>
+/// Creating a designer account: someone who wants to publish templates rather than only receive
+/// invitations. Everyone else gets an account automatically the first time they sign in with a code.
+/// </summary>
+public sealed record RegisterDesignerRequest(string Email, string Password, string DisplayName);
 
 /// <summary>One invitation the signed-in customer created, for their history.</summary>
 public sealed record MyCampaignDto(

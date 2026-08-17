@@ -37,7 +37,9 @@ public class AccountServiceTests
     private readonly IOtpSender _sms = Substitute.For<IOtpSender>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
 
+    private readonly List<IExternalAuthProvider> _authProviders = [];
     private readonly Guid _customerRoleId = Guid.NewGuid();
+    private readonly Guid _designerRoleId = Guid.NewGuid();
 
     public AccountServiceTests()
     {
@@ -47,8 +49,18 @@ public class AccountServiceTests
         _inquiries.Query(Arg.Any<bool>()).Returns(Array.Empty<Inquiry>().AsAsyncQueryable());
         _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
         _guests.Query(Arg.Any<bool>()).Returns(Array.Empty<Guest>().AsAsyncQueryable());
+        // The service looks a role up by name; answer with whichever one the predicate accepts.
         _roles.FirstOrDefaultAsync(Arg.Any<System.Linq.Expressions.Expression<Func<Role, bool>>>(), Arg.Any<CancellationToken>())
-            .Returns(new Role { Id = _customerRoleId, Name = Roles.Customer, Description = "" });
+            .Returns(ci =>
+            {
+                var predicate = ci.ArgAt<System.Linq.Expressions.Expression<Func<Role, bool>>>(0).Compile();
+                var known = new[]
+                {
+                    new Role { Id = _customerRoleId, Name = Roles.Customer, Description = "" },
+                    new Role { Id = _designerRoleId, Name = Roles.Designer, Description = "" },
+                };
+                return known.FirstOrDefault(predicate);
+            });
         _tokens.IssueForRoles(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<TimeSpan>())
             .Returns("session-jwt");
         _sms.Channel.Returns("sms");
@@ -57,7 +69,8 @@ public class AccountServiceTests
 
     private AccountService Sut() => new(
         _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests, _templates,
-        [], [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config);
+        _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(), [_sms], _otp, _uow, _tokens,
+        new PhoneNormalizer(), _config);
 
     private static AppUser User(
         string? email = null, string? phone = null, string? password = null,
@@ -256,5 +269,166 @@ public class AccountServiceTests
             () => Sut().RequestCodeAsync(new RequestCodeRequest("7771234", "MV")));
 
         Assert.Equal("sms_not_configured", ex.ErrorCode);
+    }
+    // ----- Designer sign-up ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Registering_creates_a_designer_who_is_also_a_customer()
+    {
+        _users.Query(Arg.Any<bool>()).Returns(Array.Empty<AppUser>().AsAsyncQueryable());
+        AppUser? added = null;
+        await _users.AddAsync(Arg.Do<AppUser>(u => added = u), Arg.Any<CancellationToken>());
+
+        await Sut().RegisterDesignerAsync(new RegisterDesignerRequest("  New@Test.com ", "a-long-password", "New"));
+
+        Assert.Equal("new@test.com", added!.Email);
+        Assert.Equal(2, added.UserRoles.Count);   // Designer to publish, Customer to receive
+        Assert.Contains(added.UserRoles, ur => ur.RoleId == _designerRoleId);
+        Assert.Contains(added.UserRoles, ur => ur.RoleId == _customerRoleId);
+        // Roles are referenced by id only — attaching the no-tracking instance would try to INSERT it.
+        Assert.All(added.UserRoles, ur => Assert.Null(ur.Role));
+    }
+
+    [Fact]
+    public async Task Registering_never_takes_over_an_account_that_already_has_a_password()
+    {
+        _users.Query(Arg.Any<bool>()).Returns(new[] { User(email: "taken@test.com", password: "theirs") }.AsAsyncQueryable());
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            Sut().RegisterDesignerAsync(new RegisterDesignerRequest("taken@test.com", "a-long-password", "Me")));
+        Assert.Equal("email_taken", ex.ErrorCode);
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Someone who has only ever received invitations already has a passwordless account. Signing up
+    /// to design should upgrade THAT account, not strand their history behind a second one.
+    /// </summary>
+    [Fact]
+    public async Task Registering_upgrades_the_passwordless_account_that_email_already_has()
+    {
+        var existing = User(email: "customer@test.com", roleNames: Roles.Customer);
+        _users.Query(Arg.Any<bool>()).Returns(new[] { existing }.AsAsyncQueryable());
+
+        await Sut().RegisterDesignerAsync(new RegisterDesignerRequest("customer@test.com", "a-long-password", "Me"));
+
+        Assert.NotNull(existing.PasswordHash);
+        Assert.Contains(existing.UserRoles, ur => ur.RoleId == _designerRoleId);
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Registering_refuses_a_suspended_account()
+    {
+        _users.Query(Arg.Any<bool>()).Returns(new[] { User(email: "gone@test.com", active: false) }.AsAsyncQueryable());
+
+        await Assert.ThrowsAsync<AccountSuspendedException>(() =>
+            Sut().RegisterDesignerAsync(new RegisterDesignerRequest("gone@test.com", "a-long-password", "Gone")));
+    }
+
+    // ----- OAuth --------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task OAuth_links_the_verified_email_to_the_existing_account_rather_than_creating_a_second()
+    {
+        var existing = User(email: "designer@test.com", roleNames: Roles.Designer);
+        _users.Query(Arg.Any<bool>()).Returns(new[] { existing }.AsAsyncQueryable());
+        _authProviders.Add(Provider("google", identity:
+            new ExternalIdentity("google", "google-sub-1", "designer@test.com", "Test Designer")));
+
+        UserExternalLogin? link = null;
+        await _logins.AddAsync(Arg.Do<UserExternalLogin>(l => link = l), Arg.Any<CancellationToken>());
+
+        var result = await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token"));
+
+        Assert.Equal(existing.Id, result.Account.Id);
+        Assert.Equal(existing.Id, link!.UserId);
+        Assert.Equal("google-sub-1", link.ExternalSubjectId);
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// The subject id is the linking key, not the email — a provider that let someone change their
+    /// address must not hand them a different account.
+    /// </summary>
+    [Fact]
+    public async Task OAuth_follows_an_existing_link_even_when_the_email_has_changed()
+    {
+        var linked = User(email: "old@test.com", roleNames: Roles.Designer);
+        _users.Query(Arg.Any<bool>()).Returns(new[] { linked }.AsAsyncQueryable());
+        _logins.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new UserExternalLogin
+            {
+                Id = Guid.NewGuid(), UserId = linked.Id, Provider = "google",
+                ExternalSubjectId = "google-sub-1", Email = "old@test.com",
+            },
+        }.AsAsyncQueryable());
+        _authProviders.Add(Provider("google", identity:
+            new ExternalIdentity("google", "google-sub-1", "new@test.com", "Renamed")));
+
+        var result = await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token"));
+
+        Assert.Equal(linked.Id, result.Account.Id);
+        await _logins.DidNotReceive().AddAsync(Arg.Any<UserExternalLogin>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OAuth_creates_a_customer_on_first_arrival()
+    {
+        _users.Query(Arg.Any<bool>()).Returns(Array.Empty<AppUser>().AsAsyncQueryable());
+        _authProviders.Add(Provider("google", identity:
+            new ExternalIdentity("google", "google-sub-9", "brand@new.com", "Brand New")));
+        AppUser? added = null;
+        await _users.AddAsync(Arg.Do<AppUser>(u => added = u), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token"));
+
+        Assert.Equal("brand@new.com", added!.Email);
+        // Arriving via a provider grants nothing beyond what any first sign-in grants.
+        Assert.Equal(_customerRoleId, Assert.Single(added.UserRoles).RoleId);
+    }
+
+    [Fact]
+    public async Task OAuth_with_an_unknown_provider_throws()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            Sut().OAuthAsync("facebook", new OAuthLoginRequest("id-token")));
+    }
+
+    [Fact]
+    public async Task OAuth_with_an_unconfigured_provider_says_so_instead_of_failing_obscurely()
+    {
+        _authProviders.Add(Provider("google", configured: false));
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            Sut().OAuthAsync("google", new OAuthLoginRequest("id-token")));
+        Assert.Equal("oauth_not_configured", ex.ErrorCode);
+    }
+
+    [Fact]
+    public void Options_offers_only_providers_that_have_credentials()
+    {
+        _authProviders.Add(Provider("google"));
+        _authProviders.Add(Provider("microsoft", configured: false));
+
+        var options = Sut().Options();
+
+        var only = Assert.Single(options.OAuthProviders);
+        Assert.Equal("google", only.Provider);
+        Assert.Equal("google-client-id", only.ClientId);
+    }
+
+    private static IExternalAuthProvider Provider(
+        string name, bool configured = true, ExternalIdentity? identity = null)
+    {
+        var provider = Substitute.For<IExternalAuthProvider>();
+        provider.Provider.Returns(name);
+        provider.IsConfigured.Returns(configured);
+        if (configured)
+            provider.Descriptor().Returns(new ExternalAuthDescriptor(name, $"{name}-client-id", $"https://{name}/auth"));
+        if (identity is not null)
+            provider.VerifyAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(identity);
+        return provider;
     }
 }

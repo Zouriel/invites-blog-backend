@@ -12,5 +12,4 @@ public interface IAdminService
     Task<IReadOnlyList<AdminPermissionDto>> ListPermissionsAsync(CancellationToken ct = default);
     Task<PagedResult<SuppressionEntryDto>> ListSuppressionAsync(SuppressionFilter filter, CancellationToken ct = default);
     Task<PagedResult<AuditLogDto>> ListAuditAsync(AuditLogFilter filter, CancellationToken ct = default);
-    Task<AdminLoginResultDto> LoginAsync(AdminLoginRequest request, CancellationToken ct = default);
 }

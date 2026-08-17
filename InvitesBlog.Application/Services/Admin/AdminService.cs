@@ -113,35 +113,4 @@ public sealed class AdminService(
         return PagedResult<AuditLogDto>.Create(items, total, filter);
     }
 
-    public async Task<AdminLoginResultDto> LoginAsync(AdminLoginRequest request, CancellationToken ct = default)
-    {
-        var email = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
-
-        var user = await users.Query()
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Email == email, ct);
-
-        // Uniform failure: never reveal whether the account exists.
-        if (user is null || !user.IsActive ||
-            string.IsNullOrEmpty(user.PasswordHash) ||
-            !PasswordHasher.Verify(request.Password ?? string.Empty, user.PasswordHash))
-            throw new AdminLoginFailedException();
-
-        var roleNames = user.UserRoles.Select(ur => ur.Role.Name).ToList();
-        if (!roleNames.Contains(Roles.Admin))
-            throw new AdminLoginFailedException();
-
-        var claims = new Dictionary<string, string>
-        {
-            [ClaimTypes.NameIdentifier] = user.Id.ToString(),
-        };
-        if (user.Email is { Length: > 0 } signInEmail) claims["email"] = signInEmail;
-        var token = tokenIssuer.IssueForRole(Roles.Admin, claims, AdminSessionLifetime);
-        var expiresAt = DateTimeOffset.UtcNow.Add(AdminSessionLifetime);
-
-        var userDto = new AdminUserDto(
-            user.Id, user.Email, user.DisplayName, user.IsActive, roleNames.OrderBy(n => n).ToList());
-
-        return new AdminLoginResultDto(token, expiresAt, userDto);
-    }
 }

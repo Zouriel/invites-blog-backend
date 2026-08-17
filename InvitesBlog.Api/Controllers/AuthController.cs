@@ -4,6 +4,7 @@ using InvitesBlog.Application.Services.Accounts;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace InvitesBlog.Api.Controllers;
 
@@ -23,6 +24,25 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] PasswordLoginRequest request, CancellationToken ct) =>
         Success(await accounts.LoginWithPasswordAsync(request, ct));
+
+    /// <summary>
+    /// Designer sign-up. Rate-limited like the code endpoints: it is anonymous and it creates
+    /// accounts, so it is the obvious thing to hammer.
+    /// </summary>
+    [HttpPost("register/designer")]
+    [AllowAnonymous]
+    [EnableRateLimiting("otp")]
+    public async Task<IActionResult> RegisterDesigner(
+        [FromBody] RegisterDesignerRequest request, CancellationToken ct) =>
+        Created(await accounts.RegisterDesignerAsync(request, ct));
+
+    /// <summary>Completes an OAuth sign-in started in the browser.</summary>
+    [HttpPost("oauth/{provider}")]
+    [AllowAnonymous]
+    [EnableRateLimiting("otp")]
+    public async Task<IActionResult> OAuth(
+        string provider, [FromBody] OAuthLoginRequest request, CancellationToken ct) =>
+        Success(await accounts.OAuthAsync(provider, request, ct));
 
     /// <summary>Sends a sign-in code to a phone number or an email address.</summary>
     [HttpPost("code/request")]

@@ -15,6 +15,15 @@ public interface IAccountService
     /// <summary>Email + password.</summary>
     Task<AuthResultDto> LoginWithPasswordAsync(PasswordLoginRequest request, CancellationToken ct = default);
 
+    /// <summary>
+    /// Self-service sign-up for someone who wants to publish templates. Grants the Designer role and
+    /// nothing else — their work still goes through review.
+    /// </summary>
+    Task<AuthResultDto> RegisterDesignerAsync(RegisterDesignerRequest request, CancellationToken ct = default);
+
+    /// <summary>Signs in with a provider ID token, verified server-side against the provider's keys.</summary>
+    Task<AuthResultDto> OAuthAsync(string provider, OAuthLoginRequest request, CancellationToken ct = default);
+
     /// <summary>Sends a sign-in code to a phone number or an email address.</summary>
     Task<CodeSentResponse> RequestCodeAsync(RequestCodeRequest request, CancellationToken ct = default);
 

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Accounts;
@@ -35,6 +36,7 @@ public sealed class AccountService(
     IGuestRepository guests,
     ITemplateRepository templates,
     IEnumerable<IExternalAuthProvider> authProviders,
+    IValidator<RegisterDesignerRequest> registerValidator,
     IEnumerable<IOtpSender> otpSenders,
     IOtpService otp,
     IUnitOfWork uow,
@@ -46,7 +48,71 @@ public sealed class AccountService(
 
     public AuthOptionsDto Options() => new(
         SmsAvailable: SmsIsConfigured(),
-        OAuthProviders: authProviders.Where(p => p.IsConfigured).Select(p => p.Provider).OrderBy(p => p).ToList());
+        OAuthProviders: authProviders
+            .Where(p => p.IsConfigured)
+            .Select(p => p.Descriptor())
+            .OrderBy(d => d.Provider, StringComparer.Ordinal)
+            .Select(d => new OAuthProviderDto(d.Provider, d.ClientId, d.AuthorizeUrl))
+            .ToList());
+
+    // ----- Sign up -----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates a designer account. This is the ONLY self-service way to gain a role beyond Customer,
+    /// and it grants exactly one — publishing still goes through admin review, so a new designer can
+    /// submit work and nothing else.
+    /// <para>
+    /// If an account already exists for the email — a customer who has been receiving invitations,
+    /// say — it gains the Designer role instead of being refused or duplicated. A password is only
+    /// set when the account has none, so this can never overwrite an existing one.
+    /// </para>
+    /// </summary>
+    public async Task<AuthResultDto> RegisterDesignerAsync(
+        RegisterDesignerRequest request, CancellationToken ct = default)
+    {
+        await registerValidator.ValidateAndThrowAsync(request, ct);
+
+        var email = Normalize(request.Email);
+        var existing = await LoadAsync(u => u.Email == email, ct);
+
+        if (existing is not null)
+        {
+            if (!existing.IsActive) throw new AccountSuspendedException();
+
+            // An account with a password is somebody's login: adding a role to it from an anonymous
+            // endpoint would let a stranger who knows the address grant themselves that role.
+            if (!string.IsNullOrEmpty(existing.PasswordHash))
+                throw new BusinessRuleException(
+                    "An account already uses that email address. Sign in instead.", "email_taken");
+
+            existing.PasswordHash = PasswordHasher.Hash(request.Password);
+            if (!string.IsNullOrWhiteSpace(request.DisplayName))
+                existing.DisplayName = request.DisplayName.Trim();
+            await AddRoleAsync(existing, Roles.Designer, ct);
+            await uow.SaveChangesAsync(ct);
+
+            var upgraded = await LoadAsync(u => u.Id == existing.Id, ct) ?? existing;
+            return await IssueAsync(upgraded, ct);
+        }
+
+        var user = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            Email = email,
+            DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? email.Split('@')[0]
+                : request.DisplayName.Trim(),
+            PasswordHash = PasswordHasher.Hash(request.Password),
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await AddRoleAsync(user, Roles.Designer, ct);
+        await AddRoleAsync(user, Roles.Customer, ct);
+        await users.AddAsync(user, ct);
+        await uow.SaveChangesAsync(ct);
+
+        return await IssueAsync(await LoadAsync(u => u.Id == user.Id, ct) ?? user, ct);
+    }
 
     // ----- Sign in -----------------------------------------------------------------------------
 
@@ -73,6 +139,53 @@ public sealed class AccountService(
     {
         var verified = await otp.VerifyContactAsync(new VerifyOtpRequest(request.ChallengeId, request.Code), ct);
         var user = await FindByContactAsync(verified, ct) ?? await CreateFromContactAsync(verified, ct);
+        return await IssueAsync(user, ct);
+    }
+
+    /// <summary>
+    /// Signs in with an ID token the browser got from Google or Microsoft. The token is verified
+    /// against the provider's published keys before anything is trusted, and the PROVIDER'S SUBJECT
+    /// ID is the linking key — not the email, which a provider could let someone change.
+    /// </summary>
+    public async Task<AuthResultDto> OAuthAsync(
+        string provider, OAuthLoginRequest request, CancellationToken ct = default)
+    {
+        var impl = authProviders.FirstOrDefault(p =>
+                       string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new NotFoundException($"Unknown sign-in provider '{provider}'.", "oauth_unknown_provider");
+        if (!impl.IsConfigured)
+            throw new BusinessRuleException(
+                $"{provider} sign-in isn't configured on this server.", "oauth_not_configured");
+
+        var identity = await impl.VerifyAsync(request.IdToken, ct);
+
+        var link = await externalLogins.Query(tracking: true)
+            .FirstOrDefaultAsync(l => l.Provider == identity.Provider && l.ExternalSubjectId == identity.SubjectId, ct);
+
+        AppUser user;
+        if (link is not null)
+        {
+            user = await LoadAsync(u => u.Id == link.UserId, ct) ?? throw new SignInFailedException();
+        }
+        else
+        {
+            // No link yet: attach to whoever owns this VERIFIED email, else create an account. That's
+            // what stops someone who signed up with a password from ending up with a second one.
+            user = await LoadAsync(u => u.Email == identity.Email, ct)
+                   ?? await CreateFromExternalAsync(identity, ct);
+
+            await externalLogins.AddAsync(new UserExternalLogin
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Provider = identity.Provider,
+                ExternalSubjectId = identity.SubjectId,
+                Email = identity.Email,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, ct);
+            await uow.SaveChangesAsync(ct);
+        }
+
         return await IssueAsync(user, ct);
     }
 
@@ -313,6 +426,42 @@ public sealed class AccountService(
         await uow.SaveChangesAsync(ct);
 
         return await LoadAsync(u => u.Id == user.Id, ct) ?? user;
+    }
+
+    /// <summary>
+    /// First sign-in through a provider with no account here yet. They get the Customer role, exactly
+    /// like any other first sign-in — arriving via Google grants nothing extra.
+    /// </summary>
+    private async Task<AppUser> CreateFromExternalAsync(ExternalIdentity identity, CancellationToken ct)
+    {
+        var user = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            Email = identity.Email,
+            DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName)
+                ? identity.Email.Split('@')[0]
+                : identity.DisplayName,
+            PasswordHash = null,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await AddRoleAsync(user, Roles.Customer, ct);
+        await users.AddAsync(user, ct);
+        await uow.SaveChangesAsync(ct);
+        return await LoadAsync(u => u.Id == user.Id, ct) ?? user;
+    }
+
+    /// <summary>
+    /// Adds a role by ID only. The role lookup is no-tracking, so attaching the instance as a
+    /// navigation would make EF treat it as a new row and try to INSERT it — a duplicate-key failure.
+    /// </summary>
+    private async Task AddRoleAsync(AppUser user, string roleName, CancellationToken ct)
+    {
+        var role = await roles.FirstOrDefaultAsync(r => r.Name == roleName, ct)
+                   ?? throw new BusinessRuleException(
+                       $"The {roleName} role hasn't been seeded on this server yet.", "role_missing");
+        if (user.UserRoles.Any(ur => ur.RoleId == role.Id)) return;
+        user.UserRoles.Add(new UserRole { RoleId = role.Id });
     }
 
     /// <summary>Borrows the name they already gave us on an invitation, rather than showing a bare number.</summary>

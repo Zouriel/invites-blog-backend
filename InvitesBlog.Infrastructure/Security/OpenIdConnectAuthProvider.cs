@@ -95,6 +95,13 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     private async Task<System.Security.Claims.ClaimsPrincipal> ValidateAsync(
         string idToken, bool allowKeyRefresh, CancellationToken ct)
     {
+        // Check the SHAPE before fetching anything. Otherwise a caller posting rubbish makes this
+        // server call out to the provider for signing keys it will never use.
+        var handler = new JwtSecurityTokenHandler();
+        if (!handler.CanReadToken(idToken))
+            throw new UnauthorizedException(
+                $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");
+
         var keys = await SigningKeysAsync(force: false, ct);
         var parameters = new TokenValidationParameters
         {
@@ -110,7 +117,7 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
 
         try
         {
-            return new JwtSecurityTokenHandler().ValidateToken(idToken, parameters, out _);
+            return handler.ValidateToken(idToken, parameters, out _);
         }
         catch (SecurityTokenSignatureKeyNotFoundException) when (allowKeyRefresh)
         {
@@ -118,7 +125,10 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
             await SigningKeysAsync(force: true, ct);
             return await ValidateAsync(idToken, allowKeyRefresh: false, ct);
         }
-        catch (SecurityTokenException)
+        // A malformed token is an ARGUMENT exception, not a SecurityTokenException — anything that
+        // isn't three dot-separated segments never reaches signature validation. Both are the caller
+        // sending us something unusable, so both are a 401 rather than a 500 with a stack trace.
+        catch (Exception ex) when (ex is SecurityTokenException or ArgumentException)
         {
             throw new UnauthorizedException(
                 $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");

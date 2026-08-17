@@ -8,15 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace InvitesBlog.Api.Controllers;
 
-/// <summary>Admin surface (full-RBAC). Every action requires an Admin JWT except <c>login</c>.</summary>
+/// <summary>Admin surface (full-RBAC). Signing in happens at <c>/api/auth/login</c> like everyone else.</summary>
 [Route("api/admin")]
 public sealed class AdminController(IAdminService admin) : BaseApiController
 {
-    [HttpPost("login")]
-    [AllowAnonymous]
-    public async Task<IActionResult> Login([FromBody] AdminLoginRequest request, CancellationToken ct) =>
-        Success(await admin.LoginAsync(request, ct));
-
     [HttpGet("users")]
     [HasPermission(Permissions.Admin.ManageUsers)]
     public async Task<IActionResult> Users([FromQuery] AdminUserFilter filter, CancellationToken ct) =>
