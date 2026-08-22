@@ -11,6 +11,7 @@ using InvitesBlog.Application.Guests;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Application.Services.Guests;
+using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using NSubstitute;
@@ -28,10 +29,14 @@ public class GuestServiceTests
     private readonly IRepository<UploadedGuestFile> _uploads = Substitute.For<IRepository<UploadedGuestFile>>();
     private readonly IRepository<DeliveryAttempt> _attempts = Substitute.For<IRepository<DeliveryAttempt>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
+    private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
     private IValidator<ConfirmUploadRequest> _confirmV = TestData.PassingValidator<ConfirmUploadRequest>();
 
     private GuestService Sut() => new(
-        _currentUser, _campaigns, _guests, _invites, _suppression, _uploads, _attempts, _uow,
+        _currentUser,
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
+        _campaigns, _guests, _invites, _suppression, _uploads, _attempts, _uow,
         new GuestUploadParser(new PhoneNormalizer()), new PhoneNormalizer(), _confirmV);
 
     private Campaign Own(CampaignStatus status = CampaignStatus.Draft, int paidCapacity = 100)

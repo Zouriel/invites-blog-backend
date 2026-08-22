@@ -139,13 +139,22 @@ public static class Roles
             Permissions.Dashboard.Read, Permissions.Campaigns.Read, Permissions.Inbox.Read,
         },
 
-        // A signed-in customer sees the invitations and template requests already tied to their
-        // email or phone. Everything they can do without an account still works without one — the
-        // account only adds history, so this grants read access, not new powers.
+        // A signed-in customer is the same person as an Inviter — the difference is only which key
+        // they arrived with, an account instead of the emailed link. So they hold the same campaign
+        // permissions: this is what lets someone open a campaign from Sent and actually run it
+        // (add a guest, resend, cancel) without digging the original email out.
+        //
+        // These permissions say "may do this KIND of thing", never "may do it to THIS campaign".
+        // Every campaign-scoped action re-checks ownership through ICampaignOwnershipService, so a
+        // customer still cannot touch a campaign that isn't theirs. Designer.Manage is withheld:
+        // publishing templates is a separate role you opt into.
         [Customer] = new[]
         {
-            Permissions.Templates.Read, Permissions.Dashboard.Read,
-            Permissions.Campaigns.Read, Permissions.Inbox.Read,
+            Permissions.Templates.Read, Permissions.Dashboard.Read, Permissions.Inbox.Read,
+            Permissions.Campaigns.Create, Permissions.Campaigns.Read, Permissions.Campaigns.Write,
+            Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
+            Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write,
+            Permissions.Guests.Resend, Permissions.Payments.Read,
         },
 
         [Inviter] = new[]

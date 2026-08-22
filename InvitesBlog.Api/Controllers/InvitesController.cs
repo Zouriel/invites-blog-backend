@@ -38,9 +38,11 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
     public async Task<IActionResult> Inbox(CancellationToken ct) =>
         Success(await invites.GetInboxAsync(ct));
 
-    // Shared campaign link (/e/{campaignId}): the OTP-verified caller's personalized invite, if their
-    // email is on the guest list. Authenticated (email OTP) — guest-list-only access.
-    [HttpGet("/api/campaigns/{campaignId:guid}/my-invite")]
+    // The signed-in caller's own invitation to a campaign, if their verified email or phone is on the
+    // guest list. Lives under /api/me/ rather than /api/campaigns/ on purpose: everything under
+    // /api/campaigns/{id} carries the campaign POSSESSION token (the inviter's key), and an invitation
+    // you RECEIVED is authorised by your account instead. Sharing the prefix meant the wrong bearer.
+    [HttpGet("/api/me/invitations/{campaignId:guid}")]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> MyInvite(Guid campaignId, CancellationToken ct) =>
         Success(await invites.GetMyInviteAsync(campaignId, Render, ct));

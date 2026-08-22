@@ -18,6 +18,7 @@ public class CampaignServiceTests
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
     private readonly IInviteRepository _invites = Substitute.For<IInviteRepository>();
     private readonly IPaymentRepository _payments = Substitute.For<IPaymentRepository>();
@@ -40,8 +41,13 @@ public class CampaignServiceTests
     private IValidator<UpdateInviterRequest> _inviterV = TestData.PassingValidator<UpdateInviterRequest>();
     private IValidator<UpdateDeliverySettingsRequest> _deliveryV = TestData.PassingValidator<UpdateDeliverySettingsRequest>();
 
+    // The REAL ownership service, not a substitute: it is what decides whether the possession token
+    // or the signed-in account may act, so stubbing it out would stop these tests checking anything.
+    private ICampaignOwnershipService Ownership() =>
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters);
+
     private CampaignService Sut() => new(
-        _currentUser, _campaigns, _inviters, _guests, _invites, _payments, _templates,
+        _currentUser, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
         _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _contentV, _venueV, _inviterV, _deliveryV);
 
@@ -281,6 +287,38 @@ public class CampaignServiceTests
         _campaigns.GetByDashboardTokenHashAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns((Campaign?)null);
         await Assert.ThrowsAsync<InvalidDashboardTokenException>(() => Sut().GetDashboardAsync(Guid.NewGuid(), "bad"));
+    }
+
+    // The Sent tab's way in: no magic link anywhere, just the account that booked it.
+    [Fact]
+    public async Task Dashboard_opens_for_the_signed_in_owner_with_no_token()
+    {
+        var inviter = new Inviter
+        {
+            Id = Guid.NewGuid(), Name = "Host", Email = "host@test.com",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var c = TestData.Campaign();
+        c.InviterId = inviter.Id;
+        var account = new AppUser
+        {
+            Id = Guid.NewGuid(), Email = "host@test.com", DisplayName = "Host",
+            IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+        };
+        _currentUser.UserId.Returns(account.Id);
+        _users.GetByIdAsync(account.Id, Arg.Any<CancellationToken>()).Returns(account);
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _inviters.GetByIdAsync(inviter.Id, Arg.Any<CancellationToken>()).Returns(inviter);
+        _guests.ListByCampaignAsync(c.Id, true, Arg.Any<CancellationToken>()).Returns(Array.Empty<Guest>());
+        _invites.ListByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<Invite>());
+        _attempts.Query().Returns(Array.Empty<DeliveryAttempt>().AsAsyncQueryable());
+
+        var res = await Sut().GetDashboardAsync(c.Id, null);
+
+        Assert.Equal(c.Title, res.Campaign.Title);
+        // Never falls back to the token lookup — that path must stay untouched by the account door.
+        await _campaigns.DidNotReceive().GetByDashboardTokenHashAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -129,6 +129,16 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
     public async Task<IActionResult> GetDashboard(Guid id, [FromQuery] string? token, CancellationToken ct) =>
         Success(await campaigns.GetDashboardAsync(id, token, ct));
 
+    /// <summary>
+    /// The same dashboard, opened from Sent by the account that booked the campaign — no magic link
+    /// involved. Separate path rather than a token-less call to the one above because that one answers
+    /// 401 to a stale magic link, and the app reads a 401 on an account-scoped path as "session over".
+    /// </summary>
+    [HttpGet("/api/me/campaigns/{id:guid}/dashboard")]
+    [HasPermission(Permissions.Dashboard.Read)]
+    public async Task<IActionResult> GetMyDashboard(Guid id, CancellationToken ct) =>
+        Success(await campaigns.GetDashboardAsync(id, null, ct));
+
     [HttpPost("{id:guid}/cancel")]
     [HasPermission(Permissions.Campaigns.Cancel)]
     public async Task<IActionResult> Cancel(Guid id, CancellationToken ct) =>

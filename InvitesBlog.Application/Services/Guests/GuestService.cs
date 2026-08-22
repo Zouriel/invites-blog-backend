@@ -9,6 +9,7 @@ using InvitesBlog.Application.Exceptions.Guests;
 using InvitesBlog.Application.Guests;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Security;
+using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,7 @@ namespace InvitesBlog.Application.Services.Guests;
 /// </summary>
 public sealed class GuestService(
     ICurrentUser currentUser,
+    ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IGuestRepository guests,
     IInviteRepository invites,
@@ -197,10 +199,10 @@ public sealed class GuestService(
             throw new ResendLimitExceededException();
     }
 
-    /// <summary>The possession token must map to this campaign (§4.6.2); loads it for pricing/state.</summary>
+    /// <summary>The caller must own this campaign — by possession token or by account; loads it for pricing/state.</summary>
     private async Task<Campaign> EnsureCampaignAsync(Guid campaignId, CancellationToken ct)
     {
-        if (currentUser.CampaignId != campaignId)
+        if (!await ownership.OwnsAsync(campaignId, ct))
             throw new CampaignAccessDeniedException();
         return await campaigns.GetByIdAsync(campaignId, ct)
                ?? throw new CampaignNotFoundException(campaignId);

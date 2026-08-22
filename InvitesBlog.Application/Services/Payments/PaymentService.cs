@@ -4,6 +4,7 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Payments;
 using InvitesBlog.Application.Exceptions.Campaigns;
 using InvitesBlog.Application.Pricing;
+using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +18,7 @@ namespace InvitesBlog.Application.Services.Payments;
 /// returned <see cref="WebhookProcessResult"/>.
 /// </summary>
 public sealed class PaymentService(
+    ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IPaymentRepository payments,
     IGuestRepository guests,
@@ -144,7 +146,7 @@ public sealed class PaymentService(
     /// <summary>Ownership + existence check for a campaign-scoped action (§ auth).</summary>
     private async Task<Campaign> AuthorizeAsync(Guid campaignId, CancellationToken ct)
     {
-        if (currentUser.CampaignId != campaignId) throw new CampaignAccessDeniedException();
+        if (!await ownership.OwnsAsync(campaignId, ct)) throw new CampaignAccessDeniedException();
         return await campaigns.GetByIdAsync(campaignId, ct) ?? throw new CampaignNotFoundException(campaignId);
     }
 

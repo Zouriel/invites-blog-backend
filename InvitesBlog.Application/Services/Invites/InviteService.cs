@@ -227,7 +227,7 @@ public sealed class InviteService(
                 var c = campaignList.FirstOrDefault(x => x.Id == i.CampaignId);
                 if (c is null) return null;
                 return new InboxCardResponse(
-                    i.Id, c.Title, c.EventStartAt, c.EventType,
+                    i.Id, c.Id, c.Title, c.EventStartAt, c.EventType,
                     i.RsvpStatus.ToString(), i.ViewedAt is null,
                     c.EventStartAt < now, c.Status == CampaignStatus.Cancelled,
                     c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null);

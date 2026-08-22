@@ -22,6 +22,7 @@ namespace InvitesBlog.Application.Services.Campaigns;
 /// </summary>
 public sealed class CampaignService(
     ICurrentUser currentUser,
+    ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IInviterRepository inviters,
     IGuestRepository guests,
@@ -464,10 +465,14 @@ public sealed class CampaignService(
 
     public async Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(token)) throw new InvalidDashboardTokenException();
-        var hash = TokenService.Hash(token);
-        var campaign = await campaigns.GetByDashboardTokenHashAsync(id, hash, ct)
-                       ?? throw new InvalidDashboardTokenException();
+        // Two ways in. The emailed dashboard link carries a possession token and needs no account —
+        // that's how it worked before sign-in existed, and those links are still out there. A signed-in
+        // person opening their own campaign from Sent has no such token and shouldn't need one: the
+        // account already proves who they are.
+        var campaign = string.IsNullOrEmpty(token)
+            ? await ownership.OwnsAsync(id, ct) ? await campaigns.GetByIdAsync(id, ct) : null
+            : await campaigns.GetByDashboardTokenHashAsync(id, TokenService.Hash(token), ct);
+        if (campaign is null) throw new InvalidDashboardTokenException();
 
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: true, ct);
         var inviteList = await invites.ListByCampaignAsync(id, ct);
@@ -589,7 +594,7 @@ public sealed class CampaignService(
     /// </summary>
     private async Task<Campaign> LoadOwnedAsync(Guid id, CancellationToken ct)
     {
-        if (currentUser.CampaignId != id) throw new CampaignAccessDeniedException();
+        if (!await ownership.OwnsAsync(id, ct)) throw new CampaignAccessDeniedException();
         return await campaigns.GetByIdAsync(id, ct) ?? throw new CampaignNotFoundException(id);
     }
 

@@ -1,6 +1,7 @@
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Exceptions.Campaigns;
+using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.Payments;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -19,10 +20,13 @@ public class PaymentServiceTests
     private readonly IPaymentProvider _provider = Substitute.For<IPaymentProvider>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
+    private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
 
     public PaymentServiceTests() => _provider.Name.Returns("Fake");
 
     private PaymentService Sut() => new(
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
         _campaigns, _payments, _guests, _uow, _provider, _config, _currentUser);
 
     private void Authorize(Campaign c)
