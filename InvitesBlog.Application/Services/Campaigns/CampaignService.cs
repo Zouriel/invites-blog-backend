@@ -7,6 +7,7 @@ using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Application.Exceptions.Campaigns;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Pricing;
+using InvitesBlog.Application.Rsvp;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -122,6 +123,63 @@ public sealed class CampaignService(
         if (req.EventType is not null) campaign.EventType = req.EventType;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
+    }
+
+    /// <summary>What this campaign's RSVP form asks — the stored set, or the platform's if unset.</summary>
+    public async Task<RsvpQuestionsResponse> GetRsvpQuestionsAsync(Guid id, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+        return new RsvpQuestionsResponse(RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
+    }
+
+    /// <summary>
+    /// Replaces the question set. Keys are what already-collected answers are filed under, so they're
+    /// normalised and de-duplicated here rather than trusted from the browser — two questions sharing
+    /// a key would make one silently overwrite the other's answers.
+    /// </summary>
+    public async Task<RsvpQuestionsResponse> UpdateRsvpQuestionsAsync(
+        Guid id, UpdateRsvpQuestionsRequest req, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var cleaned = new List<RsvpQuestionDto>();
+        foreach (var q in req.Questions ?? [])
+        {
+            var label = q.Label?.Trim();
+            if (string.IsNullOrWhiteSpace(label))
+                throw new Exceptions.BusinessRuleException("Every question needs a label.", "rsvp_question_unlabelled");
+
+            var key = string.IsNullOrWhiteSpace(q.Key) ? SlugKey(label) : q.Key.Trim();
+            if (!seen.Add(key)) continue;
+
+            var type = RsvpQuestions.Types.Contains(q.Type) ? q.Type : "text";
+            var options = type == "select"
+                ? (q.Options ?? []).Select(o => o.Trim()).Where(o => o.Length > 0).ToList()
+                : null;
+            if (type == "select" && options!.Count == 0)
+                throw new Exceptions.BusinessRuleException(
+                    $"\"{label}\" is a choice question, so it needs at least one option.",
+                    "rsvp_question_no_options");
+
+            cleaned.Add(q with { Key = key, Label = label, Type = type, Options = options });
+        }
+
+        campaign.RsvpQuestionsJson = RsvpQuestions.Serialize(cleaned);
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+
+        return new RsvpQuestionsResponse(cleaned);
+    }
+
+    /// <summary>A readable, stable key from a label — only used when the browser didn't supply one.</summary>
+    private static string SlugKey(string label)
+    {
+        var slug = new string(label.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray());
+        while (slug.Contains("--")) slug = slug.Replace("--", "-");
+        slug = slug.Trim('-');
+        return string.IsNullOrEmpty(slug) ? $"q-{Guid.NewGuid().ToString("N")[..6]}" : slug;
     }
 
     public async Task UpdateVenueAsync(Guid id, UpdateVenueRequest req, CancellationToken ct = default)
@@ -498,21 +556,56 @@ public sealed class CampaignService(
             .GroupBy(a => a.InviteId)
             .ToDictionary(grp => grp.Key, grp => grp.OrderByDescending(a => a.AttemptedAt).First().Channel);
 
+        // Their latest answers. Replies were being stored and never read back anywhere, so asking a
+        // question used to collect something the host could never see — including the four the form
+        // always asked.
+        var questions = RsvpQuestions.Parse(campaign.RsvpQuestionsJson);
+        var latestAnswer = (await rsvpResponses.ListAsync(r => inviteIds.Contains(r.InviteId), ct))
+            .GroupBy(r => r.InviteId)
+            .ToDictionary(grp => grp.Key, grp => grp.OrderByDescending(r => r.CreatedAt).First());
+
         var guestRows = guestList.Select(g =>
         {
             var inv = inviteList.FirstOrDefault(i => i.GuestId == g.Id);
             var channel = inv is not null && latestChannel.TryGetValue(inv.Id, out var ch) ? ch : null;
+            var answers = inv is not null && latestAnswer.TryGetValue(inv.Id, out var reply)
+                ? AnswersOf(reply)
+                : null;
             return new DashboardGuestDto(
                 g.Id, g.Name, g.Email, g.PhoneE164, g.Role, g.Gender, g.OptedOut,
                 inv?.Status.ToString() ?? "None",
                 inv?.RsvpStatus.ToString() ?? "NoResponse",
                 inv?.ViewedAt,
-                channel);
+                channel,
+                answers);
         }).ToList();
 
         return new DashboardResponse(
             new DashboardCampaignDto(campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity),
-            report, guestRows);
+            report, guestRows, questions);
+    }
+
+    /// <summary>
+    /// One reply flattened to answer-per-question. The four original questions kept their own columns,
+    /// so they're folded in beside the free-form ones rather than living in a second shape.
+    /// </summary>
+    private static Dictionary<string, string> AnswersOf(RsvpResponse reply)
+    {
+        var answers = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            var stored = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                string.IsNullOrWhiteSpace(reply.AnswersJson) ? "{}" : reply.AnswersJson);
+            if (stored is not null)
+                foreach (var (k, v) in stored) answers[k] = v;
+        }
+        catch (JsonException) { /* a reply we can't read must not take the whole dashboard down */ }
+
+        if (reply.GuestCount is { } count) answers[RsvpQuestions.GuestCount] = count.ToString();
+        if (!string.IsNullOrWhiteSpace(reply.MealPreference)) answers[RsvpQuestions.MealPreference] = reply.MealPreference!;
+        if (!string.IsNullOrWhiteSpace(reply.ArrivalTime)) answers[RsvpQuestions.ArrivalTime] = reply.ArrivalTime!;
+        if (!string.IsNullOrWhiteSpace(reply.Comment)) answers[RsvpQuestions.Comment] = reply.Comment!;
+        return answers;
     }
 
     public async Task<CancelCampaignResponse> CancelAsync(Guid id, CancellationToken ct = default)

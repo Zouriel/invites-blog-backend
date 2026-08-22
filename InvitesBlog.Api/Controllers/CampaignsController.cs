@@ -31,6 +31,18 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return SuccessMessage("Campaign content updated.");
     }
 
+    /// <summary>What the RSVP form asks. Campaign-scoped, so ownership gates it either way in.</summary>
+    [HttpGet("{id:guid}/rsvp-questions")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> GetRsvpQuestions(Guid id, CancellationToken ct) =>
+        Success(await campaigns.GetRsvpQuestionsAsync(id, ct));
+
+    [HttpPut("{id:guid}/rsvp-questions")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> SetRsvpQuestions(
+        Guid id, [FromBody] UpdateRsvpQuestionsRequest req, CancellationToken ct) =>
+        Success(await campaigns.UpdateRsvpQuestionsAsync(id, req, ct));
+
     [HttpPut("{id:guid}/venue")]
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> UpdateVenue(Guid id, [FromBody] UpdateVenueRequest req, CancellationToken ct)

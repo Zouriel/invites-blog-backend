@@ -63,9 +63,13 @@ public sealed record DashboardGuestDto(
     string InviteStatus,
     string RsvpStatus,
     DateTimeOffset? ViewedAt,
-    string? DeliveryChannel);   // channel of the latest delivery attempt ("viber" / "email" / …)
+    string? DeliveryChannel,   // channel of the latest delivery attempt ("viber" / "email" / …)
+    /// <summary>Their latest answers, keyed by question. Empty until they reply.</summary>
+    IReadOnlyDictionary<string, string>? RsvpAnswers = null);
 
 public sealed record DashboardResponse(
     DashboardCampaignDto Campaign,
     DashboardReportDto Report,
-    IReadOnlyList<DashboardGuestDto> Guests);
+    IReadOnlyList<DashboardGuestDto> Guests,
+    /// <summary>What was asked, so the table can put answers under the right headings.</summary>
+    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);

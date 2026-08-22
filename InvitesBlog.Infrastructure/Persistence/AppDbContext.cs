@@ -114,6 +114,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.RulesJson).HasColumnType("jsonb");
             // Valid JSON default so adding this NOT NULL jsonb column to existing rows succeeds.
             e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
+            e.Property(x => x.RsvpQuestionsJson).HasColumnType("jsonb").HasDefaultValue("{\"questions\":[]}");
             e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
             e.Property(x => x.DesignerFee).HasColumnType("numeric(12,2)").HasDefaultValue(0m);
             e.Property(x => x.TemplatePackageUrl).HasDefaultValue(string.Empty);
@@ -175,6 +176,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("rsvp_responses");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.InviteId);
+            e.Property(x => x.AnswersJson).HasColumnType("jsonb").HasDefaultValue("{}");
         });
 
         b.Entity<UploadedGuestFile>(e =>

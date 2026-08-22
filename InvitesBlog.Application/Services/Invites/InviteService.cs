@@ -1,7 +1,9 @@
+using System.Text.Json;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Invites;
+using InvitesBlog.Application.Rsvp;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Invites;
 using InvitesBlog.Application.Security;
@@ -66,7 +68,8 @@ public sealed class InviteService(
         var payload = render(campaign, template, guest, invite, link,
             inviter?.Name, inviter?.PhoneE164, inviter?.Email);
 
-        return new InviteViewResponse(payload.PackageUrl, payload.Data, false, payload.CampaignStatus);
+        return new InviteViewResponse(payload.PackageUrl, payload.Data, false, payload.CampaignStatus,
+            RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
     }
 
     public async Task<RsvpResultResponse> RsvpAsync(string token, RsvpRequest req, CancellationToken ct = default)
@@ -171,7 +174,7 @@ public sealed class InviteService(
         await uow.SaveChangesAsync(ct);
 
         return new MyInviteResponse(payload.PackageUrl, payload.Data, payload.CampaignStatus,
-            invite.Id, invite.RsvpStatus.ToString());
+            invite.Id, invite.RsvpStatus.ToString(), RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
     }
 
     /// <summary>Shared RSVP write path for the token and authenticated flows.</summary>
@@ -192,6 +195,12 @@ public sealed class InviteService(
             Comment = req.Comment,
             ArrivalTime = req.ArrivalTime,
             ContactNote = req.ContactNote,
+            // Whatever the host asked beyond those four. Blank answers are dropped rather than
+            // stored as empty strings, so "didn't answer" and "answered with nothing" stay the same.
+            AnswersJson = JsonSerializer.Serialize(
+                (req.Answers ?? new Dictionary<string, string>())
+                    .Where(a => !string.IsNullOrWhiteSpace(a.Value))
+                    .ToDictionary(a => a.Key, a => a.Value.Trim())),
             CreatedAt = DateTimeOffset.UtcNow
         }, ct);
         await uow.SaveChangesAsync(ct);

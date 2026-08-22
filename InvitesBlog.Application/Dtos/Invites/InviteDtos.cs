@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Domain.Entities;
 
 namespace InvitesBlog.Application.Dtos.Invites;
@@ -7,19 +8,24 @@ namespace InvitesBlog.Application.Dtos.Invites;
 
 /// <summary>Zero-login RSVP submitted against an invite token (§4.9.6).</summary>
 public sealed record RsvpRequest(
-    string Status, int? GuestCount, string? MealPreference, string? Comment, string? ArrivalTime, string? ContactNote);
+    string Status, int? GuestCount, string? MealPreference, string? Comment, string? ArrivalTime,
+    string? ContactNote, IReadOnlyDictionary<string, string>? Answers = null);
 
 // ----- by-token responses (returned as-is inside the ApiResponse envelope's Data; field names preserved) -----
 
 public sealed record InviteCancelledResponse(bool Cancelled, string Message);
 public sealed record InviteRequiresOtpResponse(bool RequiresOtp);
-public sealed record InviteViewResponse(string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus);
+public sealed record InviteViewResponse(
+    string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus,
+    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
 
 /// <summary>
 /// The rendered invite for an OTP-authenticated guest opening the shared campaign link
 /// (<c>/e/{campaignId}</c>). Carries the invite id + current RSVP so the client can RSVP.
 /// </summary>
-public sealed record MyInviteResponse(string PackageUrl, JsonObject Data, string CampaignStatus, Guid InviteId, string RsvpStatus);
+public sealed record MyInviteResponse(
+    string PackageUrl, JsonObject Data, string CampaignStatus, Guid InviteId, string RsvpStatus,
+    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
 
 // ----- other responses -----
 

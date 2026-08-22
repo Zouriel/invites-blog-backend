@@ -28,5 +28,10 @@ public sealed class RsvpResponse
     public string? Comment { get; set; }
     public string? ArrivalTime { get; set; }
     public string? ContactNote { get; set; }
+    /// <summary>
+    /// Answers to whatever the host asked beyond the four fields above, keyed by question. Those four
+    /// keep their own columns because the dashboard and exports read them by name.
+    /// </summary>
+    public string AnswersJson { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; }
 }

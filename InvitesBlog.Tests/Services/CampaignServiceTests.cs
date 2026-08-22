@@ -2,6 +2,7 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Campaigns;
+using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Campaigns;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Services.Campaigns;
@@ -271,6 +272,96 @@ public class CampaignServiceTests
 
         Assert.False(string.IsNullOrEmpty(owned.DashboardTokenHash));
         await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "host@test.com"), Arg.Any<CancellationToken>());
+    }
+
+    // ----- RSVP questions -----
+
+    /// <summary>
+    /// The keys are what already-collected answers are filed against, so these rules are about not
+    /// orphaning or colliding replies — not about tidiness.
+    /// </summary>
+    [Fact]
+    public async Task A_question_with_no_key_gets_one_derived_from_its_label()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+
+        var saved = await Sut().UpdateRsvpQuestionsAsync(
+            c.Id, new UpdateRsvpQuestionsRequest([new("", "Dietary needs", "text")]));
+
+        Assert.Equal("dietary-needs", saved.Questions[0].Key);
+    }
+
+    [Fact]
+    public async Task Two_questions_cannot_share_a_key()
+    {
+        // Sharing one would file both sets of answers under the same name.
+        var c = TestData.Campaign();
+        Own(c);
+
+        var saved = await Sut().UpdateRsvpQuestionsAsync(c.Id, new UpdateRsvpQuestionsRequest(
+            [new("song", "Song request", "text"), new("song", "Another song", "text")]));
+
+        Assert.Single(saved.Questions);
+        Assert.Equal("Song request", saved.Questions[0].Label);
+    }
+
+    [Fact]
+    public async Task A_question_with_no_label_is_refused()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().UpdateRsvpQuestionsAsync(
+            c.Id, new UpdateRsvpQuestionsRequest([new("q", "  ", "text")])));
+
+        Assert.Equal("rsvp_question_unlabelled", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_choice_question_with_no_choices_is_refused()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().UpdateRsvpQuestionsAsync(
+            c.Id, new UpdateRsvpQuestionsRequest([new("meal", "Meal", "select", Options: [])])));
+
+        Assert.Equal("rsvp_question_no_options", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task An_unknown_question_type_falls_back_to_a_text_box()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+
+        var saved = await Sut().UpdateRsvpQuestionsAsync(
+            c.Id, new UpdateRsvpQuestionsRequest([new("q", "Anything", "wingdings")]));
+
+        Assert.Equal("text", saved.Questions[0].Type);
+    }
+
+    [Fact]
+    public async Task Blank_choices_are_dropped_and_the_rest_trimmed()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+
+        var saved = await Sut().UpdateRsvpQuestionsAsync(c.Id, new UpdateRsvpQuestionsRequest(
+            [new("meal", "Meal", "select", Options: [" Veg ", "", "  ", "Fish"])]));
+
+        Assert.Equal(new[] { "Veg", "Fish" }, saved.Questions[0].Options);
+    }
+
+    [Fact]
+    public async Task Someone_else_s_campaign_cannot_be_reconfigured()
+    {
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+
+        await Assert.ThrowsAsync<CampaignAccessDeniedException>(() => Sut().UpdateRsvpQuestionsAsync(
+            c.Id, new UpdateRsvpQuestionsRequest([new("q", "Q", "text")])));
     }
 
     // ----- Dashboard -----

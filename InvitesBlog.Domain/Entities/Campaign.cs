@@ -49,6 +49,11 @@ public sealed class Campaign
     public string DeliverySettingsJson { get; set; } = "{}";
     public string RulesJson { get; set; } = "{\"rules\":[]}"; // §12 personalization rules
     public string RolesJson { get; set; } = "{\"roles\":[]}"; // guest roles → content-block mapping
+    /// <summary>
+    /// What the RSVP form asks. Empty means "whatever the platform asks by default" — campaigns made
+    /// before the question step existed keep the original four questions rather than losing them.
+    /// </summary>
+    public string RsvpQuestionsJson { get; set; } = "{\"questions\":[]}";
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

@@ -13,6 +13,10 @@ public interface ICampaignService
     Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default);
     Task UpdateContentAsync(Guid id, UpdateContentRequest req, CancellationToken ct = default);
     Task UpdateVenueAsync(Guid id, UpdateVenueRequest req, CancellationToken ct = default);
+
+    Task<RsvpQuestionsResponse> GetRsvpQuestionsAsync(Guid id, CancellationToken ct = default);
+    Task<RsvpQuestionsResponse> UpdateRsvpQuestionsAsync(
+        Guid id, UpdateRsvpQuestionsRequest req, CancellationToken ct = default);
     Task UpdateInviterAsync(Guid id, UpdateInviterRequest req, string? accessToken, CancellationToken ct = default);
     Task UpdateDeliverySettingsAsync(Guid id, UpdateDeliverySettingsRequest req, CancellationToken ct = default);
     /// <summary>Finalize the campaign (no payment): returns the shareable /e/{id} link and emails it if chosen.</summary>
