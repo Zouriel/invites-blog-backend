@@ -161,8 +161,12 @@ public sealed class InviteService(
             if (invite.Status != InviteStatus.Viewed) invite.Status = InviteStatus.Viewed;
         }
 
+        // The template's own "Respond now" button gets `{link}/rsvp`, so the base has to be a place
+        // where BOTH the invitation and its RSVP actually resolve. /e/{campaignId} had no /rsvp
+        // sibling, so that button landed on the invitee site's home page — the "empty page" it
+        // appeared to open. Addressing the invite by ID gives it a route that exists.
         var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
-        var link = $"{inviteeBase}/e/{campaignId}";
+        var link = $"{inviteeBase}/invites/{invite.Id}";
         var payload = render(campaign, template, guest, invite, link, inviter?.Name, inviter?.PhoneE164, inviter?.Email);
         await uow.SaveChangesAsync(ct);
 
