@@ -97,7 +97,11 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     {
         // Check the SHAPE before fetching anything. Otherwise a caller posting rubbish makes this
         // server call out to the provider for signing keys it will never use.
-        var handler = new JwtSecurityTokenHandler();
+        // MapInboundClaims is ON by default and rewrites OIDC claim names to the old WS-Federation
+        // URIs — `sub` becomes .../nameidentifier, `email` becomes .../emailaddress. Everything below
+        // reads the OIDC names, so leaving it on makes a perfectly good token look like one carrying
+        // no subject and no email.
+        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
         if (!handler.CanReadToken(idToken))
             throw new UnauthorizedException(
                 $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");
