@@ -59,6 +59,15 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));
 
+    /// <summary>
+    /// Opt the signed-in account into publishing templates. Gated on being signed in at all, not on
+    /// any designer permission — asking for the role is exactly what someone who lacks it does.
+    /// </summary>
+    [HttpPost("me/become-designer")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> BecomeDesigner(CancellationToken ct) =>
+        Success(await accounts.BecomeDesignerAsync(ct));
+
     // ----- Linking a second identifier onto the signed-in account -------------------------------
 
     [HttpPost("link/request")]

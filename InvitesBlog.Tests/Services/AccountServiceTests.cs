@@ -96,6 +96,25 @@ public class AccountServiceTests
     private void Existing(params AppUser[] users) =>
         _users.Query(Arg.Any<bool>()).Returns(users.AsAsyncQueryable());
 
+    /// <summary>
+    /// Like <see cref="Existing"/>, but resolves role navigations on each read the way the database
+    /// does. A newly granted role is stored as an id only (attaching the entity would make EF try to
+    /// INSERT the role), and the service re-reads the account to pick the name back up — so without
+    /// this, a role added mid-test would be invisible to anything that reads role NAMES.
+    /// </summary>
+    private void ExistingWithRoleLookup(AppUser user) =>
+        _users.Query(Arg.Any<bool>()).Returns(_ =>
+        {
+            foreach (var ur in user.UserRoles.Where(ur => ur.Role is null))
+            {
+                var name = ur.RoleId == _designerRoleId ? Roles.Designer
+                    : ur.RoleId == _customerRoleId ? Roles.Customer
+                    : "Unknown";
+                ur.Role = new Role { Id = ur.RoleId, Name = name, Description = "" };
+            }
+            return new[] { user }.AsAsyncQueryable();
+        });
+
     // ----- Sign in -------------------------------------------------------------------------------
 
     [Fact]
@@ -287,6 +306,56 @@ public class AccountServiceTests
         Assert.Contains(added.UserRoles, ur => ur.RoleId == _customerRoleId);
         // Roles are referenced by id only — attaching the no-tracking instance would try to INSERT it.
         Assert.All(added.UserRoles, ur => Assert.Null(ur.Role));
+    }
+
+    // ----- Becoming a creator -------------------------------------------------------------------
+
+    /// <summary>
+    /// Signing up a second time with an address you already use cannot work — it's taken, and Google
+    /// sign-in just returns the customer you already were. Asking from the account is the way through.
+    /// </summary>
+    [Fact]
+    public async Task A_customer_can_opt_into_publishing_templates()
+    {
+        var me = User("nadia@test.com", roleNames: Roles.Customer);
+        ExistingWithRoleLookup(me);
+        _currentUser.UserId.Returns(me.Id);
+
+        var result = await Sut().BecomeDesignerAsync();
+
+        Assert.Contains(me.UserRoles, ur => ur.RoleId == _designerRoleId);
+        // Kept, not replaced: they still receive invitations.
+        Assert.Contains(me.UserRoles, ur => ur.Role?.Name == Roles.Customer);
+        Assert.Equal("session-jwt", result.Token);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>The role rides in the token, so it means nothing until a new one is issued.</summary>
+    [Fact]
+    public async Task Becoming_a_creator_reissues_the_token_with_the_new_role()
+    {
+        var me = User("nadia@test.com", roleNames: Roles.Customer);
+        ExistingWithRoleLookup(me);
+        _currentUser.UserId.Returns(me.Id);
+
+        await Sut().BecomeDesignerAsync();
+
+        _tokens.Received(1).IssueForRoles(
+            Arg.Is<IReadOnlyCollection<string>>(r => r.Contains(Roles.Designer)),
+            Arg.Any<IReadOnlyDictionary<string, string>>(),
+            Arg.Any<TimeSpan>());
+    }
+
+    [Fact]
+    public async Task Asking_twice_says_so_rather_than_adding_the_role_again()
+    {
+        var me = User("nadia@test.com", roleNames: Roles.Designer, password: "pw");
+        Existing(me);
+        _currentUser.UserId.Returns(me.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().BecomeDesignerAsync());
+
+        Assert.Equal("already_a_designer", ex.ErrorCode);
     }
 
     [Fact]

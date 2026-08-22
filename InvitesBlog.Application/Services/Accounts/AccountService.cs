@@ -192,6 +192,28 @@ public sealed class AccountService(
     public async Task<AccountDto> MeAsync(CancellationToken ct = default) =>
         await ToDtoAsync(await CurrentAsync(ct), ct);
 
+    /// <summary>
+    /// Turns the account already signed in into a creator's as well. Signing up a second time with
+    /// the same address was the only route before, and it doesn't work — the address is taken, and
+    /// signing in through Google just returns the customer they already were.
+    /// <para>
+    /// A fresh token comes back because roles are baked into the one being held: without re-issuing,
+    /// the new role wouldn't take effect until the session expired.
+    /// </para>
+    /// </summary>
+    public async Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default)
+    {
+        var me = await CurrentAsync(ct);
+        if (RoleNames(me).Contains(Roles.Designer))
+            throw new BusinessRuleException(
+                "This account can already publish templates.", "already_a_designer");
+
+        await AddRoleAsync(me, Roles.Designer, ct);
+        await uow.SaveChangesAsync(ct);
+
+        return await IssueAsync(await LoadAsync(u => u.Id == me.Id, ct) ?? me, ct);
+    }
+
     // ----- Linking a second identifier ----------------------------------------------------------
 
     public async Task<CodeSentResponse> RequestLinkCodeAsync(

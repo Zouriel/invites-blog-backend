@@ -35,6 +35,9 @@ public interface IAccountService
 
     Task<AccountDto> MeAsync(CancellationToken ct = default);
 
+    /// <summary>Adds the Designer role to the signed-in account and re-issues its token.</summary>
+    Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default);
+
     /// <summary>Sends a code to a second identifier the signed-in account wants to add.</summary>
     Task<CodeSentResponse> RequestLinkCodeAsync(RequestCodeRequest request, CancellationToken ct = default);
 
