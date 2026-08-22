@@ -1,5 +1,8 @@
 # Making an invites.blog template
 
+> This is also published in the app at **/template-guide**, linked from My templates — that copy is
+> what community creators read, so keep the two in step.
+
 A template is **one HTML file**. You write the markup and put your CSS in a `<style>` tag — all in
 that single file. That's it. (No JavaScript — see *Animation* below; the platform handles motion.)
 
@@ -279,12 +282,12 @@ Commit + push, then on the server:
 git -C /opt/apps/invites-blog-backend pull && \
 cd /opt/apps/invites-blog-deploy && docker compose -f compose.prod.yml up -d --build api
 ```
-The template is packaged, its fields and image slots are auto-detected from your tags, and it shows
-up in the gallery. **A full working example lives at `RawTemplates/aurora-vows/` — copy it to start.**
+The template is packaged and its fields and image slots are auto-detected from your tags. **A full working example lives at `RawTemplates/aurora-vows/` — copy it to start.**
 
 ### Option B — upload at runtime (admin API)
 ```bash
-TOKEN=$(curl -s -X POST https://invites.blog/api/admin/login \
+# One sign-in for everyone; admin rights come from the account's roles, not a separate login.
+TOKEN=$(curl -s -X POST https://invites.blog/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@invites.blog","password":"YOUR_ADMIN_PASSWORD"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["token"])')
@@ -300,8 +303,9 @@ way to confirm your tags are right. Re-uploading the same slug+version updates i
 
 ### Option C — submit it as a community designer
 
-Make a designer account at `/designer/register` (email + password, or Google/Microsoft if the server
-has them configured), then submit from `/designer/submit`. You upload two files:
+Make a creator account at `/signup` (email + password, or Google/Microsoft if the server has them
+configured) — or, if you already have an account, turn it into one under **My account → Creator**.
+Then submit from `/designer`. You upload two files:
 
 ```
 index.html     # the template
