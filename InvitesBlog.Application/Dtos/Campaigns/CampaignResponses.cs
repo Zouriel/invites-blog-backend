@@ -46,7 +46,11 @@ public sealed record FinalizeResponse(string ShareLink, int GuestCount, int Emai
 
 // ----- Dashboard (§4.7.4 / §13.3) -----
 
-public sealed record DashboardCampaignDto(Guid Id, string Title, string Status, int PaidInviteCapacity);
+public sealed record DashboardCampaignDto(
+    Guid Id, string Title, string Status, int PaidInviteCapacity,
+    /// <summary>Raw roles blob, same shape/parsing as the builder summary — lets the dashboard offer
+    /// a role picker on "Add guest" instead of free text.</summary>
+    string RolesJson);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

@@ -196,6 +196,21 @@ public class GuestServiceTests
         await _guests.Received(1).AddAsync(Arg.Any<Guest>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task AddGuest_sendNow_false_skips_immediate_dispatch_even_when_already_sending()
+    {
+        // Same "already dispatched, within capacity" situation that would otherwise auto-send —
+        // SendNow: false is the explicit "add for later" choice and must override it.
+        var c = Own(status: CampaignStatus.Dispatched, paidCapacity: 100);
+        _guests.CountByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(1);
+
+        var outcome = await Sut().AddGuestAsync(
+            c.Id, new AddGuestRequest("later@test.com", null, "Later", null, null, null, SendNow: false));
+
+        Assert.Null(outcome.DispatchGuestId);
+        Assert.False(outcome.Response.Sent);
+    }
+
     // ----- UpdateGuest -----
 
     [Fact]

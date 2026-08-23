@@ -581,7 +581,9 @@ public sealed class CampaignService(
         }).ToList();
 
         return new DashboardResponse(
-            new DashboardCampaignDto(campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity),
+            new DashboardCampaignDto(
+                campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity,
+                campaign.RolesJson),
             report, guestRows, questions);
     }
 

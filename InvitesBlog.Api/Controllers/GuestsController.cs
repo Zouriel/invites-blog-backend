@@ -47,9 +47,15 @@ public sealed class GuestsController(IGuestService guests, DispatchService dispa
     public async Task<IActionResult> Add(Guid id, [FromBody] AddGuestRequest req, CancellationToken ct)
     {
         var outcome = await guests.AddGuestAsync(id, req, ct);
+        var response = outcome.Response;
         if (outcome.DispatchGuestId is Guid dispatchGuestId)
-            await dispatch.ResendAsync(dispatchGuestId, ct);
-        return Success(outcome.Response);
+        {
+            // Surface what actually happened (provider accept/reject), not just "we tried" — the
+            // response previously always looked like a bare add even when a send was attempted.
+            var sent = await dispatch.ResendAsync(dispatchGuestId, ct);
+            response = response with { Sent = sent };
+        }
+        return Success(response);
     }
 
     // PUT /api/campaigns/{id}/guests/{guestId} — fix contact details (§4.7.4)

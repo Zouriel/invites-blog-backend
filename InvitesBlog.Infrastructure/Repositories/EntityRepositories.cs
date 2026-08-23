@@ -22,6 +22,9 @@ public sealed class CampaignRepository(AppDbContext db) : BaseRepository<Campaig
 
     public Task<Campaign?> GetByDashboardTokenHashAsync(Guid id, string tokenHash, CancellationToken ct = default) =>
         Set.FirstOrDefaultAsync(c => c.Id == id && c.DashboardTokenHash == tokenHash, ct);
+
+    public Task<Campaign?> GetByDashboardTokenHashAsync(string tokenHash, CancellationToken ct = default) =>
+        Set.FirstOrDefaultAsync(c => c.DashboardTokenHash == tokenHash, ct);
 }
 
 public sealed class InviterRepository(AppDbContext db) : BaseRepository<Inviter>(db), IInviterRepository

@@ -143,9 +143,11 @@ public sealed class GuestService(
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
         var withinCapacity = guestCount <= campaign.PaidInviteCapacity;
 
-        // If already dispatched and capacity allows, send this new guest immediately.
+        // If already dispatched and capacity allows, send this new guest immediately — unless the
+        // caller explicitly asked to add it for a later send instead (SendNow: false).
+        var shouldSend = req.SendNow ?? true;
         Guid? dispatchGuestId = null;
-        if (added == 1 && withinCapacity &&
+        if (added == 1 && withinCapacity && shouldSend &&
             campaign.Status is CampaignStatus.Dispatched or CampaignStatus.PartiallyDispatched)
         {
             var latest = await guests.Query()

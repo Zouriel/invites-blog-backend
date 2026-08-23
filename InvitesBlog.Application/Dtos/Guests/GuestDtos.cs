@@ -4,9 +4,15 @@ namespace InvitesBlog.Application.Dtos.Guests;
 
 // ── Requests ────────────────────────────────────────────────────────────────
 
-/// <summary>Manual guest add after payment (§4.7.4).</summary>
+/// <summary>
+/// Manual guest add after payment (§4.7.4). <paramref name="SendNow"/> chooses whether a guest added
+/// to an already-dispatched campaign is emailed immediately or just added for a later, explicit send
+/// (the same free resend used for anyone else not-yet-sent) — null defaults to true, the original
+/// always-send-if-possible behavior, so any other caller that doesn't know about the flag is unaffected.
+/// </summary>
 public sealed record AddGuestRequest(
-    string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry);
+    string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
+    bool? SendNow = null);
 
 /// <summary>Fix a guest's contact details (§4.7.4).</summary>
 public sealed record UpdateGuestRequest(
@@ -36,7 +42,13 @@ public sealed record GuestUploadSummaryDto(
 public sealed record ConfirmUploadResultDto(int Added, int Suppressed);
 
 /// <summary>Result of a manual guest add, including prepaid-capacity accounting (§4.7.4).</summary>
-public sealed record AddGuestResultDto(int Added, int GuestCount, int PaidCapacity, bool NeedsTopUp);
+public sealed record AddGuestResultDto(
+    int Added, int GuestCount, int PaidCapacity, bool NeedsTopUp,
+    /// <summary>True only once the controller has actually attempted (and the provider accepted)
+    /// an immediate send — see <see cref="AddGuestOutcome"/>. False means the guest was added but
+    /// not sent, whether because SendNow was false, capacity/status didn't allow it, or the send
+    /// itself failed.</summary>
+    bool Sent = false);
 
 /// <summary>Result of a free resend.</summary>
 public sealed record ResendResultDto(bool Sent);

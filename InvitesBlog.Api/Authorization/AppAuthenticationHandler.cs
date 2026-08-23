@@ -52,7 +52,15 @@ public sealed class AppAuthenticationHandler(
         }
         else
         {
-            var campaign = await campaigns.GetByAccessTokenHashAsync(TokenService.Hash(token));
+            // A bearer token that isn't a JWT is one of two campaign secrets, either of which grants
+            // Inviter for that one campaign (scoped by the campaign_id claim below, re-checked by
+            // ICampaignOwnershipService on every campaign-scoped action): the possession token from
+            // the builder, or the dashboard token from the emailed "Sent" link. Both prove the same
+            // thing — this caller holds a secret only the campaign's owner has — so both should be
+            // able to manage it (add/resend/cancel guests), not just read it.
+            var hash = TokenService.Hash(token);
+            var campaign = await campaigns.GetByAccessTokenHashAsync(hash)
+                ?? await campaigns.GetByDashboardTokenHashAsync(hash);
             identity = campaign is not null
                 ? BuildIdentity(Roles.Inviter, authenticated: true,
                     extra: [new Claim(AppClaims.CampaignId, campaign.Id.ToString())])

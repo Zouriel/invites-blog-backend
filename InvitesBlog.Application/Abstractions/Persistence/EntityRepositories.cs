@@ -15,6 +15,14 @@ public interface ICampaignRepository : IRepository<Campaign>
 {
     Task<Campaign?> GetByAccessTokenHashAsync(string tokenHash, CancellationToken ct = default);
     Task<Campaign?> GetByDashboardTokenHashAsync(Guid id, string tokenHash, CancellationToken ct = default);
+
+    /// <summary>
+    /// Hash-only lookup (no campaign id known yet) — for authenticating a bearer token of unknown
+    /// kind, the same way <see cref="GetByAccessTokenHashAsync"/> already does for the possession
+    /// token. Safe: DashboardTokenHash is a SHA-256 of a 256-bit random token (see TokenService), so
+    /// a cross-campaign collision is negligible.
+    /// </summary>
+    Task<Campaign?> GetByDashboardTokenHashAsync(string tokenHash, CancellationToken ct = default);
 }
 
 public interface IInviterRepository : IRepository<Inviter>
