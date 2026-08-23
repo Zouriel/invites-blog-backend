@@ -15,6 +15,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<Invite> Invites => Set<Invite>();
+    public DbSet<InviteTrustedIp> InviteTrustedIps => Set<InviteTrustedIp>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Refund> Refunds => Set<Refund>();
@@ -144,6 +145,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("delivery_attempts");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.InviteId).HasDatabaseName("idx_delivery_invite_id");
+        });
+
+        b.Entity<InviteTrustedIp>(e =>
+        {
+            e.ToTable("invite_trusted_ips");
+            e.HasKey(x => x.Id);
+            // One row per (invite, IP) — re-trusting an already-known IP updates LastSeenAt in place
+            // rather than piling up duplicate rows.
+            e.HasIndex(x => new { x.InviteId, x.IpAddress }).IsUnique()
+                .HasDatabaseName("idx_invite_trusted_ips_invite_ip");
         });
 
         b.Entity<Payment>(e =>

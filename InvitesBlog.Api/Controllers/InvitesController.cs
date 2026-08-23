@@ -1,5 +1,6 @@
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Invites;
+using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Services.Invites;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
@@ -19,13 +20,29 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
     [AllowAnonymous]
     [HasPermission(Permissions.Invites.View)]
     public async Task<IActionResult> GetByToken(string token, CancellationToken ct) =>
-        Success(await invites.GetByTokenAsync(token, Render, ct));
+        Success(await invites.GetByTokenAsync(token, ClientIp(), Render, ct));
 
     [HttpPost("by-token/{token}/rsvp")]
     [AllowAnonymous]
     [HasPermission(Permissions.Invites.Rsvp)]
     public async Task<IActionResult> Rsvp(string token, [FromBody] RsvpRequest req, CancellationToken ct) =>
-        Success(await invites.RsvpAsync(token, req, ct));
+        Success(await invites.RsvpAsync(token, ClientIp(), req, ct));
+
+    // Personal-link IP binding (§ personal invite links): the frontend calls these two when
+    // GetByToken comes back requires-OTP because this open is from an IP not yet trusted for the
+    // invite. No contact is taken from the caller — the link is already user-bound, so the code goes
+    // to whatever contact the guest row itself has on file.
+    [HttpPost("by-token/{token}/reauth/request")]
+    [AllowAnonymous]
+    [HasPermission(Permissions.Invites.View)]
+    public async Task<IActionResult> RequestReauth(string token, CancellationToken ct) =>
+        Success(await invites.RequestReauthAsync(token, ct));
+
+    [HttpPost("by-token/{token}/reauth/verify")]
+    [AllowAnonymous]
+    [HasPermission(Permissions.Invites.View)]
+    public async Task<IActionResult> VerifyReauth(string token, [FromBody] VerifyOtpRequest req, CancellationToken ct) =>
+        Success(await invites.VerifyReauthAsync(token, ClientIp(), req, Render, ct));
 
     // Authenticated RSVP from the inbox (ownership-checked by verified contact).
     [HttpPost("{inviteId:guid}/rsvp")]
@@ -61,4 +78,8 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
         var p = renderer.Build(campaign, template, guest, invite, inviteLink, inviterName, inviterPhone, inviterEmail);
         return new InviteRenderData(p.PackageUrl, p.Data, p.RequiresOtp, p.CampaignStatus);
     }
+
+    // Requires Program.cs's ForwardedHeaders middleware to have already rewritten
+    // HttpContext.Connection.RemoteIpAddress from the Caddy hop's own IP to the real client IP.
+    private string? ClientIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
 }

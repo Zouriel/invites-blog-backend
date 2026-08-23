@@ -2,6 +2,7 @@ using InvitesBlog.Api;
 using InvitesBlog.Api.Middleware;
 using InvitesBlog.Infrastructure;
 using InvitesBlog.Infrastructure.Seed;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +10,21 @@ builder.Services.AddInvitesBlogInfrastructure(builder.Configuration);
 builder.Services.AddInvitesBlogApi(builder.Configuration);
 
 var app = builder.Build();
+
+// Production: the API is never internet-reachable directly — only the shared Caddy container can
+// reach it, over an internal Docker network (see deploy/compose.prod.yml, no published port on the
+// api service). That makes Caddy the one trusted hop, so it's safe to accept whatever X-Forwarded-For
+// it sets (Caddy always sets it) without a fixed KnownProxies/KnownNetworks allowlist — the container
+// network boundary IS the trust boundary here. Without this, HttpContext.Connection.RemoteIpAddress
+// would resolve to Caddy's own address for every request, which silently breaks anything keyed on the
+// real client IP (today: the OTP/resend rate limiters; also the personal-link IP-trust feature).
+var forwardedHeaders = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+};
+forwardedHeaders.KnownNetworks.Clear();
+forwardedHeaders.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeaders);
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors();

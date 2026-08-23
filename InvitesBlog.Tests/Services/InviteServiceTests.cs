@@ -3,10 +3,12 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Invites;
+using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Invites;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Application.Services.Invites;
+using InvitesBlog.Application.Services.Otp;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +19,11 @@ namespace InvitesBlog.Tests.Services;
 
 public class InviteServiceTests
 {
+    private const string Ip1 = "203.0.113.10";
+    private const string Ip2 = "203.0.113.20";
+    private const string Ip3 = "203.0.113.30";
+    private const string Ip4 = "203.0.113.40";
+
     private readonly IInviteRepository _invites = Substitute.For<IInviteRepository>();
     private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
@@ -24,14 +31,35 @@ public class InviteServiceTests
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
     private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IRepository<RsvpResponse> _rsvp = Substitute.For<IRepository<RsvpResponse>>();
+    private readonly IRepository<InviteTrustedIp> _trustedIps = Substitute.For<IRepository<InviteTrustedIp>>();
+    private readonly IOtpService _otp = Substitute.For<IOtpService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
     private IValidator<RsvpRequest> _rsvpValidator = TestData.PassingValidator<RsvpRequest>();
 
+    /// <summary>Backs _trustedIps with an in-memory list so ListAsync/AddAsync/Remove actually behave
+    /// like a real repository across a test — the eviction/bump logic depends on that, not just on
+    /// individual calls being received.</summary>
+    private readonly List<InviteTrustedIp> _trustedIpRows = [];
+
+    public InviteServiceTests()
+    {
+        _trustedIps.ListAsync(Arg.Any<System.Linq.Expressions.Expression<Func<InviteTrustedIp, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var predicate = ci.Arg<System.Linq.Expressions.Expression<Func<InviteTrustedIp, bool>>>().Compile();
+                return (IReadOnlyList<InviteTrustedIp>)_trustedIpRows.Where(predicate).ToList();
+            });
+        _trustedIps.AddAsync(Arg.Any<InviteTrustedIp>(), Arg.Any<CancellationToken>())
+            .Returns(ci => { _trustedIpRows.Add(ci.Arg<InviteTrustedIp>()); return Task.CompletedTask; });
+        _trustedIps.When(x => x.Remove(Arg.Any<InviteTrustedIp>()))
+            .Do(ci => _trustedIpRows.Remove(ci.Arg<InviteTrustedIp>()));
+    }
+
     private InviteService Sut() => new(
-        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _uow, _currentUser, _config,
-        _rsvpValidator);
+        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _trustedIps, _otp, _uow,
+        _currentUser, _config, _rsvpValidator);
 
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());
@@ -42,7 +70,7 @@ public class InviteServiceTests
     public async Task GetByToken_unknown_throws_NotFound()
     {
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
-        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().GetByTokenAsync("tok", Renderer));
+        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().GetByTokenAsync("tok", Ip1, Renderer));
     }
 
     [Fact]
@@ -53,22 +81,176 @@ public class InviteServiceTests
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
 
-        var res = await Sut().GetByTokenAsync("tok", Renderer);
+        var res = await Sut().GetByTokenAsync("tok", Ip1, Renderer);
 
         Assert.IsType<InviteCancelledResponse>(res);
     }
 
+    // ----- Personal-link IP binding -----
+
     [Fact]
-    public async Task GetByToken_requires_otp_returns_requiresOtp_response()
+    public async Task GetByToken_no_ip_visible_returns_requiresOtp_response()
     {
+        // Forwarded-headers misconfigured / not behind the expected proxy — never silently trust.
         var campaign = TestData.Campaign();
-        var invite = TestData.Invite(campaign.Id, Guid.NewGuid(), requiresOtp: true);
+        var invite = TestData.Invite(campaign.Id, Guid.NewGuid());
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
 
-        var res = await Sut().GetByTokenAsync("tok", Renderer);
+        var res = await Sut().GetByTokenAsync("tok", null, Renderer);
 
         Assert.IsType<InviteRequiresOtpResponse>(res);
+    }
+
+    [Fact]
+    public async Task GetByToken_first_ever_open_auto_trusts_and_renders()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id);
+        var template = TestData.Template();
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+
+        var res = await Sut().GetByTokenAsync("tok", Ip1, Renderer);
+
+        Assert.IsType<InviteViewResponse>(res);
+        var saved = Assert.Single(_trustedIpRows);
+        Assert.Equal(Ip1, saved.IpAddress);
+        Assert.Equal(invite.Id, saved.InviteId);
+    }
+
+    [Fact]
+    public async Task GetByToken_from_already_trusted_ip_renders_without_otp()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id);
+        var template = TestData.Template();
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        _trustedIpRows.Add(new InviteTrustedIp
+        {
+            Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip1,
+            FirstSeenAt = DateTimeOffset.UtcNow.AddDays(-1), LastSeenAt = DateTimeOffset.UtcNow.AddDays(-1),
+        });
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+
+        var res = await Sut().GetByTokenAsync("tok", Ip1, Renderer);
+
+        Assert.IsType<InviteViewResponse>(res);
+        var saved = Assert.Single(_trustedIpRows); // still just the one row — bumped, not duplicated
+        Assert.True(saved.LastSeenAt > saved.FirstSeenAt);
+    }
+
+    [Fact]
+    public async Task GetByToken_from_unrecognized_ip_after_first_trust_requires_otp()
+    {
+        var campaign = TestData.Campaign();
+        var invite = TestData.Invite(campaign.Id, Guid.NewGuid());
+        _trustedIpRows.Add(new InviteTrustedIp
+        {
+            Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip1,
+            FirstSeenAt = DateTimeOffset.UtcNow, LastSeenAt = DateTimeOffset.UtcNow,
+        });
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+
+        var res = await Sut().GetByTokenAsync("tok", Ip2, Renderer);
+
+        Assert.IsType<InviteRequiresOtpResponse>(res);
+        Assert.Single(_trustedIpRows); // the new IP was NOT trusted — only reauth can add it
+    }
+
+    [Fact]
+    public async Task RequestReauth_sends_to_guests_own_email_not_a_caller_supplied_one()
+    {
+        var guest = TestData.Guest(Guid.NewGuid(), email: "guest@test.com", phone: "+9607771234");
+        var invite = TestData.Invite(guest.CampaignId, guest.Id);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new OtpChallengeResponse(Guid.NewGuid(), 300));
+
+        await Sut().RequestReauthAsync("tok");
+
+        await _otp.Received(1).RequestAsync(
+            Arg.Is<SendOtpRequest>(r => r.Channel == "email" && r.Email == "guest@test.com"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestReauth_falls_back_to_phone_when_no_email_on_file()
+    {
+        var guest = TestData.Guest(Guid.NewGuid(), email: null, phone: "+9607771234");
+        var invite = TestData.Invite(guest.CampaignId, guest.Id);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new OtpChallengeResponse(Guid.NewGuid(), 300));
+
+        await Sut().RequestReauthAsync("tok");
+
+        await _otp.Received(1).RequestAsync(
+            Arg.Is<SendOtpRequest>(r => r.Channel == "sms" && r.Phone == "+9607771234"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task VerifyReauth_trusts_the_ip_and_does_not_mint_an_account_jwt()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id);
+        var template = TestData.Template();
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new VerifiedContact("email", guest.Email!));
+
+        var res = await Sut().VerifyReauthAsync("tok", Ip2, new VerifyOtpRequest(Guid.NewGuid(), "123456"), Renderer);
+
+        Assert.IsType<InviteViewResponse>(res);
+        var saved = Assert.Single(_trustedIpRows);
+        Assert.Equal(Ip2, saved.IpAddress);
+        // The whole point (per IInviteService.VerifyReauthAsync docs): scoped to this invite only —
+        // never routes through OtpService.VerifyAsync, which is the one that mints a 30-day JWT.
+        await _otp.DidNotReceive().VerifyAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task VerifyReauth_evicts_the_least_recently_seen_ip_when_already_at_three()
+    {
+        var campaign = TestData.Campaign();
+        var guest = TestData.Guest(campaign.Id);
+        var template = TestData.Template();
+        var invite = TestData.Invite(campaign.Id, guest.Id);
+        var now = DateTimeOffset.UtcNow;
+        _trustedIpRows.AddRange(
+        [
+            new InviteTrustedIp { Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip1, FirstSeenAt = now.AddDays(-3), LastSeenAt = now.AddDays(-3) },
+            new InviteTrustedIp { Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip2, FirstSeenAt = now.AddDays(-2), LastSeenAt = now.AddDays(-1) },
+            new InviteTrustedIp { Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip3, FirstSeenAt = now.AddDays(-1), LastSeenAt = now },
+        ]);
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
+        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new VerifiedContact("email", guest.Email!));
+
+        await Sut().VerifyReauthAsync("tok", Ip4, new VerifyOtpRequest(Guid.NewGuid(), "123456"), Renderer);
+
+        Assert.Equal(3, _trustedIpRows.Count);
+        Assert.DoesNotContain(_trustedIpRows, r => r.IpAddress == Ip1); // oldest LastSeenAt — evicted
+        Assert.Contains(_trustedIpRows, r => r.IpAddress == Ip2);
+        Assert.Contains(_trustedIpRows, r => r.IpAddress == Ip3);
+        Assert.Contains(_trustedIpRows, r => r.IpAddress == Ip4);
     }
 
     // ----- GetMyInvite (shared /e/{id} link, guest-list-only) -----
@@ -119,13 +301,14 @@ public class InviteServiceTests
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
         _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
 
-        var res = await Sut().GetByTokenAsync("tok", Renderer);
+        var res = await Sut().GetByTokenAsync("tok", Ip1, Renderer);
 
         var view = Assert.IsType<InviteViewResponse>(res);
         Assert.Equal(template.PackageUrl, view.PackageUrl);
         Assert.NotNull(invite.ViewedAt);
         Assert.Equal(InviteStatus.Viewed, invite.Status);
-        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        // Two separate persists: trusting the first-ever IP, then marking the invite viewed.
+        await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     // ----- Rsvp -----
@@ -135,7 +318,7 @@ public class InviteServiceTests
     {
         _rsvpValidator = TestData.FailingValidator<RsvpRequest>();
         await Assert.ThrowsAsync<ValidationException>(
-            () => Sut().RsvpAsync("tok", new RsvpRequest("Going", null, null, null, null, null)));
+            () => Sut().RsvpAsync("tok", Ip1, new RsvpRequest("Going", null, null, null, null, null)));
     }
 
     [Fact]
@@ -143,7 +326,24 @@ public class InviteServiceTests
     {
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
         await Assert.ThrowsAsync<InviteNotFoundException>(
-            () => Sut().RsvpAsync("tok", new RsvpRequest("Going", null, null, null, null, null)));
+            () => Sut().RsvpAsync("tok", Ip1, new RsvpRequest("Going", null, null, null, null, null)));
+    }
+
+    [Fact]
+    public async Task Rsvp_from_untrusted_ip_throws_Unauthorized()
+    {
+        var invite = TestData.Invite(Guid.NewGuid(), Guid.NewGuid());
+        _trustedIpRows.Add(new InviteTrustedIp
+        {
+            Id = Guid.NewGuid(), InviteId = invite.Id, IpAddress = Ip1,
+            FirstSeenAt = DateTimeOffset.UtcNow, LastSeenAt = DateTimeOffset.UtcNow,
+        });
+        _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
+
+        // Same invite already has a trusted IP (Ip1) — RSVPing from a DIFFERENT, untrusted one (Ip2)
+        // must be refused exactly like viewing would be, or the reauth challenge is pointless.
+        await Assert.ThrowsAsync<UnauthorizedException>(
+            () => Sut().RsvpAsync("tok", Ip2, new RsvpRequest("Going", null, null, null, null, null)));
     }
 
     [Fact]
@@ -152,7 +352,7 @@ public class InviteServiceTests
         var invite = TestData.Invite(Guid.NewGuid(), Guid.NewGuid());
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         await Assert.ThrowsAsync<InvalidRsvpStatusException>(
-            () => Sut().RsvpAsync("tok", new RsvpRequest("Teleporting", null, null, null, null, null)));
+            () => Sut().RsvpAsync("tok", Ip1, new RsvpRequest("Teleporting", null, null, null, null, null)));
     }
 
     [Fact]
@@ -161,12 +361,13 @@ public class InviteServiceTests
         var invite = TestData.Invite(Guid.NewGuid(), Guid.NewGuid());
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
 
-        var res = await Sut().RsvpAsync("tok", new RsvpRequest("Going", 2, null, null, null, null));
+        var res = await Sut().RsvpAsync("tok", Ip1, new RsvpRequest("Going", 2, null, null, null, null));
 
         Assert.Equal("Going", res.Rsvp);
         Assert.Equal(RsvpStatus.Going, invite.RsvpStatus);
         await _rsvp.Received(1).AddAsync(Arg.Any<RsvpResponse>(), Arg.Any<CancellationToken>());
-        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        // Two separate persists: trusting the first-ever IP, then recording the RSVP.
+        await _uow.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     // ----- Inbox / Claim -----

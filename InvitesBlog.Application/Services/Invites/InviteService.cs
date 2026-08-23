@@ -3,10 +3,12 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Invites;
+using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Rsvp;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Invites;
 using InvitesBlog.Application.Security;
+using InvitesBlog.Application.Services.Otp;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -26,12 +28,17 @@ public sealed class InviteService(
     IInviterRepository inviters,
     IRepository<AppUser> users,
     IRepository<RsvpResponse> rsvpResponses,
+    IRepository<InviteTrustedIp> trustedIps,
+    IOtpService otp,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IConfiguration config,
     IValidator<RsvpRequest> rsvpValidator) : IInviteService
 {
-    public async Task<object> GetByTokenAsync(string token, InviteRenderer render, CancellationToken ct = default)
+    /// <summary>Max concurrently-trusted IPs per personal invite link — see class doc on <see cref="InviteTrustedIp"/>.</summary>
+    private const int MaxTrustedIps = 3;
+
+    public async Task<object> GetByTokenAsync(string token, string? ipAddress, InviteRenderer render, CancellationToken ct = default)
     {
         var hash = TokenService.Hash(token);
         var invite = await invites.GetByTokenHashAsync(hash, ct)
@@ -43,8 +50,12 @@ public sealed class InviteService(
         if (campaign.Status == CampaignStatus.Cancelled)
             return new InviteCancelledResponse(true, "This event has been cancelled.");
 
-        // Sensitive invites require OTP before viewing (§4.9.1 / §4.9.3).
-        if (invite.RequiresOtp)
+        // Personal-link IP binding: the first-ever open of THIS invite auto-trusts its IP; any later
+        // open from an IP not among the (up to 3) already trusted needs a reauth OTP first. This
+        // supersedes the old campaign-wide IsSensitive/RequiresOtp toggle (§4.9.1) for personal links
+        // — every link gets this now, not just campaigns a host flagged sensitive. Invite.RequiresOtp
+        // is left in the schema (still settable via IsSensitive) but no longer consulted here.
+        if (!await IsTrustedIpAsync(invite.Id, ipAddress, ct))
             return new InviteRequiresOtpResponse(true);
 
         var guest = await guests.GetByIdAsync(invite.GuestId, ct)
@@ -72,7 +83,7 @@ public sealed class InviteService(
             RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
     }
 
-    public async Task<RsvpResultResponse> RsvpAsync(string token, RsvpRequest req, CancellationToken ct = default)
+    public async Task<RsvpResultResponse> RsvpAsync(string token, string? ipAddress, RsvpRequest req, CancellationToken ct = default)
     {
         await rsvpValidator.ValidateAndThrowAsync(req, ct);
 
@@ -80,9 +91,9 @@ public sealed class InviteService(
         var invite = await invites.GetByTokenHashAsync(hash, ct)
             ?? throw new InviteNotFoundException();
 
-        // Sensitive invites gate viewing behind OTP (§4.9.1); gate RSVP too. An OTP-verified session
-        // carries the contact on the (optional) JWT, so an authenticated holder can still RSVP.
-        if (invite.RequiresOtp && string.IsNullOrEmpty(currentUser.Contact))
+        // Same IP-trust gate as viewing (see GetByTokenAsync) — otherwise the reauth challenge on
+        // /by-token/{token} could be skipped entirely by RSVPing straight through this endpoint.
+        if (!await IsTrustedIpAsync(invite.Id, ipAddress, ct))
             throw new UnauthorizedException();
 
         return await RecordRsvpAsync(invite, req, ct);
@@ -290,5 +301,103 @@ public sealed class InviteService(
         await uow.SaveChangesAsync(ct);
 
         return new ClaimResponse(true);
+    }
+
+    public async Task<InviteReauthRequestedResponse> RequestReauthAsync(string token, CancellationToken ct = default)
+    {
+        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
+            ?? throw new InviteNotFoundException();
+        var guest = await guests.GetByIdAsync(invite.GuestId, ct)
+            ?? throw new InviteNotFoundException();
+
+        // The link is already user-bound — the caller never types a contact in. The code goes to
+        // whatever the guest row has on file: email preferred (it's also the invite delivery channel),
+        // phone as fallback (phone is OTP-only — never a delivery channel of its own here).
+        string channel;
+        OtpChallengeResponse challenge;
+        if (!string.IsNullOrWhiteSpace(guest.Email))
+        {
+            channel = "email";
+            challenge = await otp.RequestAsync(new SendOtpRequest("email", null, guest.Email, null), ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(guest.PhoneE164))
+        {
+            channel = "sms";
+            challenge = await otp.RequestAsync(new SendOtpRequest("sms", guest.PhoneE164, null, null), ct);
+        }
+        else
+        {
+            // No contact on file at all — shouldn't normally happen (a guest needs one to have been
+            // dispatched to in the first place), but nothing to reauth against.
+            throw new InviteNotFoundException();
+        }
+
+        return new InviteReauthRequestedResponse(challenge.ChallengeId, challenge.ExpiresInSeconds, channel);
+    }
+
+    public async Task<object> VerifyReauthAsync(
+        string token, string? ipAddress, VerifyOtpRequest req, InviteRenderer render, CancellationToken ct = default)
+    {
+        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
+            ?? throw new InviteNotFoundException();
+
+        // Consumes the challenge — proves the caller is really reachable at whatever contact
+        // RequestReauthAsync sent the code to. The invite itself already says who this is; the OTP
+        // only proves the person opening it right now can be reached there. Deliberately doesn't call
+        // OtpService.VerifyAsync — this must NOT mint the normal 30-day account JWT (see class docs on
+        // IInviteService.VerifyReauthAsync: this reauth is scoped to just this one invite).
+        await otp.VerifyContactAsync(req, ct);
+
+        if (!string.IsNullOrWhiteSpace(ipAddress))
+            await TrustIpAsync(invite.Id, ipAddress, ct);
+
+        return await GetByTokenAsync(token, ipAddress, render, ct);
+    }
+
+    /// <summary>
+    /// True if the IP is already trusted for this invite (bumping its last-seen time), or if this is
+    /// the very first open ever (which auto-trusts it). False means the caller must reauthenticate.
+    /// </summary>
+    private async Task<bool> IsTrustedIpAsync(Guid inviteId, string? ipAddress, CancellationToken ct)
+    {
+        // No IP visible (e.g. forwarded-headers misconfigured) — never silently trust; this is exactly
+        // the situation the whole feature is meant to gate.
+        if (string.IsNullOrWhiteSpace(ipAddress)) return false;
+
+        var trusted = await trustedIps.ListAsync(t => t.InviteId == inviteId, ct);
+        var match = trusted.FirstOrDefault(t => t.IpAddress == ipAddress);
+        if (match is not null)
+        {
+            match.LastSeenAt = DateTimeOffset.UtcNow;
+            await uow.SaveChangesAsync(ct);
+            return true;
+        }
+        if (trusted.Count > 0) return false; // known invite, unrecognized IP — needs reauth
+
+        await trustedIps.AddAsync(new InviteTrustedIp
+        {
+            Id = Guid.NewGuid(), InviteId = inviteId, IpAddress = ipAddress,
+            FirstSeenAt = DateTimeOffset.UtcNow, LastSeenAt = DateTimeOffset.UtcNow,
+        }, ct);
+        await uow.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>Trusts a new IP for an invite post-reauth, evicting the least-recently-seen of the
+    /// existing <see cref="MaxTrustedIps"/> first if the slot list is already full.</summary>
+    private async Task TrustIpAsync(Guid inviteId, string ipAddress, CancellationToken ct)
+    {
+        var trusted = await trustedIps.ListAsync(t => t.InviteId == inviteId, ct);
+        if (trusted.Any(t => t.IpAddress == ipAddress)) return; // already trusted — nothing to do
+
+        if (trusted.Count >= MaxTrustedIps)
+            trustedIps.Remove(trusted.OrderBy(t => t.LastSeenAt).First());
+
+        await trustedIps.AddAsync(new InviteTrustedIp
+        {
+            Id = Guid.NewGuid(), InviteId = inviteId, IpAddress = ipAddress,
+            FirstSeenAt = DateTimeOffset.UtcNow, LastSeenAt = DateTimeOffset.UtcNow,
+        }, ct);
+        await uow.SaveChangesAsync(ct);
     }
 }

@@ -17,6 +17,20 @@ public sealed class Invite
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>
+/// One of up to 3 IP addresses currently trusted to open a personal invite link (<c>/i/:token</c>)
+/// without re-verifying via OTP. First-ever open of an invite auto-trusts that IP; opening from a
+/// 4th distinct IP evicts whichever of the 3 has the oldest <see cref="LastSeenAt"/> to make room.
+/// </summary>
+public sealed class InviteTrustedIp
+{
+    public Guid Id { get; set; }
+    public Guid InviteId { get; set; }
+    public string IpAddress { get; set; } = default!;
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+}
+
 /// <summary>A stored RSVP response (§9.1 rsvp_responses).</summary>
 public sealed class RsvpResponse
 {

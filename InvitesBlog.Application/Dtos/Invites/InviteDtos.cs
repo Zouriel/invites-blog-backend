@@ -27,6 +27,13 @@ public sealed record MyInviteResponse(
     string PackageUrl, JsonObject Data, string CampaignStatus, Guid InviteId, string RsvpStatus,
     IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
 
+/// <summary>
+/// A reauth code was sent for a personal invite link opened from an untrusted IP.
+/// <paramref name="Channel"/> ("email" or "sms") lets the UI say where to look without exposing the
+/// actual address — same privacy posture as the rest of the OTP flow.
+/// </summary>
+public sealed record InviteReauthRequestedResponse(Guid ChallengeId, int ExpiresInSeconds, string Channel);
+
 // ----- other responses -----
 
 public sealed record RsvpResultResponse(string Rsvp);
