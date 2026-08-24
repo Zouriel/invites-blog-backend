@@ -21,8 +21,8 @@ public sealed partial class ResendEmailSender(
     public async Task<DeliveryResult> SendAsync(EmailMessage message, CancellationToken ct)
     {
         var from = message.Stream == EmailStream.Invites
-            ? config["Email:From_Invites"] ?? "invites.blog <invites@mail.invites.blog>"
-            : config["Email:From_System"] ?? "invites.blog <no-reply@mail.invites.blog>";
+            ? config["Email:From_Invites"] ?? "invites.blog <invites@invites.blog>"
+            : config["Email:From_System"] ?? "invites.blog <no-reply@invites.blog>";
 
         var tags = message.Tags?
             .Select(t => new ResendTag(SanitizeTag(t.Key), SanitizeTag(t.Value)))
