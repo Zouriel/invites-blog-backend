@@ -21,6 +21,7 @@ public class OtpServiceTests
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IOtpSender _emailSender = Substitute.For<IOtpSender>();
+    private readonly IOtpSender _smsSender = Substitute.For<IOtpSender>();
     private readonly IInviteeTokenIssuer _tokenIssuer = Substitute.For<IInviteeTokenIssuer>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
     private IValidator<SendOtpRequest> _sendValidator = TestData.PassingValidator<SendOtpRequest>();
@@ -29,11 +30,12 @@ public class OtpServiceTests
     public OtpServiceTests()
     {
         _emailSender.Channel.Returns("email");
+        _smsSender.Channel.Returns("sms");
         _config["Otp:Channels"].Returns("Email,Sms"); // both channels enabled for these unit tests
     }
 
     private OtpService Sut() => new(
-        _challenges, _guests, _campaigns, _uow, new[] { _emailSender }, _tokenIssuer,
+        _challenges, _guests, _campaigns, _uow, new[] { _emailSender, _smsSender }, _tokenIssuer,
         new PhoneNormalizer(), _config, _sendValidator, _verifyValidator);
 
     [Fact]
@@ -158,7 +160,7 @@ public class OtpServiceTests
         _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
             .Returns(new[] { TestData.Guest(c.Id, email: "invited@test.com") });
 
-        var res = await Sut().RequestForCampaignAsync(c.Id, "stranger@test.com");
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest("stranger@test.com"));
 
         Assert.False(res.Invited);
         Assert.False(res.Cancelled);
@@ -176,7 +178,7 @@ public class OtpServiceTests
             .Returns(new[] { TestData.Guest(c.Id, email: "invited@test.com") });
 
         // Match is case-insensitive and trimmed.
-        var res = await Sut().RequestForCampaignAsync(c.Id, "  Invited@Test.com ");
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest("  Invited@Test.com "));
 
         Assert.True(res.Invited);
         Assert.NotNull(res.ChallengeId);
@@ -185,12 +187,78 @@ public class OtpServiceTests
     }
 
     [Fact]
+    public async Task RequestForCampaign_phone_on_guest_list_texts_the_code()
+    {
+        // A host who listed a guest by number only: that guest can still prove they belong on this
+        // campaign, which is the whole point of allowing a number at the invite gate.
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: null, phone: "+9607819157") });
+
+        // Local format normalises against the default country before the guest-list check.
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest(null, "7819157", "MV"));
+
+        Assert.True(res.Invited);
+        Assert.NotNull(res.ChallengeId);
+        await _smsSender.Received(1).SendCodeAsync("+9607819157", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _emailSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_phone_not_on_guest_list_sends_nothing()
+    {
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: null, phone: "+9607819157") });
+
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest(null, "7770000", "MV"));
+
+        Assert.False(res.Invited);
+        Assert.Null(res.ChallengeId);
+        await _smsSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_unusable_phone_sends_nothing()
+    {
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: null, phone: "+9607819157") });
+
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest(null, "12", "MV"));
+
+        Assert.False(res.Invited);
+        await _smsSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequestForCampaign_phone_wins_when_both_contacts_are_supplied()
+    {
+        // The caller chose a channel; quietly mailing instead would put the code somewhere they may
+        // not be watching.
+        var c = TestData.Campaign();
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>())
+            .Returns(new[] { TestData.Guest(c.Id, email: "invited@test.com", phone: "+9607819157") });
+
+        var res = await Sut().RequestForCampaignAsync(
+            c.Id, new CampaignOtpRequest("invited@test.com", "7819157", "MV"));
+
+        Assert.True(res.Invited);
+        await _smsSender.Received(1).SendCodeAsync("+9607819157", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _emailSender.DidNotReceive().SendCodeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RequestForCampaign_cancelled_campaign_returns_cancelled_without_sending()
     {
         var c = TestData.Campaign(status: CampaignStatus.Cancelled);
         _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
 
-        var res = await Sut().RequestForCampaignAsync(c.Id, "invited@test.com");
+        var res = await Sut().RequestForCampaignAsync(c.Id, new CampaignOtpRequest("invited@test.com"));
 
         Assert.False(res.Invited);
         Assert.True(res.Cancelled);
@@ -202,7 +270,7 @@ public class OtpServiceTests
     {
         _campaigns.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Campaign?)null);
 
-        var res = await Sut().RequestForCampaignAsync(Guid.NewGuid(), "anyone@test.com");
+        var res = await Sut().RequestForCampaignAsync(Guid.NewGuid(), new CampaignOtpRequest("anyone@test.com"));
 
         Assert.False(res.Invited);
         Assert.False(res.Cancelled);

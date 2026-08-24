@@ -87,18 +87,34 @@ public sealed class OtpService(
         return new OtpChallengeResponse(challenge.Id, expiryMinutes * 60);
     }
 
-    public async Task<CampaignOtpResponse> RequestForCampaignAsync(Guid campaignId, string email, CancellationToken ct = default)
+    public async Task<CampaignOtpResponse> RequestForCampaignAsync(
+        Guid campaignId, CampaignOtpRequest req, CancellationToken ct = default)
     {
-        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
-
         // Never leak whether the campaign exists — an unknown/cancelled campaign reads as "not invited".
         var campaign = await campaigns.GetByIdAsync(campaignId, ct);
         if (campaign is null) return new CampaignOtpResponse(false, false, null, 0);
         if (campaign.Status == CampaignStatus.Cancelled) return new CampaignOtpResponse(false, true, null, 0);
 
-        // Only email addresses actually on this campaign's guest list get a code — no blind sends. Uses
-        // the same includeOptedOut:false view as the my-invite render, so an opted-out guest is refused too.
+        // Only contacts actually on THIS campaign's guest list get a code — no blind sends. Uses the
+        // same includeOptedOut:false view as the my-invite render, so an opted-out guest is refused too.
         var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+
+        // A phone wins when both are supplied: the caller picked a channel, and silently mailing
+        // instead would send the code somewhere they may not be watching.
+        if (!string.IsNullOrWhiteSpace(req.Phone))
+        {
+            var norm = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV");
+            if (!norm.IsUsable) return new CampaignOtpResponse(false, false, null, 0);
+
+            var onList = guestList.Any(g => g.PhoneE164 == norm.E164);
+            if (!onList) return new CampaignOtpResponse(false, false, null, 0);
+
+            var smsChallenge = await RequestAsync(
+                new SendOtpRequest("sms", norm.E164, null, req.DefaultCountry), ct);
+            return new CampaignOtpResponse(true, false, smsChallenge.ChallengeId, smsChallenge.ExpiresInSeconds);
+        }
+
+        var normalized = (req.Email ?? string.Empty).Trim().ToLowerInvariant();
         var invited = !string.IsNullOrWhiteSpace(normalized) && guestList.Any(g =>
             !string.IsNullOrWhiteSpace(g.Email) &&
             string.Equals(g.Email!.Trim(), normalized, StringComparison.OrdinalIgnoreCase));

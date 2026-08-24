@@ -12,9 +12,12 @@ public sealed record OtpChallengeResponse(Guid ChallengeId, int ExpiresInSeconds
 /// <summary>Returned after a successful verification: the invitee access + refresh tokens.</summary>
 public sealed record OtpTokensResponse(string AccessToken, string RefreshToken);
 
-/// <summary>Request an OTP for the shared campaign link — a code is sent ONLY if the email is on the
-/// campaign's guest list, so an uninvited address never triggers an email.</summary>
-public sealed record CampaignOtpRequest(string Email);
+/// <summary>
+/// Request an OTP for the shared campaign link. A code is sent ONLY if the contact is on the
+/// campaign's guest list, so an uninvited contact never triggers a send. Either identifier works —
+/// a guest a host listed by number can prove themselves the same way one listed by email can.
+/// </summary>
+public sealed record CampaignOtpRequest(string? Email, string? Phone = null, string? DefaultCountry = null);
 
 /// <summary>
 /// Result of a guest-list-gated OTP request. A challenge is created (and a code emailed) only when

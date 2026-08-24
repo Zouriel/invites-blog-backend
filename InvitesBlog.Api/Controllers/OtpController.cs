@@ -38,5 +38,5 @@ public sealed class OtpController(IOtpService otp) : BaseApiController
     [EnableRateLimiting("otp")]
     public async Task<IActionResult> RequestForCampaign(
         Guid campaignId, [FromBody] CampaignOtpRequest req, CancellationToken ct) =>
-        Success(await otp.RequestForCampaignAsync(campaignId, req.Email, ct));
+        Success(await otp.RequestForCampaignAsync(campaignId, req, ct));
 }
