@@ -7,8 +7,9 @@ namespace InvitesBlog.Api.Controllers;
 
 /// <summary>
 /// Releasing a commissioned template to the public gallery. Both parties act here, each on their own
-/// half: the designer with their designer session, the requester with the OTP-verified email the
-/// template was commissioned for — the same identity they already use to claim it.
+/// half: the designer with their designer session, the requester with the verified email the template
+/// was commissioned for — the same identity they already use to claim it, whether that email is on
+/// their account or on an OTP-JWT.
 /// </summary>
 [Route("api/template-release")]
 public sealed class TemplateReleaseController(ITemplateReleaseService release) : BaseApiController

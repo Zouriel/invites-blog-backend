@@ -11,8 +11,9 @@ namespace InvitesBlog.Api.Controllers;
 [Route("api/templates")]
 public sealed class TemplatesController(ITemplateService templates, ICurrentUser currentUser) : BaseApiController
 {
-    /// <summary>"Did you request a template?" — active dedicated templates reserved for the
-    /// OTP-verified requester's email. Empty list ⇒ the frontend shows "not ready yet".</summary>
+    /// <summary>The "My requests" tab — active dedicated templates reserved for the caller's verified
+    /// email. Either identity carries that email: an account session or an OTP-JWT. Empty list ⇒ the
+    /// frontend shows "nothing reserved for you yet".</summary>
     [HttpGet("/api/me/dedicated-templates")]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> MyDedicated(CancellationToken ct) =>

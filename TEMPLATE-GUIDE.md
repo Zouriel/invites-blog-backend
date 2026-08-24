@@ -278,8 +278,8 @@ meta.json      # { "name","slug","version","category","description" }
 ```
 
 **Keeping one private.** Add `visibility` + `assignedEmail` and the template never appears in the
-public gallery — only the person at that address sees it, after verifying by email code at
-`/request-template`:
+public gallery — only the person at that address sees it, when they sign in with that email and
+open **My templates → My requests**:
 ```json
 { "name": "Gilded Hour", "slug": "gilded-hour", "version": "1.0.0",
   "category": "Birthday", "description": "A scroll-driven birthday invitation.",
@@ -343,8 +343,8 @@ already built on it never change.
 ---
 
 > **Public vs Dedicated:** add `-F visibility=Dedicated -F assignedEmail=someone@example.com` to make
-> a template reserved for one person (they claim it via "Did you request a template?" with an email
-> code). Leave it off for a normal public gallery template.
+> a template reserved for one person (they claim it by signing in with that address and opening
+> **My templates → My requests**). Leave it off for a normal public gallery template.
 
 ---
 
