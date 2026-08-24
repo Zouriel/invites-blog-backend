@@ -23,7 +23,9 @@ public sealed class MsgOwlSmsOtpSender(
     public const string ConfigSection = "Sms:MsgOwl";
 
     private string? ApiKey => config[$"{ConfigSection}:ApiKey"];
-    private string SenderId => config[$"{ConfigSection}:SenderId"] is { Length: > 0 } s ? s : "invites.blog";
+    // Alphanumeric sender IDs are capped at 11 GSM characters with no punctuation, so the previous
+    // "invites.blog" default (12 chars, and a period) would have been rejected by the carrier.
+    private string SenderId => config[$"{ConfigSection}:SenderId"] is { Length: > 0 } s ? s : "InvitesBlog";
     private string Endpoint =>
         config[$"{ConfigSection}:Endpoint"] is { Length: > 0 } e ? e : "https://rest.msgowl.com/messages";
 
@@ -41,7 +43,11 @@ public sealed class MsgOwlSmsOtpSender(
         // is accepted, and stripping it keeps us consistent with their samples.
         var to = recipient.Trim().TrimStart('+');
 
-        var request = new MsgOwlRequest(to, SenderId, $"{code} is your invites.blog code. It expires in 5 minutes.");
+        // Same key OtpService uses to set ExpiresAt — the copy has to match the real expiry.
+        var minutes = int.TryParse(config["Otp:ExpiryMinutes"], out var m) ? m : 5;
+        var request = new MsgOwlRequest(
+            to, SenderId,
+            $"{code} is your invites.blog code. It expires in {minutes} minute{(minutes == 1 ? "" : "s")}.");
 
         try
         {
