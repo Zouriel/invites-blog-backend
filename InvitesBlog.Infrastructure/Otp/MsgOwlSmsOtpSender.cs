@@ -23,9 +23,12 @@ public sealed class MsgOwlSmsOtpSender(
     public const string ConfigSection = "Sms:MsgOwl";
 
     private string? ApiKey => config[$"{ConfigSection}:ApiKey"];
-    // Alphanumeric sender IDs are capped at 11 GSM characters with no punctuation, so the previous
-    // "invites.blog" default (12 chars, and a period) would have been rejected by the carrier.
-    private string SenderId => config[$"{ConfigSection}:SenderId"] is { Length: > 0 } s ? s : "InvitesBlog";
+    // Must match the sender ID registered with MsgOwl EXACTLY — it is case-sensitive, and an
+    // unregistered value is refused with 422 "Invalid sender_id" rather than silently substituted
+    // ("InvitesBlog" is rejected; "Invitesblog" is the approved one). Alphanumeric sender IDs are
+    // also capped at 11 GSM characters with no punctuation, which the old "invites.blog" default
+    // (12 chars, and a period) broke on both counts.
+    private string SenderId => config[$"{ConfigSection}:SenderId"] is { Length: > 0 } s ? s : "Invitesblog";
     private string Endpoint =>
         config[$"{ConfigSection}:Endpoint"] is { Length: > 0 } e ? e : "https://rest.msgowl.com/messages";
 
