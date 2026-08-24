@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="ib-fonts" content="Playfair Display, Cormorant Garamond, Georgia">
+  <title>Gilded Hour</title>
+  <style>
+:root {
+  /* Themable — every --ib-* becomes a control in the inviter's Theming step. */
+  --ib-accent: #dcaa66;        /* champagne gold */
+  --ib-accent-secondary: #d98fa0; /* dusty rose, for depth so the page isn't monotone gold */
+  --ib-bg: #1b1019;            /* deep plum-black, warmer and less generic than plain ink */
+  --ib-text: #f7eee3;          /* warm ivory */
+  --ib-heading-font: 'Playfair Display', 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+
+  /* Internal aliases — not exposed as controls, just for readability below. */
+  --bg: var(--ib-bg);
+  --bg2: #2a1522;
+  --ink: var(--ib-text);
+  --gold: var(--ib-accent);
+  --rose: var(--ib-accent-secondary);
+  --muted: #cbb9c4;
+  --line: rgba(220, 170, 102, .22);
+  --serif: var(--ib-heading-font);
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, sans-serif;
+
+  /* Motion vocabulary — named curves instead of default `ease`, chosen for what they mean:
+     entrances/exits get a fast-start, gentle-settle curve; things already on screen that
+     reposition (the book pages fanning open) get a symmetric accelerate/decelerate curve. */
+  --ease-out: cubic-bezier(.165, .84, .44, 1);
+  --ease-in-out: cubic-bezier(.645, .045, .355, 1);
+  /* A gentler in-out for motion the reader scrubs rather than watches. The curve above is
+     right for a transition that plays once — it holds, rushes the middle, settles — but under
+     a finger on the scrollbar that rush reads as a lurch. This one is near-sinusoidal: no
+     sudden middle, so the speed of the movement tracks the speed of the scroll. */
+  --ease-sine: cubic-bezier(.37, 0, .63, 1);
+  --t-fast: 350ms;
+  --t-base: 700ms;
+  --t-slow: 1100ms;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: radial-gradient(130% 90% at 50% -12%, var(--bg2), var(--bg) 62%);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* The book section deliberately fans its pages out past their own box (see .book below) —
+     without this, that intentional overflow widens the whole document and the page gains a
+     horizontal scrollbar. */
+  overflow-x: hidden;
+}
+img { max-width: 100%; display: block; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
+.eyebrow {
+  font-family: var(--sans); letter-spacing: .24em; text-transform: uppercase;
+  font-size: .68rem; color: var(--gold); margin: 0 0 .9rem;
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 0 7vw; }
+.rule { width: 46px; height: 1px; background: var(--gold); opacity: .6; margin: 1.6rem auto; border: 0; }
+.rule.left { margin: 1.6rem 0; }
+
+/* ---------- Balloons, tied to the corner of the window --------------------------------
+   Fixed, so the bunch holds the same corner of the window the whole way down rather than
+   scrolling off with the cover. Twenty-six of them in an L — one arm running right along the
+   top edge, another down the left edge, thick where they meet — so it wraps the corner rather
+   than sitting in it. Laid out on a jittered grid (one per cell, offset inside its own cell)
+   so the L fills evenly; random placement clumps in some spots and leaves holes. Size falls
+   off with distance from the corner so the arms taper as they run out, and the nearer ones
+   stack in front, giving it depth instead of a flat sheet of identical dots.
+   Black on a near-black ground only reads if it's lit: each one is a dark body with a soft
+   highlight up top and a warm bounce from below, which is what separates it from the
+   background instead of an outline. They drift rather than bounce — a few pixels over eight
+   to thirteen seconds, each on its own clock and started mid-cycle so no two ever swing
+   together. Purely decorative: aria-hidden in the markup, and pointer-events: none so they
+   can never sit between a guest and the RSVP. */
+.balloons {
+  position: fixed; top: 0; left: 0; z-index: 6; pointer-events: none;
+  width: 4.8em; height: 6.1em;
+  /* The bunch is drawn in em, so this one value sizes all of it. Tying it to vw makes it grow
+     in step with the text it has to stay clear of — the page's own margins are vw-based — so
+     the clearance holds at every width instead of collapsing at the low end of a breakpoint.
+     Floored so it stays legible as balloons on a phone, capped so it stays a corner
+     decoration rather than a centrepiece on a wide monitor. */
+  font-size: clamp(17px, calc(1.68vw + 1.5px), 30px);
+}
+.balloons span {
+  position: absolute; display: block;
+  width: var(--w); height: calc(var(--w) * 1.2);
+  border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
+  background:
+    radial-gradient(58% 46% at 33% 22%, rgba(255,255,255,.42), rgba(255,255,255,.10) 55%, transparent 78%),
+    radial-gradient(130% 110% at 72% 88%, rgba(220,170,102,.16), transparent 58%),
+    #0b060a;
+  /* Packed this tight, black bodies merge into one dark mass. The tighter, brighter specular
+     gives each one a readable highlight, and the hairline rim draws the edge where two
+     overlap; the drop shadow is kept small so it separates them instead of filling the gaps. */
+  box-shadow:
+    inset 0 0 0 1px rgba(247,238,227,.09),
+    inset 0 -.23em .46em rgba(0,0,0,.5),
+    0 .19em .46em rgba(0,0,0,.45);
+  animation: drift var(--dur) var(--ease-in-out) var(--delay) infinite alternate;
+}
+/* The knot — a small square turned 45°, just enough to stop the balloon ending in a clean arc. */
+.balloons span::after {
+  content: ""; position: absolute; left: 50%; bottom: -.15em;
+  width: .23em; height: .23em; margin-left: -.115em;
+  background: #0b060a; border-radius: 2px; transform: rotate(45deg);
+}
+/* The string — one curved border, not a straight line, so it hangs rather than points. */
+.balloons span::before {
+  content: ""; position: absolute; left: 50%; top: 100%;
+  width: calc(var(--w) * .55); height: var(--str);
+  border-left: 1px solid rgba(247,238,227,.18);
+  border-bottom-left-radius: 90% 100%;
+}
+.balloons span:nth-child(1) { --w: 0.808em; --str: 0.462em; --dur: 8.2s; --delay: -9.4s; --dx: 0.085em; --dy: 0.173em; --ra: 0.0deg; --rb: -2.6deg; left: 0.346em; top: 4.423em; z-index: 3; }
+.balloons span:nth-child(2) { --w: 0.846em; --str: 0.5em; --dur: 9.2s; --delay: -4.7s; --dx: 0.023em; --dy: 0.192em; --ra: 1.9deg; --rb: 1.3deg; left: 2.885em; top: -0.423em; z-index: 12; }
+.balloons span:nth-child(3) { --w: 1em; --str: 0.692em; --dur: 7.5s; --delay: -12.1s; --dx: 0.046em; --dy: 0.138em; --ra: 1.1deg; --rb: -0.2deg; left: -0.269em; top: 1.885em; z-index: 20; }
+.balloons span:nth-child(4) { --w: 0.769em; --str: 0.462em; --dur: 10.9s; --delay: -13.1s; --dx: 0.112em; --dy: 0.177em; --ra: -0.4deg; --rb: -1.5deg; left: -0.462em; top: 4.538em; z-index: 2; }
+.balloons span:nth-child(5) { --w: 1.038em; --str: 0.846em; --dur: 12.1s; --delay: -2.5s; --dx: -0.023em; --dy: 0.115em; --ra: -0.8deg; --rb: -1.6deg; left: 0.462em; top: 1.038em; z-index: 22; }
+.balloons span:nth-child(6) { --w: 0.962em; --str: 0.692em; --dur: 10.4s; --delay: -2.5s; --dx: -0.069em; --dy: 0.131em; --ra: 0.2deg; --rb: 2.2deg; left: 0.577em; top: -0.308em; z-index: 25; }
+.balloons span:nth-child(7) { --w: 0.885em; --str: 0.692em; --dur: 8.7s; --delay: -3.2s; --dx: 0.085em; --dy: 0.112em; --ra: 1.7deg; --rb: 0.2deg; left: 0.846em; top: 2.269em; z-index: 15; }
+.balloons span:nth-child(8) { --w: 0.962em; --str: 0.769em; --dur: 9.2s; --delay: -12.6s; --dx: -0.031em; --dy: 0.1em; --ra: 0.2deg; --rb: 2.5deg; left: 1.692em; top: 1.885em; z-index: 14; }
+.balloons span:nth-child(9) { --w: 0.846em; --str: 0.654em; --dur: 13.4s; --delay: -9.0s; --dx: 0.035em; --dy: 0.204em; --ra: 2.6deg; --rb: 0.0deg; left: 3.923em; top: 1.192em; z-index: 5; }
+.balloons span:nth-child(10) { --w: 0.885em; --str: 0.808em; --dur: 11.2s; --delay: -0.5s; --dx: 0.088em; --dy: 0.115em; --ra: -2.0deg; --rb: -2.5deg; left: 1.115em; top: 3.192em; z-index: 11; }
+.balloons span:nth-child(11) { --w: 0.885em; --str: 0.615em; --dur: 8.5s; --delay: -9.4s; --dx: -0.008em; --dy: 0.135em; --ra: 2.2deg; --rb: -2.7deg; left: 2.308em; top: 1.192em; z-index: 13; }
+.balloons span:nth-child(12) { --w: 0.923em; --str: 0.731em; --dur: 7.9s; --delay: -9.0s; --dx: 0.058em; --dy: 0.123em; --ra: -1.5deg; --rb: 1.8deg; left: 1.885em; top: 0.731em; z-index: 18; }
+.balloons span:nth-child(13) { --w: 0.808em; --str: 0.769em; --dur: 10.6s; --delay: -3.2s; --dx: 0.038em; --dy: 0.192em; --ra: 3.0deg; --rb: 0.8deg; left: 1.692em; top: 4.308em; z-index: 1; }
+.balloons span:nth-child(14) { --w: 0.808em; --str: 0.731em; --dur: 9.8s; --delay: -1.1s; --dx: 0.054em; --dy: 0.108em; --ra: 1.7deg; --rb: -0.4deg; left: 3.077em; top: 1.538em; z-index: 10; }
+.balloons span:nth-child(15) { --w: 0.885em; --str: 0.538em; --dur: 11.0s; --delay: -7.8s; --dx: 0.069em; --dy: 0.158em; --ra: 2.5deg; --rb: -2.7deg; left: 3.577em; top: 0em; z-index: 9; }
+.balloons span:nth-child(16) { --w: 1.077em; --str: 0.654em; --dur: 12.9s; --delay: -11.7s; --dx: 0.027em; --dy: 0.188em; --ra: -2.6deg; --rb: 0.4deg; left: 0.962em; top: 0.346em; z-index: 24; }
+.balloons span:nth-child(17) { --w: 1.154em; --str: 0.846em; --dur: 9.4s; --delay: -1.5s; --dx: -0.012em; --dy: 0.173em; --ra: 1.0deg; --rb: -1.8deg; left: -0.077em; top: 0em; z-index: 26; }
+.balloons span:nth-child(18) { --w: 0.923em; --str: 0.577em; --dur: 8.2s; --delay: -9.6s; --dx: 0.038em; --dy: 0.104em; --ra: 2.0deg; --rb: 1.4deg; left: 0.5em; top: 3.577em; z-index: 8; }
+.balloons span:nth-child(19) { --w: 1em; --str: 0.538em; --dur: 8.4s; --delay: -2.4s; --dx: -0.05em; --dy: 0.138em; --ra: -0.4deg; --rb: -0.4deg; left: 2.115em; top: 0.308em; z-index: 16; }
+.balloons span:nth-child(20) { --w: 0.885em; --str: 0.538em; --dur: 9.5s; --delay: -3.6s; --dx: -0.085em; --dy: 0.181em; --ra: -1.6deg; --rb: 1.8deg; left: 1.808em; top: 0.346em; z-index: 21; }
+.balloons span:nth-child(21) { --w: 0.923em; --str: 0.654em; --dur: 11.6s; --delay: -11.6s; --dx: -0.054em; --dy: 0.173em; --ra: 1.6deg; --rb: -0.6deg; left: -0.192em; top: 1.077em; z-index: 23; }
+.balloons span:nth-child(22) { --w: 0.769em; --str: 0.577em; --dur: 9.1s; --delay: -6.7s; --dx: -0.058em; --dy: 0.185em; --ra: 0.6deg; --rb: 0.9deg; left: 0.769em; top: 4.231em; z-index: 4; }
+.balloons span:nth-child(23) { --w: 0.885em; --str: 0.615em; --dur: 10.0s; --delay: -9.4s; --dx: 0.035em; --dy: 0.138em; --ra: 1.8deg; --rb: 1.3deg; left: -0.231em; top: 3.962em; z-index: 6; }
+.balloons span:nth-child(24) { --w: 0.923em; --str: 0.692em; --dur: 10.1s; --delay: -6.1s; --dx: -0.015em; --dy: 0.177em; --ra: 1.9deg; --rb: 2.7deg; left: 1.731em; top: 3.308em; z-index: 7; }
+.balloons span:nth-child(25) { --w: 0.885em; --str: 0.846em; --dur: 9.4s; --delay: -2.0s; --dx: -0.104em; --dy: 0.154em; --ra: 2.7deg; --rb: 1.3deg; left: 0.231em; top: 2.038em; z-index: 17; }
+.balloons span:nth-child(26) { --w: 0.923em; --str: 0.654em; --dur: 11.5s; --delay: -2.3s; --dx: -0.004em; --dy: 0.138em; --ra: -2.6deg; --rb: 2.2deg; left: 1.231em; top: 1.538em; z-index: 19; }
+@keyframes drift {
+  from { transform: translate(0, 0) rotate(var(--ra)); }
+  to   { transform: translate(var(--dx), var(--dy)) rotate(var(--rb)); }
+}
+/* The bunch sits above the page everywhere, phones included. On a desktop it clears every word
+   outright — text never comes further left than the bunch's own edge, measured across the whole
+   scroll. On a phone it can't: headings centre and wrap to within 8px of the edge, and no bunch
+   small enough to dodge that is big enough to be worth drawing. It stays in front there anyway,
+   grazing the odd centred line as it passes under — the text is moving, the bunch isn't. */
+
+/* ---------- Roses, running on down the same border --------------------------------------
+   The bunch stops around a fifth of the way down; this carries the decoration the rest of the
+   way as a climbing vine on the left edge, so the two read as one piece of trim rather than a
+   cluster and some separate flowers. Thirty blooms, nine of them red, on jittered spacing and
+   spread to both sides of the stem. Sizes are weighted the way a climber actually grows —
+   a few open faces, more mid, mostly buds — and the smaller ones sit dimmer so the band reads
+   as having depth instead of flattening into one dark mass. Each sits at its own tilt and sways a degree or
+   so on its own slow clock, none of them together.
+
+   The bloom is a CC0 rose from Wikimedia Commons (COAmaker17, "Rose with leafs"), public
+   domain, no attribution required — which matters for a template other people redistribute.
+   Hand-drawing one was the wrong effort: rings of petals in CSS read as a cog or a dahlia, and
+   what makes a rose legible is the coil of its throat, which is exactly the part that's hard.
+   One image serves both colours — the black is it desaturated and pushed toward the page's
+   plum, the red is its hue rotated round to wine — so there's one copy in the file, not two.
+
+   The vine is drawn here: one tile that repeats down the border, whose stem starts and ends at
+   the same x AND with the same tangent, which is what lets it repeat with no kink at the seam.
+   Leaves sit at points read off the curve rather than guessed, so they actually touch it.
+   Everything is a data: URI, so the file stays self-contained — no request leaves the page.
+   Decorative only: aria-hidden and pointer-events: none. */
+.roses {
+  --rose: url("data:image/svg+xml,%3Csvg version=%271.1%27 id=%27Capa_1%27 xmlns=%27http://www.w3.org/2000/svg%27 xmlns:xlink=%27http://www.w3.org/1999/xlink%27 x=%270px%27 y=%270px%27 viewBox=%270 0 82.4727249 82.9090881%27 style=%27enable-background:new 0 0 82.4727249 82.9090881%3B%27 xml:space=%27preserve%27%3E %3Cstyle type=%27text/css%27%3E .st0%7Bfill:url%28%23SVGID_1_%29%3B%7D .st1%7Bfill:url%28%23SVGID_2_%29%3B%7D .st2%7Bfill:url%28%23SVGID_3_%29%3B%7D .st3%7Bfill:url%28%23SVGID_4_%29%3B%7D .st4%7Bfill:url%28%23SVGID_5_%29%3B%7D .st5%7Bfill:url%28%23SVGID_6_%29%3B%7D .st6%7Bfill:url%28%23SVGID_7_%29%3B%7D .st7%7Bfill:url%28%23SVGID_8_%29%3B%7D .st8%7Bfill:url%28%23SVGID_9_%29%3B%7D .st9%7Bfill:url%28%23SVGID_10_%29%3B%7D .st10%7Bfill:url%28%23SVGID_11_%29%3B%7D .st11%7Bfill:url%28%23SVGID_12_%29%3B%7D .st12%7Bfill:url%28%23SVGID_13_%29%3B%7D .st13%7Bfill:url%28%23SVGID_14_%29%3B%7D .st14%7Bfill:url%28%23SVGID_15_%29%3B%7D .st15%7Bfill:url%28%23SVGID_16_%29%3B%7D .st16%7Bfill:url%28%23SVGID_17_%29%3B%7D .st17%7Bfill:url%28%23SVGID_18_%29%3B%7D .st18%7Bfill:url%28%23SVGID_19_%29%3B%7D .st19%7Bfill:url%28%23SVGID_20_%29%3B%7D .st20%7Bfill:url%28%23SVGID_21_%29%3B%7D .st21%7Bfill:url%28%23SVGID_22_%29%3B%7D .st22%7Bfill:url%28%23SVGID_23_%29%3B%7D .st23%7Bfill:url%28%23SVGID_24_%29%3B%7D .st24%7Bfill:url%28%23SVGID_25_%29%3B%7D .st25%7Bfill:url%28%23SVGID_26_%29%3B%7D .st26%7Bfill:url%28%23SVGID_27_%29%3B%7D .st27%7Bfill:url%28%23SVGID_28_%29%3B%7D .st28%7Bfill:url%28%23SVGID_29_%29%3B%7D %3C/style%3E %3ClinearGradient id=%27SVGID_1_%27 gradientUnits=%27userSpaceOnUse%27 x1=%2756.0911903%27 y1=%27176.0949097%27 x2=%2726.2204113%27 y2=%27155.6122131%27 gradientTransform=%27matrix%28-0.7449726 0.667095 -0.667095 -0.7449726 181.618515 108.0723877%29%27%3E %3Cstop offset=%270.4713834%27 style=%27stop-color:%23113D15%27/%3E %3Cstop offset=%270.5468134%27 style=%27stop-color:%23195B21%27/%3E %3Cstop offset=%270.6165925%27 style=%27stop-color:%2320722A%27/%3E %3C/linearGradient%3E %3Cpath class=%27st0%27 d=%27M47.7241821,21.4652901c0.0698853-2.1917496-0.0843239-5.1719589-1.02425-8.5411301 c-1.5509872-5.5596414-4.4606476-9.3798227-6.2871513-11.4224205c-1.3745384,1.5671134-3.5773468,4.5027447-4.8021507,8.7715082 c-1.6253128,5.6632757-0.6020012,10.4419355-0.0194588,12.5299482%27/%3E %3ClinearGradient id=%27SVGID_2_%27 gradientUnits=%27userSpaceOnUse%27 x1=%2730.9045944%27 y1=%2796.8383179%27 x2=%271.0338176%27 y2=%2776.3556213%27 gradientTransform=%27matrix%280.742538 -0.6698039 0.6698039 0.742538 -27.6825638 18.0905972%29%27%3E %3Cstop offset=%270.4713834%27 style=%27stop-color:%23113D15%27/%3E %3Cstop offset=%270.5468134%27 style=%27stop-color:%23195B21%27/%3E %3Cstop offset=%270.6165925%27 style=%27stop-color:%2320722A%27/%3E %3C/linearGradient%3E %3Cpath class=%27st1%27 d=%27M34.7379494,62.2284927c-0.0619049,2.1919937,0.1031609,5.1716156,1.0553513,8.5373459 c1.571228,5.5539551,4.4947815,9.3635101,6.3287163,11.3994446c1.3688202-1.572113,3.5609207-4.5157471,4.7701683-8.7889404 c1.6046753-5.6691589,0.5639648-10.4440613-0.0261765-12.5299377%27/%3E %3ClinearGradient id=%27SVGID_3_%27 gradientUnits=%27userSpaceOnUse%27 x1=%2721.1443176%27 y1=%2757.5760612%27 x2=%27-8.7264605%27 y2=%2737.0933647%27 gradientTransform=%27matrix%280.6324035 0.7746391 -0.7746391 0.6324035 43.9014168 7.3302751%29%27%3E %3Cstop offset=%270.4713834%27 style=%27stop-color:%23113D15%27/%3E %3Cstop offset=%270.5468134%27 style=%27stop-color:%23195B21%27/%3E %3Cstop offset=%270.6165925%27 style=%27stop-color:%2320722A%27/%3E %3C/linearGradient%3E %3Cpath class=%27st2%27 d=%27M20.9831524,35.1098938c-2.1862774-0.1698341-5.1704187-0.151783-8.5789738,0.6334114 c-5.6246276,1.2956619-9.5736103,4.0279579-11.6974316,5.759346c1.5027544,1.444622,4.3348026,3.7790985,8.5432262,5.1974335 c5.5832052,1.8820572,10.4035854,1.0778847,12.5160065,0.5912361%27/%3E %3ClinearGradient id=%27SVGID_4_%27 gradientUnits=%27userSpaceOnUse%27 x1=%2781.390892%27 y1=%27122.4525681%27 x2=%2751.5201111%27 y2=%27101.9698715%27 gradientTransform=%27matrix%28-0.6054094 -0.7959142 0.7959142 -0.6054094 22.1545067 161.8825836%29%27%3E %3Cstop offset=%270.4713834%27 style=%27stop-color:%23113D15%27/%3E %3Cstop offset=%270.5468134%27 style=%27stop-color:%23195B21%27/%3E %3Cstop offset=%270.6165925%27 style=%27stop-color:%2320722A%27/%3E %3C/linearGradient%3E %3Cpath class=%27st3%27 d=%27M61.176178,47.6790085c2.1791496,0.2448616,5.1621475,0.3293724,8.5956726-0.3382225 c5.6658325-1.1016045,9.7063828-3.696579,11.888443-5.3539619c-1.4522171-1.4954071-4.2023697-3.9258308-8.3595657-5.4879494 c-5.5152283-2.0728149-10.3603973-1.4347687-12.4882965-1.0210037%27/%3E %3Cg id=%27Capa_1_1_%27%3E %3C/g%3E %3Cg id=%27Capa_3%27%3E %3C/g%3E %3Cg id=%27Capa_5%27%3E %3C/g%3E %3Cg id=%27Capa_6%27%3E %3C/g%3E %3Cg id=%27Capa_7%27%3E %3Cg id=%27Capa_2_1_%27%3E %3C/g%3E %3C/g%3E %3Cg id=%27Capa_8%27%3E %3C/g%3E %3Cg id=%27Capa_4%27%3E %3C/g%3E %3Cg id=%27Capa_9%27%3E %3C/g%3E %3Cg id=%27Capa_11%27%3E %3C/g%3E %3Cg id=%27Capa_10%27%3E %3Cg%3E %3ClinearGradient id=%27SVGID_5_%27 gradientUnits=%27userSpaceOnUse%27 x1=%2734.4161186%27 y1=%2740.1524696%27 x2=%2751.0137749%27 y2=%2740.1524696%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%270.1481033%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cellipse class=%27st4%27 cx=%2742.7149467%27 cy=%2740.1524696%27 rx=%278.2988281%27 ry=%278.8916016%27/%3E %3ClinearGradient id=%27SVGID_6_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1122.1699219%27 y1=%27-366.4500427%27 x2=%27-1121.1699219%27 y2=%27-366.4500427%27 gradientTransform=%27matrix%2814.7044706 0 0 -14.7044706 16549.5566406 -5354.559082%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st5%27 d=%27M58.1485405,42.5235634c0.4101563-0.4926758,0.6132813-1.1225586,0.8457031-1.722168 c1.1875-3.0703125,3.3574219-5.7216797,4.2158203-8.9023457c0.1601563-0.5927734,0.2509766-1.2939453-0.1425781-1.7617188 c-0.2695313-0.3193359-0.7011719-0.4458008-1.0107422-0.7250977c-0.7832031-0.7080078-0.5107422-2.0737305-1.1523438-2.9145508 c-0.28125-0.3676758-0.7070313-0.5913086-1.1367188-0.7553711c-3.2246094-1.234375-6.7988281,0.3310547-10.2460938,0.234375 c-0.1943359-0.0053711-0.4013672-0.0131836-0.5712891,0.0830078c-0.3867188,0.21875-0.3408203,0.7890625-0.2294922,1.2231445 c0.7822266,3.0585938,2.1601563,5.9604511,4.03125,8.4907246c0.640625,0.8657227,1.3388672,1.6899414,1.90625,2.6064453 c0.5673828,0.918457,0.9990234,1.9228516,1.6230469,2.8037109c0.3964844,0.5600586,0.8945313,1.0830078,1.5371094,1.3139648%27/%3E %3ClinearGradient id=%27SVGID_7_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1111.4250488%27 y1=%27-397.499176%27 x2=%27-1110.4250488%27 y2=%27-397.499176%27 gradientTransform=%27matrix%283.9749315 -21.0321579 -21.0321579 -3.9749315 -3895.2932129 -24923.0117188%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st6%27 d=%27M57.7393608,25.1168232c-1.0380859-2.168457-2.0771484-4.3364258-3.1162109-6.5043945 c-0.1035156-0.2177734-0.2119141-0.440918-0.3896484-0.6035156c-0.375-0.3427734-0.9404297-0.328125-1.4443359-0.3901367 c-1.3310547-0.1645508-2.4775391-0.9736328-3.6542969-1.6176758s-2.5908203-1.144043-3.8369141-0.6494141 c-0.6962891,0.2753906-1.2460938,0.8295898-1.9199219,1.1538086c-0.6611328,0.3183594-1.4404297,0.4169922-1.9990234,0.8920898 c-0.28125,0.2392578-0.484375,0.5600586-0.6269531,0.9003906c-0.4003906,0.9555664-0.3251953,2.0664063,0.0546875,3.0302734 c0.3798828,0.9633789,1.0429688,1.7929688,1.7929688,2.5073242c2.0751953,1.9770508,4.8964844,3.1518555,7.7607422,3.2324219 c0.8857422,0.0249023,1.7705078-0.0507813,2.6533203-0.1259766c0.8203125-0.0703125,1.6396484-0.1401367,2.4599609-0.2104492 c0.4257813-0.0361328,0.8613281-0.0751953,1.2470703-0.2583008c0.3847656-0.1835938,0.7158203-0.5444336,0.7373047-0.9702148%27/%3E %3ClinearGradient id=%27SVGID_8_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1147.5756836%27 y1=%27-407.0145874%27 x2=%27-1146.5756836%27 y2=%27-407.0145874%27 gradientTransform=%27matrix%28-18.1534615 12.0210733 12.0210733 18.1534615 -15906.9111328 21231.2265625%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st7%27 d=%27M19.1690502,46.0269814c-0.3798828,0.2880859-0.4873047,0.8027344-0.5693359,1.2719727 c-0.1416016,0.8110352-0.2822266,1.6220703-0.4238281,2.4331055c-0.0615234,0.3525391-0.1230469,0.7094727-0.09375,1.065918 c0.0732422,0.8774414,0.6728516,1.6035156,1.1455078,2.3461914c0.5527344,0.8676758,0.9638672,1.8549805,0.9863281,2.8837891 c0.0048828,0.2363281-0.0097656,0.4746094,0.0253906,0.7084961c0.1259766,0.8144531,0.8320313,1.4067383,1.5400391,1.8295898 c0.7080078,0.4223633,1.4931641,0.7797852,1.9882813,1.4384766c0.28125,0.3730469,0.4541016,0.8271484,0.7900391,1.1518555 c0.5087891,0.4931641,1.2724609,0.5854492,1.9775391,0.6513672c1.0761719,0.1010742,2.2685547,0.1704102,3.1220703-0.4916992 c0.7021484-0.5449219,1-1.4672852,1.1005859-2.3500977c0.3554688-3.0966797-1.2226563-6.0913086-3.109375-8.5722656 c-0.8955078-1.1777344-1.8808594-2.3027344-3.0585938-3.1982422c-1.7119141-1.3027344-3.8134766-2.0859375-5.9609375-2.222168%27/%3E %3ClinearGradient id=%27SVGID_9_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1147.75354%27 y1=%27-390.9229431%27 x2=%27-1146.75354%27 y2=%27-390.9229431%27 gradientTransform=%27matrix%28-2.545831 26.4307652 26.4307652 2.545831 7452.6606445 31375.5761719%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st8%27 d=%27M54.0030327,53.8316689c-0.0957031,1.6425781-0.2607422,3.3842773-1.2539063,4.6958008 c-0.4228516,0.5576172-0.984375,1.0200195-1.2841797,1.6523438c-0.4550781,0.9614258-0.2128906,2.0874023-0.2275391,3.1513672 c-0.0058594,0.4135742-0.0625,0.8530235-0.3222656,1.1743126c-0.1992188,0.2456055-0.4921875,0.3916016-0.7753906,0.5307617 c-0.7451172,0.3652344-1.4892578,0.7299805-2.2333984,1.0952148c-0.7167969,0.3515625-1.4384766,0.7050781-2.2109375,0.9052734 c-0.640625,0.1660156-1.3046875,0.2236328-1.9658203,0.2568359c-3.84375,0.1918945-7.7275391-0.4350586-11.3164063-1.8266602 c-0.6562481-0.2543945-1.3066387-0.5366211-1.8935528-0.9257813c-1.1455078-0.7597618-2.0126953-1.9282188-2.4091797-3.2446251 c-0.7353516-2.4423828,0.1484375-5.0463867,1.0234375-7.4423828c0.2207031-0.6035156,0.4609375-1.2353516,0.9521484-1.6489258 c0.6005859-0.503418,1.4414063-0.574707,2.2236309-0.6171875c3.5253906-0.1918945,7.0566406-0.2597656,10.5869141-0.3276367 c3.1787109-0.0610352,6.4023438-0.1176758,9.4853516,0.6586914c0.8632813,0.2172852,1.8486328,0.6479492,2.0078125,1.5244141%27/%3E %3ClinearGradient id=%27SVGID_10_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1147.3703613%27 y1=%27-405.2725525%27 x2=%27-1146.5186768%27 y2=%27-404.7483826%27 gradientTransform=%27matrix%28-18.42066 14.2632351 14.2632351 18.42066 -15314.8779297 23873.0117188%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st9%27 d=%27M48.5049858,52.8765907c-0.7919922,0.6713867-0.9599609,1.8032227-1.1425781,2.8256836 c-0.1816406,1.0224609-0.53125,2.1630859-1.4697266,2.6079102c-0.4013672,0.1899414-0.8564453,0.2211914-1.2998047,0.2490234 c-1.2148438,0.0766602-2.4287109,0.1533203-3.6425781,0.2304688c-0.6933594,0.043457-1.3867188,0.0874023-2.0810547,0.0776367 c-1.4072266-0.0205078-2.8115234-0.2631836-4.1445313-0.7167969c-0.5292969-0.1806641-1.0683594-0.4082031-1.4365234-0.8291016 c-0.3515625-0.4023438-0.5126953-0.9404297-0.84375-1.359375c-0.9628887-1.2167969-2.9785137-1.0449219-4.0468731-2.1694336 c-0.3427734-0.3603516-0.5546875-0.8232422-0.7441406-1.2827148c-0.7597656-1.8447266-1.2626953-3.7954102-1.4892578-5.7773438 c-0.1308594-1.1464844-0.1171875-2.4492188,0.6914063-3.2719727c0.5644531-0.5737305,1.4179688-0.784668,2.2216797-0.7373047 c0.8027344,0.0473633,1.5722656,0.3232422,2.3261719,0.6044922c3.1933575,1.1899414,6.3359356,2.5175781,9.3925762,4.0224609 c2.5546875,1.2578125,5.0498047,2.6396484,7.4472656,4.175293c0.3789063,0.2421875,0.7988281,0.5683594,0.7851563,1.0175781%27/%3E %3ClinearGradient id=%27SVGID_11_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1129.9880371%27 y1=%27-379.7491455%27 x2=%27-1128.9880371%27 y2=%27-379.7491455%27 gradientTransform=%27matrix%2828.5076714 6.1284871 6.1284871 -28.5076714 34580.8867188 -3856.7412109%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st10%27 d=%27M52.3135796,61.1720009c1.4326172-0.1381836,2.8583984-0.3530273,4.2685547-0.6430664 c0.5732422-0.1181641,1.15625-0.2529297,1.6582031-0.5561523c0.4882813-0.2954102,0.8720703-0.7338867,1.2470703-1.1650391 c0.9013672-1.0366211,1.8056641-2.0771484,2.5585938-3.2255859c1.2021484-1.8339844,1.9921913-3.8999023,2.8974648-5.8974609 c0.1474609-0.3256836,0.3095703-0.6645508,0.6015625-0.8706055c0.2089844-0.1474609,0.4667969-0.2128906,0.6777344-0.3569336 c0.5966797-0.4072266,0.6328125-1.2597656,0.5947266-1.9814453c-0.1210938-2.2954102-0.3652344-4.6020508-1.0429688-6.7983398 c-0.5849609-1.8969727-1.4921875-3.6938477-2.6709023-5.2910156c-0.0830078-0.112793-0.171875-0.2280273-0.2958984-0.2939453 c-0.1542969-0.0810547-0.3388672-0.0737305-0.5117188-0.0546875c-2.3144531,0.2553711-4.1591797,2.1523438-5.1435547,4.262207 s-1.2978516,4.4580078-1.8427734,6.7211914c-1.0507813,4.3662109-2.9873047,8.4897461-3.9082031,12.8852539 c-0.2158203,1.027832-0.3095703,2.2651367,0.4755859,2.9619141%27/%3E %3ClinearGradient id=%27SVGID_12_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1115.9250488%27 y1=%27-400.5301208%27 x2=%27-1114.9250488%27 y2=%27-400.5301208%27 gradientTransform=%27matrix%28-0.7903723 -26.0291615 -26.0291615 0.7903723 -11270.2011719 -28693.3964844%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st11%27 d=%27M50.0391655,27.4263935c-0.5410156-2.5317383-1.8964844-4.8828125-3.8173828-6.6186523 c-2.3408203-2.1152344-5.3789063-3.2539063-8.3378906-4.3461914c-0.5458984-0.2011719-1.1015625-0.4047852-1.6816406-0.4296875 c-0.7802734-0.0332031-1.5390625,0.2578125-2.3183594,0.2993164c-0.4472656,0.0239258-0.90625-0.0336914-1.3349609,0.0947266 c-0.8330059,0.2504883-1.3066387,1.109375-1.9951153,1.6420898c-0.6279297,0.4858398-1.4248047,0.6899414-2.1230469,1.0673828 c-1.2587891,0.6811523-2.1347656,1.8857422-2.9658203,3.0512695c-0.3984375,0.559082-0.8066406,1.1381836-0.9550781,1.809082 c-0.1289063,0.581543-0.0517578,1.1860352-0.0537109,1.7817383c-0.0078125,1.6293945-0.6171875,3.2392578-0.4179688,4.8564453 c0.1103516,0.9038086,0.4707031,1.7578144,0.8798828,2.5708027c0.3164063,0.6274414,0.6826172,1.2597656,1.2558594,1.6655273 c0.9619141,0.6801758,2.2841797,0.5673828,3.390625,0.1645508c1.1064453-0.4023438,2.1113281-1.0581055,3.2314434-1.418457 c0.9453125-0.3046875,1.9472656-0.390625,2.9052734-0.6538086c1.4003906-0.3847656,2.6689453-1.1367207,4.0263672-1.6528339 c1.7089844-0.6494141,3.5341797-0.9169922,5.3115234-1.3461914c1.7773438-0.4287109,3.5673828-1.0527344,4.9267578-2.2758789%27/%3E %3ClinearGradient id=%27SVGID_13_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1133.5007324%27 y1=%27-411.8681641%27 x2=%27-1132.5007324%27 y2=%27-411.8681641%27 gradientTransform=%27matrix%28-24.7174835 -5.5401587 -5.5401587 24.7174835 -30265.6054688 3932.1516113%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st12%27 d=%27M25.4571362,22.0894794c-0.9296875,0.2133789-1.8427734,0.5063477-2.7236328,0.8745117 c-0.2929688,0.1230469-0.5917969,0.2602539-0.8056641,0.4956055c-0.2363281,0.2602539-0.3417969,0.609375-0.4677734,0.9370117 c-0.2919922,0.7529297-0.7304688,1.4482422-1.2841797,2.0361328c-0.8496094,0.9003906-2.0302734,1.6640625-2.2236328,2.8867188 c-0.1347656,0.8535156,0.2675781,1.690918,0.4042969,2.5439453c0.0703125,0.4389668,0.0703125,0.8867207,0.1367188,1.3266621 c0.2509766,1.6772461,1.5986328,3.1850586,3.2753906,3.4448242c1.6757813,0.2597656,3.5029297-0.8959961,3.8251953-2.5610352 c0.1777344-0.918457-0.0712891-1.8623047-0.0556641-2.7973652c0.0244141-1.4350586,0.6660156-2.7768555,1.0361328-4.1635742 s0.4072266-3.0332031-0.5771484-4.0776367%27/%3E %3ClinearGradient id=%27SVGID_14_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1137.0682373%27 y1=%27-409.5117798%27 x2=%27-1136.0682373%27 y2=%27-409.5117798%27 gradientTransform=%27matrix%28-27.742609 0.618682 0.618682 27.742609 -31255.4609375 12103.8095703%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st13%27 d=%27M26.1612377,28.8272724c-2.5673828-0.5317383-5.1523438,0.7275391-7.3447266,2.1650391 c-0.5449219,0.3569336-1.1064453,0.7573242-1.3710938,1.3520527c-0.6396484,1.434082,0.7460938,3.0390625,0.5224609,4.5932617 c-0.1171875,0.8173828-0.6787109,1.5693359-0.5761719,2.3886719c0.0478516,0.3862305,0.2431641,0.7480469,0.2509766,1.137207 c0.0273438,1.3295898-2.0009766,1.9829102-1.9980469,3.3129883c0.0009766,0.4316406,0.2285156,0.8266602,0.4501953,1.1977539 c0.3828125,0.6425781,0.7646484,1.284668,1.1474609,1.9272461c0.2255859,0.3774414,0.4560547,0.7617188,0.7880859,1.0493164 c0.6123047,0.5297852,1.4638672,0.6513672,2.2548828,0.8227539c1.4746094,0.3198242,2.8837891,0.8842773,4.3359375,1.2924805 c1.453125,0.4082031,2.9941406,0.6591797,4.4677734,0.3364258c0.2060547-0.0449219,0.4121094-0.1020508,0.5917969-0.2109375 c0.796875-0.4794922,0.7333984-1.6259766,0.65625-2.5522461c-0.3007813-3.6420898,0.7548828-7.2763672,0.6386719-10.9287109 c-0.0263672-0.8325195-0.1162109-1.6708984-0.3798828-2.4609375c-0.2695313-0.8051758-0.7138672-1.5390625-1.0791016-2.3051777 c-0.34375-0.7207031-0.625-1.4814453-1.1064453-2.1176758s-1.2246094-1.1435547-2.0205078-1.0922852%27/%3E %3ClinearGradient id=%27SVGID_15_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1133.0285645%27 y1=%27-429.6143188%27 x2=%27-1132.0285645%27 y2=%27-429.6143188%27 gradientTransform=%27matrix%28-12.0127382 -3.5468581 -3.5468581 12.0127382 -15098.9550781 1180.5819092%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st14%27 d=%27M36.1944389,28.8897724c-4.0263672-0.418457-7.1806622,0.2563477-8.2998028,1.1855469 c-0.6962891,0.578125-1.1855469,1.1855469-1.1855469,1.1855469c-0.6210938,0.7719746-1.1845703,1.7768574-1.1855469,1.7783222 c-0.1621094,0.2695313-0.3837891,0.6723633-0.5927734,1.1855469c-0.3378906,0.8330078-0.3623047,1.2734375-0.5927734,2.3710938 c-0.46875,2.2373047-0.8349609,2.6274414-0.5927734,3.5566406c0.1416016,0.5400391,0.4042969,0.940918,0.5927734,1.1855469 c-0.0078125,0.6015625,0.0810547,1.4951172,0.5927734,2.3710938c0.9707031,1.6586914,3.0517578,2.5561523,5.3349609,2.3710938%27/%3E %3ClinearGradient id=%27SVGID_16_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1151.2956543%27 y1=%27-404.4213257%27 x2=%27-1150.2956543%27 y2=%27-404.4213257%27 gradientTransform=%27matrix%28-14.1648626 14.1247377 14.1247377 14.1648626 -10556.1826172 22031.109375%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st15%27 d=%27M33.2305717,37.1886024c-0.5117188,0.6879883-1.171875,1.6811523-1.779295,2.9638672 c-0.4267578,0.9038086-0.9501953,2.0297852-1.1855469,3.5566406c-0.1757813,1.1469727-0.53125,3.4545898,0.5927734,4.1494141 c0.5449219,0.3369141,1.2607403,0.1865234,1.779295,0c0.8955078,0.9458008,1.7802734,1.480957,2.3710938,1.7783203 c0.5917969,0.2983398,1.0859375,0.5415039,1.7783203,0.5927734c0.34375,0.0253906,0.9804688,0.0214844,2.3710938-0.5927734 c0.7558594-0.3339844,1.8105469-0.8823242,2.9638672-1.7783203%27/%3E %3ClinearGradient id=%27SVGID_17_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1116.0107422%27 y1=%27-407.9075012%27 x2=%27-1115.0107422%27 y2=%27-407.9075012%27 gradientTransform=%27matrix%28-7.8312941 -19.8566303 -19.8566303 7.8312941 -16798.6796875 -18926.0429688%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st16%27 d=%27M32.6377983,36.595829l0.5927734-4.7421894c0.3212891-0.5605469,0.7119141-1.1621094,1.1855469-1.7783203 c0.9990234-1.3022461,2.0585938-2.2675781,2.9638672-2.9638672c0.3759766-0.0249023,1.3759766-0.0385742,2.3710938,0.5927734 c0.6181641,0.3925781,0.9882813,0.878418,1.1855469,1.1855469c1.3828125,1.3828125,2.765625,2.7661133,4.1494141,4.149416 l-10.6699219,4.1494141L32.6377983,36.595829z%27/%3E %3ClinearGradient id=%27SVGID_18_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1138.2966309%27 y1=%27-410.1586304%27 x2=%27-1137.2966309%27 y2=%27-410.1586304%27 gradientTransform=%27matrix%28-26.0655403 1.7677459 1.7677459 26.0655403 -28898.5195313 12741.453125%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st17%27 d=%27M36.7872124,33.6319618c-0.2714844-0.0571289-0.6962891-0.109375-1.1855469,0 c-0.7626953,0.1699219-1.2216797,0.628418-1.7783203,1.1855469c-0.5576172,0.5571289-1.0166016,1.015625-1.1855469,1.7783203 c-0.109375,0.4897461-0.0576172,0.9145508,0,1.1855469c-0.1914063,0.2583008-0.4394531,0.6567383-0.59375,1.1855469 c-0.498045,1.7143555,0.2978516,3.7592773,1.7792969,4.7421875c0.3261719,0.2167969,1.2480469,0.8286133,2.3710938,0.5927734 c0.5576172-0.1171875,0.9580078-0.4003906,1.1855469-0.5927734C37.1817436,40.3502235,36.984478,36.9908485,36.7872124,33.6319618 z%27/%3E %3ClinearGradient id=%27SVGID_19_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1114.9451904%27 y1=%27-414.1083374%27 x2=%27-1113.4997559%27 y2=%27-414.1083374%27 gradientTransform=%27matrix%28-8.5850916 -14.7308264 -14.7308264 8.5850916 -15625.0302734 -12821.7246094%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st18%27 d=%27M44.3769417,34.9126053c-1.4648361-0.8563995-2.8984756-1.5032196-4.3633118-2.3596191 c-0.4842072-0.2835159-1.1542358-0.5723534-1.6438713-0.2946892c-0.1681824,0.0952148-0.2753334,0.2420273-0.3757019,0.3845825 c-0.4584389,0.6473541-0.9155235,1.3213043-1.0118217,2.0574875c-0.0813789,0.6287346,0.1044388,1.2734299-0.0705299,1.8899307 c-0.1668282,0.5888405-0.6578178,1.1361923-0.5791512,1.7362061c0.0840912,0.6340523,0.7703934,1.1000214,1.4051552,1.4968376 c0.6388321,0.3984108,1.2952957,0.8048019,2.0697594,1.0064011c1.1555939,0.3010712,2.4318962,0.1069183,3.561718-0.2500038 c1.1284676-0.3574562,2.1674156-0.8707619,3.2890968-1.2404518c0.3255196-0.1069145,0.6876602-0.2228775,0.8382111-0.4728813 c0.1722565-0.2856445-0.0067787-0.6228828-0.2156563-0.8936348c-0.7500496-0.9755516-1.9422607-1.8080139-2.14571-2.9362259%27/%3E %3ClinearGradient id=%27SVGID_20_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1135.5098877%27 y1=%27-360.2640686%27 x2=%27-1134.5098877%27 y2=%27-360.2640686%27 gradientTransform=%27matrix%2811.4680719 5.3415985 5.3415985 -11.4680719 14991.3115234 1976.5128174%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st19%27 d=%27M47.0137749,53.1051064c1.4648438-0.015625,2.9521484-0.0288086,4.3642578,0.3588867 c0.4501953,0.1235352,0.8945313,0.2880859,1.359375,0.3261719c1.4482422,0.1181641,2.7285156-1.0200195,3.4013672-2.3071289 c0.3183594-0.6074219,0.5458984-1.262207,0.9082031-1.8442383c0.2890625-0.4667969,0.6601563-0.8774414,0.9824219-1.3217773 c1.1777344-1.6210938,1.6904297-3.7099609,1.3984375-5.6918945c-0.0966797-0.6533203-0.2851563-1.3110352-0.6865234-1.8344727 c-0.3369141-0.4394531-0.8027344-0.7583008-1.2607422-1.0693359c-0.9267578-0.6303711-1.8535156-1.2602539-2.7792969-1.890625 c-0.3154297-0.2138672-0.6386719-0.4321289-1.0087891-0.5209961c-0.96875-0.2338867-1.921875,0.4829102-2.4941406,1.2993164 c-0.5712891,0.8144531-0.9355469,1.7724609-1.0488281,2.7607422c-0.1845703,1.6137695,0.2890625,3.2675781-0.0273438,4.8608398 c-0.1289063,0.6499023-0.3867188,1.2695313-0.5048828,1.9213867c-0.1064453,0.5810547-0.1005859,1.1821289-0.2529297,1.753418 c-0.3398438,1.2700195-1.40625,2.2089844-2.5068359,2.9277344%27/%3E %3ClinearGradient id=%27SVGID_21_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1154.5524902%27 y1=%27-370.9309387%27 x2=%27-1153.4910889%27 y2=%27-370.9309387%27 gradientTransform=%27matrix%286.1252341 11.8189507 11.8189507 -6.1252341 11497.7763672 11415.5439453%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st20%27 d=%27M37.0631104,49.2135887c1.2092819,1.3779411,2.9441032,2.2503166,4.7049255,2.9176025 c1.7608261,0.6672897,3.5975037,1.1672478,5.2878952,1.9794197c0.4681091,0.2254906,1.0044861,0.4805717,1.4942665,0.2999763 c0.59272-0.2178383,0.7487564-0.9193077,0.8712006-1.5070114c0.4908638-2.3645935,1.7803307-4.5327721,2.2516899-6.9014435 c0.1712074-0.8621674,0.199379-1.8437157-0.3976746-2.517128c-0.6772423-0.7631989-1.8886909-0.8361511-2.9386826-0.7290154 c-0.9416351,0.0959091-1.8702698,0.28722-2.7945671,0.4846497c-1.471508,0.3142586-2.9668541,0.6535149-4.2606544,1.3835526 c-1.3208923,0.7448349-2.3578835,1.8534126-3.3721161,2.9436226c-0.509285,0.5474014-1.0554123,1.2254028-0.8603668,1.9294243%27/%3E %3ClinearGradient id=%27SVGID_22_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1078.8013916%27 y1=%27-237.8947296%27 x2=%27-1077.8012695%27 y2=%27-237.8947296%27 gradientTransform=%27matrix%282.6470554 0 0 -2.6470554 2897.1540527 -589.0726318%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st21%27 d=%27M41.5069389,40.9112587c0.1074219-0.2553711,0.2138672-0.5102539,0.3203125-0.765625 c0.0507813-0.121582,0.1044922-0.2470703,0.203125-0.3344727c0.0810547-0.0732422,0.1865234-0.1132813,0.2910156-0.1469727 c0.3808594-0.1210938,0.7841797-0.1708984,1.1835938-0.1459961c0.1152344,0.0073242,0.2353516,0.0224609,0.3310547,0.0878906 l0.1787109,0.2290039c0.2685547,0.543457,0.1396484,1.2548828-0.3017578,1.6704102 c-0.2207031,0.2080078-0.5429688,0.3442383-0.8291016,0.2456055c-0.3916016-0.1352539-0.5400391-0.6240234-0.8886719-0.8476563 c-0.1484375-0.0957031-0.3857422-0.1147461-0.4677734,0.0415039%27/%3E %3ClinearGradient id=%27SVGID_23_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1103.3330078%27 y1=%27-404.357605%27 x2=%27-1102.3330078%27 y2=%27-404.357605%27 gradientTransform=%27matrix%28-0.0546395 -14.6156998 -14.6156998 0.0546395 -5925.7509766 -16066.0332031%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st22%27 d=%27M37.2325249,27.8521748c0.4433594-1.7661133,2.8769531-2.2734375,3.5263672-2.4086914 c0.3417969-0.0712891,0.2080078-0.012207,1.9560547-0.1108398c2.9521484-0.1655273,3.3652344-0.3349609,4.1494141,0 c0.9257813,0.3959961,0.7412109,0.7988281,1.7783203,1.1860352c1.1601563,0.4326172,1.7626953,0.065918,2.3710938,0.5927734 c0.3994141,0.3457031,0.4833984,0.8544922,0.6523438,1.8720703c0.2880859,1.7431641-0.0517578,3.020998-0.1328125,3.3125019 c-0.1582031,0.5712891-0.3291016,1.1650391-0.7255859,1.605957c-0.6894531,0.7651367-1.8408203,0.8535156-2.8701172,0.8676758 c-0.8066406,0.0112305-1.6298828,0.0073242-2.3945313-0.246582c-0.9199219-0.3056641-1.6816406-0.9462891-2.5068359-1.4545898 c-0.6484375-0.3989258-0.6308594-0.2768555-3.1865234-1.4443378c-1.2099609-0.5532227-1.3632813-0.6391602-1.5751953-0.8364258 C37.6085014,30.168581,36.9463921,28.9903584,37.2325249,27.8521748z%27/%3E %3ClinearGradient id=%27SVGID_24_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1116.579834%27 y1=%27-380.2005615%27 x2=%27-1115.579834%27 y2=%27-380.2005615%27 gradientTransform=%27matrix%2818.5513401 -9.6964064 -9.6964064 -18.5513401 17066.0234375 -17837.3203125%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st23%27 d=%27M54.6651421,41.9400673c0.4775391-0.4648438,0.9169922-1.0556641,0.8935547-1.7211914 c-0.0214844-0.6025391-0.4140625-1.1181641-0.7685547-1.6054688c-0.4628906-0.6357422-0.8955078-1.3085938-1.1308594-2.059082 c-0.2929688-0.9345703-0.265625-1.9375-0.4628906-2.8969727c-0.1962891-0.9594727-0.7109375-1.9575214-1.6357422-2.2802753 c-0.3457031-0.1206055-0.71875-0.1347656-1.0849609-0.140625c-1.6923828-0.027832-3.3876953,0.1030273-5.0566406,0.3891602 c-0.2041016,0.0351563-0.4121094,0.0737305-0.5927734,0.1733398c-0.4160156,0.2285175-0.6054688,0.727541-0.6582031,1.1982441 c-0.0849609,0.7578125,0.0996094,1.5175781,0.3085938,2.2509766c0.734375,2.5800781,1.7871094,5.0698242,3.1279297,7.394043 c0.34375,0.5966797,0.7333984,1.2084961,1.3378906,1.5390625%27/%3E %3ClinearGradient id=%27SVGID_25_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1115.5932617%27 y1=%27-379.4028015%27 x2=%27-1114.5932617%27 y2=%27-379.4028015%27 gradientTransform=%27matrix%2817.4499493 -9.2274075 -9.2274075 -17.4499493 16003.2519531 -16873.546875%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st24%27 d=%27M46.8897514,41.6275673c0.2050781-0.6235352,0.5986328-1.1835938,1.1162109-1.5874023 c0.8212891-0.6401367,2.0039063-0.9731445,2.3632813-1.949707c0.1621094-0.4394531,0.1132813-0.9248047,0.0625-1.390625 c-0.0693359-0.637207-0.1386719-1.2744141-0.2070313-1.9116211c-0.0488281-0.4433594-0.1044922-0.9082031-0.3662109-1.2695313 c-0.4882813-0.6757813-1.4609375-0.7202148-2.2949219-0.699707c-1.0869141,0.0268555-2.1728516,0.0537109-3.2597656,0.0800781 c-0.5771484,0.0141602-3.7382813,0.2001953-3.9599609,0.7329102c0.2548828,0.3369141,3.0761719,0.5043945,3.2646484,0.8828125 c0.1357422,0.2734375,0.1689453,0.5844727,0.21875,0.8857422c0.3867188,2.3134766,1.8857422,4.2631836,3.3349609,6.1069336%27/%3E %3ClinearGradient id=%27SVGID_26_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1155.5113525%27 y1=%27-378.4194641%27 x2=%27-1154.5113525%27 y2=%27-378.4194641%27 gradientTransform=%27matrix%284.100843 14.623867 14.623867 -4.100843 10314.3857422 15385.3779297%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st25%27 d=%27M42.9346733,48.3565712c1.1064453-0.0292969,2.1416016-0.519043,3.1386719-0.9990234 c0.5722656-0.2753906,1.171875-0.5742188,1.5244141-1.1025391c0.5478516-0.8222656,0.3310547-1.9135742,0.09375-2.8730469 c-0.0556641-0.2250977-0.1152344-0.4584961-0.2617188-0.6391602c-0.2705078-0.3349609-0.7490234-0.3950195-1.1787109-0.4213867 c-1.0849609-0.0668945-2.1728516-0.0795898-3.2597656-0.0380859c-0.703125,0.0268555-1.4150391,0.078125-2.0830078,0.3022461 c-0.6669922,0.2246094-1.2939453,0.6411133-1.6425781,1.253418c-0.6396484,1.125-0.1777344,2.5859375,0.6201172,3.6049805%27/%3E %3ClinearGradient id=%27SVGID_27_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1140.9107666%27 y1=%27-378.9353333%27 x2=%27-1139.9107666%27 y2=%27-378.9353333%27 gradientTransform=%27matrix%2815.6333218 18.1400928 18.1400928 -15.6333218 24749.0253906 14809.7451172%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st26%27 d=%27M38.9520302,42.1936798c-0.2460938,0.4897461-0.1376953,1.0776367,0.0146484,1.6035156 c0.1142578,0.394043,0.2587891,0.7949219,0.5449219,1.0878906c0.4306641,0.4399414,1.0976563,0.550293,1.7128906,0.5307617 s1.2304688-0.1450195,1.8427734-0.0786133c0.6777344,0.0732422,1.3066406,0.3769531,1.9589844,0.5756836 s1.3974609,0.2827148,1.9873047-0.059082c0.4052734-0.234375,0.6855469-0.644043,0.8564453-1.0800781 c0.5703125-1.4570313,0.0019531-3.1318359-0.8896484-4.4174805c-0.3632813-0.5229492-0.8828125-1.0566406-1.5175781-1.0053711 c-0.7607422,0.0620117-1.1689453,0.8886719-1.6826172,1.4536133c-0.7773438,0.8554688-2.0771484,1.1923828-3.171875,0.8232422 c-0.2929688-0.0981445-0.5839844-0.2441406-0.8916016-0.21875c-0.3066406,0.0253906-0.6181641,0.3237305-0.5117188,0.6132813%27/%3E %3ClinearGradient id=%27SVGID_28_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1119.6796875%27 y1=%27-422.6975098%27 x2=%27-1118.6796875%27 y2=%27-422.6975098%27 gradientTransform=%27matrix%28-10.6902094 -9.5899963 -9.5899963 10.6902094 -15976.1259766 -6172.9980469%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0485415%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.0985361%27 style=%27stop-color:%231F0F15%27/%3E %3Cstop offset=%270.202444%27 style=%27stop-color:%235A2B3C%27/%3E %3Cstop offset=%270.306314%27 style=%27stop-color:%238C445E%27/%3E %3Cstop offset=%270.4076306%27 style=%27stop-color:%23B5577A%27/%3E %3Cstop offset=%270.5059722%27 style=%27stop-color:%23D56790%27/%3E %3Cstop offset=%270.6004307%27 style=%27stop-color:%23EC729F%27/%3E %3Cstop offset=%270.68942%27 style=%27stop-color:%23FA79A9%27/%3E %3Cstop offset=%270.7672601%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st27%27 d=%27M40.0694847,39.512661c-0.2753906,0.1381836-0.4404297,0.4414063-0.4794922,0.7470703 c-0.0380859,0.3051758,0.0322266,0.6142578,0.1279297,0.9072266c0.2246094,0.6914063,0.65625,1.3925781,1.3525391,1.5986328 c0.3925781,0.1162109,0.8154297,0.0576172,1.2089844-0.0546875c0.3349609-0.0957031,0.6748047-0.2407227,0.8886719-0.515625 c0.3056641-0.3920898,0.2822266-0.9394531,0.2451172-1.4355469c-0.0234375-0.3012695-0.0703125-0.6459961-0.3251953-0.809082 l-0.2675781-0.1494141c-0.0966797-0.0805664-0.1435547-0.206543-0.2275391-0.3007813 c-0.1308594-0.1469727-0.3349609-0.2001953-0.5273438-0.2382813c-0.5957031-0.1176758-1.2060547-0.1586914-1.8105469-0.121582%27/%3E %3ClinearGradient id=%27SVGID_29_%27 gradientUnits=%27userSpaceOnUse%27 x1=%27-1104.9046631%27 y1=%27-402.5757141%27 x2=%27-1103.9046631%27 y2=%27-402.5757141%27 gradientTransform=%27matrix%280.6283239 -15.6783705 -15.6783705 -0.6283239 -5575.9804688 -17530.8125%29%27%3E %3Cstop offset=%270%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.1676906%27 style=%27stop-color:%23000000%27/%3E %3Cstop offset=%270.1973083%27 style=%27stop-color:%23321821%27/%3E %3Cstop offset=%270.2303033%27 style=%27stop-color:%23612F42%27/%3E %3Cstop offset=%270.2652777%27 style=%27stop-color:%238C435E%27/%3E %3Cstop offset=%270.3016169%27 style=%27stop-color:%23AF5576%27/%3E %3Cstop offset=%270.3396665%27 style=%27stop-color:%23CC638A%27/%3E %3Cstop offset=%270.3800451%27 style=%27stop-color:%23E36D99%27/%3E %3Cstop offset=%270.4238068%27 style=%27stop-color:%23F375A4%27/%3E %3Cstop offset=%270.4734148%27 style=%27stop-color:%23FC7AAA%27/%3E %3Cstop offset=%270.5414954%27 style=%27stop-color:%23FF7BAC%27/%3E %3Cstop offset=%271%27 style=%27stop-color:%23FF7BAC%27/%3E %3C/linearGradient%3E %3Cpath class=%27st28%27 d=%27M40.7075462,39.2991295c-0.0117188,0.3754883-0.0195313,0.7822266,0.1992188,1.0878906 c0.0839844,0.1181641,0.1972656,0.2124023,0.3095703,0.3051758c0.1845703,0.1533203,0.3730469,0.3085938,0.5947266,0.3999023 c0.2226563,0.0913086,0.4873047,0.1103516,0.6962891-0.0083008c0.1416016-0.0800781,0.2441406-0.2148438,0.3310547-0.3530273 c0.1152344-0.1821289,0.2119141-0.3857422,0.2119141-0.6010742c0-0.4223633-0.3583984-0.7460938-0.6875-1.0112305 c-0.0869141-0.0703125-0.1757813-0.1416016-0.2773438-0.1894531c-0.2724609-0.1274414-0.5976563-0.0668945-0.8720703,0.0541992 c-0.2753906,0.1210938-0.5234375,0.2988281-0.7998047,0.4145508%27/%3E %3C/g%3E %3C/g%3E %3C/svg%3E");
+  --vine: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 44 200%27%3E%3Cdefs%3E%3ClinearGradient id=%27lf%27 x1=%270%27 y1=%270%27 x2=%271%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%232f3e30%27/%3E%3Cstop offset=%271%27 stop-color=%27%2317231b%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%27M20,0 C28,40 12,70 20,100 C28,130 12,160 20,200%27 fill=%27none%27 stroke=%27%234a3341%27 stroke-width=%271.5%27 stroke-linecap=%27round%27/%3E%3Cg transform=%27translate%2822.3,20.7%29 rotate%28116.6%29 scale%281.00,1.00%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2819.8,55.7%29 rotate%2869.0%29 scale%28-0.85,0.85%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.8,85.6%29 rotate%28115.1%29 scale%280.92,0.92%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2822.3,116.3%29 rotate%2860.3%29 scale%28-1.00,1.00%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2819.8,148.2%29 rotate%28124.9%29 scale%280.82,0.82%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.8,181.5%29 rotate%2859.6%29 scale%28-0.95,0.95%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2821.7,37.7%29 rotate%2842.6%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2818.0,72.7%29 rotate%28145.9%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2821.5,132.9%29 rotate%28147.6%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.9,168.5%29 rotate%2840.7%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3C/svg%3E");
+  position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none;
+  width: 3.4em; height: 100dvh;
+  font-size: clamp(21px, calc(1.85vw + 3px), 34px);
+}
+/* The vine, tiled down the edge and faded out at both ends so it arrives and leaves rather
+   than stopping dead — it starts below the balloons so the two decorations meet, not clash. */
+.roses::before {
+  content: ""; position: absolute; left: 0; top: 17%; bottom: 3%; width: 44px;
+  background: var(--vine) left top / 44px 200px repeat-y;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
+  opacity: .85;
+}
+.roses span {
+  position: absolute; display: block;
+  left: 20px; margin-left: calc(var(--w) / -2 + var(--off, 0em));
+  top: var(--y); width: var(--w); height: var(--w);
+  opacity: var(--op, 1);
+  background: var(--rose) center / contain no-repeat;
+  /* Desaturated and pushed toward the page's plum, then darkened — a black rose that still
+     shows its form, rather than the flat silhouette a straight brightness cut gives. */
+  filter: grayscale(1) sepia(.55) hue-rotate(272deg) saturate(.9) brightness(.44) contrast(1.35)
+          drop-shadow(0 .06em .18em rgba(0,0,0,.6));
+  animation: sway var(--dur) var(--ease-in-out) var(--delay) infinite alternate;
+}
+.roses span.red {
+  /* Same image, hue carried round from the original's pink to a wine that belongs to this
+     ground — a pillarbox red would fight it. The leaves stay green, which keeps them alive. */
+  filter: hue-rotate(20deg) saturate(2) brightness(.54) contrast(1.08)
+          drop-shadow(0 .06em .18em rgba(0,0,0,.6));
+}
+.roses span:nth-child(1) { --w: 1.13em; --y: 14.3%; --off: -0.34em; --op: 1.0; --dur: 14.0s; --delay: -14.1s; --sa: 14.9deg; --sb: 16.8deg; }
+.roses span:nth-child(2) { --w: 0.84em; --y: 17.8%; --off: -0.32em; --op: 0.77; --dur: 10.0s; --delay: -14.7s; --sa: 9.5deg; --sb: 12.5deg; }
+.roses span:nth-child(3) { --w: 0.81em; --y: 20.4%; --off: -0.31em; --op: 0.79; --dur: 17.4s; --delay: -14.5s; --sa: 6.8deg; --sb: 8.9deg; }
+.roses span:nth-child(4) { --w: 0.98em; --y: 24.2%; --off: -0.26em; --op: 0.88; --dur: 16.9s; --delay: -12.7s; --sa: -8.5deg; --sb: -5.6deg; }
+.roses span:nth-child(5) { --w: 1.61em; --y: 26.2%; --off: -0.13em; --op: 1.0; --dur: 13.5s; --delay: -2.1s; --sa: -7.3deg; --sb: -4.7deg; }
+.roses span:nth-child(6) { --w: 0.79em; --y: 28.8%; --off: -0.30em; --op: 0.71; --dur: 17.3s; --delay: -8.6s; --sa: -2.3deg; --sb: 1.5deg; }
+.roses span:nth-child(7) { --w: 1.43em; --y: 31.6%; --off: 0.25em; --op: 1.0; --dur: 9.9s; --delay: -11.2s; --sa: -17.2deg; --sb: -15.5deg; }
+.roses span:nth-child(8) { --w: 1.03em; --y: 34.3%; --off: -0.05em; --op: 0.92; --dur: 17.4s; --delay: -17.8s; --sa: 15.4deg; --sb: 18.5deg; }
+.roses span:nth-child(9) { --w: 1.18em; --y: 37.2%; --off: 0.00em; --op: 1.0; --dur: 17.0s; --delay: -7.8s; --sa: -10.2deg; --sb: -6.7deg; }
+.roses span:nth-child(10) { --w: 0.96em; --y: 39.4%; --off: -0.05em; --op: 0.87; --dur: 13.4s; --delay: -16.6s; --sa: 5.3deg; --sb: 8.4deg; }
+.roses span:nth-child(11) { --w: 1.13em; --y: 42.1%; --off: 0.07em; --op: 1.0; --dur: 16.5s; --delay: -5.7s; --sa: 12.6deg; --sb: 16.1deg; }
+.roses span:nth-child(12) { --w: 1.61em; --y: 46.1%; --off: -0.06em; --op: 1.0; --dur: 17.7s; --delay: -15.2s; --sa: 11.1deg; --sb: 14.0deg; }
+.roses span:nth-child(13) { --w: 1.45em; --y: 48.1%; --off: 0.31em; --op: 1.0; --dur: 13.0s; --delay: -0.3s; --sa: -1.0deg; --sb: 0.8deg; }
+.roses span:nth-child(14) { --w: 0.88em; --y: 49.9%; --off: -0.31em; --op: 0.81; --dur: 15.8s; --delay: -17.2s; --sa: -20.1deg; --sb: -16.6deg; }
+.roses span:nth-child(15) { --w: 0.66em; --y: 53.9%; --off: 0.33em; --op: 0.66; --dur: 13.4s; --delay: -13.0s; --sa: -9.7deg; --sb: -6.7deg; }
+.roses span:nth-child(16) { --w: 1.16em; --y: 55.7%; --off: 0.01em; --op: 0.99; --dur: 15.0s; --delay: -16.8s; --sa: 18.3deg; --sb: 22.0deg; }
+.roses span:nth-child(17) { --w: 0.71em; --y: 59.7%; --off: 0.02em; --op: 0.62; --dur: 9.1s; --delay: -1.9s; --sa: -5.6deg; --sb: -2.1deg; }
+.roses span:nth-child(18) { --w: 1.48em; --y: 62.6%; --off: -0.59em; --op: 1.0; --dur: 11.9s; --delay: -5.5s; --sa: -8.2deg; --sb: -4.7deg; }
+.roses span:nth-child(19) { --w: 1.70em; --y: 64.3%; --off: -0.43em; --op: 1.0; --dur: 12.9s; --delay: -6.1s; --sa: 1.4deg; --sb: 4.9deg; }
+.roses span:nth-child(20) { --w: 0.64em; --y: 67.6%; --off: 0.52em; --op: 0.55; --dur: 13.9s; --delay: -15.1s; --sa: -5.5deg; --sb: -3.4deg; }
+.roses span:nth-child(21) { --w: 0.67em; --y: 70.1%; --off: -0.46em; --op: 0.63; --dur: 16.1s; --delay: -9.3s; --sa: 7.4deg; --sb: 11.1deg; }
+.roses span:nth-child(22) { --w: 1.66em; --y: 73.8%; --off: -0.11em; --op: 1.0; --dur: 11.7s; --delay: -6.2s; --sa: -6.2deg; --sb: -3.5deg; }
+.roses span:nth-child(23) { --w: 1.22em; --y: 75.2%; --off: -0.22em; --op: 1.0; --dur: 10.1s; --delay: -14.3s; --sa: -5.1deg; --sb: -2.3deg; }
+.roses span:nth-child(24) { --w: 0.86em; --y: 79.0%; --off: 0.47em; --op: 0.79; --dur: 12.7s; --delay: -14.1s; --sa: -13.8deg; --sb: -9.9deg; }
+.roses span:nth-child(25) { --w: 0.89em; --y: 81.9%; --off: 0.08em; --op: 0.81; --dur: 13.8s; --delay: -2.0s; --sa: -7.5deg; --sb: -5.5deg; }
+.roses span:nth-child(26) { --w: 1.15em; --y: 84.4%; --off: -0.29em; --op: 1.0; --dur: 9.9s; --delay: -4.7s; --sa: -13.7deg; --sb: -11.4deg; }
+.roses span:nth-child(27) { --w: 1.60em; --y: 87.6%; --off: -0.39em; --op: 1.0; --dur: 13.6s; --delay: -5.0s; --sa: 9.7deg; --sb: 13.1deg; }
+.roses span:nth-child(28) { --w: 1.06em; --y: 90.1%; --off: -0.11em; --op: 0.99; --dur: 16.0s; --delay: -7.5s; --sa: -11.4deg; --sb: -9.6deg; }
+.roses span:nth-child(29) { --w: 1.36em; --y: 91.3%; --off: 0.09em; --op: 1.0; --dur: 12.2s; --delay: -14.0s; --sa: -18.2deg; --sb: -15.0deg; }
+.roses span:nth-child(30) { --w: 0.79em; --y: 95.2%; --off: -0.35em; --op: 0.72; --dur: 17.8s; --delay: -15.8s; --sa: 17.5deg; --sb: 19.9deg; }
+@keyframes sway {
+  from { transform: rotate(var(--sa)); }
+  to   { transform: rotate(var(--sb)); }
+}
+
+/* ---------- Cover: an unsealing, not a fade-in ---------------------------------------- */
+.cover {
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 9vh 7vw; position: relative; overflow: hidden;
+}
+.cover::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(420px 420px at 18% 8%, rgba(217,143,160,.14), transparent 70%),
+    radial-gradient(520px 520px at 88% 92%, rgba(220,170,102,.14), transparent 70%);
+}
+.seal {
+  width: 58px; height: 58px; border-radius: 50%; position: relative; z-index: 1;
+  display: grid; place-items: center; font-size: 22px; color: var(--bg);
+  background: radial-gradient(circle at 34% 28%, #f3ddab, var(--gold));
+  box-shadow: 0 0 0 6px rgba(220,170,102,.14);
+  transition: transform var(--t-slow) var(--ease-in-out), opacity var(--t-base) var(--ease-out);
+  margin-bottom: 1.5rem;
+}
+.cover.is-open .seal { transform: scale(.44) rotate(210deg); opacity: 0; }
+
+.cover-guest { font-size: .95rem; color: var(--muted); font-style: italic; position: relative; z-index: 1; }
+.cover-name {
+  font-size: clamp(2.6rem, 8vw, 4.6rem); line-height: 1.04; margin: .3em 0 .18em;
+  position: relative; z-index: 1;
+}
+.cover-tag {
+  font-family: var(--serif); font-style: italic; font-weight: 500; color: var(--rose);
+  font-size: clamp(1rem, 2.6vw, 1.35rem); position: relative; z-index: 1;
+}
+.cover-guest, .cover-name, .cover-tag {
+  filter: blur(7px); opacity: 0; transform: translateY(16px);
+  transition: filter var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.cover.is-open .cover-guest  { filter: none; opacity: 1; transform: none; transition-delay: .1s; }
+.cover.is-open .cover-name   { filter: none; opacity: 1; transform: none; transition-delay: .22s; }
+.cover.is-open .cover-tag    { filter: none; opacity: 1; transform: none; transition-delay: .36s; }
+
+.cover-cue {
+  position: absolute; bottom: 6vh; font-size: 1.1rem; color: var(--gold); opacity: .75;
+  animation: drift 2.4s var(--ease-in-out) infinite;
+}
+@keyframes drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(8px); } }
+
+/* ---------- Full-bleed scene stack: the "changes as you scroll" moment ---------------- */
+/* Sticky panels stack naturally in DOM/paint order — no JS needed for the crossfade. */
+.scenes { position: relative; }
+.scene {
+  position: sticky; top: 0; height: 100dvh; overflow: hidden;
+  /* Caption sits near the TOP, not the bottom. The next scene slides up and covers the
+     viewport from the bottom edge first, so a bottom-anchored caption gets covered within
+     the first moments of the handoff, before there's time to read it. Top-anchored, it stays
+     visible for this scene's entire dwell time and only disappears right at the end, once the
+     next scene has almost fully taken over. */
+  display: flex; align-items: flex-start;
+  /* Explicit z-index (not auto) so each scene forms its OWN stacking context — otherwise its
+     .frame and .caption compete directly with the NEXT scene's .frame/.caption in the shared
+     parent context instead of staying scoped to their own scene. Equal z-index across all
+     scenes still lets later ones cover earlier ones on tie (DOM order), which is exactly the
+     stacking effect this section wants — just scoped correctly per scene now. */
+  z-index: 0;
+}
+.scene .frame {
+  position: absolute; inset: 0;
+  background: linear-gradient(160deg, var(--bg2), var(--bg) 70%);
+}
+.scene .frame img {
+  width: 100%; height: 100%; object-fit: cover;
+  filter: saturate(.92) brightness(.7);
+  transform: scale(1.08);
+  transition: transform var(--t-slow) var(--ease-out), filter var(--t-slow) var(--ease-out);
+}
+.scene.is-visible .frame img { transform: scale(1); filter: saturate(1) brightness(.62); }
+.scene .frame::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(15,7,12,.82) 0%, rgba(15,7,12,.1) 50%, transparent 74%);
+}
+.scene .caption {
+  position: relative; z-index: 1; padding: 8vh 8vw; max-width: 640px;
+  opacity: 0; transform: translateY(26px);
+  transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.scene.is-visible .caption { opacity: 1; transform: none; transition-delay: .15s; }
+.scene .caption p.tag { font-family: var(--sans); letter-spacing: .18em; text-transform: uppercase; font-size: .68rem; color: var(--rose); margin: 0 0 .6rem; }
+.scene .caption h2 { font-size: clamp(1.7rem, 4.6vw, 2.7rem); font-style: italic; font-weight: 500; }
+
+/* ---------- Story: an asymmetric column, deliberately not the centered-panel default -- */
+.story {
+  padding: 16vh 0 12vh; position: relative;
+}
+.story .wrap { max-width: 620px; margin: 0; margin-left: max(7vw, calc(50% - 460px)); text-align: left; }
+.story h2 { font-size: clamp(1.9rem, 4.4vw, 2.7rem); margin-bottom: .7em; }
+.story p { font-size: 1.08rem; color: var(--muted); max-width: 52ch; }
+.story .wrap > * {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.story.is-visible .wrap > * { opacity: 1; transform: none; }
+.story.is-visible .wrap > *:nth-child(2) { transition-delay: .1s; }
+
+/* ---------- Book: a fanned spread, not a grid ------------------------------------------ */
+.book {
+  padding: 10vh 0 14vh; text-align: center;
+  /* The fanned pages below intentionally extend past their own .pages box — clip that
+     spillover here too (belt-and-suspenders with body's overflow-x: hidden), so this section
+     is self-contained even if it's ever embedded somewhere that ignores the body rule. */
+  overflow-x: hidden;
+}
+.book h2 { font-size: clamp(1.8rem, 4.2vw, 2.5rem); margin-bottom: .3em; }
+.book .sub { color: var(--muted); font-size: 1rem; margin-bottom: 5vh; }
+/* Without scroll-driven animation there's nothing to type against, so both lines simply
+   stack and read as an ordinary when/where. The typing below is layered on top of this. */
+.book .sub .line { display: block; }
+.book .sub .line + .line { margin-top: .35em; }
+.book .pages {
+  position: relative; width: min(80vw, 320px); height: min(50vh, 360px);
+  margin: 0 auto; perspective: 1800px;
+}
+/* Each page is a real polaroid-style print, not a bare photo — a solid ivory mount (via
+   padding on the img itself; ::before/::after don't render on <img>, so this can't be a
+   pseudo-element background) is what makes overlapping photos read as distinct objects
+   instead of blurring into one smeared collage. */
+.page {
+  position: absolute; inset: 0; border-radius: 3px; box-sizing: border-box;
+  background: var(--ink);
+  padding: 10px 10px 30px;
+  object-fit: cover;
+  box-shadow: 0 20px 50px rgba(8,3,7,.5), 0 0 0 1px rgba(0,0,0,.08);
+  transform-origin: 50% 85%;
+  transition: transform var(--t-slow) var(--ease-in-out), opacity var(--t-base) var(--ease-out);
+}
+/* Resting stack — each page already sits at a slightly different angle/offset. A pile of
+   real photos never lands in a perfectly identical stack, and revealing FROM one flat image
+   INTO a fan reads as a glitch, not a fan-out. Starting visibly-stacked-but-messy makes the
+   reveal read as "spreading out", exactly what it's supposed to be. */
+.page:nth-child(1) { transform: rotate(-4deg) translate(-7px, -5px) scale(.95); }
+.page:nth-child(2) { transform: rotate(3deg)  translate(-3px, -2px) scale(.96); }
+.page:nth-child(3) { transform: rotate(-2deg) translate(0, 0)       scale(.97); z-index: 2; }
+.page:nth-child(4) { transform: rotate(4deg)  translate(3px, 2px)   scale(.96); }
+.page:nth-child(5) { transform: rotate(-3deg) translate(6px, 4px)   scale(.95); }
+.page:nth-child(6) { transform: rotate(5deg)  translate(9px, 6px)   scale(.94); }
+/* Fanned open — wide enough that the photos genuinely separate rather than still overlapping. */
+.book.is-visible .page:nth-child(1) { transform: rotate(-24deg) translate(-108px, 22px) scale(1); transition-delay: .05s; }
+.book.is-visible .page:nth-child(2) { transform: rotate(-13deg) translate(-56px, 10px)  scale(1); transition-delay: .14s; }
+.book.is-visible .page:nth-child(3) { transform: rotate(0deg)   translate(0, 0)         scale(1); transition-delay: .23s; z-index: 3; }
+.book.is-visible .page:nth-child(4) { transform: rotate(13deg)  translate(56px, 10px)   scale(1); transition-delay: .32s; }
+.book.is-visible .page:nth-child(5) { transform: rotate(24deg)  translate(108px, 22px)  scale(1); transition-delay: .41s; }
+.book.is-visible .page:nth-child(6) { transform: rotate(34deg)  translate(156px, 36px)  scale(1); transition-delay: .5s; }
+
+/* ---- Progressive enhancement: the fan holds the screen and browses itself --------------
+   Everything above this point is the whole experience on every browser — the fan opens once
+   as you arrive, done. This block adds one thing on top, ONLY where the browser supports
+   scroll-driven animation: after the fan has spread, the section holds the viewport (the
+   stage goes sticky) and each photo in turn swings up to the front — left to right, one per
+   scroll beat — so you browse the whole set on the way down, and it un-browses right to left
+   on the way up.
+
+   Why it's built this way, twice over:
+   - It can't ride on data-reveal's .is-visible. The platform's injector sets that once per
+     element and never clears it, so anything driven by it can only move forward. A view
+     timeline is a live readout of scroll position, recomputed every frame — reversing is
+     automatic, not something to build.
+   - The hold is a real sticky stage inside its own taller track, not a shared parent. Sticky
+     siblings under one big parent all stay stuck until the WHOLE parent is exhausted; each
+     one needs its own track, and that track has to be taller than the element or there's no
+     dwell at all and it just scrolls past.
+
+   The motion is the spread's motion: same rotate/translate/scale, same --ease-in-out curve.
+   A photo un-rotates most of the way upright, lifts, and grows — then settles back into the
+   fan exactly where it was, because the keyframes' rest state is read from the very values
+   the fan is arranged with (--pr/--px/--py below mirror the .book.is-visible rules above and
+   nothing else). animation-fill-mode is none on purpose: outside the pinned stretch the
+   animation contributes nothing at all, so the entrance spread runs untouched and the fan
+   sits at exactly its declared arrangement before and after. Unsupported browsers get none
+   of this — no pin, no sticky, no shuffle — and keep the section precisely as defined above. */
+@supports (animation-timeline: view()) {
+  /* overflow-x: hidden above would make .book a scroll container, and a sticky child sticks
+     to its nearest scrolling ancestor — which would silently kill the hold. clip does the
+     same clipping without ever becoming one. */
+  .book { overflow-x: clip; padding-bottom: 0; }
+
+  /* The track. Its height beyond one viewport IS the dwell — how far you scroll while the
+     stage is held. Scaled to how many photos there actually are (2–6), so a two-photo fan
+     doesn't hold the screen for the same distance as a six-photo one. */
+  .book-pin {
+    --n: 6; --dwell: 220dvh;
+    position: relative; min-height: calc(100dvh + var(--dwell));
+    view-timeline-name: --book-pin; view-timeline-axis: block;
+  }
+  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25dvh; }
+  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90dvh; }
+  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125dvh; }
+  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160dvh; }
+  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190dvh; }
+  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220dvh; }
+
+  .book-stage {
+    position: sticky; top: 0; height: 100dvh; overflow-x: clip;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding-top: 3vh;
+  }
+  /* Held, the section gets exactly one viewport instead of the open-ended flow it had before,
+     and a fanned print reaches well past its own box — rotated, lifted, and scaled up at the
+     peak of its beat. Sizing .pages does nothing here (the prints are <img> at inset: 0, so
+     they take their height from the photo's own aspect ratio, not this box); scaling the whole
+     fan is what fits it, and it fits it without touching the arrangement — every angle,
+     offset and gap stays exactly in proportion. */
+  /* Held, the two lines occupy the same spot and take turns, so the space is reserved once
+     and they're stacked on top of each other rather than flowing. */
+  /* align-self: stretch is load-bearing. Both lines are absolutely positioned, so this flex
+     item has no in-flow content left to size it — without stretching it collapses to zero
+     width and the text wraps one word per row. */
+  .book-stage .sub {
+    margin-bottom: 8vh; position: relative; height: 1.7em;
+    align-self: stretch; padding: 0 6vw;
+  }
+  .book-stage .sub .line {
+    position: absolute; left: 0; right: 0; top: 0; margin: 0;
+    /* Typed by clipping from the right in steps, not by animating width. Width would have to
+       grow from nothing, and a centred box that grows slides sideways the whole time it's
+       typing; clipping leaves the box exactly where it will end up and only uncovers it.
+       steps() is what makes it read as typing rather than a wipe. */
+    clip-path: inset(0 100% 0 0);
+    animation-name: type-in, type-out;
+    /* forwards, not both: before its window the line is untouched — that's the base above,
+       clipped shut — and after it, it holds open instead of snapping shut again. Scrolling
+       back up walks the timeline out of range the same way and it closes again. */
+    animation-fill-mode: forwards, forwards;
+    animation-timing-function: steps(26, end), var(--ease-sine);
+    animation-timeline: --book-pin, --book-pin;
+  }
+  /* Line one types early, clears at the halfway point; line two takes over and holds to the
+     end of the photos. Percentages of the hold, so this keeps step with however many photos
+     there are — a two-photo fan gets the same beats over a shorter distance. */
+  .book-stage .sub .line:nth-child(1) {
+    animation-range: contain 2% contain 22%, contain 40% contain 49%;
+  }
+  .book-stage .sub .line:nth-child(2) {
+    animation-range: contain 55% contain 75%, contain 94% contain 100%;
+  }
+  .book-stage .pages { transform: scale(var(--fan-fit, .84)); }
+  /* The prints are a fixed pixel size — an <img> at inset: 0 takes its height from the
+     photo's own aspect ratio, so the fan doesn't shrink on a short screen the way vh-sized
+     things do. In normal flow that was fine (the section just grew); held to exactly one
+     viewport it isn't, so step the fit down as the screen gets shorter. */
+  @media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
+  @media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
+  @media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
+  @media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
+  @media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
+
+  /* Rest state, read straight off the fanned arrangement above — these mirror it, they never
+     redefine it. --pz mirrors the stacking the fan already has. */
+  .book .page { --pr: 0deg; --px: 0px; --py: 0px; --pz: 1; }
+  .book .page:nth-child(1) { --i: 1; --pr: -24deg; --px: -108px; --py: 22px; }
+  .book .page:nth-child(2) { --i: 2; --pr: -13deg; --px: -56px;  --py: 10px; }
+  .book .page:nth-child(3) { --i: 3; --pr: 0deg;   --px: 0px;    --py: 0px;  --pz: 3; }
+  .book .page:nth-child(4) { --i: 4; --pr: 13deg;  --px: 56px;   --py: 10px; }
+  .book .page:nth-child(5) { --i: 5; --pr: 24deg;  --px: 108px;  --py: 22px; }
+  .book .page:nth-child(6) { --i: 6; --pr: 34deg;  --px: 156px;  --py: 36px; }
+
+  /* One window per photo across the held stretch, and the windows deliberately OVERLAP by
+     exactly half: 200%/(n+1) long, spaced so each print starts its rise at the precise moment
+     the one before it reaches the front. That ratio is the whole trick — back-to-back windows
+     moved in separate beats (up, all the way down, stop, next), and the pause between beats is
+     what read as choppy; at half-overlap one print is always arriving as another leaves, so
+     the sweep never stops moving. Spacing still puts the first and last windows fully inside
+     the hold, so no print is cut off mid-move at either end. `contain` is exactly the span
+     during which the track covers the viewport — the hold. */
+  .book .page {
+    animation-name: page-to-front; animation-fill-mode: none;
+    animation-timing-function: var(--ease-sine); animation-timeline: --book-pin;
+    --span: calc(200% / (var(--n) + 1));
+    --step: calc((100% - var(--span)) / max(1, var(--n) - 1));
+    animation-range:
+      contain calc((var(--i) - 1) * var(--step))
+      contain calc((var(--i) - 1) * var(--step) + var(--span));
+  }
+}
+/* Rest → front → rest, in the fan's own vocabulary: swing most of the way upright, lift, grow.
+   z-index rides the same curve rather than snapping, so where two prints overlap mid-handoff
+   the one nearer its peak is the one in front — they trade places at the crossing point
+   instead of one jumping over the other. */
+@keyframes type-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+@keyframes type-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes page-to-front {
+  0%   { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
+  50%  { transform: rotate(calc(var(--pr) * .28)) translate(var(--px), calc(var(--py) - 20px)) scale(1.18); z-index: 30; }
+  100% { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
+}
+
+/* ---------- A note, plainly stated -------------------------------------------------- */
+.note { padding: 6vh 0; text-align: center; }
+.note p {
+  font-family: var(--serif); font-style: italic; font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+  color: var(--rose); max-width: 46ch; margin: 0 auto;
+  opacity: 0; transform: translateY(20px); transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.note .note-map { margin-top: 2.6rem; }
+.note.is-visible p { opacity: 1; transform: none; }
+.note.is-visible .note-map { transition-delay: .12s; }
+
+/* ---------- Dress code: a single pill, not a wall of text ------------------------------ */
+.dresscode { padding: 4vh 0 10vh; text-align: center; }
+.dresscode .pill {
+  display: inline-flex; align-items: center; gap: .5em; padding: .6em 1.4em; border-radius: 999px;
+  border: 1px solid var(--line); font-family: var(--serif); font-style: italic; font-size: 1.05rem;
+  opacity: 0; transform: translateY(16px); transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.dresscode.is-visible .pill { opacity: 1; transform: none; }
+
+/* ---------- RSVP: the one ask ------------------------------------------------------------ */
+.rsvp { padding: 12vh 0 14vh; text-align: center; }
+.rsvp h2 { font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 1.1rem; }
+.btn {
+  display: inline-block; padding: 15px 34px; border-radius: 999px;
+  background: linear-gradient(120deg, var(--gold), var(--rose));
+  color: #241019; text-decoration: none; font-weight: 700; letter-spacing: .02em; font-size: 1.02rem;
+  transition: transform var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(220,170,102,.28); }
+}
+.btn:active { transform: scale(.97); }
+/* Quieter sibling of the primary button: the map is useful, but Reply now is the ask, and two
+   filled buttons on one page would compete. Sets its own family/style because it lives inside
+   .note, whose paragraphs are italic serif — inheriting that would make it read as prose. */
+.btn.ghost {
+  background: transparent; border: 1px solid var(--gold); color: var(--gold);
+  font-family: var(--sans); font-style: normal; font-size: .92rem; font-weight: 600;
+  letter-spacing: .04em; padding: 11px 26px;
+}
+.hashtag { margin-top: 1.4rem; color: var(--muted); font-size: .95rem; letter-spacing: .04em; }
+.rsvp > * { opacity: 0; transform: translateY(22px); transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out); }
+.rsvp.is-visible > * { opacity: 1; transform: none; }
+
+/* ---------- Footer -------------------------------------------------------------------- */
+footer {
+  padding: 8vh 6vw 6vh; text-align: center; color: var(--muted); font-size: .85rem;
+  border-top: 1px solid var(--line);
+}
+footer .from { font-family: var(--serif); font-style: italic; color: var(--ink); font-size: 1.05rem; margin-bottom: .6rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+  .seal, .cover-guest, .cover-name, .cover-tag,
+  .caption, .story .wrap > *, .note p,
+  .dresscode .pill, .rsvp > * { opacity: 1; transform: none; filter: none; }
+  .scene .frame img { transform: none; filter: saturate(1) brightness(.62); }
+  /* .page keeps its own transform (excluded above) — reduced motion means no ANIMATED
+     transition, not "undo the fan and restack everything on top of itself". Jump straight
+     to the fanned-open end state instead of the resting stack. */
+  .page { opacity: 1; }
+  .page:nth-child(1) { transform: rotate(-24deg) translate(-108px, 22px); }
+  .page:nth-child(2) { transform: rotate(-13deg) translate(-56px, 10px); }
+  .page:nth-child(3) { transform: rotate(0deg)   translate(0, 0); z-index: 3; }
+  .page:nth-child(4) { transform: rotate(13deg)  translate(56px, 10px); }
+  .page:nth-child(5) { transform: rotate(24deg)  translate(108px, 22px); }
+  .page:nth-child(6) { transform: rotate(34deg)  translate(156px, 36px); }
+  /* No shuffle means no reason to hold the screen — collapse the track and let the section
+     flow normally, otherwise it's a long stretch of empty scrolling for nothing. */
+  .book-pin { min-height: 0; }
+  .book-stage { position: static; height: auto; padding-top: 0; }
+  .book-stage .pages { transform: none; }
+}
+  </style>
+</head>
+<body>
+
+  <!-- Decoration only, and nothing to read aloud — hidden from assistive tech.
+       Twenty-six empty spans; every balloon is drawn entirely in CSS. -->
+  <div class="balloons" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+
+  <!-- Roses on the same border, carrying the corner trim down the page.
+       Decorative like the bunch: hidden from assistive tech, drawn entirely in CSS. -->
+  <div class="roses" aria-hidden="true"><span></span><span class="red"></span><span></span><span></span><span class="red"></span><span></span><span></span><span></span><span class="red"></span><span></span><span></span><span class="red"></span><span></span><span></span><span></span><span class="red"></span><span></span><span></span><span class="red"></span><span></span><span></span><span></span><span class="red"></span><span></span><span></span><span class="red"></span><span></span><span></span><span class="red"></span><span></span></div>
+
+  <!-- Cover: the platform adds .is-open after the first scroll. No literal envelope flaps —
+       the seal shrinks away and the name comes into focus out of a blur, which reads as an
+       unsealing without risking a 3D-flip that can look broken on some browsers. -->
+  <header class="cover" data-envelope>
+    <div class="seal">✦</div>
+    <p class="cover-guest">For <span data-var="guest.name">you</span></p>
+    <h1 class="cover-name" data-var="event.celebrantName">Her Birthday</h1>
+    <p class="cover-tag" data-var="event.subtitle">An evening, just for her</p>
+    <span class="cover-cue" aria-hidden="true">↓</span>
+  </header>
+
+  <main>
+    <!-- Full-bleed scene stack. Each panel sticks to the top of the viewport until the next
+         one arrives and covers it — the "images change as you scroll" moment, no JS required. -->
+    <section class="scenes">
+      <div class="scene" data-reveal>
+        <div class="frame">
+          <span data-optional><img data-src="event.scenePhoto1" data-slot-label="First scene photo" alt=""></span>
+        </div>
+        <div class="caption">
+          <p class="tag">One</p>
+          <h2 data-var="event.sceneCaption1">Another year, and still the best part of it</h2>
+        </div>
+      </div>
+      <div class="scene" data-reveal>
+        <div class="frame">
+          <span data-optional><img data-src="event.scenePhoto2" data-slot-label="Second scene photo" alt=""></span>
+        </div>
+        <div class="caption">
+          <p class="tag">Two</p>
+          <h2 data-var="event.sceneCaption2">A little more wisdom, a lot more light</h2>
+        </div>
+      </div>
+      <div class="scene" data-reveal>
+        <div class="frame">
+          <span data-optional><img data-src="event.scenePhoto3" data-slot-label="Third scene photo" alt=""></span>
+        </div>
+        <div class="caption">
+          <p class="tag">Three</p>
+          <h2 data-var="event.sceneCaption3">Tonight, we raise a glass to her</h2>
+        </div>
+      </div>
+    </section>
+
+    <section class="story" data-reveal>
+      <div class="wrap">
+        <h2 data-var="event.title">A celebration, gathered with love</h2>
+        <p data-var="event.description">She has spent this past year holding everyone else together, quietly and without asking for much in return. So for one evening, the table turns. Good food, good company, and absolutely no talk of the dishes.</p>
+      </div>
+    </section>
+
+    <section class="book" data-reveal>
+      <div class="book-pin">
+        <div class="book-stage">
+          <p class="eyebrow">Moments worth keeping</p>
+          <h2>A few pages from her story</h2>
+          <!-- Not a caption any more: the when and the where, typed out one after the other
+               while the photos go by, so the hold does two jobs at once. Same variables the
+               Details and Venue sections use, so the inviter fills them in once. -->
+          <p class="sub">
+            <span class="line"><span data-var="event.date">The date</span><span data-optional> · <span data-var="event.time">The time</span></span></span>
+            <span class="line"><span data-var="event.venue.name">The venue</span></span>
+          </p>
+          <div class="pages">
+            <img class="page" data-src="event.gallery" data-multiple="true" data-min-images="2" data-max-images="6" data-slot-label="Pages from her story" alt="">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="note" data-reveal>
+      <p data-optional data-var="event.adultsOnlyNote">A grown-up affair, through and through. This one's for the adults.</p>
+      <!-- The venue name is typed out over the photos above; this is how you actually get
+           there. Optional, so it simply isn't rendered when no map link is given. -->
+      <p class="note-map" data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open the location</a></p>
+    </section>
+
+    <section class="dresscode" data-reveal>
+      <span class="pill" data-var="event.dressCode" data-type="select" data-options="Cocktail Chic,Black-Tie Optional,Garden Elegant,Come As You Are">Cocktail Chic</span>
+    </section>
+
+    <section class="rsvp" data-reveal>
+      <h2>Will you be there?</h2>
+      <a class="btn" data-href="rsvp.link" href="#">Reply now</a>
+      <p class="hashtag" data-optional data-var="event.hashtag">#HerGildedHour</p>
+    </section>
+
+    <footer data-reveal>
+      <p class="from" data-optional>With love, <span data-var="inviter.name">your host</span></p>
+      <p>Sent with love via invites.blog</p>
+    </footer>
+  </main>
+</body>
+</html>

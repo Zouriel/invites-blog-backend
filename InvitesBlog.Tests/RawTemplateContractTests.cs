@@ -14,7 +14,7 @@ namespace InvitesBlog.Tests;
 /// </summary>
 public class RawTemplateContractTests
 {
-    private static readonly string[] Slugs = ["aurora-vows", "a-love-story"];
+    private static readonly string[] Slugs = ["aurora-vows", "a-love-story", "gilded-hour"];
 
     private static string Html(string slug)
     {
@@ -35,12 +35,14 @@ public class RawTemplateContractTests
     [Theory]
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]
+    [InlineData("gilded-hour")]
     public void Passes_the_same_scan_a_community_submission_must_pass(string slug) =>
         RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug));
 
     [Theory]
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]
+    [InlineData("gilded-hour")]
     public void Declares_the_three_required_theme_colours(string slug)
     {
         var manifest = Packager().BuildManifest(slug, "1.0.0", Html(slug));
@@ -74,9 +76,32 @@ public class RawTemplateContractTests
         Assert.DoesNotContain(manifest.Fields, f => f.Key.StartsWith("event.dressEveryone"));
     }
 
+    [Fact]
+    public void Gilded_hour_declares_its_scenes_gallery_and_typed_when_where()
+    {
+        var manifest = Packager().BuildManifest("gilded-hour", "1.0.0", Html("gilded-hour"));
+
+        // Three full-bleed scenes plus the fanned spread the pinned section shuffles through.
+        Assert.Equal(3, manifest.ImageSlots.Count(s => s.Key.StartsWith("event.scenePhoto")));
+        var gallery = Assert.Single(manifest.ImageSlots, s => s.Key == "event.gallery");
+        Assert.True(gallery.Multiple);
+        Assert.Equal(2, gallery.MinImages);
+        Assert.Equal(6, gallery.MaxImages);
+
+        // The caption that types out over the spread reads these two, so they must stay typed
+        // (a free-text date would defeat the editor's picker).
+        Assert.Equal("date", Assert.Single(manifest.Fields, f => f.Key == "event.date").Type);
+        Assert.Equal("time", Assert.Single(manifest.Fields, f => f.Key == "event.time").Type);
+
+        var dressCode = Assert.Single(manifest.Fields, f => f.Key == "event.dressCode");
+        Assert.Equal("select", dressCode.Type);
+        Assert.Contains("Cocktail Chic", dressCode.Options!);
+    }
+
     [Theory]
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]
+    [InlineData("gilded-hour")]
     public void Stays_within_the_hard_size_ceiling(string slug)
     {
         var bytes = Encoding.UTF8.GetByteCount(Html(slug));

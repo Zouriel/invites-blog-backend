@@ -12,6 +12,12 @@ namespace InvitesBlog.Infrastructure.Seed;
 /// Seeds admin-authored raw HTML/CSS templates that ship in the repo under
 /// <c>RawTemplates/{slug}/</c> (index.html + styles.css + meta.json, embedded). Each is packaged and
 /// registered as an active gallery template. Committing a new folder is how the owner "adds" a template.
+/// <para>
+/// A folder may ship private: <c>"visibility": "Dedicated"</c> plus an <c>"assignedEmail"</c> reserves
+/// the template for that one address (it never appears in the public gallery, only under
+/// <c>/api/me/dedicated-templates</c> once that email verifies by OTP). Omit both for a normal
+/// public gallery template.
+/// </para>
 /// </summary>
 public sealed class RawTemplateSeeder(
     AppDbContext db,
@@ -20,7 +26,9 @@ public sealed class RawTemplateSeeder(
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    private sealed record RawMeta(string Name, string Slug, string Version, string Category, string? Description);
+    private sealed record RawMeta(
+        string Name, string Slug, string Version, string Category, string? Description,
+        string? Visibility, string? AssignedEmail);
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
@@ -44,6 +52,21 @@ public sealed class RawTemplateSeeder(
 
             var meta = JsonSerializer.Deserialize<RawMeta>(metaJson, JsonOpts);
             if (meta is null) continue;
+
+            // Public (listed in the gallery) vs Dedicated (reserved for one address). A Dedicated
+            // folder with no address is a broken privacy declaration, so fail CLOSED — skipping keeps
+            // the template out of the gallery, whereas defaulting to Public would publish something
+            // the author meant to keep private.
+            var isDedicated = string.Equals(meta.Visibility, TemplateVisibility.Dedicated,
+                StringComparison.OrdinalIgnoreCase);
+            var assignedEmail = isDedicated ? (meta.AssignedEmail ?? "").Trim().ToLowerInvariant() : null;
+            if (isDedicated && string.IsNullOrWhiteSpace(assignedEmail))
+            {
+                logger.LogWarning(
+                    "Raw template {Slug} declares Dedicated visibility with no assignedEmail — skipped.",
+                    meta.Slug);
+                continue;
+            }
 
             var html = await ReadAsync(asm, prefix + ".index.html", ct);
             if (html is null)
@@ -73,6 +96,15 @@ public sealed class RawTemplateSeeder(
                 if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
                     || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
                     existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
+                // Re-apply the declared visibility only while the row is STILL dedicated. Dedicated to
+                // Public is a one-way door owned by the consent flow (TemplateReleaseService) and by
+                // admin, so a restart must never quietly reverse a release — or re-privatize a template
+                // the gallery is already showing.
+                if (existing.Visibility == TemplateVisibility.Dedicated)
+                {
+                    existing.Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public;
+                    existing.AssignedEmail = isDedicated ? assignedEmail : null;
+                }
                 existing.IsActive = true;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
                 logger.LogInformation(
@@ -97,11 +129,17 @@ public sealed class RawTemplateSeeder(
                 SceneJson = "{}",                       // raw templates have no SceneJson source
                 ManifestJson = published.ManifestJson,
                 PackageUrl = published.PackageUrl,
+                Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public,
+                AssignedEmail = assignedEmail,
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             });
-            logger.LogInformation("Seeded raw template {Slug}@{Version}.", meta.Slug, meta.Version);
+            logger.LogInformation(
+                isDedicated
+                    ? "Seeded raw template {Slug}@{Version}, reserved for {Email}."
+                    : "Seeded raw template {Slug}@{Version}.",
+                meta.Slug, meta.Version, assignedEmail);
         }
 
         await db.SaveChangesAsync(ct);

@@ -277,6 +277,19 @@ meta.json      # { "name","slug","version","category","description" }
   "category": "Wedding", "description": "A warm gold-on-ink wedding invite." }
 ```
 
+**Keeping one private.** Add `visibility` + `assignedEmail` and the template never appears in the
+public gallery — only the person at that address sees it, after verifying by email code at
+`/request-template`:
+```json
+{ "name": "Gilded Hour", "slug": "gilded-hour", "version": "1.0.0",
+  "category": "Birthday", "description": "A scroll-driven birthday invitation.",
+  "visibility": "Dedicated", "assignedEmail": "someone@example.com" }
+```
+Two things to know about a dedicated template: it is **single-use** — the first campaign started from
+it flips it to a read-only gallery showcase (listed, but nobody can start another campaign from it) —
+and once it has been released to the public gallery, re-seeding will not pull it back into private.
+Omit both keys for a normal public template.
+
 Commit + push, then on the server:
 ```bash
 git -C /opt/apps/invites-blog-backend pull && \
