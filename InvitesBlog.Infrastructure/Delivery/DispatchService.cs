@@ -185,7 +185,10 @@ public sealed class DispatchService(
 
         if (!anyAddressable)
         {
-            // §product rule: no phone for Viber AND no email → do nothing, but say so on the dashboard.
+            // Nothing configured can reach this guest — record it plainly so the dashboard shows who
+            // was missed and what to do, rather than leaving a silent gap in the delivery report.
+            // A guest with a phone but no email lands here (email is the only sending channel), and
+            // they are NOT stuck: the shared campaign link accepts their number at the invite gate.
             db.DeliveryAttempts.Add(new DeliveryAttempt
             {
                 Id = Guid.NewGuid(),
@@ -193,7 +196,9 @@ public sealed class DispatchService(
                 Channel = "none",
                 RecipientAddress = "-",
                 Status = DeliveryStatus.Skipped,
-                ErrorMessage = "Not sent: guest has no phone number (Viber) and no email address.",
+                ErrorMessage = string.IsNullOrWhiteSpace(guest.Email)
+                    ? "Not sent: no email address on file. Share the invitation link with them — they can open it and verify with their phone number."
+                    : "Not sent: no delivery channel could reach this guest.",
                 AttemptedAt = DateTimeOffset.UtcNow
             });
         }
