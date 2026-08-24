@@ -28,6 +28,7 @@ public sealed class InviteService(
     IInviterRepository inviters,
     IRepository<AppUser> users,
     IRepository<RsvpResponse> rsvpResponses,
+    IRepository<VerifiedContactLink> contactLinks,
     IRepository<InviteTrustedIp> trustedIps,
     IOtpService otp,
     IUnitOfWork uow,
@@ -279,7 +280,19 @@ public sealed class InviteService(
 
         var contact = currentUser.Contact;
         if (string.IsNullOrEmpty(contact)) return (null, null);
-        return currentUser.ContactType == "phone" ? (null, contact) : (contact, null);
+
+        // An invitee with no account answers to the one contact they verified — plus any second
+        // contact they have since PROVED is theirs (VerifiedContactLink). That is what lets someone
+        // invited by email open their inbox with the phone number a different host had for them.
+        // Only proven links count: guest rows pair contacts too, but nobody checks those.
+        if (currentUser.ContactType == "phone")
+        {
+            var byPhone = await contactLinks.FirstOrDefaultAsync(l => l.PhoneE164 == contact, ct);
+            return (byPhone?.Email, contact);
+        }
+
+        var byEmail = await contactLinks.FirstOrDefaultAsync(l => l.Email == contact, ct);
+        return (contact, byEmail?.PhoneE164);
     }
 
     public async Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default)

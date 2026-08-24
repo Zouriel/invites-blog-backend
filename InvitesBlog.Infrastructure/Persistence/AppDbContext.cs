@@ -27,6 +27,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
+    public DbSet<VerifiedContactLink> VerifiedContactLinks => Set<VerifiedContactLink>();
 
     // RBAC (full authorization model)
     public DbSet<AppUser> Users => Set<AppUser>();
@@ -206,6 +207,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("suppression_list");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ContactHash).IsUnique().HasDatabaseName("idx_suppression_contact");
+        });
+
+        b.Entity<VerifiedContactLink>(e =>
+        {
+            e.ToTable("verified_contact_links");
+            e.HasKey(x => x.Id);
+            // One row per pairing; both directions look the pair up by either side.
+            e.HasIndex(x => new { x.Email, x.PhoneE164 }).IsUnique().HasDatabaseName("idx_vcl_pair");
+            e.HasIndex(x => x.Email).HasDatabaseName("idx_vcl_email");
+            e.HasIndex(x => x.PhoneE164).HasDatabaseName("idx_vcl_phone");
         });
 
         b.Entity<AuditLog>(e =>

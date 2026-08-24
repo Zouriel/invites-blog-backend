@@ -61,3 +61,25 @@ public sealed class AuditLog
     public string DataJson { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// A proven email↔phone pairing for one person.
+/// <para>
+/// Guest rows already pair the two contacts, but that pairing is asserted by whoever uploaded the
+/// list and is never checked — anyone can upload a stranger's email next to their own number. So an
+/// uploaded pair is only ever a <em>hint</em>: it decides what we OFFER to link, never what someone
+/// can see. A row lands here only after the person proved the second contact with a one-time code,
+/// and only rows here widen an inbox.
+/// </para>
+/// </summary>
+public sealed class VerifiedContactLink
+{
+    public Guid Id { get; set; }
+    /// <summary>Lowercased email.</summary>
+    public string Email { get; set; } = default!;
+    /// <summary>E.164 phone.</summary>
+    public string PhoneE164 { get; set; } = default!;
+    /// <summary>Which side the person had already verified when they proved the other: "email" | "phone".</summary>
+    public string VerifiedFrom { get; set; } = default!;
+    public DateTimeOffset CreatedAt { get; set; }
+}

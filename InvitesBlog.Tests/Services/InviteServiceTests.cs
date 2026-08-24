@@ -31,6 +31,7 @@ public class InviteServiceTests
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
     private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IRepository<RsvpResponse> _rsvp = Substitute.For<IRepository<RsvpResponse>>();
+    private readonly IRepository<VerifiedContactLink> _contactLinks = Substitute.For<IRepository<VerifiedContactLink>>();
     private readonly IRepository<InviteTrustedIp> _trustedIps = Substitute.For<IRepository<InviteTrustedIp>>();
     private readonly IOtpService _otp = Substitute.For<IOtpService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -58,7 +59,7 @@ public class InviteServiceTests
     }
 
     private InviteService Sut() => new(
-        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _trustedIps, _otp, _uow,
+        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks, _trustedIps, _otp, _uow,
         _currentUser, _config, _rsvpValidator);
 
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e) =>
@@ -433,6 +434,68 @@ public class InviteServiceTests
         var cards = await Sut().GetInboxAsync();
 
         Assert.Equal(2, cards.Count);
+    }
+
+    /// <summary>
+    /// The point of a verified contact link: someone a host invited by EMAIL signs in with the phone
+    /// number a different host had for them, and still finds that invitation. Only the proven link
+    /// does this — the guest row pairing alone must not (see ContactLinkServiceTests).
+    /// </summary>
+    [Fact]
+    public async Task Inbox_includes_invitations_for_an_email_proven_to_belong_to_the_signed_in_phone()
+    {
+        var campaign = TestData.Campaign();
+        var invitedByEmail = TestData.Guest(campaign.Id, email: "me@test.com", phone: null);
+        var stranger = TestData.Guest(campaign.Id, email: "other@test.com", phone: null);
+
+        // Signed in by phone only — no account, so the token names just the number.
+        _currentUser.UserId.Returns((Guid?)null);
+        _currentUser.Contact.Returns("+9607771234");
+        _currentUser.ContactType.Returns("phone");
+
+        _contactLinks.FirstOrDefaultAsync(
+                Arg.Any<System.Linq.Expressions.Expression<Func<VerifiedContactLink, bool>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new VerifiedContactLink
+            {
+                Id = Guid.NewGuid(), Email = "me@test.com", PhoneE164 = "+9607771234", VerifiedFrom = "phone"
+            });
+
+        _guests.Query().Returns(new[] { invitedByEmail, stranger }.AsAsyncQueryable());
+        _invites.Query().Returns(new[]
+        {
+            TestData.Invite(campaign.Id, invitedByEmail.Id),
+            TestData.Invite(campaign.Id, stranger.Id),
+        }.AsAsyncQueryable());
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+        _inviters.Query().Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+
+        var cards = await Sut().GetInboxAsync();
+
+        Assert.Single(cards);
+    }
+
+    /// <summary>Without a proven link, the same phone-only sign-in sees nothing.</summary>
+    [Fact]
+    public async Task Inbox_ignores_an_email_that_only_shares_a_guest_row_with_the_phone()
+    {
+        var campaign = TestData.Campaign();
+        var invitedByEmail = TestData.Guest(campaign.Id, email: "me@test.com", phone: null);
+
+        _currentUser.UserId.Returns((Guid?)null);
+        _currentUser.Contact.Returns("+9607771234");
+        _currentUser.ContactType.Returns("phone");
+        _contactLinks.FirstOrDefaultAsync(
+                Arg.Any<System.Linq.Expressions.Expression<Func<VerifiedContactLink, bool>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns((VerifiedContactLink?)null);
+
+        _guests.Query().Returns(new[] { invitedByEmail }.AsAsyncQueryable());
+        _invites.Query().Returns(new[] { TestData.Invite(campaign.Id, invitedByEmail.Id) }.AsAsyncQueryable());
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+        _inviters.Query().Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+
+        Assert.Empty(await Sut().GetInboxAsync());
     }
 
     /// <summary>
