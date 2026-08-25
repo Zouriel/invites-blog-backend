@@ -393,25 +393,13 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
      scale the whole fan down to fit. Scaling here keeps every angle, offset and gap in exact
      proportion, which sizing the prints individually would not. Width-based queries on purpose:
      unlike height, viewport width does not move while you scroll. */
-  transform: scale(var(--fan-fit, 1));
 }
-@media (max-width: 900px) { .book .pages { --fan-fit: .74; } }
-@media (max-width: 720px) { .book .pages { --fan-fit: .62; } }
-@media (max-width: 540px) { .book .pages { --fan-fit: .52; } }
-@media (max-width: 420px) { .book .pages { --fan-fit: .46; } }
 /* Each page is a real polaroid-style print, not a bare photo — a solid ivory mount (via
    padding on the img itself; ::before/::after don't render on <img>, so this can't be a
    pseudo-element background) is what makes overlapping photos read as distinct objects
    instead of blurring into one smeared collage. */
 .page {
   position: absolute; inset: 0; border-radius: 3px; box-sizing: border-box;
-  /* Size to the BOX, not to each photo. An <img> positioned with inset:0 and auto width/height
-     takes its size from the photo's own aspect ratio, so a set of guest photos — 9:16 tall next
-     to 4:3 wide next to square — fanned out as six different-sized prints, several of them
-     larger than this box and sprawling off both screen edges. The fan's rotate/translate offsets
-     assume one print size. Pinning to 100% makes every print identical and object-fit: cover
-     crops each photo into it, which is what makes the spread read as a neat stack of prints. */
-  width: 100%; height: 100%;
   background: var(--ink);
   padding: 10px 10px 30px;
   object-fit: cover;
@@ -474,14 +462,48 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    vh, not dvh: an iframe has no URL bar, so the viewport height in here never moves. */
 .book { overflow-x: clip; padding-bottom: 0; }
 .book-pin {
-  --n: 6; --dwell: 210vh;
+  --n: 6; --dwell: 220vh;
   position: relative; min-height: calc(100vh + var(--dwell));
 }
+/* The dwell is scaled to how many photos there actually are, so a two-photo fan doesn't hold the
+   screen for the same distance as a six-photo one. */
+.book-pin:has(.page:only-child) { --n: 1; --dwell: 25vh; }
+.book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90vh; }
+.book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125vh; }
+.book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160vh; }
+.book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190vh; }
+.book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220vh; }
+
 .book-stage {
   position: sticky; top: 0; height: 100vh; overflow-x: clip;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   padding-top: 3vh;
 }
+/* Held, the two lines occupy the same spot and take turns, so the space is reserved once and they
+   are stacked rather than flowing. align-self: stretch is load-bearing — both lines are absolutely
+   positioned, so without it this flex item collapses to zero width and the text wraps one word per
+   row. */
+.book-stage .sub {
+  margin-bottom: 8vh; position: relative; height: 1.7em;
+  align-self: stretch; padding: 0 6vw;
+}
+.book-stage .sub .line {
+  position: absolute; left: 0; right: 0; top: 0; margin: 0;
+  /* Typed by clipping from the right, not by animating width: a centred box that grows slides
+     sideways the whole time it types, whereas clipping leaves it where it will end up and only
+     uncovers it. The script quantises the reveal into steps, which is what reads as typing. */
+  clip-path: inset(0 100% 0 0);
+}
+/* The fan is sized by the photos' own aspect ratio, so it does not shrink on a short screen the way
+   vh-sized things do. Held to exactly one viewport that matters, so step the fit down as the screen
+   gets shorter. Height queries are safe in here — an iframe has no URL bar, so its viewport height
+   does not move while you scroll. */
+.book-stage .pages { transform: scale(var(--fan-fit, .84)); }
+@media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
+@media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
+@media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
+@media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
+@media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
 /* While the script is driving, the entrance transition must not also be chasing transform. */
 .book.is-driving .page { transition: none; }
 
@@ -698,13 +720,36 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     { r:  34, x:  156, y: 36, z: 1 }
   ];
 
-  var book, pin, prints = [], queued = false, driving = false;
+  var book, pin, prints = [], lines = [], queued = false, driving = false;
+
+  // cubic-bezier(.37, 0, .63, 1) — the stylesheet's --ease-sine, which is what the original
+  // keyframes were timed with. Solved by bisection; the curve is monotonic so this converges fast.
+  function easeSine(t) {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    var lo = 0, hi = 1, u = t, i, x;
+    for (i = 0; i < 20; i++) {
+      u = (lo + hi) / 2;
+      var v = 1 - u;
+      x = 3 * v * v * u * 0.37 + 3 * v * u * u * 0.63 + u * u * u;
+      if (x < t) lo = u; else hi = u;
+    }
+    var w = 1 - u;
+    return 3 * w * w * u * 0 + 3 * w * u * u * 1 + u * u * u;
+  }
+
+  function span(v, a, b) {            // where v sits inside [a,b], clamped to 0..1
+    if (b <= a) return 0;
+    var t = (v - a) / (b - a);
+    return t < 0 ? 0 : (t > 1 ? 1 : t);
+  }
 
   function collect() {
     book = document.querySelector('.book');
     pin = document.querySelector('.book-pin');
     // The gallery images are cloned by the injector when data arrives, so this must run after it.
     prints = [].slice.call(document.querySelectorAll('.book .page'));
+    lines = [].slice.call(document.querySelectorAll('.book-stage .sub .line'));
     if (pin && prints.length) pin.style.setProperty('--n', prints.length);
     schedule();
   }
@@ -717,7 +762,21 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       prints[i].style.transform = '';
       prints[i].style.zIndex = '';
     }
+    for (var j = 0; j < lines.length; j++) {
+      lines[j].style.clipPath = '';
+      lines[j].style.opacity = '';
+    }
   }
+
+  // The when and the where, typed out one after the other while the photos go by, so the hold does
+  // two jobs at once. Beats are percentages of the hold, so they keep step with however many photos
+  // there are. These are the original ranges: line 1 types 2–22% and clears 40–49%; line 2 types
+  // 55–75% and clears 94–100%.
+  var BEATS = [
+    { inA: 0.02, inB: 0.22, outA: 0.40, outB: 0.49 },
+    { inA: 0.55, inB: 0.75, outA: 0.94, outB: 1.00 }
+  ];
+  var STEPS = 26;   // steps(26, end) — quantising the reveal is what reads as typing, not a wipe
 
   function frame() {
     queued = false;
@@ -727,8 +786,8 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     var travel = rect.height - window.innerHeight;
     var p = travel > 0 ? (-rect.top) / travel : 0;
 
-    // Outside the hold the stylesheet owns these prints — that is what lets the entrance spread
-    // play, and what leaves the fan at its declared arrangement once the section is behind you.
+    // Outside the hold the stylesheet owns all of this — that is what lets the entrance spread play,
+    // and what leaves the fan at its declared arrangement once the section is behind you.
     if (p <= 0 || p >= 1) { release(); return; }
 
     if (!driving) {
@@ -737,23 +796,32 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     }
 
     var n = prints.length;
-    // Windows overlap by half, so one print is always arriving as another leaves and the sweep
-    // never stops moving. First and last sit fully inside the hold.
-    var span = 2 / (n + 1);
-    var step = n > 1 ? (1 - span) / (n - 1) : 0;
+    // Windows overlap by exactly half: one print is always arriving as another leaves, so the sweep
+    // never stops moving. Spacing puts the first and last fully inside the hold.
+    var w = 2 / (n + 1);
+    var step = n > 1 ? (1 - w) / (n - 1) : 0;
 
     for (var i = 0; i < n; i++) {
       var rest = REST[i] || REST[REST.length - 1];
-      var local = span > 0 ? (p - i * step) / span : -1;
-      // A smooth 0 -> 1 -> 0 over the window: rise to the front, settle back into the fan.
-      var lift = (local > 0 && local < 1) ? Math.sin(local * Math.PI) : 0;
-      lift = lift * lift * (3 - 2 * lift);   // smoothstep, so the turn at the top is not a corner
-
+      var local = w > 0 ? (p - i * step) / w : -1;
+      var lift = 0;
+      if (local > 0 && local < 1) {
+        // Rest -> front -> rest, each half eased on its own the way the keyframes were.
+        lift = local < 0.5 ? easeSine(local * 2) : 1 - easeSine((local - 0.5) * 2);
+      }
       prints[i].style.transform =
         'rotate(' + (rest.r * (1 - 0.72 * lift)).toFixed(3) + 'deg) ' +
         'translate(' + rest.x + 'px,' + (rest.y - 20 * lift).toFixed(2) + 'px) ' +
         'scale(' + (1 + 0.18 * lift).toFixed(4) + ')';
       prints[i].style.zIndex = String(Math.round(rest.z + lift * 29));
+    }
+
+    for (var k = 0; k < lines.length && k < BEATS.length; k++) {
+      var b = BEATS[k];
+      var typed = span(p, b.inA, b.inB);
+      typed = Math.round(typed * STEPS) / STEPS;            // steps(26, end)
+      lines[k].style.clipPath = 'inset(0 ' + ((1 - typed) * 100).toFixed(2) + '% 0 0)';
+      lines[k].style.opacity = (1 - easeSine(span(p, b.outA, b.outB))).toFixed(3);
     }
   }
 
