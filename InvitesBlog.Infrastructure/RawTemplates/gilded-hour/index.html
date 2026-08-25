@@ -557,7 +557,11 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 }
 
 /* ---------- A note, plainly stated -------------------------------------------------- */
-.note { padding: 6vh 0; text-align: center; }
+/* The fanned prints above are sticky-pinned and reach past their own box, so at the handoff the
+   lowest print sat ~120px from this text — close enough to read as covering it. The top padding
+   is that clearance, not decoration. The side padding matches .cover: without it a long note runs
+   to within a few px of both screen edges on a phone, under the rose border. */
+.note { padding: 12vh 7vw 6vh; text-align: center; }
 .note p {
   font-family: var(--serif); font-style: italic; font-size: clamp(1.15rem, 2.6vw, 1.5rem);
   color: var(--rose); max-width: 46ch; margin: 0 auto;
