@@ -411,6 +411,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   object-fit: cover;
   box-shadow: 0 20px 50px rgba(8,3,7,.5), 0 0 0 1px rgba(0,0,0,.08);
   transform-origin: 50% 85%;
+  will-change: transform;
   transition: transform var(--t-slow) var(--ease-in-out), opacity var(--t-base) var(--ease-out);
 }
 /* Resting stack — each page already sits at a slightly different angle/offset. A pile of
@@ -424,12 +425,12 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .page:nth-child(5) { transform: rotate(-3deg) translate(6px, 4px)   scale(.95); }
 .page:nth-child(6) { transform: rotate(5deg)  translate(9px, 6px)   scale(.94); }
 /* Fanned open — wide enough that the photos genuinely separate rather than still overlapping. */
-.book.is-visible .page:nth-child(1) { transform: rotate(-24deg) translate(-108px, 22px) scale(1); transition-delay: .05s; }
-.book.is-visible .page:nth-child(2) { transform: rotate(-13deg) translate(-56px, 10px)  scale(1); transition-delay: .14s; }
-.book.is-visible .page:nth-child(3) { transform: rotate(0deg)   translate(0, 0)         scale(1); transition-delay: .23s; z-index: 3; }
-.book.is-visible .page:nth-child(4) { transform: rotate(13deg)  translate(56px, 10px)   scale(1); transition-delay: .32s; }
-.book.is-visible .page:nth-child(5) { transform: rotate(24deg)  translate(108px, 22px)  scale(1); transition-delay: .41s; }
-.book.is-visible .page:nth-child(6) { transform: rotate(34deg)  translate(156px, 36px)  scale(1); transition-delay: .5s; }
+.book.is-visible .page:nth-child(1) { transform: rotate(-21deg) translate(-92px, 19px) scale(1); transition-delay: .05s; }
+.book.is-visible .page:nth-child(2) { transform: rotate(-11deg) translate(-55px, 6px) scale(1); transition-delay: .14s; }
+.book.is-visible .page:nth-child(3) { transform: rotate(2deg) translate(-19px, 0px) scale(1); transition-delay: .23s; z-index: 3; }
+.book.is-visible .page:nth-child(4) { transform: rotate(13deg) translate(21px, 9px) scale(1); transition-delay: .32s; }
+.book.is-visible .page:nth-child(5) { transform: rotate(23deg) translate(58px, 17px) scale(1); transition-delay: .41s; }
+.book.is-visible .page:nth-child(6) { transform: rotate(31deg) translate(92px, 31px) scale(1); transition-delay: .5s; }
 
 /* ---- Progressive enhancement: the fan holds the screen and browses itself --------------
    Everything above this point is the whole experience on every browser — the fan opens once
@@ -468,17 +469,17 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    vh, not dvh: an iframe has no URL bar, so the viewport height in here never moves. */
 .book { overflow-x: clip; padding-bottom: 0; }
 .book-pin {
-  --n: 6; --dwell: 220vh;
+  --n: 6; --dwell: 150vh;
   position: relative; min-height: calc(100vh + var(--dwell));
 }
 /* The dwell is scaled to how many photos there actually are, so a two-photo fan doesn't hold the
    screen for the same distance as a six-photo one. */
-.book-pin:has(.page:only-child) { --n: 1; --dwell: 25vh; }
-.book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90vh; }
-.book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125vh; }
-.book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160vh; }
-.book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190vh; }
-.book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220vh; }
+.book-pin:has(.page:only-child) { --n: 1; --dwell: 22vh; }
+.book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 66vh; }
+.book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 90vh; }
+.book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 112vh; }
+.book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 130vh; }
+.book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 150vh; }
 
 .book-stage {
   position: sticky; top: 0; height: 100vh; overflow-x: clip;
@@ -510,12 +511,14 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 @media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
 @media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
 @media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
-/* The spread reaches ~770px wide once the prints are uniform, so on a phone the binding
-   constraint is width, not height. These come after the height steps so the narrower wins. */
-@media (max-width: 900px) { .book-stage { --fan-fit: .74; } }
-@media (max-width: 720px) { .book-stage { --fan-fit: .62; } }
-@media (max-width: 540px) { .book-stage { --fan-fit: .52; } }
-@media (max-width: 420px) { .book-stage { --fan-fit: .46; } }
+/* With uniform prints the spread is ~628px wide, so on a phone the binding constraint is width,
+   not height. Sized so the fan lands just inside the screen at each step — any smaller and the
+   photos stop being readable, which is the whole point of showing them. These come after the
+   height steps so the narrower constraint wins. */
+@media (max-width: 900px) { .book-stage { --fan-fit: .95; } }
+@media (max-width: 720px) { .book-stage { --fan-fit: .82; } }
+@media (max-width: 540px) { .book-stage { --fan-fit: .66; } }
+@media (max-width: 420px) { .book-stage { --fan-fit: .58; } }
 /* While the script is driving, the entrance transition must not also be chasing transform. */
 .book.is-driving .page { transition: none; }
 
@@ -724,15 +727,16 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
   // Mirrors the fanned arrangement in the stylesheet. Kept in sync by hand — these are the same
   // numbers as .book.is-visible .page:nth-child(n).
   var REST = [
-    { r: -24, x: -108, y: 22, z: 1 },
-    { r: -13, x:  -56, y: 10, z: 1 },
-    { r:   0, x:    0, y:  0, z: 3 },
-    { r:  13, x:   56, y: 10, z: 1 },
-    { r:  24, x:  108, y: 22, z: 1 },
-    { r:  34, x:  156, y: 36, z: 1 }
+    { r: -21, x:  -92, y: 19, z: 1 },
+    { r: -11, x:  -55, y:  6, z: 1 },
+    { r:   2, x:  -19, y:  0, z: 3 },
+    { r:  13, x:   21, y:  9, z: 1 },
+    { r:  23, x:   58, y: 17, z: 1 },
+    { r:  31, x:   92, y: 31, z: 1 }
   ];
 
   var book, pin, prints = [], lines = [], queued = false, driving = false;
+  var last = [], lastLine = [];   // last value written per element, to skip no-op writes
 
   // cubic-bezier(.37, 0, .63, 1) — the stylesheet's --ease-sine, which is what the original
   // keyframes were timed with. Solved by bisection; the curve is monotonic so this converges fast.
@@ -762,6 +766,8 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     // The gallery images are cloned by the injector when data arrives, so this must run after it.
     prints = [].slice.call(document.querySelectorAll('.book .page'));
     lines = [].slice.call(document.querySelectorAll('.book-stage .sub .line'));
+    last = prints.map(function () { return { t: '', z: -1 }; });
+    lastLine = lines.map(function () { return { c: '', o: '' }; });
     if (pin && prints.length) pin.style.setProperty('--n', prints.length);
     schedule();
   }
@@ -778,6 +784,8 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       lines[j].style.clipPath = '';
       lines[j].style.opacity = '';
     }
+    for (var c = 0; c < last.length; c++) { last[c].t = ''; last[c].z = -1; }
+    for (var d = 0; d < lastLine.length; d++) { lastLine[d].c = ''; lastLine[d].o = ''; }
   }
 
   // The when and the where, typed out one after the other while the photos go by, so the hold does
@@ -821,19 +829,27 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
         // Rest -> front -> rest, each half eased on its own the way the keyframes were.
         lift = local < 0.5 ? easeSine(local * 2) : 1 - easeSine((local - 0.5) * 2);
       }
-      prints[i].style.transform =
-        'rotate(' + (rest.r * (1 - 0.72 * lift)).toFixed(3) + 'deg) ' +
-        'translate(' + rest.x + 'px,' + (rest.y - 20 * lift).toFixed(2) + 'px) ' +
-        'scale(' + (1 + 0.18 * lift).toFixed(4) + ')';
-      prints[i].style.zIndex = String(Math.round(rest.z + lift * 29));
+      // Only touch the DOM when the value actually changes. Writing all twelve properties every
+      // frame is what made this lag: each z-index write re-sorts the stacking context and repaints
+      // six shadowed prints, and most frames the rounded value is identical to the last one.
+      var t =
+        'rotate(' + (rest.r * (1 - 0.72 * lift)).toFixed(2) + 'deg) ' +
+        'translate(' + rest.x + 'px,' + (rest.y - 20 * lift).toFixed(1) + 'px) ' +
+        'scale(' + (1 + 0.18 * lift).toFixed(3) + ')';
+      if (t !== last[i].t) { prints[i].style.transform = t; last[i].t = t; }
+
+      var z = Math.round(rest.z + lift * 29);
+      if (z !== last[i].z) { prints[i].style.zIndex = String(z); last[i].z = z; }
     }
 
     for (var k = 0; k < lines.length && k < BEATS.length; k++) {
       var b = BEATS[k];
       var typed = span(p, b.inA, b.inB);
       typed = Math.round(typed * STEPS) / STEPS;            // steps(26, end)
-      lines[k].style.clipPath = 'inset(0 ' + ((1 - typed) * 100).toFixed(2) + '% 0 0)';
-      lines[k].style.opacity = (1 - easeSine(span(p, b.outA, b.outB))).toFixed(3);
+      var clip = 'inset(0 ' + ((1 - typed) * 100).toFixed(2) + '% 0 0)';
+      if (clip !== lastLine[k].c) { lines[k].style.clipPath = clip; lastLine[k].c = clip; }
+      var op = (1 - easeSine(span(p, b.outA, b.outB))).toFixed(3);
+      if (op !== lastLine[k].o) { lines[k].style.opacity = op; lastLine[k].o = op; }
     }
   }
 
