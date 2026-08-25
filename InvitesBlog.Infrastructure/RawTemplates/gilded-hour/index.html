@@ -81,6 +81,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .balloons {
   position: fixed; top: 0; left: 0; z-index: 6; pointer-events: none;
   width: 4.8em; height: 6.1em;
+  will-change: transform;   /* same reason as .roses — don't repaint it under the moving fan */
   /* The bunch is drawn in em, so this one value sizes all of it. Tying it to vw makes it grow
      in step with the text it has to stay clear of — the page's own margins are vw-based — so
      the clearance holds at every width instead of collapsing at the low end of a breakpoint.
@@ -180,6 +181,9 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   --vine: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 44 200%27%3E%3Cdefs%3E%3ClinearGradient id=%27lf%27 x1=%270%27 y1=%270%27 x2=%271%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%232f3e30%27/%3E%3Cstop offset=%271%27 stop-color=%27%2317231b%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%27M20,0 C28,40 12,70 20,100 C28,130 12,160 20,200%27 fill=%27none%27 stroke=%27%234a3341%27 stroke-width=%271.5%27 stroke-linecap=%27round%27/%3E%3Cg transform=%27translate%2822.3,20.7%29 rotate%28116.6%29 scale%281.00,1.00%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2819.8,55.7%29 rotate%2869.0%29 scale%28-0.85,0.85%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.8,85.6%29 rotate%28115.1%29 scale%280.92,0.92%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2822.3,116.3%29 rotate%2860.3%29 scale%28-1.00,1.00%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2819.8,148.2%29 rotate%28124.9%29 scale%280.82,0.82%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.8,181.5%29 rotate%2859.6%29 scale%28-0.95,0.95%29%27%3E%3Cpath d=%27M0,0 C4.5,-4.2 11,-3.4 14.5,1.2 C11,6.4 3.6,6.2 0,0 Z%27 fill=%27url%28%23lf%29%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.5%27/%3E%3Cpath d=%27M.6,.2 C5,.4 9.5,.8 13.4,1.1%27 fill=%27none%27 stroke=%27rgba%28206,224,206,.24%29%27 stroke-width=%27.4%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3Cg transform=%27translate%2821.7,37.7%29 rotate%2842.6%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2818.0,72.7%29 rotate%28145.9%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2821.5,132.9%29 rotate%28147.6%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3Cg transform=%27translate%2817.9,168.5%29 rotate%2840.7%29%27%3E%3Cpath d=%27M0,0 L4.6,-1.1 L.4,1.4 Z%27 fill=%27%234a3341%27/%3E%3C/g%3E%3C/svg%3E");
   position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none;
   width: 3.4em; height: 100dvh;
+  /* Promoted on purpose. A fixed element that isn't on its own layer is repainted every frame that
+     moving content passes over it — which is the whole photo sweep, and why these flickered. */
+  will-change: transform;
   font-size: clamp(21px, calc(1.85vw + 3px), 34px);
 }
 /* The vine, tiled down the edge and faded out at both ends so it arrives and leaves rather
@@ -387,7 +391,12 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .book .sub .line + .line { margin-top: .35em; }
 .book .pages {
   position: relative; width: min(80vw, 320px); height: min(50vh, 360px);
-  margin: 0 auto; perspective: 1800px;
+  margin: 0 auto;
+  /* isolation, not perspective. Every transform in the fan is 2D, so perspective bought nothing and
+     cost a 3D rendering context. It WAS creating the stacking context that kept these prints'
+     z-index churn (1 -> 30, above the decorations' 6) from reaching the page, so that job moves here
+     explicitly: the sweep now re-sorts only inside this box. */
+  isolation: isolate;
   /* The spread reaches roughly 770px wide — the prints are 320px and the outermost is pushed
      156px out and rotated 34deg on top of that. On a phone that hangs well off both edges, so
      scale the whole fan down to fit. Scaling here keeps every angle, offset and gap in exact
@@ -409,9 +418,8 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   background: var(--ink);
   padding: 10px 10px 30px;
   object-fit: cover;
-  box-shadow: 0 20px 50px rgba(8,3,7,.5), 0 0 0 1px rgba(0,0,0,.08);
+  box-shadow: 0 8px 18px rgba(8,3,7,.55), 0 0 0 1px rgba(0,0,0,.08);
   transform-origin: 50% 85%;
-  will-change: transform;
   transition: transform var(--t-slow) var(--ease-in-out), opacity var(--t-base) var(--ease-out);
 }
 /* Resting stack — each page already sits at a slightly different angle/offset. A pile of
