@@ -497,12 +497,18 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
      are stacked rather than flowing. align-self: stretch is load-bearing — both lines are absolutely
      positioned, so this flex item has no in-flow content left to size it, and without stretching it
      collapses to zero width and the text wraps one word per row. */
+  /* Sized for a sentence now, not a date. The height is reserved up front so the fan below does
+     not shift as the words arrive — the box is the same whether the note is typed or not. */
   .book-stage .sub {
-    margin-bottom: 8vh; position: relative; height: 1.7em;
+    margin-bottom: 6vh; position: relative; min-height: 6.2em;
     align-self: stretch; padding: 0 6vw;
   }
   .book-stage .sub .line {
     position: absolute; left: 0; right: 0; top: 0; margin: 0;
+    /* A sentence, so it needs room to wrap and a measure that keeps it readable. */
+    display: block; max-width: 34ch; margin-inline: auto;
+    font-family: var(--serif); font-style: italic; color: var(--rose);
+    font-size: clamp(1.02rem, 2.4vw, 1.28rem); line-height: 1.55;
     /* Typed by clipping from the right in steps, not by animating width. Width would have to grow
        from nothing, and a centred box that grows slides sideways the whole time it is typing;
        clipping leaves the box exactly where it will end up and only uncovers it. steps() is what
@@ -515,13 +521,11 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
     animation-timing-function: steps(26, end), var(--ease-sine);
     animation-timeline: --book-pin, --book-pin;
   }
-  /* Line one types early and clears at the halfway point; line two takes over and holds to the end
-     of the photos. Percentages of the hold, so these keep step with however many photos there are. */
-  .book-stage .sub .line:nth-child(1) {
-    animation-range: contain 2% contain 22%, contain 40% contain 49%;
-  }
-  .book-stage .sub .line:nth-child(2) {
-    animation-range: contain 55% contain 75%, contain 94% contain 100%;
+  /* One line now, and it earns the whole hold: it types over the first third and then stays up
+     while the photographs go by, instead of clearing halfway to make room for a second line.
+     Percentages of the hold, so this keeps step with however many photos there are. */
+  .book-stage .sub .line {
+    animation-range: contain 2% contain 32%, contain 94% contain 100%;
   }
 
   .book-stage .pages { transform: scale(var(--fan-fit, .84)); }
@@ -634,6 +638,22 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   font-family: var(--sans); font-style: normal; font-size: .92rem; font-weight: 600;
   letter-spacing: .04em; padding: 11px 26px;
 }
+/* The when and the where, moved here off the photo slide. The date leads in the accent, the venue
+   sits under it in the serif — the same pairing the details section uses, so the two read as one
+   voice rather than two different treatments of the same facts. */
+.rsvp .when {
+  font-family: var(--sans); letter-spacing: .16em; text-transform: uppercase;
+  font-size: .78rem; color: var(--gold); margin: 0 0 .5rem;
+  /* letter-spacing leaves a trailing gap after the last character; indenting by the same amount
+     puts the line back on the centre. */
+  text-indent: .16em;
+}
+.rsvp .where {
+  font-family: var(--serif); font-style: italic; color: var(--ink);
+  font-size: clamp(1.2rem, 3.4vw, 1.6rem); margin: 0 0 1.4rem;
+}
+/* The map is a quiet option, so it sits above the ask rather than beside it. */
+.rsvp-map { margin: 0 0 2rem; }
 .hashtag { margin-top: 1.4rem; color: var(--muted); font-size: .95rem; letter-spacing: .04em; }
 .rsvp > * { opacity: 0; transform: translateY(22px); transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out); }
 .rsvp.is-visible > * { opacity: 1; transform: none; }
@@ -737,12 +757,12 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
         <div class="book-stage">
           <p class="eyebrow">Moments worth keeping</p>
           <h2>A few pages from her story</h2>
-          <!-- Not a caption any more: the when and the where, typed out one after the other
-               while the photos go by, so the hold does two jobs at once. Same variables the
-               Details and Venue sections use, so the inviter fills them in once. -->
+          <!-- The note types out while the photos go by, so the hold does two jobs at once. This is
+               the line that says what the night is FOR, which is why it belongs with her photographs
+               rather than filed under practical details. The when and the where moved to the reply
+               section, next to the question they answer. -->
           <p class="sub">
-            <span class="line"><span data-var="event.date">The date</span><span data-optional> · <span data-var="event.time">The time</span></span></span>
-            <span class="line"><span data-var="event.venue.name">The venue</span></span>
+            <span class="line" data-optional data-var="event.note" data-field-label="Note" data-type="textarea">If we were to include every memory she cherished, we'd have a book with no ending.</span>
           </p>
           <div class="pages">
             <img class="page" data-src="event.gallery" data-multiple="true" data-min-images="2" data-max-images="6" data-slot-label="Pages from her story" alt="">
@@ -751,19 +771,18 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       </div>
     </section>
 
-    <section class="note" data-reveal>
-      <p data-optional data-var="event.note" data-field-label="Note" data-type="textarea">Anything your guests should know before the night.</p>
-      <!-- The venue name is typed out over the photos above; this is how you actually get
-           there. Optional, so it simply isn't rendered when no map link is given. -->
-      <p class="note-map" data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open the location</a></p>
-    </section>
-
     <section class="dresscode" data-reveal>
       <span class="pill" data-var="event.dressCode" data-type="select" data-options="Cocktail Chic,Black-Tie Optional,Garden Elegant,Come As You Are">Cocktail Chic</span>
     </section>
 
     <section class="rsvp" data-reveal>
       <h2>Will you be there?</h2>
+      <!-- The practical answer sits with the question. Someone deciding whether they can come is
+           asking "when, and where" in the same breath — making them scroll back for it was the
+           wrong place to keep it. -->
+      <p class="when"><span data-var="event.date">The date</span><span data-optional> &middot; <span data-var="event.time">The time</span></span></p>
+      <p class="where" data-var="event.venue.name">The venue</p>
+      <p class="rsvp-map" data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open the location</a></p>
       <a class="btn" data-href="rsvp.link" href="#">Reply now</a>
       <p class="hashtag" data-optional data-var="event.hashtag">#HerGildedHour</p>
     </section>
