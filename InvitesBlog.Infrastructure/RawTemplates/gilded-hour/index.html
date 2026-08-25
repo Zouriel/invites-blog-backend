@@ -267,21 +267,35 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .cover.is-open .seal { transform: scale(.44) rotate(210deg); opacity: 0; }
 
 .cover-guest { font-size: .95rem; color: var(--muted); font-style: italic; position: relative; z-index: 1; }
-.cover-name {
-  font-size: clamp(2.6rem, 8vw, 4.6rem); line-height: 1.04; margin: .3em 0 .18em;
+/* The invitation sentence. Sans, not italic, so it reads as an address to the guest rather than
+   competing with the two serif lines it sits between. */
+.cover-invite {
+  font-family: var(--sans); font-size: clamp(.98rem, 2.1vw, 1.12rem); line-height: 1.5;
+  color: var(--muted); margin: .5em 0 0; max-width: 38ch;
+  /* Wide enough to sit on one line on a laptop; where it does wrap (a phone, or a longer line
+     the inviter writes) balance keeps the two halves even instead of stranding a single word. */
+  text-wrap: balance;
   position: relative; z-index: 1;
+}
+.cover-name {
+  /* The celebrant is the loudest thing on the page: heavier than the other headings and a step
+     larger, so the eye lands here before the lines above and below it. */
+  font-size: clamp(3rem, 9.2vw, 5.4rem); font-weight: 700; line-height: 1.02;
+  margin: .22em 0 .2em; position: relative; z-index: 1;
 }
 .cover-tag {
   font-family: var(--serif); font-style: italic; font-weight: 500; color: var(--rose);
   font-size: clamp(1rem, 2.6vw, 1.35rem); position: relative; z-index: 1;
 }
-.cover-guest, .cover-name, .cover-tag {
+.cover-guest, .cover-invite, .cover-name, .cover-tag {
   filter: blur(7px); opacity: 0; transform: translateY(16px);
   transition: filter var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
 }
+/* Staggered in reading order, so the greeting resolves before the name it introduces. */
 .cover.is-open .cover-guest  { filter: none; opacity: 1; transform: none; transition-delay: .1s; }
-.cover.is-open .cover-name   { filter: none; opacity: 1; transform: none; transition-delay: .22s; }
-.cover.is-open .cover-tag    { filter: none; opacity: 1; transform: none; transition-delay: .36s; }
+.cover.is-open .cover-invite { filter: none; opacity: 1; transform: none; transition-delay: .2s; }
+.cover.is-open .cover-name   { filter: none; opacity: 1; transform: none; transition-delay: .32s; }
+.cover.is-open .cover-tag    { filter: none; opacity: 1; transform: none; transition-delay: .46s; }
 
 .cover-cue {
   position: absolute; bottom: 6vh; font-size: 1.1rem; color: var(--gold); opacity: .75;
@@ -634,9 +648,10 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
        unsealing without risking a 3D-flip that can look broken on some browsers. -->
   <header class="cover" data-envelope>
     <div class="seal">✦</div>
-    <p class="cover-guest">For <span data-var="guest.name">you</span></p>
-    <h1 class="cover-name" data-var="event.celebrantName">Her Birthday</h1>
-    <p class="cover-tag" data-var="event.subtitle">An evening, just for her</p>
+    <p class="cover-guest">Hello <span data-var="guest.name">friend</span>,</p>
+    <p class="cover-invite" data-var="event.inviteLine" data-field-label="Invitation line">we&rsquo;d like to invite you to celebrate</p>
+    <h1 class="cover-name" data-var="event.celebrantName">Aisha</h1>
+    <p class="cover-tag" data-var="event.subtitle">Her birthday &mdash; please join us</p>
     <span class="cover-cue" aria-hidden="true">↓</span>
   </header>
 
