@@ -767,7 +767,11 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     var h = window.innerHeight;
     // Roughly a quarter of a screen of scrolling per photo — enough for each to arrive and leave
     // without the section overstaying once the last one has had its turn.
-    var dwell = Math.round(h * (prints.length <= 1 ? 0.25 : 0.25 * prints.length));
+    // Per photo, as a fraction of a screen. Half-overlapping windows put the last print's peak at
+    // n/(n+1) of the hold — 87% for six — so the closing stretch is always that print settling back.
+    // Keeping the hold short is what stops that tail reading as the section refusing to end: six
+    // photos now take about one screen of scrolling rather than one and a half.
+    var dwell = Math.round(h * (prints.length <= 1 ? 0.22 : 0.17 * prints.length));
     pin.style.height = (h + dwell) + 'px';
     pin.style.setProperty('--stage-h', h + 'px');
     pin.classList.add('is-pinned');
