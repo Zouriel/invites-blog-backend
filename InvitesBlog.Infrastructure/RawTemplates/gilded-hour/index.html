@@ -388,13 +388,30 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .book .pages {
   position: relative; width: min(80vw, 320px); height: min(50vh, 360px);
   margin: 0 auto; perspective: 1800px;
+  /* The spread reaches roughly 770px wide — the prints are 320px and the outermost is pushed
+     156px out and rotated 34deg on top of that. On a phone that hangs well off both edges, so
+     scale the whole fan down to fit. Scaling here keeps every angle, offset and gap in exact
+     proportion, which sizing the prints individually would not. Width-based queries on purpose:
+     unlike height, viewport width does not move while you scroll. */
+  transform: scale(var(--fan-fit, 1));
 }
+@media (max-width: 900px) { .book .pages { --fan-fit: .74; } }
+@media (max-width: 720px) { .book .pages { --fan-fit: .62; } }
+@media (max-width: 540px) { .book .pages { --fan-fit: .52; } }
+@media (max-width: 420px) { .book .pages { --fan-fit: .46; } }
 /* Each page is a real polaroid-style print, not a bare photo — a solid ivory mount (via
    padding on the img itself; ::before/::after don't render on <img>, so this can't be a
    pseudo-element background) is what makes overlapping photos read as distinct objects
    instead of blurring into one smeared collage. */
 .page {
   position: absolute; inset: 0; border-radius: 3px; box-sizing: border-box;
+  /* Size to the BOX, not to each photo. An <img> positioned with inset:0 and auto width/height
+     takes its size from the photo's own aspect ratio, so a set of guest photos — 9:16 tall next
+     to 4:3 wide next to square — fanned out as six different-sized prints, several of them
+     larger than this box and sprawling off both screen edges. The fan's rotate/translate offsets
+     assume one print size. Pinning to 100% makes every print identical and object-fit: cover
+     crops each photo into it, which is what makes the spread read as a neat stack of prints. */
+  width: 100%; height: 100%;
   background: var(--ink);
   padding: 10px 10px 30px;
   object-fit: cover;
@@ -446,127 +463,23 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    animation contributes nothing at all, so the entrance spread runs untouched and the fan
    sits at exactly its declared arrangement before and after. Unsupported browsers get none
    of this — no pin, no sticky, no shuffle — and keep the section precisely as defined above. */
-@supports (animation-timeline: view()) {
-  /* overflow-x: hidden above would make .book a scroll container, and a sticky child sticks
-     to its nearest scrolling ancestor — which would silently kill the hold. clip does the
-     same clipping without ever becoming one. */
-  .book { overflow-x: clip; padding-bottom: 0; }
+/* The scroll-driven "hold the screen and browse the photos" enhancement lived here and has been
+   removed.
 
-  /* The track. Its height beyond one viewport IS the dwell — how far you scroll while the
-     stage is held. Scaled to how many photos there actually are (2–6), so a two-photo fan
-     doesn't hold the screen for the same distance as a six-photo one. */
-  .book-pin {
-    --n: 6; --dwell: 220dvh;
-    position: relative; min-height: calc(100dvh + var(--dwell));
-    view-timeline-name: --book-pin; view-timeline-axis: block;
-  }
-  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25dvh; }
-  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90dvh; }
-  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125dvh; }
-  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160dvh; }
-  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190dvh; }
-  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220dvh; }
+   It was built on view-timeline, which reads the document's own scroll position. Inside the invite
+   sandbox that position is not the guest's scroll: the platform runtime drives it programmatically
+   (`window.scrollTo(0, p * (scrollHeight - innerHeight))` on every host scroll event, because
+   touch-scroll inside an iframe does not work on iOS Safari). So the timeline was being re-read
+   against a position that is recomputed and re-set constantly, and the prints snapped between
+   sweep states — the flicker.
 
-  .book-stage {
-    position: sticky; top: 0; height: 100dvh; overflow-x: clip;
-    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-    padding-top: 3vh;
-  }
-  /* Held, the section gets exactly one viewport instead of the open-ended flow it had before,
-     and a fanned print reaches well past its own box — rotated, lifted, and scaled up at the
-     peak of its beat. Sizing .pages does nothing here (the prints are <img> at inset: 0, so
-     they take their height from the photo's own aspect ratio, not this box); scaling the whole
-     fan is what fits it, and it fits it without touching the arrangement — every angle,
-     offset and gap stays exactly in proportion. */
-  /* Held, the two lines occupy the same spot and take turns, so the space is reserved once
-     and they're stacked on top of each other rather than flowing. */
-  /* align-self: stretch is load-bearing. Both lines are absolutely positioned, so this flex
-     item has no in-flow content left to size it — without stretching it collapses to zero
-     width and the text wraps one word per row. */
-  .book-stage .sub {
-    margin-bottom: 8vh; position: relative; height: 1.7em;
-    align-self: stretch; padding: 0 6vw;
-  }
-  .book-stage .sub .line {
-    position: absolute; left: 0; right: 0; top: 0; margin: 0;
-    /* Typed by clipping from the right in steps, not by animating width. Width would have to
-       grow from nothing, and a centred box that grows slides sideways the whole time it's
-       typing; clipping leaves the box exactly where it will end up and only uncovers it.
-       steps() is what makes it read as typing rather than a wipe. */
-    clip-path: inset(0 100% 0 0);
-    animation-name: type-in, type-out;
-    /* forwards, not both: before its window the line is untouched — that's the base above,
-       clipped shut — and after it, it holds open instead of snapping shut again. Scrolling
-       back up walks the timeline out of range the same way and it closes again. */
-    animation-fill-mode: forwards, forwards;
-    animation-timing-function: steps(26, end), var(--ease-sine);
-    animation-timeline: --book-pin, --book-pin;
-  }
-  /* Line one types early, clears at the halfway point; line two takes over and holds to the
-     end of the photos. Percentages of the hold, so this keeps step with however many photos
-     there are — a two-photo fan gets the same beats over a shorter distance. */
-  .book-stage .sub .line:nth-child(1) {
-    animation-range: contain 2% contain 22%, contain 40% contain 49%;
-  }
-  .book-stage .sub .line:nth-child(2) {
-    animation-range: contain 55% contain 75%, contain 94% contain 100%;
-  }
-  .book-stage .pages { transform: scale(var(--fan-fit, .84)); }
-  /* The prints are a fixed pixel size — an <img> at inset: 0 takes its height from the
-     photo's own aspect ratio, so the fan doesn't shrink on a short screen the way vh-sized
-     things do. In normal flow that was fine (the section just grew); held to exactly one
-     viewport it isn't, so step the fit down as the screen gets shorter. */
-  @media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
-  @media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
-  @media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
-  @media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
-  @media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
+   The injector documents the supported way to scrub on scroll here: --ib-progress, a 0..1 custom
+   property the runtime publishes. Any future version of this effect should be built on that, not
+   on view-timeline.
 
-  /* Rest state, read straight off the fanned arrangement above — these mirror it, they never
-     redefine it. --pz mirrors the stacking the fan already has. */
-  .book .page { --pr: 0deg; --px: 0px; --py: 0px; --pz: 1; }
-  .book .page:nth-child(1) { --i: 1; --pr: -24deg; --px: -108px; --py: 22px; }
-  .book .page:nth-child(2) { --i: 2; --pr: -13deg; --px: -56px;  --py: 10px; }
-  .book .page:nth-child(3) { --i: 3; --pr: 0deg;   --px: 0px;    --py: 0px;  --pz: 3; }
-  .book .page:nth-child(4) { --i: 4; --pr: 13deg;  --px: 56px;   --py: 10px; }
-  .book .page:nth-child(5) { --i: 5; --pr: 24deg;  --px: 108px;  --py: 22px; }
-  .book .page:nth-child(6) { --i: 6; --pr: 34deg;  --px: 156px;  --py: 36px; }
-
-  /* One window per photo across the held stretch, and the windows deliberately OVERLAP by
-     exactly half: 200%/(n+1) long, spaced so each print starts its rise at the precise moment
-     the one before it reaches the front. That ratio is the whole trick — back-to-back windows
-     moved in separate beats (up, all the way down, stop, next), and the pause between beats is
-     what read as choppy; at half-overlap one print is always arriving as another leaves, so
-     the sweep never stops moving. Spacing still puts the first and last windows fully inside
-     the hold, so no print is cut off mid-move at either end. `contain` is exactly the span
-     during which the track covers the viewport — the hold. */
-  .book .page {
-    animation-name: page-to-front; animation-fill-mode: none;
-    animation-timing-function: var(--ease-sine); animation-timeline: --book-pin;
-    --span: calc(200% / (var(--n) + 1));
-    --step: calc((100% - var(--span)) / max(1, var(--n) - 1));
-    animation-range:
-      contain calc((var(--i) - 1) * var(--step))
-      contain calc((var(--i) - 1) * var(--step) + var(--span));
-  }
-}
-/* Rest → front → rest, in the fan's own vocabulary: swing most of the way upright, lift, grow.
-   z-index rides the same curve rather than snapping, so where two prints overlap mid-handoff
-   the one nearer its peak is the one in front — they trade places at the crossing point
-   instead of one jumping over the other. */
-@keyframes type-in {
-  from { clip-path: inset(0 100% 0 0); }
-  to   { clip-path: inset(0 0 0 0); }
-}
-@keyframes type-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-@keyframes page-to-front {
-  0%   { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
-  50%  { transform: rotate(calc(var(--pr) * .28)) translate(var(--px), calc(var(--py) - 20px)) scale(1.18); z-index: 30; }
-  100% { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
-}
+   What remains is the entrance the section always had on browsers without scroll-driven animation,
+   which the original code already treated as the complete experience: the prints fan open once as
+   the section arrives, and hold. */
 
 /* ---------- A note, plainly stated -------------------------------------------------- */
 /* The fanned prints above are sticky-pinned and reach past their own box, so at the handoff the
