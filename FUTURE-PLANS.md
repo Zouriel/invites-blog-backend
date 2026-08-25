@@ -3,7 +3,7 @@
 Things we've decided to do but haven't built. Each one records *why*, what it touches, and the traps
 we already know about — so whoever picks it up isn't rediscovering them.
 
-**Order:** R2 first (it's small and it unblocks cost/scale), then the render app, then invites.lense.
+**Order:** R2 first (it's small and it unblocks cost/scale), then the render app, then invites.lens.
 Nothing here is started.
 
 ---
@@ -16,7 +16,7 @@ host. That means our object storage is one disk on one server, backed up by noth
 growing with every campaign photo.
 
 **Why R2.** No egress fees, replicated, and it stops storage being a thing that can fill up a VPS.
-Guest photo uploads are only going to grow — and *especially* if invites.lense (below) ever ships,
+Guest photo uploads are only going to grow — and *especially* if invites.lens (below) ever ships,
 because that turns every event into a bulk photo upload.
 
 **Why it should be easy.** `S3StorageService` is already generic S3 — `ServiceURL` + `ForcePathStyle`,
@@ -107,7 +107,7 @@ that holds no session, and the editor preview still works.
 
 ---
 
-## 3. invites.lense — the event photo box
+## 3. invites.lens — the event photo box
 
 **The idea.** A mobile app guests use *at* the event to take photos. Everything they shoot collects into
 that campaign's photo box, for the host and guests to look through or download afterwards. The
