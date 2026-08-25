@@ -287,15 +287,27 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   font-family: var(--serif); font-style: italic; font-weight: 500; color: var(--rose);
   font-size: clamp(1rem, 2.6vw, 1.35rem); position: relative; z-index: 1;
 }
+/* Revealed on LOAD, not on scroll. This waited for .is-open, which the platform only adds after
+   the FIRST SCROLL — so a guest opening the invitation met a blank cover, and their own name
+   faded in around the time they had already scrolled past it. An invitation has to be readable
+   the moment it opens. .is-open is kept below so the seal still keys off it and a
+   platform-added class lands on the same resting state instead of fighting the filled value. */
 .cover-guest, .cover-invite, .cover-name, .cover-tag {
   filter: blur(7px); opacity: 0; transform: translateY(16px);
-  transition: filter var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+  animation: cover-settle var(--t-base) var(--ease-out) forwards;
 }
 /* Staggered in reading order, so the greeting resolves before the name it introduces. */
-.cover.is-open .cover-guest  { filter: none; opacity: 1; transform: none; transition-delay: .1s; }
-.cover.is-open .cover-invite { filter: none; opacity: 1; transform: none; transition-delay: .2s; }
-.cover.is-open .cover-name   { filter: none; opacity: 1; transform: none; transition-delay: .32s; }
-.cover.is-open .cover-tag    { filter: none; opacity: 1; transform: none; transition-delay: .46s; }
+.cover-guest  { animation-delay: .25s; }
+.cover-invite { animation-delay: .36s; }
+.cover-name   { animation-delay: .50s; }
+.cover-tag    { animation-delay: .66s; }
+
+@keyframes cover-settle { to { filter: none; opacity: 1; transform: none; } }
+
+.cover.is-open .cover-guest,
+.cover.is-open .cover-invite,
+.cover.is-open .cover-name,
+.cover.is-open .cover-tag { filter: none; opacity: 1; transform: none; }
 
 .cover-cue {
   position: absolute; bottom: 6vh; font-size: 1.1rem; color: var(--gold); opacity: .75;
@@ -443,26 +455,20 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   /* The track. Its height beyond one viewport IS the dwell — how far you scroll while the
      stage is held. Scaled to how many photos there actually are (2–6), so a two-photo fan
      doesn't hold the screen for the same distance as a six-photo one. */
-  /* svh, NOT dvh. dvh tracks the phone's URL bar, which collapses and expands WHILE you scroll —
-     and this track is 320 viewport-heights tall, so every wobble is amplified over three times.
-     The track resizing mid-scroll moves the view timeline's own range, which moves every print to
-     a different point in the sweep, which changes the page height, which nudges the bar again:
-     that loop is the flicker. svh is the chrome-visible height and never changes during a scroll,
-     so the track and its timeline stay put. Same reason for the stage below. */
   .book-pin {
-    --n: 6; --dwell: 220svh;
-    position: relative; min-height: calc(100svh + var(--dwell));
+    --n: 6; --dwell: 220dvh;
+    position: relative; min-height: calc(100dvh + var(--dwell));
     view-timeline-name: --book-pin; view-timeline-axis: block;
   }
-  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25svh; }
-  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90svh; }
-  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125svh; }
-  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160svh; }
-  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190svh; }
-  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220svh; }
+  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25dvh; }
+  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90dvh; }
+  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125dvh; }
+  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160dvh; }
+  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190dvh; }
+  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220dvh; }
 
   .book-stage {
-    position: sticky; top: 0; height: 100svh; overflow-x: clip;
+    position: sticky; top: 0; height: 100dvh; overflow-x: clip;
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
     padding-top: 3vh;
   }
@@ -535,21 +541,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
      the hold, so no print is cut off mid-move at either end. `contain` is exactly the span
      during which the track covers the viewport — the hold. */
   .book .page {
-    /* The scroll timeline owns `transform` in here, so the entrance transition must not also be
-       chasing it. With fill-mode `none` the animation stops contributing the instant the range
-       ends, transform snaps back to the declared fan value, and the 0.7s transition animates
-       that snap — scroll back and forth across a boundary and it re-fires every time, which is
-       the flicker. `both` holds the 0%/100% keyframe outside the range instead; those mirror the
-       fan's declared arrangement exactly, so the resting picture is unchanged and there is no
-       snap left to chase. The transition is then redundant here and only reintroduces the
-       fight, so it goes. Browsers without scroll-driven animation never enter this block and
-       keep the transition-based spread untouched.
-
-       will-change keeps each print on its own compositor layer: these are large, shadowed
-       images, and without it every frame of the sweep repaints them. */
-    transition: none;
-    will-change: transform;
-    animation-name: page-to-front; animation-fill-mode: both;
+    animation-name: page-to-front; animation-fill-mode: none;
     animation-timing-function: var(--ease-sine); animation-timeline: --book-pin;
     --span: calc(200% / (var(--n) + 1));
     --step: calc((100% - var(--span)) / max(1, var(--n) - 1));
@@ -635,7 +627,7 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { transition: none !important; animation: none !important; }
-  .seal, .cover-guest, .cover-name, .cover-tag,
+  .seal, .cover-guest, .cover-invite, .cover-name, .cover-tag,
   .caption, .story .wrap > *, .note p,
   .dresscode .pill, .rsvp > * { opacity: 1; transform: none; filter: none; }
   .scene .frame img { transform: none; filter: saturate(1) brightness(.62); }
