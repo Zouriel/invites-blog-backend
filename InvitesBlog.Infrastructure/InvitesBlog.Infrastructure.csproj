@@ -25,5 +25,7 @@
     <EmbeddedResource Include="RawTemplates\**\*.html" />
     <EmbeddedResource Include="RawTemplates\**\*.css" />
     <EmbeddedResource Include="RawTemplates\**\*.json" />
+    <!-- A template may ship poster.webp: the still the gallery shows instead of rendering it. -->
+    <EmbeddedResource Include="RawTemplates\**\*.webp" />
   </ItemGroup>
 </Project>

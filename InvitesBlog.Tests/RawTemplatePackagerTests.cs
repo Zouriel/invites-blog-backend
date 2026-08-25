@@ -299,6 +299,62 @@ public class RawTemplatePackagerTests
         Assert.DoesNotContain("querySelector('[data-var]')", TemplateInjector.Js);
     }
 
+    // ----- the card image -----
+
+    /// <summary>A storage double that records what was written and where.</summary>
+    private static (RawTemplatePackager Sut, Dictionary<string, (byte[] Content, string Type)> Written) Recording()
+    {
+        var written = new Dictionary<string, (byte[], string)>();
+        var storage = Substitute.For<IStorageService>();
+        storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                written[ci.ArgAt<string>(0)] = (ci.ArgAt<byte[]>(1), ci.ArgAt<string>(2));
+                return Task.FromResult("/assets/" + ci.ArgAt<string>(0));
+            });
+        storage.PublicUrl(Arg.Any<string>()).Returns(ci => "/assets/" + ci.ArgAt<string>(0));
+        return (new RawTemplatePackager(storage), written);
+    }
+
+    [Fact]
+    public async Task A_shipped_poster_is_published_beside_the_package()
+    {
+        // The gallery shows this still instead of rendering the whole template to act as a thumbnail.
+        var (sut, written) = Recording();
+        var poster = new byte[] { 0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4 };
+
+        var result = await sut.PublishAsync("nice-one", "1.0.0", Page("hi"), allowScripts: true, poster: poster);
+
+        Assert.Equal("/assets/templates/nice-one@1.0.0/poster.webp", result.PosterUrl);
+        Assert.True(written.ContainsKey("templates/nice-one@1.0.0/poster.webp"));
+        Assert.Equal("image/webp", written["templates/nice-one@1.0.0/poster.webp"].Type);
+        Assert.Equal(poster, written["templates/nice-one@1.0.0/poster.webp"].Content);
+    }
+
+    [Fact]
+    public async Task A_template_with_no_poster_publishes_none()
+    {
+        // Optional by design: the gallery falls back to rendering the template, which still works.
+        var (sut, written) = Recording();
+
+        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"), allowScripts: true);
+
+        Assert.Null(result.PosterUrl);
+        Assert.DoesNotContain(written.Keys, k => k.EndsWith("poster.webp"));
+    }
+
+    [Fact]
+    public async Task An_empty_poster_is_not_published()
+    {
+        // A zero-byte file would publish a URL that resolves to a broken image — worse than none.
+        var (sut, written) = Recording();
+
+        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"), allowScripts: true, poster: []);
+
+        Assert.Null(result.PosterUrl);
+        Assert.DoesNotContain(written.Keys, k => k.EndsWith("poster.webp"));
+    }
+
     [Fact]
     public void Expanding_a_gallery_a_second_time_does_not_multiply_it()
     {

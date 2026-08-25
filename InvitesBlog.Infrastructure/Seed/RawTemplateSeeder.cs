@@ -75,11 +75,15 @@ public sealed class RawTemplateSeeder(
                 continue;
             }
 
+            // A template may ship its own card image. Optional: without one the gallery falls back to
+            // rendering the template itself, which still works and just costs more.
+            var poster = await ReadBytesAsync(asm, prefix + ".poster.webp", ct);
+
             // Always (re)publish so a fresh container's storage is populated.
             // These templates ship in this repository and are reviewed like any other source file,
             // so they may carry their own script. Designer submissions still may not.
             var published = await packager.PublishAsync(
-                meta.Slug, meta.Version, html, allowScripts: true, ct: ct);
+                meta.Slug, meta.Version, html, allowScripts: true, ct: ct, poster: poster);
 
             // Match on SLUG alone. Matching slug+version would treat a version bump as a brand-new
             // template and leave TWO cards for the same design in the gallery; a bump SUPERSEDES.
@@ -95,10 +99,12 @@ public sealed class RawTemplateSeeder(
                 existing.Version = meta.Version;
                 existing.ManifestJson = published.ManifestJson;
                 existing.PackageUrl = published.PackageUrl;
-                // Keep a real uploaded card image; only replace the live-page stand-in.
+                // Keep a real card image; only replace the live-page stand-in. A stand-in is any URL
+                // still pointing at index.html — that is not an image, and a gallery that "previews" a
+                // template by rendering the whole template is what this replaces.
                 if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
                     || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
-                    existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
+                    existing.PreviewImageUrl = published.PosterUrl ?? $"{published.PackageUrl}index.html";
                 // Re-apply the declared visibility only while the row is STILL dedicated. Dedicated to
                 // Public is a one-way door owned by the consent flow (TemplateReleaseService) and by
                 // admin, so a restart must never quietly reverse a release — or re-privatize a template
@@ -126,7 +132,7 @@ public sealed class RawTemplateSeeder(
                 Version = meta.Version,
                 Category = meta.Category,
                 Description = meta.Description ?? $"A {meta.Category.ToLowerInvariant()} invitation template.",
-                PreviewImageUrl = $"{published.PackageUrl}index.html",
+                PreviewImageUrl = published.PosterUrl ?? $"{published.PackageUrl}index.html",
                 IsPremium = false,
                 DesignerName = "invites.blog",
                 SceneJson = "{}",                       // raw templates have no SceneJson source
@@ -146,6 +152,16 @@ public sealed class RawTemplateSeeder(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Reads an embedded binary resource (a poster), or null when the template ships none.</summary>
+    private static async Task<byte[]?> ReadBytesAsync(Assembly asm, string resource, CancellationToken ct)
+    {
+        await using var stream = asm.GetManifestResourceStream(resource);
+        if (stream is null) return null;
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        return ms.ToArray();
     }
 
     private static async Task<string?> ReadAsync(Assembly asm, string resource, CancellationToken ct)

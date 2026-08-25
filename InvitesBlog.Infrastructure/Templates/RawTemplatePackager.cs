@@ -7,7 +7,12 @@ using InvitesBlog.TemplateCompiler;
 
 namespace InvitesBlog.Infrastructure.Templates;
 
-public sealed record RawPublishedPackage(string PackageUrl, TemplateManifest Manifest, string ManifestJson);
+/// <param name="PosterUrl">
+/// The published card image, when the template shipped one. Null means the gallery has no still to
+/// show and must fall back to rendering the template itself — correct, but far more expensive.
+/// </param>
+public sealed record RawPublishedPackage(
+    string PackageUrl, TemplateManifest Manifest, string ManifestJson, string? PosterUrl = null);
 
 /// <summary>
 /// Publishes a template — a SINGLE self-contained <c>index.html</c> that inlines its own CSS
@@ -111,8 +116,9 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
     /// <summary>Publishes to the live template path — <c>templates/{slug}@{version}/</c>.</summary>
     public Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, bool allowScripts = false, CancellationToken ct = default) =>
-        PublishToAsync($"templates/{slug}@{version}", slug, version, html, allowScripts, ct);
+        string slug, string version, string html, bool allowScripts = false, CancellationToken ct = default,
+        byte[]? poster = null) =>
+        PublishToAsync($"templates/{slug}@{version}", slug, version, html, allowScripts, ct, poster);
 
     /// <summary>
     /// Publishes to an arbitrary base path. The review pipeline uses this to stage a submission
@@ -121,7 +127,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// </summary>
     public async Task<RawPublishedPackage> PublishToAsync(
         string basePath, string slug, string version, string html, bool allowScripts = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default, byte[]? poster = null)
     {
         EnsureSelfContainedAndSafe(html, allowScripts);
 
@@ -134,7 +140,17 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         var manifestJson = JsonSerializer.Serialize(manifest, JsonOut);
         await storage.PutAsync($"{basePath}/manifest.json", Bytes(manifestJson), "application/json", ct);
 
-        return new RawPublishedPackage(storage.PublicUrl($"{basePath}/"), manifest, manifestJson);
+        // The card image, when the template ships one. A gallery that renders the template itself to
+        // act as a thumbnail pays for a whole browsing context per card; a still is a few KB and is
+        // what the reader is actually scanning. Published beside the package so it versions with it.
+        string? posterUrl = null;
+        if (poster is { Length: > 0 })
+        {
+            await storage.PutAsync($"{basePath}/poster.webp", poster, "image/webp", ct);
+            posterUrl = storage.PublicUrl($"{basePath}/poster.webp");
+        }
+
+        return new RawPublishedPackage(storage.PublicUrl($"{basePath}/"), manifest, manifestJson, posterUrl);
     }
 
     /// <summary>
