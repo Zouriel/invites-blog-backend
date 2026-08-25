@@ -463,23 +463,27 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    animation contributes nothing at all, so the entrance spread runs untouched and the fan
    sits at exactly its declared arrangement before and after. Unsupported browsers get none
    of this — no pin, no sticky, no shuffle — and keep the section precisely as defined above. */
-/* The scroll-driven "hold the screen and browse the photos" enhancement lived here and has been
-   removed.
+/* The hold: the stage sticks for the length of the track while each print takes its turn at the
+   front. The motion is driven by the script at the end of this file, NOT by view-timeline.
+   view-timeline reads the document's scroll position, and inside the invite sandbox that position
+   is set programmatically by the platform runtime on every host scroll event — so the timeline was
+   being re-read against a value that is constantly recomputed and re-set, and the prints snapped
+   between states. Reading layout directly each frame is immune to that: however the scroll got
+   where it is, getBoundingClientRect tells the truth.
 
-   It was built on view-timeline, which reads the document's own scroll position. Inside the invite
-   sandbox that position is not the guest's scroll: the platform runtime drives it programmatically
-   (`window.scrollTo(0, p * (scrollHeight - innerHeight))` on every host scroll event, because
-   touch-scroll inside an iframe does not work on iOS Safari). So the timeline was being re-read
-   against a position that is recomputed and re-set constantly, and the prints snapped between
-   sweep states — the flicker.
-
-   The injector documents the supported way to scrub on scroll here: --ib-progress, a 0..1 custom
-   property the runtime publishes. Any future version of this effect should be built on that, not
-   on view-timeline.
-
-   What remains is the entrance the section always had on browsers without scroll-driven animation,
-   which the original code already treated as the complete experience: the prints fan open once as
-   the section arrives, and hold. */
+   vh, not dvh: an iframe has no URL bar, so the viewport height in here never moves. */
+.book { overflow-x: clip; padding-bottom: 0; }
+.book-pin {
+  --n: 6; --dwell: 210vh;
+  position: relative; min-height: calc(100vh + var(--dwell));
+}
+.book-stage {
+  position: sticky; top: 0; height: 100vh; overflow-x: clip;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding-top: 3vh;
+}
+/* While the script is driving, the entrance transition must not also be chasing transform. */
+.book.is-driving .page { transition: none; }
 
 /* ---------- A note, plainly stated -------------------------------------------------- */
 /* The fanned prints above are sticky-pinned and reach past their own box, so at the handoff the
@@ -665,5 +669,112 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       <p>Sent with love via invites.blog</p>
     </footer>
   </main>
+
+<script>
+/* The photo fan's browse-on-scroll.
+
+   Written in JS on purpose. The obvious CSS approach — view-timeline — reads the document's own
+   scroll position, and inside the invite sandbox that is not the guest's scroll: the platform
+   runtime sets it programmatically (window.scrollTo on every host scroll event, because
+   touch-scroll in an iframe does not work on iOS Safari). A timeline read against a value that is
+   recomputed and re-set constantly snaps between states, which is what flickered. Measuring the
+   track's live position each frame is immune to it — however the scroll arrived where it is,
+   getBoundingClientRect reports the truth.
+
+   Rules it follows: read layout once per frame, write only transform and z-index, never write
+   during the entrance so the CSS spread runs untouched, and if anything at all goes wrong leave
+   every print exactly where the stylesheet put it. */
+(function () {
+  'use strict';
+
+  // Mirrors the fanned arrangement in the stylesheet. Kept in sync by hand — these are the same
+  // numbers as .book.is-visible .page:nth-child(n).
+  var REST = [
+    { r: -24, x: -108, y: 22, z: 1 },
+    { r: -13, x:  -56, y: 10, z: 1 },
+    { r:   0, x:    0, y:  0, z: 3 },
+    { r:  13, x:   56, y: 10, z: 1 },
+    { r:  24, x:  108, y: 22, z: 1 },
+    { r:  34, x:  156, y: 36, z: 1 }
+  ];
+
+  var book, pin, prints = [], queued = false, driving = false;
+
+  function collect() {
+    book = document.querySelector('.book');
+    pin = document.querySelector('.book-pin');
+    // The gallery images are cloned by the injector when data arrives, so this must run after it.
+    prints = [].slice.call(document.querySelectorAll('.book .page'));
+    if (pin && prints.length) pin.style.setProperty('--n', prints.length);
+    schedule();
+  }
+
+  function release() {
+    if (!driving) return;
+    driving = false;
+    if (book) book.classList.remove('is-driving');
+    for (var i = 0; i < prints.length; i++) {
+      prints[i].style.transform = '';
+      prints[i].style.zIndex = '';
+    }
+  }
+
+  function frame() {
+    queued = false;
+    if (!pin || !prints.length) return;
+
+    var rect = pin.getBoundingClientRect();
+    var travel = rect.height - window.innerHeight;
+    var p = travel > 0 ? (-rect.top) / travel : 0;
+
+    // Outside the hold the stylesheet owns these prints — that is what lets the entrance spread
+    // play, and what leaves the fan at its declared arrangement once the section is behind you.
+    if (p <= 0 || p >= 1) { release(); return; }
+
+    if (!driving) {
+      driving = true;
+      if (book) book.classList.add('is-driving');
+    }
+
+    var n = prints.length;
+    // Windows overlap by half, so one print is always arriving as another leaves and the sweep
+    // never stops moving. First and last sit fully inside the hold.
+    var span = 2 / (n + 1);
+    var step = n > 1 ? (1 - span) / (n - 1) : 0;
+
+    for (var i = 0; i < n; i++) {
+      var rest = REST[i] || REST[REST.length - 1];
+      var local = span > 0 ? (p - i * step) / span : -1;
+      // A smooth 0 -> 1 -> 0 over the window: rise to the front, settle back into the fan.
+      var lift = (local > 0 && local < 1) ? Math.sin(local * Math.PI) : 0;
+      lift = lift * lift * (3 - 2 * lift);   // smoothstep, so the turn at the top is not a corner
+
+      prints[i].style.transform =
+        'rotate(' + (rest.r * (1 - 0.72 * lift)).toFixed(3) + 'deg) ' +
+        'translate(' + rest.x + 'px,' + (rest.y - 20 * lift).toFixed(2) + 'px) ' +
+        'scale(' + (1 + 0.18 * lift).toFixed(4) + ')';
+      prints[i].style.zIndex = String(Math.round(rest.z + lift * 29));
+    }
+  }
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(frame);
+  }
+
+  try {
+    addEventListener('scroll', schedule, { passive: true });
+    addEventListener('resize', schedule);
+    // The runtime drives our scroll programmatically and announces it; a scroll event may not fire.
+    addEventListener('invite:progress', schedule);
+    addEventListener('invite:data', function () { setTimeout(collect, 0); });
+    if (document.readyState === 'loading') addEventListener('DOMContentLoaded', collect);
+    else collect();
+  } catch (e) {
+    release();   // never leave the prints mid-write
+  }
+})();
+</script>
 </body>
 </html>

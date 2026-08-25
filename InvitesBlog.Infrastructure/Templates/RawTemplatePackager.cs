@@ -111,8 +111,8 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
     /// <summary>Publishes to the live template path — <c>templates/{slug}@{version}/</c>.</summary>
     public Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, CancellationToken ct = default) =>
-        PublishToAsync($"templates/{slug}@{version}", slug, version, html, ct);
+        string slug, string version, string html, bool allowScripts = false, CancellationToken ct = default) =>
+        PublishToAsync($"templates/{slug}@{version}", slug, version, html, allowScripts, ct);
 
     /// <summary>
     /// Publishes to an arbitrary base path. The review pipeline uses this to stage a submission
@@ -120,9 +120,10 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// promotion to <c>templates/…</c> happens only on approval.
     /// </summary>
     public async Task<RawPublishedPackage> PublishToAsync(
-        string basePath, string slug, string version, string html, CancellationToken ct = default)
+        string basePath, string slug, string version, string html, bool allowScripts = false,
+        CancellationToken ct = default)
     {
-        EnsureSelfContainedAndSafe(html);
+        EnsureSelfContainedAndSafe(html, allowScripts);
 
         var manifest = BuildManifest(slug, version, html);
 
@@ -184,7 +185,12 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// upload is scanned exactly like a community submission. This throws rather than silently
     /// stripping, so an author learns their template was changed instead of discovering it in production.
     /// </summary>
-    public static void EnsureSelfContainedAndSafe(string html)
+    /// <param name="allowScripts">
+    /// True only for first-party templates that ship in this repository, where the markup is code
+    /// reviewed like any other source file. Designer submissions keep the ban: they arrive from
+    /// outside and the sandbox alone is not a licence to run a stranger's JavaScript.
+    /// </param>
+    public static void EnsureSelfContainedAndSafe(string html, bool allowScripts = false)
     {
         EnsureSelfContained(html);
 
@@ -195,7 +201,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 $"Compress or drop some embedded images (we recommend staying under {RecommendedTemplateBytes / 1024}KB).",
                 "template_too_large");
 
-        if (AnyScriptRegex().IsMatch(html))
+        if (!allowScripts && AnyScriptRegex().IsMatch(html))
             throw new BusinessRuleException(
                 "Templates are HTML and CSS only — remove the <script> tag. Use CSS animations and the "
                 + "data-reveal / data-envelope hooks for motion.",

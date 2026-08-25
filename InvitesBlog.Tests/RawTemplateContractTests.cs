@@ -8,8 +8,11 @@ using Xunit;
 namespace InvitesBlog.Tests;
 
 /// <summary>
-/// The committed raw templates are the platform's own work, so they must satisfy the rules we hold
-/// community designers to — no JavaScript, within budget, and declaring a real theming surface.
+/// The committed raw templates are the platform's own work. They must satisfy every rule we hold
+/// community designers to — self-contained, within budget, no inline handlers or javascript: URLs,
+/// and declaring a real theming surface — with ONE deliberate exception: they may carry their own
+/// script, because they ship in this repository and are reviewed like any other source file. That
+/// exception is first-party only, and the test below pins it shut for submissions.
 /// These run against the embedded resource, so a regression can't reach production unnoticed.
 /// </summary>
 public class RawTemplateContractTests
@@ -36,8 +39,37 @@ public class RawTemplateContractTests
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]
     [InlineData("gilded-hour")]
-    public void Passes_the_same_scan_a_community_submission_must_pass(string slug) =>
-        RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug));
+    public void Passes_the_scan_a_first_party_template_must_pass(string slug) =>
+        RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug), allowScripts: true);
+
+    /// <summary>
+    /// The exception is first-party only. A submission arriving from outside is still refused for a
+    /// script, and the sandbox is not a licence to run a stranger's JavaScript.
+    /// </summary>
+    [Fact]
+    public void A_submission_carrying_a_script_is_still_refused()
+    {
+        var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
+                 + "<body><h1 data-var=\"event.title\">T</h1><script>alert(1)</script></body></html>";
+
+        var ex = Assert.Throws<InvitesBlog.Application.Exceptions.BusinessRuleException>(
+            () => RawTemplatePackager.EnsureSelfContainedAndSafe(html));
+
+        Assert.Equal("template_script_not_allowed", ex.ErrorCode);
+    }
+
+    /// <summary>Everything else in the scan still applies to first-party templates too.</summary>
+    [Fact]
+    public void A_first_party_template_is_still_refused_an_inline_handler()
+    {
+        var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
+                 + "<body><h1 onclick=\"go()\">T</h1></body></html>";
+
+        var ex = Assert.Throws<InvitesBlog.Application.Exceptions.BusinessRuleException>(
+            () => RawTemplatePackager.EnsureSelfContainedAndSafe(html, allowScripts: true));
+
+        Assert.Equal("template_inline_handler_not_allowed", ex.ErrorCode);
+    }
 
     [Theory]
     [InlineData("aurora-vows")]

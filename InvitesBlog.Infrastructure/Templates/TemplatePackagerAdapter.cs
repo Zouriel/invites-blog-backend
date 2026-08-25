@@ -22,7 +22,7 @@ public sealed class TemplatePackagerAdapter(RawTemplatePackager packager) : ITem
     public async Task<TemplatePackage> PublishAsync(
         string basePath, string slug, string version, string html, CancellationToken ct = default)
     {
-        var published = await packager.PublishToAsync(basePath, slug, version, html, ct);
+        var published = await packager.PublishToAsync(basePath, slug, version, html, ct: ct);
         return new TemplatePackage(published.PackageUrl, published.ManifestJson, Flatten(published.Manifest));
     }
 

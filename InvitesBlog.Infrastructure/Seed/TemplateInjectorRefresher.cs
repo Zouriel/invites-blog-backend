@@ -66,7 +66,7 @@ public sealed class TemplateInjectorRefresher(
 
             try
             {
-                await packager.PublishToAsync(basePath, template.Slug, template.Version, submission.Html, ct);
+                await packager.PublishToAsync(basePath, template.Slug, template.Version, submission.Html, ct: ct);
                 refreshed++;
                 logger.LogInformation(
                     "Re-published {Slug}@{Version} with the current injector.", template.Slug, template.Version);
