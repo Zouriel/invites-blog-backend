@@ -443,20 +443,26 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   /* The track. Its height beyond one viewport IS the dwell — how far you scroll while the
      stage is held. Scaled to how many photos there actually are (2–6), so a two-photo fan
      doesn't hold the screen for the same distance as a six-photo one. */
+  /* svh, NOT dvh. dvh tracks the phone's URL bar, which collapses and expands WHILE you scroll —
+     and this track is 320 viewport-heights tall, so every wobble is amplified over three times.
+     The track resizing mid-scroll moves the view timeline's own range, which moves every print to
+     a different point in the sweep, which changes the page height, which nudges the bar again:
+     that loop is the flicker. svh is the chrome-visible height and never changes during a scroll,
+     so the track and its timeline stay put. Same reason for the stage below. */
   .book-pin {
-    --n: 6; --dwell: 220dvh;
-    position: relative; min-height: calc(100dvh + var(--dwell));
+    --n: 6; --dwell: 220svh;
+    position: relative; min-height: calc(100svh + var(--dwell));
     view-timeline-name: --book-pin; view-timeline-axis: block;
   }
-  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25dvh; }
-  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90dvh; }
-  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125dvh; }
-  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160dvh; }
-  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190dvh; }
-  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220dvh; }
+  .book-pin:has(.page:only-child) { --n: 1; --dwell: 25svh; }
+  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 90svh; }
+  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 125svh; }
+  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 160svh; }
+  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 190svh; }
+  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 220svh; }
 
   .book-stage {
-    position: sticky; top: 0; height: 100dvh; overflow-x: clip;
+    position: sticky; top: 0; height: 100svh; overflow-x: clip;
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
     padding-top: 3vh;
   }
@@ -529,7 +535,21 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
      the hold, so no print is cut off mid-move at either end. `contain` is exactly the span
      during which the track covers the viewport — the hold. */
   .book .page {
-    animation-name: page-to-front; animation-fill-mode: none;
+    /* The scroll timeline owns `transform` in here, so the entrance transition must not also be
+       chasing it. With fill-mode `none` the animation stops contributing the instant the range
+       ends, transform snaps back to the declared fan value, and the 0.7s transition animates
+       that snap — scroll back and forth across a boundary and it re-fires every time, which is
+       the flicker. `both` holds the 0%/100% keyframe outside the range instead; those mirror the
+       fan's declared arrangement exactly, so the resting picture is unchanged and there is no
+       snap left to chase. The transition is then redundant here and only reintroduces the
+       fight, so it goes. Browsers without scroll-driven animation never enter this block and
+       keep the transition-based spread untouched.
+
+       will-change keeps each print on its own compositor layer: these are large, shadowed
+       images, and without it every frame of the sweep repaints them. */
+    transition: none;
+    will-change: transform;
+    animation-name: page-to-front; animation-fill-mode: both;
     animation-timing-function: var(--ease-sine); animation-timeline: --book-pin;
     --span: calc(200% / (var(--n) + 1));
     --step: calc((100% - var(--span)) / max(1, var(--n) - 1));
