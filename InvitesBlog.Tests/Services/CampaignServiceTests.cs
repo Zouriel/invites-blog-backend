@@ -102,16 +102,38 @@ public class CampaignServiceTests
     }
 
     [Fact]
-    public async Task Create_dedicated_template_first_use_flips_IsUsed()
+    public async Task Create_does_not_spend_a_dedicated_template()
     {
+        // Starting a campaign is not using the template. Flipping it here meant a draft abandoned
+        // before anything was sent burned a single-use template permanently — DispatchService marks
+        // it once invitations actually reach guests.
         var template = TestData.Template();
         template.Visibility = Domain.Entities.TemplateVisibility.Dedicated;
         _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
 
         await Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event"));
 
-        Assert.True(template.IsUsed); // tracked entity flipped, persisted by SaveChanges
+        Assert.False(template.IsUsed);
         await _campaigns.Received(1).AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Create_stamps_the_signed_in_account_as_owner()
+    {
+        // Ownership from the first click: the inviter is only attached at the host-details step, so
+        // without this a draft abandoned before then belongs to nobody and cannot be listed.
+        var userId = Guid.NewGuid();
+        _currentUser.UserId.Returns(userId);
+        var template = TestData.Template();
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        Campaign? saved = null;
+        await _campaigns.AddAsync(Arg.Do<Campaign>(c => saved = c), Arg.Any<CancellationToken>());
+
+        await Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event"));
+
+        Assert.Equal(userId, saved!.CreatedByUserId);
+        Assert.Null(saved.InviterId);   // no host yet — that is the point
     }
 
     [Fact]

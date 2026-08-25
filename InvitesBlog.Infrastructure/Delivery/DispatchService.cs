@@ -75,6 +75,22 @@ public sealed class DispatchService(
             ? CampaignStatus.Dispatched
             : (sent > 0 ? CampaignStatus.PartiallyDispatched : CampaignStatus.DispatchFailed);
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // A dedicated template is spent once its invitations actually reach guests — not when someone
+        // merely starts a campaign with it. Marking it at creation meant one abandoned draft burned a
+        // single-use template for good, with nothing sent and no way for its owner to start again.
+        if (sent > 0)
+        {
+            var template = await db.Templates.FirstOrDefaultAsync(t => t.Id == campaign.TemplateId, ct);
+            if (template is { Visibility: TemplateVisibility.Dedicated, IsUsed: false })
+            {
+                template.IsUsed = true;
+                logger.LogInformation(
+                    "Dedicated template {TemplateId} marked used — campaign {CampaignId} reached {Sent} guest(s).",
+                    template.Id, campaignId, sent);
+            }
+        }
+
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Dispatch for {CampaignId}: {Sent} sent, {Failed} failed, {NotSent} not sent (no contact).",

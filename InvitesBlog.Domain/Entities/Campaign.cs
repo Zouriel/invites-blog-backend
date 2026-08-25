@@ -32,6 +32,17 @@ public sealed class Campaign
     /// <summary>Who the fee is owed to, for the checkout line item and the payouts report.</summary>
     public string? DesignerFeeName { get; set; }
     public Guid? InviterId { get; set; }                      // set at inviter-details step
+
+    /// <summary>
+    /// The signed-in account that started this campaign, when there was one.
+    /// <para>
+    /// Separate from <see cref="InviterId"/> on purpose: the inviter is WHO IS HOSTING, and is only
+    /// known once the host-details step is filled in. A draft abandoned before that step had no
+    /// owner at all, so it never appeared in "my drafts" and could not be found or deleted by
+    /// anyone. This records who it belongs to from the first click.
+    /// </para>
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
     public string AccessTokenHash { get; set; } = default!;   // §4.6.2 possession token
     public string? DashboardTokenHash { get; set; }           // §4.6.2 post-payment dashboard link
     public string Title { get; set; } = default!;

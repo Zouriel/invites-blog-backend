@@ -120,6 +120,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
             e.Property(x => x.DesignerFee).HasColumnType("numeric(12,2)").HasDefaultValue(0m);
             e.Property(x => x.TemplatePackageUrl).HasDefaultValue(string.Empty);
+            e.HasIndex(x => x.CreatedByUserId).HasDatabaseName("idx_campaign_created_by");
         });
 
         b.Entity<Guest>(e =>

@@ -79,17 +79,19 @@ public sealed class CampaignService(
             Title = req.Title,
             Slug = Slugify(req.Title),
             Status = CampaignStatus.Draft,
+            // Ownership from the first click. The inviter isn't known until the host-details step,
+            // so without this a draft abandoned before then belongs to nobody and is unreachable.
+            CreatedByUserId = currentUser.UserId,
             EventStartAt = now.AddDays(30),
             CreatedAt = now,
             UpdatedAt = now
         };
         await campaigns.AddAsync(campaign, ct);
 
-        // First use of a dedicated template flips it to a showcase (still listed in the gallery, but
-        // view-only). `template` is tracked, so this persists in the SaveChanges below.
-        if (template.Visibility == TemplateVisibility.Dedicated && !template.IsUsed)
-            template.IsUsed = true;
-
+        // NOT marked used here. Starting a campaign is not using the template — a draft abandoned
+        // before payment used to burn a single-use dedicated template permanently, leaving the person
+        // it was made for unable to start again. DispatchService flips it once invitations actually
+        // reach guests, which is what "used" was always meant to mean.
         await uow.SaveChangesAsync(ct);
 
         return new CreateCampaignResponse(campaign.Id, campaign.Status.ToString(), rawToken);

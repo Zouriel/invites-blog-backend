@@ -27,6 +27,41 @@ public class CampaignOwnershipServiceTests
         DisplayName = "Host", IsActive = true, CreatedAt = DateTimeOffset.UtcNow
     };
 
+    [Fact]
+    public async Task The_account_that_started_a_campaign_owns_it_before_a_host_is_attached()
+    {
+        // The draft case: InviterId is only set at the host-details step, so a campaign abandoned
+        // before then matches no inviter. Without creator ownership it could be listed in Drafts but
+        // never opened or deleted.
+        var me = Account();
+        _currentUser.CampaignId.Returns((Guid?)null);
+        _currentUser.UserId.Returns(me.Id);
+        _users.GetByIdAsync(me.Id, Arg.Any<CancellationToken>()).Returns(me);
+
+        var campaign = TestData.Campaign();
+        campaign.InviterId = null;
+        campaign.CreatedByUserId = me.Id;
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+
+        Assert.True(await Sut().OwnsAsync(campaign.Id));
+    }
+
+    [Fact]
+    public async Task Someone_elses_hostless_draft_is_still_refused()
+    {
+        var me = Account();
+        _currentUser.CampaignId.Returns((Guid?)null);
+        _currentUser.UserId.Returns(me.Id);
+        _users.GetByIdAsync(me.Id, Arg.Any<CancellationToken>()).Returns(me);
+
+        var campaign = TestData.Campaign();
+        campaign.InviterId = null;
+        campaign.CreatedByUserId = Guid.NewGuid();   // started by a different account
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+
+        Assert.False(await Sut().OwnsAsync(campaign.Id));
+    }
+
     private Campaign BookedBy(string? email, string? phone = null)
     {
         var inviter = new Inviter

@@ -321,10 +321,13 @@ public sealed class AccountService(
     {
         var me = await CurrentAsync(ct);
         var inviterIds = await MyInviterIdsAsync(me, ct);
-        if (inviterIds.Count == 0) return [];
 
+        // Two ways a campaign is yours: you are the host on it, or you started it. The second matters
+        // for drafts — the inviter is only attached at the host-details step, so a campaign abandoned
+        // before then matches no inviter and would otherwise be invisible to everyone.
         var mine = await campaigns.Query()
-            .Where(c => c.InviterId != null && inviterIds.Contains(c.InviterId!.Value))
+            .Where(c => c.CreatedByUserId == me.Id
+                        || (c.InviterId != null && inviterIds.Contains(c.InviterId!.Value)))
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync(ct);
         if (mine.Count == 0) return [];

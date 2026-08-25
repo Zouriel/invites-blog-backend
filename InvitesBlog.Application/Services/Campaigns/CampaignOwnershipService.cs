@@ -38,7 +38,13 @@ public sealed class CampaignOwnershipService(
         if (string.IsNullOrWhiteSpace(me.Email) && string.IsNullOrWhiteSpace(me.PhoneE164)) return false;
 
         var campaign = await campaigns.GetByIdAsync(campaignId, ct);
-        if (campaign?.InviterId is not { } inviterId) return false;
+        if (campaign is null) return false;
+
+        // Whoever started it owns it, even before a host is attached. Without this a draft abandoned
+        // at the first step could be listed but never opened or deleted — no inviter to match on.
+        if (campaign.CreatedByUserId == userId) return true;
+
+        if (campaign.InviterId is not { } inviterId) return false;
 
         var inviter = await inviters.GetByIdAsync(inviterId, ct);
         if (inviter is null) return false;
