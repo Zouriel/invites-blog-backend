@@ -98,27 +98,18 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     [GeneratedRegex("""<link\b[^>]*rel\s*=\s*["']?\s*stylesheet""", RegexOptions.IgnoreCase)]
     private static partial Regex StylesheetLinkRegex();
 
-    // --- Safety scan (§HTML/CSS-only platform-wide) ---------------------------------------------
-    [GeneratedRegex("""<script\b""", RegexOptions.IgnoreCase)]
-    private static partial Regex AnyScriptRegex();
-
-    // on<event>= as a real ATTRIBUTE — preceded by whitespace so "on" inside a word can't trip it.
-    [GeneratedRegex("""\s\bon[a-z]+\s*=""", RegexOptions.IgnoreCase)]
-    private static partial Regex InlineHandlerRegex();
-
-    [GeneratedRegex("""javascript\s*:""", RegexOptions.IgnoreCase)]
-    private static partial Regex JavascriptUriRegex();
-
-    [GeneratedRegex("""<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*refresh""", RegexOptions.IgnoreCase)]
-    private static partial Regex MetaRefreshRegex();
+    // A template may carry its own <script>, but it must be IN the file. An external script could be
+    // swapped for something else after a human approved it, which would make the review meaningless.
+    [GeneratedRegex("""<script\b[^>]*\bsrc\s*=""", RegexOptions.IgnoreCase)]
+    private static partial Regex ExternalScriptRegex();
 
     private static readonly JsonSerializerOptions JsonOut = new() { WriteIndented = false };
 
     /// <summary>Publishes to the live template path — <c>templates/{slug}@{version}/</c>.</summary>
     public Task<RawPublishedPackage> PublishAsync(
-        string slug, string version, string html, bool allowScripts = false, CancellationToken ct = default,
+        string slug, string version, string html, CancellationToken ct = default,
         byte[]? poster = null) =>
-        PublishToAsync($"templates/{slug}@{version}", slug, version, html, allowScripts, ct, poster);
+        PublishToAsync($"templates/{slug}@{version}", slug, version, html, ct, poster);
 
     /// <summary>
     /// Publishes to an arbitrary base path. The review pipeline uses this to stage a submission
@@ -126,10 +117,10 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// promotion to <c>templates/…</c> happens only on approval.
     /// </summary>
     public async Task<RawPublishedPackage> PublishToAsync(
-        string basePath, string slug, string version, string html, bool allowScripts = false,
+        string basePath, string slug, string version, string html,
         CancellationToken ct = default, byte[]? poster = null)
     {
-        EnsureSelfContainedAndSafe(html, allowScripts);
+        EnsureSelfContainedAndSafe(html);
 
         var manifest = BuildManifest(slug, version, html);
 
@@ -201,17 +192,23 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     public const int RecommendedTemplateBytes = 300 * 1024;
 
     /// <summary>
-    /// Rejects anything that isn't self-contained AND anything that could execute. The product decision
-    /// is HTML/CSS-only platform-wide, so there is deliberately NO trusted-author exemption: an admin
-    /// upload is scanned exactly like a community submission. This throws rather than silently
-    /// stripping, so an author learns their template was changed instead of discovering it in production.
+    /// Rejects anything that isn't self-contained, and anything larger than the ceiling.
+    /// <para>
+    /// It deliberately does NOT reject JavaScript. Templates may script themselves: the motion is the
+    /// product, and the automatic ban was pushing authors into CSS contortions for animation that JS
+    /// does plainly. What replaces it is not a weaker check but a different KIND of check — a person
+    /// reads the template before it can reach anyone. A regex cannot tell a scroll driver from an
+    /// exfiltration script; a reviewer can.
+    /// </para>
+    /// <para>
+    /// The containment that makes that safe is the frame, not this scan: every surface that renders a
+    /// template does so in an iframe sandboxed WITHOUT <c>allow-same-origin</c>, so template script
+    /// runs on an opaque origin and cannot read the app's session, call the API as the reader, or
+    /// touch the host document. If you are adding a new place that renders a template, it must be
+    /// sandboxed the same way.
+    /// </para>
     /// </summary>
-    /// <param name="allowScripts">
-    /// True only for first-party templates that ship in this repository, where the markup is code
-    /// reviewed like any other source file. Designer submissions keep the ban: they arrive from
-    /// outside and the sandbox alone is not a licence to run a stranger's JavaScript.
-    /// </param>
-    public static void EnsureSelfContainedAndSafe(string html, bool allowScripts = false)
+    public static void EnsureSelfContainedAndSafe(string html)
     {
         EnsureSelfContained(html);
 
@@ -222,26 +219,6 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 $"Compress or drop some embedded images (we recommend staying under {RecommendedTemplateBytes / 1024}KB).",
                 "template_too_large");
 
-        if (!allowScripts && AnyScriptRegex().IsMatch(html))
-            throw new BusinessRuleException(
-                "Templates are HTML and CSS only — remove the <script> tag. Use CSS animations and the "
-                + "data-reveal / data-envelope hooks for motion.",
-                "template_script_not_allowed");
-
-        if (InlineHandlerRegex().IsMatch(html))
-            throw new BusinessRuleException(
-                "Inline event handlers (onclick, onload, …) aren't allowed — remove them and use CSS instead.",
-                "template_inline_handler_not_allowed");
-
-        if (JavascriptUriRegex().IsMatch(html))
-            throw new BusinessRuleException(
-                "A javascript: URL isn't allowed — links must point at a real address.",
-                "template_javascript_uri_not_allowed");
-
-        if (MetaRefreshRegex().IsMatch(html))
-            throw new BusinessRuleException(
-                "<meta http-equiv=\"refresh\"> isn't allowed — a template must not navigate on its own.",
-                "template_meta_refresh_not_allowed");
     }
 
     /// <summary>Reject anything that isn't self-contained in the single HTML file.</summary>
@@ -251,6 +228,15 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             throw new BusinessRuleException(
                 "A template must be one self-contained file — inline your CSS in a <style> tag (no <link rel=\"stylesheet\"> / separate .css).",
                 "template_not_self_contained");
+
+        // Scripts are allowed, but only the ones a reviewer can actually see. A src= points somewhere
+        // else, and whatever is there today can be something else tomorrow — the approval would be of
+        // a file that no longer runs.
+        if (ExternalScriptRegex().IsMatch(html))
+            throw new BusinessRuleException(
+                "A template's JavaScript must be inline in the file — <script src=\"…\"> isn't allowed, "
+                + "because what a reviewer approves has to be what actually runs.",
+                "template_external_script_not_allowed");
     }
 
     private readonly record struct SlotOccurrence(

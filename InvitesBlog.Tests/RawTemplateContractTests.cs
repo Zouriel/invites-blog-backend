@@ -40,35 +40,33 @@ public class RawTemplateContractTests
     [InlineData("a-love-story")]
     [InlineData("gilded-hour")]
     public void Passes_the_scan_a_first_party_template_must_pass(string slug) =>
-        RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug), allowScripts: true);
+        RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug));
 
     /// <summary>
-    /// The exception is first-party only. A submission arriving from outside is still refused for a
-    /// script, and the sandbox is not a licence to run a stranger's JavaScript.
+    /// Scripts are allowed now, wherever they come from. The scan is no longer the thing standing
+    /// between a stranger's JavaScript and a reader — a human review is, and the frame it runs in has
+    /// an opaque origin. What the scan still refuses is anything the file does not contain, because
+    /// that is what makes the review mean something.
     /// </summary>
     [Fact]
-    public void A_submission_carrying_a_script_is_still_refused()
+    public void A_submission_may_carry_its_own_script()
     {
         var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
-                 + "<body><h1 data-var=\"event.title\">T</h1><script>alert(1)</script></body></html>";
+                 + "<body><h1 data-var=\"event.title\">T</h1><script>document.title='x'</script></body></html>";
+
+        RawTemplatePackager.EnsureSelfContainedAndSafe(html);
+    }
+
+    [Fact]
+    public void A_submission_may_not_pull_its_script_from_somewhere_else()
+    {
+        var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
+                 + "<body><script src=\"https://cdn.example/x.js\"></script></body></html>";
 
         var ex = Assert.Throws<InvitesBlog.Application.Exceptions.BusinessRuleException>(
             () => RawTemplatePackager.EnsureSelfContainedAndSafe(html));
 
-        Assert.Equal("template_script_not_allowed", ex.ErrorCode);
-    }
-
-    /// <summary>Everything else in the scan still applies to first-party templates too.</summary>
-    [Fact]
-    public void A_first_party_template_is_still_refused_an_inline_handler()
-    {
-        var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
-                 + "<body><h1 onclick=\"go()\">T</h1></body></html>";
-
-        var ex = Assert.Throws<InvitesBlog.Application.Exceptions.BusinessRuleException>(
-            () => RawTemplatePackager.EnsureSelfContainedAndSafe(html, allowScripts: true));
-
-        Assert.Equal("template_inline_handler_not_allowed", ex.ErrorCode);
+        Assert.Equal("template_external_script_not_allowed", ex.ErrorCode);
     }
 
     [Theory]

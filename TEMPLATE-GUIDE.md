@@ -3,8 +3,8 @@
 > This is also published in the app at **/template-guide**, linked from My templates — that copy is
 > what community creators read, so keep the two in step.
 
-A template is **one HTML file**. You write the markup and put your CSS in a `<style>` tag — all in
-that single file. That's it. (No JavaScript — see *Animation* below; the platform handles motion.)
+A template is **one HTML file**. You write the markup, put your CSS in a `<style>` tag and, if you
+want it, your JavaScript in a `<script>` tag — all in that single file. That's it.
 
 You mark the spots that should be filled in with little `data-*` tags. When an invite is sent, the
 platform fills those spots with the event's details and each guest's personal info, inside a safe
@@ -224,39 +224,119 @@ anything and map rules to them).
 
 ---
 
-## Animation (CSS only)
+## Animation
 
-Templates are **HTML and CSS — no JavaScript**. Every upload is scanned and any `<script>`, inline
-`onclick=`/`onload=` handler, `javascript:` URL or `<meta http-equiv="refresh">` is **rejected
-outright**, for every author including admins. Nothing is silently stripped; you'll get a clear error
-naming what to remove.
+Templates may use **CSS, JavaScript, or both**. Motion is the whole product here, so nothing stops you
+writing the animation you actually want.
 
-You don't need JS for motion. The platform drives it for you:
+The platform still gives you two hooks that need no code at all:
 
 - `data-reveal` gets the class `is-visible` when the element scrolls into view — animate that class.
 - `data-envelope` gets `is-open` after the first scroll — animate a seal or flap opening.
-- The whole invite is scroll-driven, so CSS transitions and keyframes on those two classes cover
-  cover reveals, parallax-feel fades, staggered entrances and envelope openings.
 
 ```css
 .panel{opacity:0; transform:translateY(40px); transition:opacity .8s, transform .8s}
 .panel.is-visible{opacity:1; transform:none}
 .envelope .flap{transform-origin:top; transition:transform 1s}
 .envelope.is-open .flap{transform:rotateX(-180deg)}
-@media (prefers-reduced-motion: reduce){ .panel,.flap{transition:none; opacity:1; transform:none} }
+```
+
+### Reach for CSS scroll-driven animation before a scroll handler
+
+If the motion follows the scroll, `animation-timeline` with a `view-timeline` is almost always the
+better tool, and this is measured rather than taste:
+
+- A scroll-driven CSS animation runs on the **compositor**. A `requestAnimationFrame` handler runs on
+  the **main thread**, every frame, competing with everything else on the page.
+- A layout read inside a scroll handler — `getBoundingClientRect()`, `offsetTop`, `scrollHeight` —
+  forces the browser to resolve layout **synchronously**, for the whole document, before it can
+  answer. On a page carrying a lot of animated decoration that one call is expensive. If you must
+  read geometry, read it once and cache it; recompute on `resize`, not on `scroll`.
+
+We rebuilt one template's photo section in JavaScript, decided it was the wrong call, and put the CSS
+version back. The CSS version is both simpler and cheaper.
+
+### Your JavaScript talks to the platform through events
+
+```js
+addEventListener('invite:data', e => { /* e.detail is the resolved invitation */ });
+addEventListener('invite:progress', e => { /* 0..1 through the invitation, when the host drives it */ });
+// window.invite.data and window.invite.progress hold the same values.
 ```
 
 ---
 
 ## The rules (the sandbox)
 
-- **One self-contained file.** Inline your CSS in `<style>` and embed images as `data:` URIs.
-  External `<link rel="stylesheet">` is rejected. (Need a CDN allow-listed? Ask and I'll add it.)
-- **No JavaScript at all** — see above. Use CSS with `data-reveal` / `data-envelope` for motion.
+- **One self-contained file.** Inline your CSS in `<style>`, your JS in `<script>`, and embed images
+  as `data:` URIs. An external `<link rel="stylesheet">` or `<script src="…">` is **rejected** — not
+  because scripts are dangerous, but because what a reviewer approves has to be what actually runs.
+  A file fetched from somewhere else can become something else the day after it was approved.
+- **JavaScript is allowed.** There is no automatic scan for it any more. What replaces that ban is a
+  person: community submissions are read by a human with the `designer.review` permission — which is
+  deliberately *not* the same permission designers hold, so nobody approves their own work.
+- **Everything runs in a sandboxed frame** with an opaque origin (`sandbox="allow-scripts"`, without
+  `allow-same-origin`). Your script cannot read the app's session, call the API as the reader, or
+  reach the page around it. `postMessage` works, which is all the data binding needs.
 - **Keep it light** — aim under ~300KB; **800KB is a hard limit** and an upload over it is rejected.
-  Keep embedded images small.
-- **Respect reduced motion** with a `@media (prefers-reduced-motion: reduce)` block.
 - **Guest text is inserted as text, never HTML** — safe by design.
+- **Ship a `poster.webp`** next to your `index.html` (see *Adding a template*). The gallery shows that
+  still, not your live template — a card that renders a whole invitation to act as a thumbnail costs
+  a browsing context per card.
+
+### Where this is heading
+
+Worth knowing if you are designing something ambitious: we intend to move the **guest-facing**
+invitation off the iframe and render it on the server as a normal page on its own origin — one
+document, filled in before it is sent, no nested viewport. That would remove two whole classes of bug
+described below (data applied twice, and viewport units that shift under a resizing frame) and make a
+guest's first paint much faster.
+
+It is a direction, not a promise, and nothing here changes until it ships. Previews **inside** the
+signed-in app will keep using the sandboxed iframe either way — that is where a reader's session
+lives, and it is not somewhere a stranger's script should ever run. Write to the contract on this
+page and your template will work under both.
+
+---
+
+## Things that have bitten us
+
+Hard-won, all of them from real breakage in production. Worth ten minutes before you ship.
+
+**Your data is applied more than once.** The platform binds on load, and again every time the host
+sends fresh data — the editor sends it on *every edit*. If your JavaScript clones or generates
+elements, make it idempotent: tag what you created and clear it before creating it again. We once
+shipped a binder that cloned a gallery on each pass, so six photos became thirty-six, then two
+hundred and sixteen. It looked exactly like an animation bug, and we rewrote the animation twice
+before finding it.
+
+**Anything you don't supply is blanked.** Binding sets an element's text to `''` when the payload has
+no value for it. The placeholder text you author is what shows *before* data arrives — it is not a
+fallback afterwards. Test with fields missing.
+
+**Give per-child CSS variables a default.** If you name children individually —
+`.page:nth-child(1){--i:1}` … `:nth-child(6){--i:6}` — and feed `--i` into an `animation-range`, a
+*seventh* child gets an undefined variable. The range becomes invalid, falls back to `normal`, and
+that element animates across the **entire** timeline. With thirty extra children all doing it at
+once, the section flickers. Set a default on the base rule, and consider
+`:nth-child(n+7){animation:none}`.
+
+**Count the things that animate forever.** One template had 56 continuously animating decorations.
+They cost about 4ms a frame — more than six full-resolution photographs did. Hiding half of them put
+the section back at 60fps. Infinite animations are not free just because they are small.
+
+**Photos are smaller than you think.** Gallery images are capped at **512px** on the long edge,
+because a gallery print is painted a couple of hundred CSS pixels wide and six full-size photos is
+tens of megabytes of decoded bitmap. Design prints to be small; don't count on full resolution.
+
+**Don't build a scroll track out of viewport units.** Anything sized in `vh`/`dvh` is relative to the
+frame, and a frame can be resized by the browser's own chrome while the reader scrolls. That remaps
+their position into a different part of your animation and throws it backwards. Prefer ranges tied to
+the element (`contain`), not to the viewport.
+
+**`prefers-reduced-motion` is neutralised at runtime.** An invitation's whole value is its motion, so
+the platform strips `@media (prefers-reduced-motion: reduce)` rules. Don't rely on that block to fix
+anything. If you want a calmer variant, key it off something you control.
 
 ---
 
@@ -267,9 +347,18 @@ In `invites-blog-backend`, add a folder
 `InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` with:
 
 ```
-index.html     # the whole template: markup + inline <style>
+index.html     # the whole template: markup + inline <style> (+ inline <script> if you want one)
 meta.json      # { "name","slug","version","category","description" }
+poster.webp    # optional but wanted: the still the gallery shows for your template
 ```
+
+**About `poster.webp`.** The gallery shows this image, not your live template — rendering a whole
+invitation to act as a thumbnail costs a browsing context per card. Portrait, around 720x1280, is
+right; the card crops from the top. Capture it with sample copy filled in rather than your
+placeholder text, and pick the frame that actually shows the design — most invitations open on a
+deliberately bare "scroll to open" screen, and a poster of that sells nothing. The published filename
+carries a hash of the bytes, so correcting a poster changes its URL and no cache can serve the old
+one. Ship without it and the card falls back to rendering your template live, which still works.
 
 `meta.json`:
 ```json
@@ -327,8 +416,8 @@ preview.png    # a static preview image — REQUIRED, it's the card art in the g
 
 What happens next:
 
-1. **The automatic scan runs immediately.** Scripts, inline handlers, `javascript:` URLs, meta
-   refresh, an external stylesheet, anything over 800KB, or a `select` with no `data-options` are
+1. **The automatic scan runs immediately.** It checks only two things now: that the file is
+   self-contained (no external stylesheet or `<script src>`) and that it is under the size ceiling.
    rejected on the spot — nothing reaches a human. You can dry-run it with the **Check** button on
    the form, which also shows every field, image slot, role and theme key we detected.
 2. **It enters the review queue** as `Submitted`. An admin sees your markup and a plain-language

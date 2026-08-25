@@ -247,19 +247,31 @@ public class RawTemplatePackagerTests
     // --- Safety scan: HTML/CSS only, for EVERY author including admins -------------------------
 
     [Theory]
-    [InlineData("<script>alert(1)</script>", "template_script_not_allowed")]
-    [InlineData("<script src=\"https://cdn.example/x.js\"></script>", "template_script_not_allowed")]
-    [InlineData("<button onclick=\"go()\">x</button>", "template_inline_handler_not_allowed")]
-    [InlineData("<body ONLOAD='go()'></body>", "template_inline_handler_not_allowed")]
-    [InlineData("<a href=\"javascript:alert(1)\">x</a>", "template_javascript_uri_not_allowed")]
-    [InlineData("<meta http-equiv=\"refresh\" content=\"0;url=/x\">", "template_meta_refresh_not_allowed")]
     [InlineData("<link rel=\"stylesheet\" href=\"x.css\">", "template_not_self_contained")]
-    public void The_scan_hard_rejects_anything_executable(string markup, string expectedCode)
+    [InlineData("<script src=\"https://cdn.example/x.js\"></script>", "template_external_script_not_allowed")]
+    [InlineData("<script SRC='/x.js'></script>", "template_external_script_not_allowed")]
+    public void The_scan_rejects_anything_the_file_does_not_contain(string markup, string expectedCode)
     {
+        // What a reviewer reads has to be what actually runs. A stylesheet or a script fetched from
+        // somewhere else can be swapped after approval, which would make the review meaningless.
         var ex = Assert.Throws<BusinessRuleException>(
             () => RawTemplatePackager.EnsureSelfContainedAndSafe(Page(markup)));
 
         Assert.Equal(expectedCode, ex.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("<script>document.title = 'hi'</script>")]
+    [InlineData("<button onclick=\"go()\">x</button>")]
+    [InlineData("<body ONLOAD='go()'></body>")]
+    [InlineData("<a href=\"javascript:void(0)\">x</a>")]
+    [InlineData("<meta http-equiv=\"refresh\" content=\"0;url=/x\">")]
+    public void A_template_may_carry_its_own_javascript(string markup)
+    {
+        // The automatic ban is gone on purpose: motion is the product, and a regex cannot tell a
+        // scroll driver from an exfiltration script. A person reads the template instead, and the
+        // frame it runs in has an opaque origin, so there is nothing of the reader's to reach.
+        RawTemplatePackager.EnsureSelfContainedAndSafe(Page(markup));
     }
 
     [Fact]
@@ -323,7 +335,7 @@ public class RawTemplatePackagerTests
         var (sut, written) = Recording();
         var poster = new byte[] { 0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4 };
 
-        var result = await sut.PublishAsync("nice-one", "1.0.0", Page("hi"), allowScripts: true, poster: poster);
+        var result = await sut.PublishAsync("nice-one", "1.0.0", Page("hi"), poster: poster);
 
         var key = written.Keys.Single(k => k.Contains("poster."));
         Assert.Matches(@"^templates/nice-one@1\.0\.0/poster\.[0-9a-f]{8}\.webp$", key);
@@ -339,9 +351,9 @@ public class RawTemplatePackagerTests
         // filename meant the edge kept serving the old picture for hours after the bytes had changed.
         var (sut, _) = Recording();
 
-        var first = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [1, 2, 3]);
-        var same = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [1, 2, 3]);
-        var changed = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [9, 9, 9]);
+        var first = await sut.PublishAsync("x", "1.0.0", Page("hi"), poster: [1, 2, 3]);
+        var same = await sut.PublishAsync("x", "1.0.0", Page("hi"), poster: [1, 2, 3]);
+        var changed = await sut.PublishAsync("x", "1.0.0", Page("hi"), poster: [9, 9, 9]);
 
         Assert.Equal(first.PosterUrl, same.PosterUrl);        // same bytes, same URL — no churn
         Assert.NotEqual(first.PosterUrl, changed.PosterUrl);  // new bytes, new URL — nothing to go stale
@@ -353,7 +365,7 @@ public class RawTemplatePackagerTests
         // Optional by design: the gallery falls back to rendering the template, which still works.
         var (sut, written) = Recording();
 
-        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"), allowScripts: true);
+        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"));
 
         Assert.Null(result.PosterUrl);
         Assert.DoesNotContain(written.Keys, k => k.EndsWith("poster.webp"));
@@ -365,7 +377,7 @@ public class RawTemplatePackagerTests
         // A zero-byte file would publish a URL that resolves to a broken image — worse than none.
         var (sut, written) = Recording();
 
-        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"), allowScripts: true, poster: []);
+        var result = await sut.PublishAsync("plain", "1.0.0", Page("hi"), poster: []);
 
         Assert.Null(result.PosterUrl);
         Assert.DoesNotContain(written.Keys, k => k.EndsWith("poster.webp"));

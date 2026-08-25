@@ -80,10 +80,8 @@ public sealed class RawTemplateSeeder(
             var poster = await ReadBytesAsync(asm, prefix + ".poster.webp", ct);
 
             // Always (re)publish so a fresh container's storage is populated.
-            // These templates ship in this repository and are reviewed like any other source file,
-            // so they may carry their own script. Designer submissions still may not.
             var published = await packager.PublishAsync(
-                meta.Slug, meta.Version, html, allowScripts: true, ct: ct, poster: poster);
+                meta.Slug, meta.Version, html, ct: ct, poster: poster);
 
             // Match on SLUG alone. Matching slug+version would treat a version bump as a brand-new
             // template and leave TWO cards for the same design in the gallery; a bump SUPERSEDES.
