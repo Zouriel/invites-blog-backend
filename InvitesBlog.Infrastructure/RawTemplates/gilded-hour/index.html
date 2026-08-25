@@ -726,6 +726,9 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     { r:  31, x:  92, y: 31 }
   ];
   var LIFT_PX = 20, GROW = 0.18, UNTWIST = 0.72;
+  /* Fractions of one print's window spent arriving and leaving; the remainder — 60% — is spent held
+     at the front, which is what gives you time to actually look at the photo. */
+  var RISE = 0.20, FALL = 0.20;
 
   /* The when and the where, typed and cleared while the photos go by. Fractions of the hold, so
      they keep step with however many photos there are. */
@@ -767,11 +770,10 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     var h = window.innerHeight;
     // Roughly a quarter of a screen of scrolling per photo — enough for each to arrive and leave
     // without the section overstaying once the last one has had its turn.
-    // Per photo, as a fraction of a screen. Half-overlapping windows put the last print's peak at
-    // n/(n+1) of the hold — 87% for six — so the closing stretch is always that print settling back.
-    // Keeping the hold short is what stops that tail reading as the section refusing to end: six
-    // photos now take about one screen of scrolling rather than one and a half.
-    var dwell = Math.round(h * (prints.length <= 1 ? 0.22 : 0.17 * prints.length));
+    // Per photo, as a fraction of a screen. With back-to-back windows the last print settles right
+    // at the end of the hold, so there is no trailing stretch with nothing happening — the section
+    // releases as the sixth photo comes back down.
+    var dwell = Math.round(h * (prints.length <= 1 ? 0.22 : 0.20 * prints.length));
     pin.style.height = (h + dwell) + 'px';
     pin.style.setProperty('--stage-h', h + 'px');
     pin.classList.add('is-pinned');
@@ -809,19 +811,21 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     if (!driving) { driving = true; if (book) book.classList.add('is-driving'); }
 
     var n = prints.length;
-    // Windows overlap by half, so one print is always arriving as another leaves and the sweep never
-    // stalls. The spacing keeps the first and last fully inside the hold.
-    var w = 2 / (n + 1);
-    var step = n > 1 ? (1 - w) / (n - 1) : 0;
+    // One window each, back to back — not overlapping. Each print rises, HOLDS at the front, then
+    // settles as the next arrives. The hold is the point: a photo you are given time to look at,
+    // and time for the line of text to finish typing, instead of a continuous sweep that has to be
+    // made longer (and so reads as repeating) to buy that time. Only one print leads at a time.
+    var w = 1 / n;
     var best = -1, bestLift = 0.02;
 
     for (var i = 0; i < n; i++) {
       var rest = REST[i] || REST[REST.length - 1];
-      var local = w > 0 ? (p - i * step) / w : -1;
+      var local = w > 0 ? (p - i * w) / w : -1;
       var lift = 0;
       if (local > 0 && local < 1) {
-        // Up and back down, each half eased on its own so the turn at the top is not a corner.
-        lift = local < 0.5 ? ease(local * 2) : 1 - ease((local - 0.5) * 2);
+        if (local < RISE) lift = ease(local / RISE);
+        else if (local > 1 - FALL) lift = 1 - ease((local - (1 - FALL)) / FALL);
+        else lift = 1;                                   // held at the front
       }
       if (lift > bestLift) { bestLift = lift; best = i; }
 
