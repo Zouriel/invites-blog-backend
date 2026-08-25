@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Infrastructure.Images;
 using Microsoft.Extensions.Logging.Abstractions;
 using SixLabors.ImageSharp;
@@ -119,6 +120,58 @@ public class ImageOptimizerTests
 
         using var img = Image.Load<Rgba32>(result.Content);
         Assert.Equal(0, img[0, 0].A);   // still transparent, not flattened onto black
+    }
+
+    [Fact]
+    public void A_gallery_print_is_capped_smaller_than_a_cover()
+    {
+        // A gallery print renders a couple of hundred CSS pixels wide, so cover resolution is bitmap
+        // the browser can never show. Six at the default came to 49 MB held at once and made the fan
+        // stutter on a phone.
+        var original = Photo(4032, 3024);
+
+        var result = Sut().Optimize(original, "image/jpeg", ImageEdgeCaps.Gallery);
+
+        Assert.Equal(ImageEdgeCaps.Gallery, result.Width);
+        Assert.True(ImageEdgeCaps.Gallery < ImageSharpOptimizer.MaxEdge);
+    }
+
+    [Fact]
+    public void Six_gallery_prints_come_down_to_a_fraction_of_the_bitmap()
+    {
+        // The number that actually matters is decoded pixels held at once, not the download.
+        var originals = Enumerable.Range(0, 6).Select(_ => Photo(2048, 1536)).ToList();
+
+        var atCover = originals.Select(o => DimensionsOf(Sut().Optimize(o, "image/jpeg").Content)).ToList();
+        var atGallery = originals
+            .Select(o => DimensionsOf(Sut().Optimize(o, "image/jpeg", ImageEdgeCaps.Gallery).Content)).ToList();
+
+        long Bitmap(List<(int Width, int Height)> d) => d.Sum(x => (long)x.Width * x.Height * 4);
+        Assert.True(Bitmap(atGallery) * 3 < Bitmap(atCover),
+            $"expected a big cut in held bitmap, got {Bitmap(atCover) / 1_000_000} MB -> {Bitmap(atGallery) / 1_000_000} MB");
+    }
+
+    [Fact]
+    public void A_slot_cannot_ask_for_more_pixels_than_the_pipeline_allows()
+    {
+        // The cap is a floor-lowering knob only; nothing gets to opt out of the pipeline's ceiling.
+        var original = Photo(4032, 3024);
+
+        var result = Sut().Optimize(original, "image/jpeg", 8000);
+
+        Assert.Equal(ImageSharpOptimizer.MaxEdge, result.Width);
+    }
+
+    [Fact]
+    public void A_photo_already_under_the_gallery_cap_is_not_upscaled()
+    {
+        var original = Photo(700, 500, quality: 70);
+
+        var result = Sut().Optimize(original, "image/jpeg", ImageEdgeCaps.Gallery);
+
+        var (w, h) = DimensionsOf(result.Changed ? result.Content : original);
+        Assert.Equal(700, w);
+        Assert.Equal(500, h);
     }
 
     // ----- when it must keep its hands off -----

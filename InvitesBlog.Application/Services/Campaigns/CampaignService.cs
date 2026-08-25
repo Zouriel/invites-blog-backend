@@ -415,7 +415,14 @@ public sealed class CampaignService(
         // Shrink before storing. A phone photo is routinely 4000px wide, and six of them in one
         // invitation is more bitmap than a browser will hold — which is what hung the page. The
         // optimizer keeps the format and hands back the original whenever rewriting wouldn't help.
-        var optimized = imageOptimizer.Optimize(content, contentType);
+        //
+        // A gallery print is capped harder than a cover. The cover is full-bleed and wants every pixel
+        // a phone can show; a print is one of six small photos in a fan, and storing those at cover
+        // resolution only buys the browser a bitmap three times larger than it can display — which is
+        // what made the fan stutter.
+        var optimized = imageOptimizer.Optimize(
+            content, contentType,
+            IsGallerySlot(campaign.TemplateManifestJson, slot) ? ImageEdgeCaps.Gallery : null);
         var stored = optimized.Content;
 
         var ext = System.IO.Path.GetExtension(fileName);
@@ -442,6 +449,34 @@ public sealed class CampaignService(
     private static readonly JsonSerializerOptions CamelCaseJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private const long MaxImageBytes = 20 * 1024 * 1024;
+
+    /// <summary>
+    /// True when this slot is a gallery — a <c>data-multiple</c> image slot in the campaign's pinned
+    /// manifest. A malformed or missing manifest simply means "not known to be a gallery", so the
+    /// upload takes the default cap rather than failing.
+    /// </summary>
+    private static bool IsGallerySlot(string? manifestJson, string? slot)
+    {
+        if (string.IsNullOrWhiteSpace(manifestJson) || string.IsNullOrWhiteSpace(slot)) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(manifestJson);
+            if (!doc.RootElement.TryGetProperty("imageSlots", out var slots)
+                || slots.ValueKind != System.Text.Json.JsonValueKind.Array) return false;
+            foreach (var s in slots.EnumerateArray())
+            {
+                if (!s.TryGetProperty("key", out var key)) continue;
+                if (!string.Equals(key.GetString(), slot.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                return s.TryGetProperty("multiple", out var m)
+                    && m.ValueKind == System.Text.Json.JsonValueKind.True;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not readable as a manifest; fall back to the default cap.
+        }
+        return false;
+    }
 
     private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
     {

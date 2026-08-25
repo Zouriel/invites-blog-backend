@@ -1,5 +1,25 @@
 namespace InvitesBlog.Application.Abstractions;
 
+/// <summary>
+/// Edge caps a caller can ask for when it knows how small a slot is actually rendered. This is policy,
+/// not capability: the optimizer decides how to shrink, the caller decides how much is worth keeping.
+/// </summary>
+public static class ImageEdgeCaps
+{
+    /// <summary>
+    /// Longest edge for an image the template shows as one of many small prints.
+    /// <para>
+    /// A gallery print in Gilded Hour renders about 180&#8211;260 CSS pixels wide, so even a 3x phone
+    /// asks for roughly 640 real pixels at full lift. Six stored at the pipeline's default came to
+    /// 49 MB of bitmap held at once, which is what made the fan stutter on a phone; at 1024 the same
+    /// six are about 17 MB. Nothing on screen changes &#8212; there were never enough pixels on the
+    /// display to show the difference. Kept well above the measured need so a tablet, or a future
+    /// layout that shows these larger, still has room.
+    /// </para>
+    /// </summary>
+    public const int Gallery = 1024;
+}
+
 /// <summary>The result of running an upload through the optimizer.</summary>
 /// <param name="Content">The bytes to store — the original when nothing was worth changing.</param>
 /// <param name="ContentType">Unchanged from the input: the optimizer never switches format.</param>
@@ -25,5 +45,10 @@ public sealed record OptimizedImage(
 /// </summary>
 public interface IImageOptimizer
 {
-    OptimizedImage Optimize(byte[] content, string contentType);
+    /// <param name="maxEdge">
+    /// Longest edge to keep, overriding the default. Pass a smaller cap for images the template only
+    /// ever renders small — a gallery print is a couple of hundred CSS pixels wide, so storing it at
+    /// full cover resolution buys nothing visible and costs the browser a much larger bitmap.
+    /// </param>
+    OptimizedImage Optimize(byte[] content, string contentType, int? maxEdge = null);
 }

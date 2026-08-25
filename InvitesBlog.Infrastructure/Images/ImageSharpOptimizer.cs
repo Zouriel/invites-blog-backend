@@ -22,14 +22,18 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
     /// </summary>
     public const int MaxEdge = 2048;
 
+
     /// <summary>High enough that the difference is invisible at these dimensions, well below the
     /// near-lossless quality phones encode at (which is where most of the file size goes).</summary>
     private const int JpegQuality = 82;
     private const int WebpQuality = 82;
 
-    public OptimizedImage Optimize(byte[] content, string contentType)
+    public OptimizedImage Optimize(byte[] content, string contentType, int? maxEdge = null)
     {
         var type = (contentType ?? string.Empty).ToLowerInvariant();
+        // A caller may cap smaller than the default, never larger — an image is not worth storing at
+        // more pixels than the pipeline's own ceiling just because a slot asked for it.
+        var edge = maxEdge is > 0 && maxEdge < MaxEdge ? maxEdge.Value : MaxEdge;
 
         // SVG is vector — resizing is meaningless and re-encoding would rasterise it. GIF and AVIF
         // are passed through rather than mangled: rewriting a GIF drops its animation, and this
@@ -42,10 +46,10 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
             using var image = Image.Load(content);
 
             var longest = Math.Max(image.Width, image.Height);
-            var needsResize = longest > MaxEdge;
+            var needsResize = longest > edge;
             if (needsResize)
             {
-                var scale = (double)MaxEdge / longest;
+                var scale = (double)edge / longest;
                 image.Mutate(x => x.Resize(new ResizeOptions
                 {
                     // Never upscale, and keep the aspect ratio — Max fits inside the box.
