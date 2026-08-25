@@ -400,6 +400,12 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    instead of blurring into one smeared collage. */
 .page {
   position: absolute; inset: 0; border-radius: 3px; box-sizing: border-box;
+  /* Size to the BOX, not to each photo. An <img> at inset:0 with auto width/height takes its size
+     from the photo's own aspect ratio — fine when a set of photos is roughly uniform, but a real
+     guest's set is not: 9:16 tall beside 4:3 wide beside square fans out as six different-sized
+     prints, several larger than this box, sprawling off both screen edges. The fan's rotate and
+     translate offsets assume ONE print size. object-fit: cover then crops each photo into it. */
+  width: 100%; height: 100%;
   background: var(--ink);
   padding: 10px 10px 30px;
   object-fit: cover;
@@ -504,6 +510,12 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 @media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
 @media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
 @media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
+/* The spread reaches ~770px wide once the prints are uniform, so on a phone the binding
+   constraint is width, not height. These come after the height steps so the narrower wins. */
+@media (max-width: 900px) { .book-stage { --fan-fit: .74; } }
+@media (max-width: 720px) { .book-stage { --fan-fit: .62; } }
+@media (max-width: 540px) { .book-stage { --fan-fit: .52; } }
+@media (max-width: 420px) { .book-stage { --fan-fit: .46; } }
 /* While the script is driving, the entrance transition must not also be chasing transform. */
 .book.is-driving .page { transition: none; }
 
