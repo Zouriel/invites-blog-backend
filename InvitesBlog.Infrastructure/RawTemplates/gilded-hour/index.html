@@ -483,14 +483,6 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    a stage with no height. Nothing here depends on the script having run. */
 .book-pin.is-pinned .book-stage { height: var(--stage-h); }
 
-.book-stage .sub {
-  margin-bottom: 8vh; position: relative; height: 1.7em;
-  align-self: stretch; padding: 0 6vw;
-}
-.book-stage .sub .line {
-  position: absolute; left: 0; right: 0; top: 0; margin: 0;
-  clip-path: inset(0 100% 0 0);
-}
 .book-stage .pages { transform: scale(var(--fan-fit, .84)); }
 @media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
 @media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
@@ -514,6 +506,25 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
    is that clearance, not decoration. The side padding matches .cover: without it a long note runs
    to within a few px of both screen edges on a phone, under the rose border. */
 .note { padding: 12vh 7vw 6vh; text-align: center; }
+/* The when and the where, moved here off the photo slide. The date leads in the accent, the venue
+   sits under it in the serif — the same pairing the details section uses, so the two read as one
+   voice rather than two different treatments of the same facts. */
+.note .when {
+  font-family: var(--sans); letter-spacing: .16em; text-transform: uppercase;
+  font-size: .78rem; color: var(--gold); margin: 0 0 .5rem;
+  /* .note p caps at 46ch, and ch is font-relative — in this smaller sans face that box comes out
+     far narrower than the serif one it was written for, which pulls the line off centre. These two
+     take the section's full width instead. */
+  max-width: none;
+  /* letter-spacing leaves a trailing gap after the last character; indenting by the same amount
+     puts the line back on the centre. */
+  text-indent: .16em;
+}
+.note .where {
+  font-family: var(--serif); font-style: italic; color: var(--ink);
+  font-size: clamp(1.2rem, 3.4vw, 1.6rem); margin: 0 0 1.6rem;
+  max-width: none;
+}
 .note p {
   font-family: var(--serif); font-style: italic; font-size: clamp(1.15rem, 2.6vw, 1.5rem);
   color: var(--rose); max-width: 46ch; margin: 0 auto;
@@ -659,10 +670,6 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
           <!-- Not a caption any more: the when and the where, typed out one after the other
                while the photos go by, so the hold does two jobs at once. Same variables the
                Details and Venue sections use, so the inviter fills them in once. -->
-          <p class="sub">
-            <span class="line"><span data-var="event.date">The date</span><span data-optional> · <span data-var="event.time">The time</span></span></span>
-            <span class="line"><span data-var="event.venue.name">The venue</span></span>
-          </p>
           <div class="pages">
             <img class="page" data-src="event.gallery" data-multiple="true" data-min-images="2" data-max-images="6" data-slot-label="Pages from her story" alt="">
           </div>
@@ -671,9 +678,13 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     </section>
 
     <section class="note" data-reveal>
+      <!-- The when and the where. They used to type out over the photos, which made that section
+           have to hold the screen long enough for them to finish; they read better here, still,
+           with the map link they belong next to. -->
+      <p class="when"><span data-var="event.date">The date</span><span data-optional> &middot; <span data-var="event.time">The time</span></span></p>
+      <p class="where" data-var="event.venue.name">The venue</p>
       <p data-optional data-var="event.note" data-field-label="Note" data-type="textarea">Anything your guests should know before the night.</p>
-      <!-- The venue name is typed out over the photos above; this is how you actually get
-           there. Optional, so it simply isn't rendered when no map link is given. -->
+      <!-- Optional, so it simply isn't rendered when no map link is given. -->
       <p class="note-map" data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open the location</a></p>
     </section>
 
@@ -694,8 +705,7 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
   </main>
 
 <script>
-/* The photo section: the prints fan open, then each takes its turn at the front as you scroll,
-   while the when and the where type out over them.
+/* The photo section: the prints fan open, then each takes its turn at the front as you scroll.
 
    Written from scratch in JavaScript, and the reasons are specific.
 
@@ -730,16 +740,8 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
      at the front, which is what gives you time to actually look at the photo. */
   var RISE = 0.20, FALL = 0.20;
 
-  /* The when and the where, typed and cleared while the photos go by. Fractions of the hold, so
-     they keep step with however many photos there are. */
-  var BEATS = [
-    { inA: 0.02, inB: 0.22, outA: 0.40, outB: 0.49 },
-    { inA: 0.55, inB: 0.75, outA: 0.94, outB: 1.00 }
-  ];
-  var TYPE_STEPS = 26;
-
-  var pin, stage, book, prints = [], lines = [];
-  var lastWidth = 0, lastTransform = [], lastClip = [], lastOpacity = [];
+  var pin, stage, book, prints = [];
+  var lastWidth = 0, lastTransform = [];
   var leader = -1, driving = false, queued = false;
 
   /* cubic-bezier(.37, 0, .63, 1) — the stylesheet's --ease-sine. Bisection: the curve is monotonic
@@ -787,11 +789,6 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       prints[i].style.transform = '';
       prints[i].style.zIndex = '';
       lastTransform[i] = '';
-    }
-    for (var j = 0; j < lines.length; j++) {
-      lines[j].style.clipPath = '';
-      lines[j].style.opacity = '';
-      lastClip[j] = ''; lastOpacity[j] = '';
     }
     leader = -1;
   }
@@ -842,14 +839,6 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       leader = best;
     }
 
-    for (var k = 0; k < lines.length && k < BEATS.length; k++) {
-      var b = BEATS[k];
-      var typed = Math.round(within(p, b.inA, b.inB) * TYPE_STEPS) / TYPE_STEPS;
-      var clip = 'inset(0 ' + ((1 - typed) * 100).toFixed(1) + '% 0 0)';
-      if (clip !== lastClip[k]) { lines[k].style.clipPath = clip; lastClip[k] = clip; }
-      var op = (1 - ease(within(p, b.outA, b.outB))).toFixed(2);
-      if (op !== lastOpacity[k]) { lines[k].style.opacity = op; lastOpacity[k] = op; }
-    }
   }
 
   function schedule() { if (!queued) { queued = true; requestAnimationFrame(frame); } }
@@ -860,8 +849,7 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     stage = document.querySelector('.book-stage');
     // The gallery images are cloned by the injector once data arrives, so this runs after it.
     prints = [].slice.call(document.querySelectorAll('.book .page'));
-    lines = [].slice.call(document.querySelectorAll('.book-stage .sub .line'));
-    lastTransform = []; lastClip = []; lastOpacity = []; leader = -1;
+    lastTransform = []; leader = -1;
     lastWidth = 0;
     measure();
     schedule();
