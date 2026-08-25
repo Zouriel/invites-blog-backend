@@ -165,13 +165,17 @@ public class ImageOptimizerTests
     [Fact]
     public void A_photo_already_under_the_gallery_cap_is_not_upscaled()
     {
-        var original = Photo(700, 500, quality: 70);
+        // Sized off the cap rather than a literal, so lowering the cap can't quietly turn this into a
+        // test that the photo IS resized — which is what happened when it moved from 1024 to 512.
+        var w0 = ImageEdgeCaps.Gallery / 2;
+        var h0 = ImageEdgeCaps.Gallery / 4;
+        var original = Photo(w0, h0, quality: 70);
 
         var result = Sut().Optimize(original, "image/jpeg", ImageEdgeCaps.Gallery);
 
         var (w, h) = DimensionsOf(result.Changed ? result.Content : original);
-        Assert.Equal(700, w);
-        Assert.Equal(500, h);
+        Assert.Equal(w0, w);
+        Assert.Equal(h0, h);
     }
 
     // ----- when it must keep its hands off -----

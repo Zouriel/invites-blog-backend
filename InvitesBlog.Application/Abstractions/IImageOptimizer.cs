@@ -9,15 +9,19 @@ public static class ImageEdgeCaps
     /// <summary>
     /// Longest edge for an image the template shows as one of many small prints.
     /// <para>
-    /// A gallery print in Gilded Hour renders about 180&#8211;260 CSS pixels wide, so even a 3x phone
-    /// asks for roughly 640 real pixels at full lift. Six stored at the pipeline's default came to
-    /// 49 MB of bitmap held at once, which is what made the fan stutter on a phone; at 1024 the same
-    /// six are about 17 MB. Nothing on screen changes &#8212; there were never enough pixels on the
-    /// display to show the difference. Kept well above the measured need so a tablet, or a future
-    /// layout that shows these larger, still has room.
+    /// The slots these land in are genuinely small. A gallery print in Gilded Hour is painted about
+    /// 249x280 CSS pixels even while it is lifted to the front, so 512 is roughly a 2x screen's worth
+    /// and about 60% of what a 3x phone would ask for. Measured against the originals at the size a
+    /// print is actually painted, that costs 1.3% mean difference versus 0.55% at 1024 — a little
+    /// softer if you go looking on the held photo, and not something you see in the fan.
+    /// </para>
+    /// <para>
+    /// What it buys is the memory the browser has to hold to draw six of them at once: 49 MB as
+    /// uploaded, 18 MB at 1024, 4.8 MB here. That is the number that makes the section stutter on a
+    /// phone, and it scales with pixels, not with file size.
     /// </para>
     /// </summary>
-    public const int Gallery = 1024;
+    public const int Gallery = 512;
 }
 
 /// <summary>The result of running an upload through the optimizer.</summary>
