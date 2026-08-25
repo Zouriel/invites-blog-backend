@@ -441,72 +441,153 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
 .book.is-visible .page:nth-child(6) { transform: rotate(31deg) translate(92px, 31px) scale(1); transition-delay: .5s; }
 
 /* ---- Progressive enhancement: the fan holds the screen and browses itself --------------
-   Everything above this point is the whole experience on every browser — the fan opens once
-   as you arrive, done. This block adds one thing on top, ONLY where the browser supports
-   scroll-driven animation: after the fan has spread, the section holds the viewport (the
-   stage goes sticky) and each photo in turn swings up to the front — left to right, one per
-   scroll beat — so you browse the whole set on the way down, and it un-browses right to left
-   on the way up.
+   Everything above this point is the whole experience on every browser — the fan opens once as you
+   arrive, done. This block adds one thing on top, ONLY where the browser supports scroll-driven
+   animation: after the fan has spread, the section holds the viewport and each print in turn swings
+   up to the front as you scroll, un-browsing on the way back up.
 
-   Why it's built this way, twice over:
-   - It can't ride on data-reveal's .is-visible. The platform's injector sets that once per
-     element and never clears it, so anything driven by it can only move forward. A view
-     timeline is a live readout of scroll position, recomputed every frame — reversing is
-     automatic, not something to build.
-   - The hold is a real sticky stage inside its own taller track, not a shared parent. Sticky
-     siblings under one big parent all stay stuck until the WHOLE parent is exhausted; each
-     one needs its own track, and that track has to be taller than the element or there's no
-     dwell at all and it just scrolls past.
+   This was rewritten in JavaScript for a while, on the belief that the CSS version was looping. It
+   was not: the injector was cloning the gallery on every apply, so six photos had become thirty-six
+   and the section was six times too long. With that fixed, the CSS version is both correct and
+   materially cheaper — it runs on the compositor, so the browser is not recalculating style for the
+   whole page (56 continuously animating roses and balloons included) sixty times a second. Measured
+   against the JavaScript driver on the same page: 16.7ms per frame against 20.4, and the
+   decorations cost nothing here where they cost ~3ms there.
 
-   The motion is the spread's motion: same rotate/translate/scale, same --ease-in-out curve.
-   A photo un-rotates most of the way upright, lifts, and grows — then settles back into the
-   fan exactly where it was, because the keyframes' rest state is read from the very values
-   the fan is arranged with (--pr/--px/--py below mirror the .book.is-visible rules above and
-   nothing else). animation-fill-mode is none on purpose: outside the pinned stretch the
-   animation contributes nothing at all, so the entrance spread runs untouched and the fan
-   sits at exactly its declared arrangement before and after. Unsupported browsers get none
-   of this — no pin, no sticky, no shuffle — and keep the section precisely as defined above. */
-/* The hold. Deliberately carries NO viewport units.
-   Every vh inside an iframe is relative to the FRAME, and the frame's height follows the phone's
-   URL bar. Sizing the track in vh therefore rescaled it whenever the bar moved, which re-mapped the
-   reader's position into a different part of the sweep and threw the photos backwards — the loop.
-   The script sets both heights in pixels instead, and recomputes them only when the WIDTH changes
-   (a rotation). A height-only change is the browser's own chrome and is ignored by design. */
-.book { overflow-x: clip; padding-bottom: 0; }
-.book-pin { position: relative; }
-.book-stage {
-  position: sticky; top: 0; overflow-x: clip;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-  padding-top: 3vh;
-}
-/* Until the script measures, the section still reads as an ordinary block: no hold, no clipping of
-   a stage with no height. Nothing here depends on the script having run. */
-.book-pin.is-pinned .book-stage { height: var(--stage-h); }
+   The motion is the spread's motion: same rotate/translate/scale, same curve. A print un-rotates
+   most of the way upright, lifts and grows, then settles back into the fan exactly where it was,
+   because the keyframes' rest state is read from the very values the fan is arranged with (--pr/--px
+   /--py below mirror the .book.is-visible rules above and nothing else). animation-fill-mode is none
+   on purpose: outside the held stretch this contributes nothing at all, so the entrance spread runs
+   untouched and the fan sits at exactly its declared arrangement before and after. */
+@supports (animation-timeline: view()) {
+  /* overflow-x: hidden above would make .book a scroll container, and a sticky child sticks to its
+     nearest scrolling ancestor — which would silently kill the hold. clip does the same clipping
+     without ever becoming one. */
+  .book { overflow-x: clip; padding-bottom: 0; }
 
-.book-stage .sub {
-  margin-bottom: 8vh; position: relative; height: 1.7em;
-  align-self: stretch; padding: 0 6vw;
+  /* The track. Its height beyond one screen IS the dwell — how far you scroll while the stage is
+     held — and it scales with how many photos there actually are, so a two-photo fan doesn't hold
+     the screen as long as a six-photo one.
+
+     34% of a screen per print, measured off the thumb rather than taste: a phone swipe moves
+     roughly 300px, which gives each print about one swipe from arriving to settling and ~170px
+     actually held at the front. At the 20% this used to be, one flick cleared three photos and a
+     line of text crossed its whole typing range inside a single gesture, so it appeared rather
+     than typed. */
+  .book-pin {
+    --n: 6; --dwell: 204dvh;
+    position: relative; min-height: calc(100dvh + var(--dwell));
+    view-timeline-name: --book-pin; view-timeline-axis: block;
+  }
+  .book-pin:has(.page:only-child) { --n: 1; --dwell: 34dvh; }
+  .book-pin:has(.page:nth-child(2):last-child) { --n: 2; --dwell: 68dvh; }
+  .book-pin:has(.page:nth-child(3):last-child) { --n: 3; --dwell: 102dvh; }
+  .book-pin:has(.page:nth-child(4):last-child) { --n: 4; --dwell: 136dvh; }
+  .book-pin:has(.page:nth-child(5):last-child) { --n: 5; --dwell: 170dvh; }
+  .book-pin:has(.page:nth-child(6):last-child) { --n: 6; --dwell: 204dvh; }
+
+  .book-stage {
+    position: sticky; top: 0; height: 100dvh; overflow-x: clip;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding-top: 3vh;
+  }
+
+  /* Held, the two lines occupy the same spot and take turns, so the space is reserved once and they
+     are stacked rather than flowing. align-self: stretch is load-bearing — both lines are absolutely
+     positioned, so this flex item has no in-flow content left to size it, and without stretching it
+     collapses to zero width and the text wraps one word per row. */
+  .book-stage .sub {
+    margin-bottom: 8vh; position: relative; height: 1.7em;
+    align-self: stretch; padding: 0 6vw;
+  }
+  .book-stage .sub .line {
+    position: absolute; left: 0; right: 0; top: 0; margin: 0;
+    /* Typed by clipping from the right in steps, not by animating width. Width would have to grow
+       from nothing, and a centred box that grows slides sideways the whole time it is typing;
+       clipping leaves the box exactly where it will end up and only uncovers it. steps() is what
+       makes it read as typing rather than a wipe. */
+    clip-path: inset(0 100% 0 0);
+    animation-name: type-in, type-out;
+    /* forwards, not both: before its window the line is untouched — that is the base above, clipped
+       shut — and after it, it holds open instead of snapping shut again. */
+    animation-fill-mode: forwards, forwards;
+    animation-timing-function: steps(26, end), var(--ease-sine);
+    animation-timeline: --book-pin, --book-pin;
+  }
+  /* Line one types early and clears at the halfway point; line two takes over and holds to the end
+     of the photos. Percentages of the hold, so these keep step with however many photos there are. */
+  .book-stage .sub .line:nth-child(1) {
+    animation-range: contain 2% contain 22%, contain 40% contain 49%;
+  }
+  .book-stage .sub .line:nth-child(2) {
+    animation-range: contain 55% contain 75%, contain 94% contain 100%;
+  }
+
+  .book-stage .pages { transform: scale(var(--fan-fit, .84)); }
+  /* The prints are a fixed pixel size, so the fan does not shrink on a short screen the way
+     vh-sized things do. In normal flow that was fine (the section just grew); held to exactly one
+     screen it is not, so step the fit down as the screen gets shorter. */
+  @media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
+  @media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
+  @media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
+  @media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
+  @media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
+  /* With uniform prints the spread is ~628px wide, so on a phone the binding constraint is width,
+     not height. Sized so the fan lands just inside the screen at each step — any smaller and the
+     photos stop being readable, which is the whole point of showing them. These come after the
+     height steps so the narrower constraint wins. */
+  @media (max-width: 900px) { .book-stage { --fan-fit: .95; } }
+  @media (max-width: 720px) { .book-stage { --fan-fit: .82; } }
+  @media (max-width: 540px) { .book-stage { --fan-fit: .66; } }
+  @media (max-width: 420px) { .book-stage { --fan-fit: .58; } }
+
+  /* Rest state, read straight off the fanned arrangement above — these mirror it, they never
+     redefine it. --pz mirrors the stacking the fan already has. */
+  .book .page { --pr: 0deg; --px: 0px; --py: 0px; --pz: 1; }
+  .book .page:nth-child(1) { --i: 1; --pr: -21deg; --px: -92px; --py: 19px; }
+  .book .page:nth-child(2) { --i: 2; --pr: -11deg; --px: -55px; --py: 6px; }
+  .book .page:nth-child(3) { --i: 3; --pr: 2deg;   --px: -19px; --py: 0px;  --pz: 3; }
+  .book .page:nth-child(4) { --i: 4; --pr: 13deg;  --px: 21px;  --py: 9px; }
+  .book .page:nth-child(5) { --i: 5; --pr: 23deg;  --px: 58px;  --py: 17px; }
+  .book .page:nth-child(6) { --i: 6; --pr: 31deg;  --px: 92px;  --py: 31px; }
+
+  /* One window per photo across the held stretch, and the windows deliberately OVERLAP by exactly
+     half: 200%/(n+1) long, spaced so each print starts its rise at the precise moment the one
+     before it reaches the front. That ratio is the whole trick — back-to-back windows moved in
+     separate beats (up, all the way down, stop, next), and the pause between beats is what read as
+     choppy; at half-overlap one print is always arriving as another leaves, so the sweep never
+     stops moving. The spacing still puts the first and last windows fully inside the hold, so no
+     print is cut off mid-move at either end, and the sixth is the last thing that happens — the
+     section releases as it comes back down. `contain` is exactly the span during which the track
+     covers the viewport: the hold. */
+  .book .page {
+    animation-name: page-to-front; animation-fill-mode: none;
+    animation-timing-function: var(--ease-sine); animation-timeline: --book-pin;
+    --span: calc(200% / (var(--n) + 1));
+    --step: calc((100% - var(--span)) / max(1, var(--n) - 1));
+    animation-range:
+      contain calc((var(--i) - 1) * var(--step))
+      contain calc((var(--i) - 1) * var(--step) + var(--span));
+  }
 }
-.book-stage .sub .line {
-  position: absolute; left: 0; right: 0; top: 0; margin: 0;
-  clip-path: inset(0 100% 0 0);
+@keyframes type-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
 }
-.book-stage .pages { transform: scale(var(--fan-fit, .84)); }
-@media (max-height: 880px) { .book-stage { --fan-fit: .76; } }
-@media (max-height: 800px) { .book-stage { --fan-fit: .70; } }
-@media (max-height: 740px) { .book-stage { --fan-fit: .64; } }
-@media (max-height: 680px) { .book-stage { --fan-fit: .54; } }
-@media (max-height: 620px) { .book-stage { --fan-fit: .48; } }
-/* With uniform prints the spread is ~628px wide, so on a phone the binding constraint is width,
-   not height. Sized so the fan lands just inside the screen at each step — any smaller and the
-   photos stop being readable, which is the whole point of showing them. These come after the
-   height steps so the narrower constraint wins. */
-@media (max-width: 900px) { .book-stage { --fan-fit: .95; } }
-@media (max-width: 720px) { .book-stage { --fan-fit: .82; } }
-@media (max-width: 540px) { .book-stage { --fan-fit: .66; } }
-@media (max-width: 420px) { .book-stage { --fan-fit: .58; } }
-/* While the script is driving, the entrance transition must not also be chasing transform. */
-.book.is-driving .page { transition: none; }
+@keyframes type-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+/* Rest -> front -> rest, in the fan's own vocabulary: swing most of the way upright, lift, grow.
+   z-index rides the same curve rather than snapping, so where two prints overlap mid-handoff the
+   one nearer its peak is the one in front — they trade places at the crossing point instead of one
+   jumping over the other. */
+@keyframes page-to-front {
+  0%   { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
+  50%  { transform: rotate(calc(var(--pr) * .28)) translate(var(--px), calc(var(--py) - 20px)) scale(1.18); z-index: 30; }
+  100% { transform: rotate(var(--pr)) translate(var(--px), var(--py)) scale(1); z-index: var(--pz); }
+}
 
 /* ---------- A note, plainly stated -------------------------------------------------- */
 /* The fanned prints above are sticky-pinned and reach past their own box, so at the handoff the
@@ -693,201 +774,6 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
     </footer>
   </main>
 
-<script>
-/* The photo section: the prints fan open, then each takes its turn at the front as you scroll,
-   while the when and the where type out over them.
 
-   Written from scratch in JavaScript, and the reasons are specific.
-
-   1. The track is sized in PIXELS, by this script, and re-measured only when the width changes.
-      Every vh inside an iframe is relative to the frame, and the frame's height follows the phone's
-      URL bar — so a vh-sized track was being rescaled mid-scroll, which re-mapped the reader's
-      position into a different part of the sweep and threw the photos backwards. A height-only
-      change is the browser's own chrome; it is ignored on purpose. Rotating re-measures.
-
-   2. Nothing expensive is animated. Only `transform` changes per frame, and only when its value
-      actually differs from what was last written. z-index is touched twice per handoff — when the
-      print at the front changes — rather than sixty times a second, because that churn is what was
-      repainting the fixed roses and balloons across the rest of the page.
-
-   3. It degrades to nothing. Without this script the section is a normal block that fans open on
-      arrival, which is what the stylesheet alone already does. If any of it throws, every print is
-      handed straight back to the stylesheet. */
-(function () {
-  'use strict';
-
-  /* The fanned arrangement, mirroring .book.is-visible .page:nth-child(n) in the stylesheet. */
-  var REST = [
-    { r: -21, x: -92, y: 19 },
-    { r: -11, x: -55, y:  6 },
-    { r:   2, x: -19, y:  0 },
-    { r:  13, x:  21, y:  9 },
-    { r:  23, x:  58, y: 17 },
-    { r:  31, x:  92, y: 31 }
-  ];
-  var LIFT_PX = 20, GROW = 0.18, UNTWIST = 0.72;
-  /* Fractions of one print's window spent arriving and leaving; the remainder — 60% — is spent held
-     at the front, which is what gives you time to actually look at the photo. */
-  var RISE = 0.20, FALL = 0.20;
-
-  /* The when and the where, typed and cleared while the photos go by. Fractions of the hold, so
-     they keep step with however many photos there are. */
-  var BEATS = [
-    { inA: 0.02, inB: 0.22, outA: 0.40, outB: 0.49 },
-    { inA: 0.55, inB: 0.75, outA: 0.94, outB: 1.00 }
-  ];
-  var TYPE_STEPS = 26;
-
-  var pin, stage, book, prints = [], lines = [];
-  var lastWidth = 0, lastTransform = [], lastClip = [], lastOpacity = [];
-  var leader = -1, driving = false, queued = false;
-
-  /* cubic-bezier(.37, 0, .63, 1) — the stylesheet's --ease-sine. Bisection: the curve is monotonic
-     in x, so twenty halvings put us well inside a pixel. */
-  function ease(t) {
-    if (!(t > 0)) return 0;
-    if (t >= 1) return 1;
-    var lo = 0, hi = 1, u = 0.5, i, v, x;
-    for (i = 0; i < 20; i++) {
-      u = (lo + hi) * 0.5; v = 1 - u;
-      x = 3 * v * v * u * 0.37 + 3 * v * u * u * 0.63 + u * u * u;
-      if (x < t) lo = u; else hi = u;
-    }
-    v = 1 - u;
-    return 3 * v * u * u + u * u * u;
-  }
-
-  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
-  function within(v, a, b) { return b > a ? clamp01((v - a) / (b - a)) : 0; }
-
-  /* Measure once per width. Height changes alone are the URL bar and must NOT resize the track. */
-  function measure() {
-    if (!pin || !prints.length) return;
-    var w = window.innerWidth;
-    if (w === lastWidth) return;
-    lastWidth = w;
-
-    var h = window.innerHeight;
-    // Per photo, as a fraction of a screen. Sized off the thumb, not off taste: a phone swipe moves
-    // roughly 300px, so a third of a screen gives each print about one swipe from arriving to
-    // settling and ~170px actually held at the front. At the 0.20 this used to be, a print got 169px
-    // end to end and 101px of hold — one flick cleared three of them, and the line of text crossed
-    // its whole typing range inside a single gesture, so it appeared rather than typed.
-    // With back-to-back windows the last print settles right at the end of the hold, so there is no
-    // trailing stretch with nothing happening — the section releases as the sixth comes back down.
-    var dwell = Math.round(h * (prints.length <= 1 ? 0.34 : 0.34 * prints.length));
-    pin.style.height = (h + dwell) + 'px';
-    pin.style.setProperty('--stage-h', h + 'px');
-    pin.classList.add('is-pinned');
-  }
-
-  function release() {
-    if (!driving) return;
-    driving = false;
-    if (book) book.classList.remove('is-driving');
-    for (var i = 0; i < prints.length; i++) {
-      prints[i].style.transform = '';
-      prints[i].style.zIndex = '';
-      lastTransform[i] = '';
-    }
-    for (var j = 0; j < lines.length; j++) {
-      lines[j].style.clipPath = '';
-      lines[j].style.opacity = '';
-      lastClip[j] = ''; lastOpacity[j] = '';
-    }
-    leader = -1;
-  }
-
-  function frame() {
-    queued = false;
-    if (!pin || !prints.length) return;
-
-    var box = pin.getBoundingClientRect();
-    var travel = box.height - window.innerHeight;
-    var p = travel > 0 ? (-box.top) / travel : 0;
-
-    // Outside the hold the stylesheet owns the prints: the entrance spread plays untouched, and the
-    // fan sits at its declared arrangement once the section is behind you.
-    if (p <= 0 || p >= 1) { release(); return; }
-
-    if (!driving) { driving = true; if (book) book.classList.add('is-driving'); }
-
-    var n = prints.length;
-    // One window each, back to back — not overlapping. Each print rises, HOLDS at the front, then
-    // settles as the next arrives. The hold is the point: a photo you are given time to look at,
-    // and time for the line of text to finish typing, instead of a continuous sweep that has to be
-    // made longer (and so reads as repeating) to buy that time. Only one print leads at a time.
-    var w = 1 / n;
-    var best = -1, bestLift = 0.02;
-
-    for (var i = 0; i < n; i++) {
-      var rest = REST[i] || REST[REST.length - 1];
-      var local = w > 0 ? (p - i * w) / w : -1;
-      var lift = 0;
-      if (local > 0 && local < 1) {
-        if (local < RISE) lift = ease(local / RISE);
-        else if (local > 1 - FALL) lift = 1 - ease((local - (1 - FALL)) / FALL);
-        else lift = 1;                                   // held at the front
-      }
-      if (lift > bestLift) { bestLift = lift; best = i; }
-
-      var t = 'rotate(' + (rest.r * (1 - UNTWIST * lift)).toFixed(2) + 'deg) translate(' +
-              rest.x + 'px,' + (rest.y - LIFT_PX * lift).toFixed(1) + 'px) scale(' +
-              (1 + GROW * lift).toFixed(3) + ')';
-      if (t !== lastTransform[i]) { prints[i].style.transform = t; lastTransform[i] = t; }
-    }
-
-    // Two writes when the front print changes, instead of six every frame.
-    if (best !== leader) {
-      if (leader >= 0) prints[leader].style.zIndex = '';
-      if (best >= 0) prints[best].style.zIndex = '10';
-      leader = best;
-    }
-
-    for (var k = 0; k < lines.length && k < BEATS.length; k++) {
-      var b = BEATS[k];
-      var typed = Math.round(within(p, b.inA, b.inB) * TYPE_STEPS) / TYPE_STEPS;
-      var clip = 'inset(0 ' + ((1 - typed) * 100).toFixed(1) + '% 0 0)';
-      if (clip !== lastClip[k]) { lines[k].style.clipPath = clip; lastClip[k] = clip; }
-      var op = (1 - ease(within(p, b.outA, b.outB))).toFixed(2);
-      if (op !== lastOpacity[k]) { lines[k].style.opacity = op; lastOpacity[k] = op; }
-    }
-  }
-
-  function schedule() { if (!queued) { queued = true; requestAnimationFrame(frame); } }
-
-  function collect() {
-    book = document.querySelector('.book');
-    pin = document.querySelector('.book-pin');
-    stage = document.querySelector('.book-stage');
-    // The gallery images are cloned by the injector once data arrives, so this runs after it.
-    prints = [].slice.call(document.querySelectorAll('.book .page'));
-    lines = [].slice.call(document.querySelectorAll('.book-stage .sub .line'));
-    lastTransform = []; lastClip = []; lastOpacity = []; leader = -1;
-    lastWidth = 0;
-    measure();
-    schedule();
-  }
-
-  function onResize() {
-    // Width-gated inside measure(); a URL-bar height change reaches here and is deliberately ignored.
-    measure();
-    schedule();
-  }
-
-  try {
-    addEventListener('scroll', schedule, { passive: true });
-    addEventListener('resize', onResize);
-    addEventListener('orientationchange', function () { lastWidth = 0; onResize(); });
-    addEventListener('invite:data', function () { setTimeout(collect, 0); });
-    if (document.readyState === 'loading') addEventListener('DOMContentLoaded', collect);
-    else collect();
-    // Photos arriving change nothing about the track, but the first frame should reflect them.
-    addEventListener('load', schedule);
-  } catch (e) {
-    release();
-  }
-})();
-</script>
 </body>
 </html>
