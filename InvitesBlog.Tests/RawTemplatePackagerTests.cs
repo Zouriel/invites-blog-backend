@@ -325,10 +325,26 @@ public class RawTemplatePackagerTests
 
         var result = await sut.PublishAsync("nice-one", "1.0.0", Page("hi"), allowScripts: true, poster: poster);
 
-        Assert.Equal("/assets/templates/nice-one@1.0.0/poster.webp", result.PosterUrl);
-        Assert.True(written.ContainsKey("templates/nice-one@1.0.0/poster.webp"));
-        Assert.Equal("image/webp", written["templates/nice-one@1.0.0/poster.webp"].Type);
-        Assert.Equal(poster, written["templates/nice-one@1.0.0/poster.webp"].Content);
+        var key = written.Keys.Single(k => k.Contains("poster."));
+        Assert.Matches(@"^templates/nice-one@1\.0\.0/poster\.[0-9a-f]{8}\.webp$", key);
+        Assert.Equal("/assets/" + key, result.PosterUrl);
+        Assert.Equal("image/webp", written[key].Type);
+        Assert.Equal(poster, written[key].Content);
+    }
+
+    [Fact]
+    public async Task Changing_a_poster_changes_its_url()
+    {
+        // The package path is versioned, but a poster can be corrected without a version bump. A fixed
+        // filename meant the edge kept serving the old picture for hours after the bytes had changed.
+        var (sut, _) = Recording();
+
+        var first = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [1, 2, 3]);
+        var same = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [1, 2, 3]);
+        var changed = await sut.PublishAsync("x", "1.0.0", Page("hi"), allowScripts: true, poster: [9, 9, 9]);
+
+        Assert.Equal(first.PosterUrl, same.PosterUrl);        // same bytes, same URL — no churn
+        Assert.NotEqual(first.PosterUrl, changed.PosterUrl);  // new bytes, new URL — nothing to go stale
     }
 
     [Fact]

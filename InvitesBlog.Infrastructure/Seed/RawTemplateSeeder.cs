@@ -99,12 +99,15 @@ public sealed class RawTemplateSeeder(
                 existing.Version = meta.Version;
                 existing.ManifestJson = published.ManifestJson;
                 existing.PackageUrl = published.PackageUrl;
-                // Keep a real card image; only replace the live-page stand-in. A stand-in is any URL
-                // still pointing at index.html — that is not an image, and a gallery that "previews" a
-                // template by rendering the whole template is what this replaces.
-                if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
-                    || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
-                    existing.PreviewImageUrl = published.PosterUrl ?? $"{published.PackageUrl}index.html";
+                // A first-party template SHIPS its card image, so the shipped one wins — that is how a
+                // corrected poster reaches the gallery, and its filename changes with its content.
+                // Without a shipped poster, only the live-page stand-in is replaced: a stand-in is any
+                // URL still pointing at index.html, which is a page, not an image.
+                if (published.PosterUrl is { Length: > 0 })
+                    existing.PreviewImageUrl = published.PosterUrl;
+                else if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
+                         || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
+                    existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
                 // Re-apply the declared visibility only while the row is STILL dedicated. Dedicated to
                 // Public is a one-way door owned by the consent flow (TemplateReleaseService) and by
                 // admin, so a restart must never quietly reverse a release — or re-privatize a template

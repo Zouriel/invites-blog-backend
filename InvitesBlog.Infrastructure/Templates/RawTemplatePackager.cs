@@ -146,8 +146,13 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         string? posterUrl = null;
         if (poster is { Length: > 0 })
         {
-            await storage.PutAsync($"{basePath}/poster.webp", poster, "image/webp", ct);
-            posterUrl = storage.PublicUrl($"{basePath}/poster.webp");
+            // Content-addressed: the filename carries a hash of the bytes, so re-publishing a CHANGED
+            // poster produces a different URL. The package path is versioned but a poster can be
+            // corrected without a version bump, and a fixed name meant caches kept serving the old
+            // picture — the edge held it for hours after the file behind it had already changed.
+            var name = $"poster.{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(poster))[..8].ToLowerInvariant()}.webp";
+            await storage.PutAsync($"{basePath}/{name}", poster, "image/webp", ct);
+            posterUrl = storage.PublicUrl($"{basePath}/{name}");
         }
 
         return new RawPublishedPackage(storage.PublicUrl($"{basePath}/"), manifest, manifestJson, posterUrl);
