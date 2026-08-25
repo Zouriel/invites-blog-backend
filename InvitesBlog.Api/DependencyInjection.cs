@@ -28,7 +28,11 @@ public static class DependencyInjection
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
-        services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 20 * 1024 * 1024);
+        // Sits ABOVE the 20 MB image cap on purpose: this bounds the whole multipart envelope —
+        // boundaries, headers and any other form fields — so a file exactly at the cap would trip a
+        // limit set to the same number, and the caller would see a protocol error instead of the
+        // "Images must be 20 MB or smaller." message the service is there to give them.
+        services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 24 * 1024 * 1024);
 
         services.AddCors(o => o.AddDefaultPolicy(p => p
             .WithOrigins(

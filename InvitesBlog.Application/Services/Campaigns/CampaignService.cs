@@ -407,7 +407,7 @@ public sealed class CampaignService(
         if (content.Length == 0)
             throw new Exceptions.BusinessRuleException("The image file is empty.", "empty_image");
         if (content.Length > MaxImageBytes)
-            throw new Exceptions.BusinessRuleException("Images must be 5 MB or smaller.", "image_too_large");
+            throw new Exceptions.BusinessRuleException("Images must be 20 MB or smaller.", "image_too_large");
         if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             throw new Exceptions.BusinessRuleException("Only image files can be uploaded here.", "not_an_image");
 
@@ -434,7 +434,7 @@ public sealed class CampaignService(
 
     private static readonly JsonSerializerOptions CamelCaseJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    private const long MaxImageBytes = 5 * 1024 * 1024;
+    private const long MaxImageBytes = 20 * 1024 * 1024;
 
     private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
     {
