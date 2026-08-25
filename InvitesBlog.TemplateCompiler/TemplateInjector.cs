@@ -44,6 +44,10 @@ public static class TemplateInjector
             }
           }
 
+          // Serial number per authored gallery slot, so each pass can find and clear the clones it
+          // made last time. Lives outside apply() because apply() runs many times.
+          var galleryGroups = 0;
+
           function apply(data) {
             data = data || {};
             applyTheme(data.themeVars);
@@ -65,11 +69,29 @@ public static class TemplateInjector
               if (Object.prototype.toString.call(sv) === '[object Array]') {
                 // A gallery slot: the authored element is the template for the first photo and is
                 // cloned for the rest, so the author's markup and styling carry to every image.
+                //
+                // Expansion has to be idempotent. apply() runs more than once by design — the inline
+                // payload first, then again for every __inviteData the host posts, and the editor
+                // posts one on every edit. A clone carries data-src and data-multiple exactly like
+                // the element it came from, so a second pass used to expand the clones too: six
+                // photos became thirty-six, a third pass two hundred and sixteen. In an invitation
+                // that reads as the same few photos cycling past over and over before the section
+                // will let you scroll on. So: a clone is never itself expanded, and the clones from
+                // the previous pass are cleared before this pass builds its set.
+                if (img.getAttribute('data-gallery-clone')) continue;
                 if (!sv.length) continue;
+                var gid = img.getAttribute('data-gallery-of');
+                if (!gid) { gid = 'g' + (++galleryGroups); img.setAttribute('data-gallery-of', gid); }
+                var stale = document.querySelectorAll('[data-gallery-clone="' + gid + '"]');
+                for (var x = 0; x < stale.length; x++) {
+                  if (stale[x].parentNode) stale[x].parentNode.removeChild(stale[x]);
+                }
                 img.setAttribute('src', String(sv[0]));
                 var anchor = img;
                 for (var g = 1; g < sv.length; g++) {
                   var clone = img.cloneNode(true);
+                  clone.removeAttribute('data-gallery-of');
+                  clone.setAttribute('data-gallery-clone', gid);
                   clone.setAttribute('src', String(sv[g]));
                   anchor.parentNode.insertBefore(clone, anchor.nextSibling);
                   anchor = clone;

@@ -298,4 +298,21 @@ public class RawTemplatePackagerTests
         Assert.Contains("querySelectorAll('[data-src]')", TemplateInjector.Js);
         Assert.DoesNotContain("querySelector('[data-var]')", TemplateInjector.Js);
     }
+
+    [Fact]
+    public void Expanding_a_gallery_a_second_time_does_not_multiply_it()
+    {
+        // apply() runs once for the inline payload and again for every __inviteData the host posts
+        // (the editor posts one per edit). A clone carries data-src and data-multiple exactly like the
+        // element it was cloned from, so the second pass used to expand the clones too: six photos
+        // became thirty-six, a third pass two hundred and sixteen. In the invitation that read as the
+        // same handful of photos cycling past over and over before the section would let you scroll on.
+        //
+        // Verified in a browser against both versions: 6 -> 36 -> 216 before, 6 -> 6 -> 6 after. There
+        // is no JS engine here to re-run that, so this pins the two halves of the guard instead — a
+        // clone is never itself expanded, and last pass's clones are cleared before this pass builds.
+        Assert.Contains("if (img.getAttribute('data-gallery-clone')) continue;", TemplateInjector.Js);
+        Assert.Contains("clone.setAttribute('data-gallery-clone', gid);", TemplateInjector.Js);
+        Assert.Contains("removeChild(stale[x])", TemplateInjector.Js);
+    }
 }
