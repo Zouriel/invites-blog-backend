@@ -23,6 +23,7 @@ namespace InvitesBlog.Application.Services.Campaigns;
 /// </summary>
 public sealed class CampaignService(
     ICurrentUser currentUser,
+    IImageOptimizer imageOptimizer,
     ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IInviterRepository inviters,
@@ -411,10 +412,16 @@ public sealed class CampaignService(
         if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             throw new Exceptions.BusinessRuleException("Only image files can be uploaded here.", "not_an_image");
 
+        // Shrink before storing. A phone photo is routinely 4000px wide, and six of them in one
+        // invitation is more bitmap than a browser will hold — which is what hung the page. The
+        // optimizer keeps the format and hands back the original whenever rewriting wouldn't help.
+        var optimized = imageOptimizer.Optimize(content, contentType);
+        var stored = optimized.Content;
+
         var ext = System.IO.Path.GetExtension(fileName);
         if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
         var key = $"campaigns/{campaign.Id:N}/images/{Guid.NewGuid():N}{ext}";
-        var url = await storage.PutAsync(key, content, contentType, ct);
+        var url = await storage.PutAsync(key, stored, contentType, ct);
 
         await campaignAssets.AddAsync(new CampaignAsset
         {
@@ -422,7 +429,7 @@ public sealed class CampaignService(
             CampaignId = campaign.Id,
             Url = url,
             ContentType = contentType,
-            SizeBytes = content.Length,
+            SizeBytes = stored.Length,
             Slot = string.IsNullOrWhiteSpace(slot) ? null : slot.Trim(),
             CreatedAt = DateTimeOffset.UtcNow
         }, ct);

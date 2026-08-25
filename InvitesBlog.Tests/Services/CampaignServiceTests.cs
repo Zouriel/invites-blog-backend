@@ -47,8 +47,15 @@ public class CampaignServiceTests
     private ICampaignOwnershipService Ownership() =>
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters);
 
+    /// The real optimizer: image handling is part of what upload does, so stubbing it would stop
+    /// these tests noticing if it started corrupting or dropping uploads.
+    private readonly IImageOptimizer _imageOptimizer =
+        new InvitesBlog.Infrastructure.Images.ImageSharpOptimizer(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                InvitesBlog.Infrastructure.Images.ImageSharpOptimizer>.Instance);
+
     private CampaignService Sut() => new(
-        _currentUser, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
+        _currentUser, _imageOptimizer, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
         _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _contentV, _venueV, _inviterV, _deliveryV);
 

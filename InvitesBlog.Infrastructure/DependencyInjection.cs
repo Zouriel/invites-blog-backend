@@ -99,6 +99,10 @@ public static class DependencyInjection
         }
         services.AddSingleton<Email.ResendWebhookVerifier>();
 
+        // Stateless and thread-safe, so one instance serves every upload. Named *Optimizer rather
+        // than *Service, so Scrutor's convention scan doesn't pick it up — registered explicitly.
+        services.AddSingleton<IImageOptimizer, Images.ImageSharpOptimizer>();
+
         // OTP senders (email + sms), resolved by channel. Only channels in Otp:Channels are enabled.
         // SMS goes through MsgOwl once Sms:MsgOwl:ApiKey is set; without a key we fall back to the
         // console sender so local development still shows the code instead of failing.
