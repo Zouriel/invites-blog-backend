@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using InvitesBlog.Api.Rendering;
 using Xunit;
 
@@ -108,6 +109,26 @@ public class GuestCameraPageTests
         Assert.Contains("Starting the camera", html);
         // Keyed on the absence of a state, so it clears the moment the stream arrives or is refused.
         Assert.Contains("body:not([data-state]) .starting", html);
+    }
+
+    /// <summary>
+    /// The script and the markup are written in two different files and shipped as one document, so
+    /// nothing but this notices when they drift. A renamed id is not a build error — it is a null at
+    /// a party, on the one control someone is reaching for.
+    /// </summary>
+    [Fact]
+    public void Every_element_the_script_reaches_for_exists_in_the_page()
+    {
+        var html = Page();
+
+        var wanted = Regex.Matches(html, @"\$\('([^']+)'\)")
+            .Select(m => m.Groups[1].Value).Distinct().ToList();
+        var present = Regex.Matches(html, @"id=""([^""]+)""")
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        Assert.NotEmpty(wanted);
+        var missing = wanted.Where(w => !present.Contains(w)).ToList();
+        Assert.True(missing.Count == 0, "Script asks for ids the page does not have: " + string.Join(", ", missing));
     }
 
     /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
