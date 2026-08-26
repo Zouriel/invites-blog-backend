@@ -118,6 +118,19 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
     /// Sets the campaign's cover photo — the tile it shows wherever it is listed rather than opened.
     /// Send <c>null</c> to clear it and fall back to the template's preview.
     /// </summary>
+    /// <summary>
+    /// Renames the campaign — the name the host files it under, not the title their guests read
+    /// inside the invitation.
+    /// </summary>
+    [HttpPut("{id:guid}/title")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> Rename(
+        Guid id, [FromBody] RenameCampaignRequest req, CancellationToken ct)
+    {
+        await campaigns.RenameAsync(id, req, ct);
+        return SuccessMessage("Renamed.");
+    }
+
     [HttpPut("{id:guid}/cover")]
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> SetCover(

@@ -20,6 +20,11 @@ public interface ICampaignService
     /// post a blob it never read, overwriting whatever the builder last wrote.
     /// </summary>
     Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default);
+
+    /// <summary>
+    /// Renames the campaign — the name the host files it under, not the title inside the invitation.
+    /// </summary>
+    Task RenameAsync(Guid id, RenameCampaignRequest req, CancellationToken ct = default);
     Task UpdateVenueAsync(Guid id, UpdateVenueRequest req, CancellationToken ct = default);
 
     Task<RsvpQuestionsResponse> GetRsvpQuestionsAsync(Guid id, CancellationToken ct = default);

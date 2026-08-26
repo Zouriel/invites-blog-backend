@@ -37,6 +37,7 @@ public class CampaignServiceTests
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
 
     private IValidator<CreateCampaignRequest> _createV = TestData.PassingValidator<CreateCampaignRequest>();
+    private IValidator<RenameCampaignRequest> _renameV = TestData.PassingValidator<RenameCampaignRequest>();
     private IValidator<UpdateContentRequest> _contentV = TestData.PassingValidator<UpdateContentRequest>();
     private IValidator<UpdateVenueRequest> _venueV = TestData.PassingValidator<UpdateVenueRequest>();
     private IValidator<UpdateInviterRequest> _inviterV = TestData.PassingValidator<UpdateInviterRequest>();
@@ -57,7 +58,7 @@ public class CampaignServiceTests
     private CampaignService Sut() => new(
         _currentUser, _imageOptimizer, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
         _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
-        new PhoneNormalizer(), _config, _createV, _contentV, _venueV, _inviterV, _deliveryV);
+        new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV);
 
     private void Own(Campaign c)
     {

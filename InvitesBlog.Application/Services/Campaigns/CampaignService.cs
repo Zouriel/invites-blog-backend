@@ -44,6 +44,7 @@ public sealed class CampaignService(
     PhoneNormalizer phones,
     IConfiguration config,
     IValidator<CreateCampaignRequest> createValidator,
+    IValidator<RenameCampaignRequest> renameValidator,
     IValidator<UpdateContentRequest> contentValidator,
     IValidator<UpdateVenueRequest> venueValidator,
     IValidator<UpdateInviterRequest> inviterValidator,
@@ -396,6 +397,18 @@ public sealed class CampaignService(
                 });
         campaign.RulesJson = new JsonObject { ["rules"] = rulesArray }.ToJsonString();
 
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task RenameAsync(Guid id, RenameCampaignRequest req, CancellationToken ct = default)
+    {
+        await renameValidator.ValidateAndThrowAsync(req, ct);
+        var campaign = await LoadOwnedAsync(id, ct);
+
+        // The slug is deliberately NOT regenerated. It is baked into links that have already been
+        // sent, and a rename is a host tidying their own list — not a reason to break a guest's URL.
+        campaign.Title = req.Title.Trim();
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
     }

@@ -10,6 +10,14 @@ public sealed record CreateCampaignRequest(Guid TemplateId, string Title);
 /// <summary>The campaign's cover photo. Null clears it, falling back to the template's preview.</summary>
 public sealed record SetCoverRequest(string? Url);
 
+/// <summary>
+/// Renames the campaign. This is the name the HOST files it under — what they see in their list and
+/// on the dashboard — not the title printed inside the invitation, which is a template field the
+/// guests read. Campaigns are created named after their template ("Gilded Hour invitation"), so
+/// without this every invitation a host makes from one template is indistinguishable from the rest.
+/// </summary>
+public sealed record RenameCampaignRequest(string Title);
+
 public sealed record UpdateContentRequest(
     string? CustomContentJson,
     string? ThemeOverridesJson,
