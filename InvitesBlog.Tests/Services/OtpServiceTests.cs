@@ -64,16 +64,63 @@ public class OtpServiceTests
     [Fact]
     public async Task Request_over_send_limit_throws_RateLimit()
     {
-        _challenges.CountRecentSendsAsync(null, "user@test.com", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _challenges.CountRecentSendsAsync(null, "user@test.com", Arg.Any<OtpPurpose>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(3);
         var req = new SendOtpRequest("email", null, "user@test.com", null);
         await Assert.ThrowsAsync<OtpRateLimitException>(() => Sut().RequestAsync(req));
     }
 
     [Fact]
+    public async Task A_spent_reauth_budget_does_not_stop_the_same_person_signing_in()
+    {
+        // The lockout this split exists to prevent. Reauth fires whenever a personal invite link is
+        // opened from an unrecognised IP — which a phone does just by moving between wifi and mobile
+        // data. When both flows shared one allowance, three such opens left the guest unable to sign
+        // in at all for an hour.
+        _challenges.CountRecentSendsAsync(null, "user@test.com", OtpPurpose.InviteReauth,
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(3);
+        _challenges.CountRecentSendsAsync(null, "user@test.com", OtpPurpose.SignIn,
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var res = await Sut().RequestAsync(new SendOtpRequest("email", null, "user@test.com", null));
+
+        Assert.True(res.ExpiresInSeconds > 0);
+    }
+
+    [Fact]
+    public async Task Each_budget_still_has_its_own_ceiling()
+    {
+        // Splitting them must not uncap either one: a leaked link should not be able to mail-bomb a
+        // guest just because sign-in codes are counted elsewhere.
+        _challenges.CountRecentSendsAsync(null, "user@test.com", OtpPurpose.InviteReauth,
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(3);
+
+        await Assert.ThrowsAsync<OtpRateLimitException>(() => Sut().RequestAsync(
+            new SendOtpRequest("email", null, "user@test.com", null), OtpPurpose.InviteReauth));
+    }
+
+    [Fact]
+    public async Task A_code_records_which_budget_it_came_from()
+    {
+        OtpChallenge? saved = null;
+        await _challenges.AddAsync(Arg.Do<OtpChallenge>(c => saved = c), Arg.Any<CancellationToken>());
+        _challenges.CountRecentSendsAsync(null, "user@test.com", Arg.Any<OtpPurpose>(),
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        await Sut().RequestAsync(
+            new SendOtpRequest("email", null, "user@test.com", null), OtpPurpose.InviteReauth);
+
+        Assert.Equal(OtpPurpose.InviteReauth, saved!.Purpose);
+    }
+
+    [Fact]
     public async Task Request_success_persists_challenge_and_sends_code()
     {
-        _challenges.CountRecentSendsAsync(null, "user@test.com", Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _challenges.CountRecentSendsAsync(null, "user@test.com", Arg.Any<OtpPurpose>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(0);
         var req = new SendOtpRequest("email", null, "user@test.com", null);
 

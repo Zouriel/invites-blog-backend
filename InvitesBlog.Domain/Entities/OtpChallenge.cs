@@ -14,4 +14,10 @@ public sealed class OtpChallenge
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? VerifiedAt { get; set; }
+
+    /// <summary>
+    /// Which send budget this code was drawn from. Reauth and sign-in are counted separately so that
+    /// one cannot lock a guest out of the other — see <see cref="OtpPurpose"/>.
+    /// </summary>
+    public OtpPurpose Purpose { get; set; }
 }

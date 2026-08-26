@@ -30,7 +30,8 @@ public sealed class OtpService(
     private const int MaxAttempts = 5;
     private const int MaxSendsPerHour = 3;
 
-    public async Task<OtpChallengeResponse> RequestAsync(SendOtpRequest req, CancellationToken ct = default)
+    public async Task<OtpChallengeResponse> RequestAsync(
+        SendOtpRequest req, OtpPurpose purpose = OtpPurpose.SignIn, CancellationToken ct = default)
     {
         await sendValidator.ValidateAndThrowAsync(req, ct);
 
@@ -59,9 +60,12 @@ public sealed class OtpService(
             recipient = email;
         }
 
-        // Send limits (§11.1): 3 per contact per hour.
+        // Send limits (§11.1): 3 per contact per hour, counted PER PURPOSE. Reauth on a personal
+        // invite link fires whenever the guest opens it from an unrecognised IP — which a phone does
+        // routinely, just by moving between wifi and mobile data. Sharing one allowance meant three
+        // such opens locked the same guest out of signing in for an hour.
         var since = DateTimeOffset.UtcNow.AddHours(-1);
-        var recentSends = await challenges.CountRecentSendsAsync(phone, email, since, ct);
+        var recentSends = await challenges.CountRecentSendsAsync(phone, email, purpose, since, ct);
         if (recentSends >= MaxSendsPerHour) throw new OtpRateLimitException();
 
         var expiryMinutes = int.TryParse(config["Otp:ExpiryMinutes"], out var m) ? m : 5;
@@ -75,7 +79,8 @@ public sealed class OtpService(
             CodeHash = TokenService.Hash(code),
             Attempts = 0,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(expiryMinutes),
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = DateTimeOffset.UtcNow,
+            Purpose = purpose
         };
         await challenges.AddAsync(challenge, ct);
         await uow.SaveChangesAsync(ct);
@@ -110,7 +115,7 @@ public sealed class OtpService(
             if (!onList) return new CampaignOtpResponse(false, false, null, 0);
 
             var smsChallenge = await RequestAsync(
-                new SendOtpRequest("sms", norm.E164, null, req.DefaultCountry), ct);
+                new SendOtpRequest("sms", norm.E164, null, req.DefaultCountry), ct: ct);
             return new CampaignOtpResponse(true, false, smsChallenge.ChallengeId, smsChallenge.ExpiresInSeconds);
         }
 
@@ -120,7 +125,7 @@ public sealed class OtpService(
             string.Equals(g.Email!.Trim(), normalized, StringComparison.OrdinalIgnoreCase));
         if (!invited) return new CampaignOtpResponse(false, false, null, 0);
 
-        var challenge = await RequestAsync(new SendOtpRequest("email", null, normalized, null), ct);
+        var challenge = await RequestAsync(new SendOtpRequest("email", null, normalized, null), ct: ct);
         return new CampaignOtpResponse(true, false, challenge.ChallengeId, challenge.ExpiresInSeconds);
     }
 

@@ -398,7 +398,7 @@ public sealed class AccountService(
         if (LooksLikeEmail(raw))
         {
             var email = raw.ToLowerInvariant();
-            var challenge = await otp.RequestAsync(new SendOtpRequest("email", null, email, null), ct);
+            var challenge = await otp.RequestAsync(new SendOtpRequest("email", null, email, null), ct: ct);
             return new CodeSentResponse(challenge.ChallengeId, "email", MaskEmail(email), challenge.ExpiresInSeconds);
         }
 
@@ -411,7 +411,7 @@ public sealed class AccountService(
         if (!normalized.IsUsable)
             throw new BusinessRuleException("That doesn't look like a valid phone number.", "invalid_phone");
 
-        var sms = await otp.RequestAsync(new SendOtpRequest("sms", normalized.E164, null, request.DefaultCountry), ct);
+        var sms = await otp.RequestAsync(new SendOtpRequest("sms", normalized.E164, null, request.DefaultCountry), ct: ct);
         return new CodeSentResponse(sms.ChallengeId, "sms", MaskPhone(normalized.E164!), sms.ExpiresInSeconds);
     }
 

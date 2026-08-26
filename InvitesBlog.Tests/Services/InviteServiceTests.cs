@@ -173,14 +173,16 @@ public class InviteServiceTests
         var invite = TestData.Invite(guest.CampaignId, guest.Id);
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
-        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>())
+        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<OtpPurpose>(), Arg.Any<CancellationToken>())
             .Returns(new OtpChallengeResponse(Guid.NewGuid(), 300));
 
         await Sut().RequestReauthAsync("tok");
 
+        // The purpose matters as much as the channel: reauth must draw on its own send budget, or
+        // three network changes leave the guest unable to sign in at all for an hour.
         await _otp.Received(1).RequestAsync(
             Arg.Is<SendOtpRequest>(r => r.Channel == "email" && r.Email == "guest@test.com"),
-            Arg.Any<CancellationToken>());
+            OtpPurpose.InviteReauth, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -190,14 +192,14 @@ public class InviteServiceTests
         var invite = TestData.Invite(guest.CampaignId, guest.Id);
         _invites.GetByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(invite);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
-        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>())
+        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<OtpPurpose>(), Arg.Any<CancellationToken>())
             .Returns(new OtpChallengeResponse(Guid.NewGuid(), 300));
 
         await Sut().RequestReauthAsync("tok");
 
         await _otp.Received(1).RequestAsync(
             Arg.Is<SendOtpRequest>(r => r.Channel == "sms" && r.Phone == "+9607771234"),
-            Arg.Any<CancellationToken>());
+            OtpPurpose.InviteReauth, Arg.Any<CancellationToken>());
     }
 
     [Fact]

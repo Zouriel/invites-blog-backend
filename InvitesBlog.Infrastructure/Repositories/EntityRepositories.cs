@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Persistence;
@@ -66,8 +67,12 @@ public sealed class PaymentRepository(AppDbContext db) : BaseRepository<Payment>
 
 public sealed class OtpChallengeRepository(AppDbContext db) : BaseRepository<OtpChallenge>(db), IOtpChallengeRepository
 {
-    public Task<int> CountRecentSendsAsync(string? phone, string? email, DateTimeOffset since, CancellationToken ct = default) =>
-        Set.CountAsync(c => c.CreatedAt >= since &&
+    // Counts within ONE purpose's budget. Reauth codes and sign-in codes go to the same contact but
+    // must not share an allowance: a guest whose IP moved three times would otherwise be unable to
+    // sign in at all for an hour.
+    public Task<int> CountRecentSendsAsync(
+        string? phone, string? email, OtpPurpose purpose, DateTimeOffset since, CancellationToken ct = default) =>
+        Set.CountAsync(c => c.CreatedAt >= since && c.Purpose == purpose &&
             (phone != null ? c.PhoneE164 == phone : c.Email == email), ct);
 }
 

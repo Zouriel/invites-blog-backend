@@ -77,6 +77,22 @@ public enum OtpChannel
 }
 
 /// <summary>
+/// What a code was sent FOR. Not a label — it partitions the per-contact send budget, so that
+/// re-proving yourself on a personal invite link cannot exhaust the allowance you need to sign in,
+/// or the other way round. Never settable by a caller: the service that starts the flow decides.
+/// Numeric values are pinned — the column is persisted as an int, so members may be appended but
+/// never reordered.
+/// </summary>
+public enum OtpPurpose
+{
+    /// <summary>Signing in — the inbox, and the shared campaign link.</summary>
+    SignIn = 0,
+
+    /// <summary>Re-proving a personal invite link from a network it doesn't recognise.</summary>
+    InviteReauth = 1
+}
+
+/// <summary>
 /// The review status machine a designer submission walks. Numeric values are pinned: the column is
 /// persisted as an int, so members may be appended but never reordered.
 /// </summary>

@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Otp;
@@ -151,7 +152,7 @@ public class ContactLinkServiceTests
         await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().RequestLinkCodeAsync("s•••r@example.com"));
 
-        await _otp.DidNotReceive().RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>());
+        await _otp.DidNotReceive().RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<OtpPurpose>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -228,7 +229,7 @@ public class ContactLinkServiceTests
         NoExistingLinks();
         _guests.Query().Returns(new[] { GuestRow(Email, Phone) }.AsAsyncQueryable());
         var challengeId = Guid.NewGuid();
-        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<CancellationToken>())
+        _otp.RequestAsync(Arg.Any<SendOtpRequest>(), Arg.Any<OtpPurpose>(), Arg.Any<CancellationToken>())
             .Returns(new OtpChallengeResponse(challengeId, 300));
 
         var id = await Sut().RequestLinkCodeAsync(MaskedEmail);
@@ -236,6 +237,6 @@ public class ContactLinkServiceTests
         Assert.Equal(challengeId, id);
         await _otp.Received().RequestAsync(
             Arg.Is<SendOtpRequest>(r => r.Channel == "email" && r.Email == Email),
-            Arg.Any<CancellationToken>());
+            OtpPurpose.SignIn, Arg.Any<CancellationToken>());
     }
 }

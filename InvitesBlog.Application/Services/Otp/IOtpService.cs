@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Dtos.Otp;
 
 namespace InvitesBlog.Application.Services.Otp;
@@ -5,7 +6,13 @@ namespace InvitesBlog.Application.Services.Otp;
 /// <summary>OTP request/verify for invitee inbox login (§10.7).</summary>
 public interface IOtpService
 {
-    Task<OtpChallengeResponse> RequestAsync(SendOtpRequest req, CancellationToken ct = default);
+    /// <param name="purpose">
+    /// Which send budget to draw from. Deliberately a parameter rather than a field on
+    /// <see cref="SendOtpRequest"/> — a caller that could name its own purpose could pick the emptier
+    /// allowance and sidestep the limit entirely.
+    /// </param>
+    Task<OtpChallengeResponse> RequestAsync(
+        SendOtpRequest req, OtpPurpose purpose = OtpPurpose.SignIn, CancellationToken ct = default);
     Task<OtpTokensResponse> VerifyAsync(VerifyOtpRequest req, CancellationToken ct = default);
 
     /// <summary>Guest-list-gated OTP for the shared campaign link: only sends a code if the contact —

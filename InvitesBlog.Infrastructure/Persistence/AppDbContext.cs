@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -182,6 +183,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.PhoneE164, x.ExpiresAt }).HasDatabaseName("idx_otp_phone_expires");
             e.HasIndex(x => new { x.Email, x.ExpiresAt }).HasDatabaseName("idx_otp_email_expires");
+            // Existing rows predate the split and were all sign-in codes; 0 is SignIn.
+            e.Property(x => x.Purpose).HasDefaultValue(OtpPurpose.SignIn);
         });
 
         b.Entity<RsvpResponse>(e =>

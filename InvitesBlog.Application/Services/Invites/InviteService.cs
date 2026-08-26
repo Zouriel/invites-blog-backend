@@ -331,12 +331,14 @@ public sealed class InviteService(
         if (!string.IsNullOrWhiteSpace(guest.Email))
         {
             channel = "email";
-            challenge = await otp.RequestAsync(new SendOtpRequest("email", null, guest.Email, null), ct);
+            challenge = await otp.RequestAsync(
+                new SendOtpRequest("email", null, guest.Email, null), OtpPurpose.InviteReauth, ct);
         }
         else if (!string.IsNullOrWhiteSpace(guest.PhoneE164))
         {
             channel = "sms";
-            challenge = await otp.RequestAsync(new SendOtpRequest("sms", guest.PhoneE164, null, null), ct);
+            challenge = await otp.RequestAsync(
+                new SendOtpRequest("sms", guest.PhoneE164, null, null), OtpPurpose.InviteReauth, ct);
         }
         else
         {

@@ -44,7 +44,7 @@ public sealed class ContactLinkService(
         var req = otherType == "email"
             ? new SendOtpRequest("email", null, target, null)
             : new SendOtpRequest("sms", target, null, null);
-        var challenge = await otp.RequestAsync(req, ct);
+        var challenge = await otp.RequestAsync(req, ct: ct);
         return challenge.ChallengeId;
     }
 

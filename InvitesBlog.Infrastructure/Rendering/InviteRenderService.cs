@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using InvitesBlog.Application.Abstractions;
@@ -91,7 +92,14 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
         // Inviter-filled dynamic fields + images, keyed by their data-var/href/src path. Each value is
         // placed at its path, so any field an author adds to a template just resolves — no server-side
         // whitelist. The whitelisted event object above stays as the default.
-        ApplyPathMap(data, content["fields"] as JsonObject, guest.Role);
+        // Field TYPES come from the same frozen manifest, so a date entered in the builder is
+        // formatted the way the template's own fallback would have formatted it.
+        var fieldTypes = manifest?.Fields?
+            .Where(f => !string.IsNullOrWhiteSpace(f.Key))
+            .GroupBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Type, StringComparer.OrdinalIgnoreCase);
+
+        ApplyPathMap(data, content["fields"] as JsonObject, guest.Role, fieldTypes);
         ApplyPathMap(data, content["imageSlots"] as JsonObject, guest.Role);
 
         // Serve the package the campaign PINNED, not whatever the template points at now — an
@@ -110,7 +118,9 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
     /// <c>{ "value": …, "roles": [...] }</c>, in which case an empty/absent role list still means
     /// everyone and a populated one means only those roles. A value may be an array (a gallery slot).
     /// </summary>
-    private static void ApplyPathMap(JsonObject data, JsonObject? map, string? guestRole)
+    private static void ApplyPathMap(
+        JsonObject data, JsonObject? map, string? guestRole,
+        IReadOnlyDictionary<string, string>? fieldTypes = null)
     {
         if (map is null) return;
         foreach (var (path, node) in map)
@@ -131,9 +141,36 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             }
 
             var text = value.ToString();
-            if (!string.IsNullOrWhiteSpace(text)) SetPath(data, path, text);
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            // A date picker stores 2026-08-28 and a time picker 22:00. Those are storage formats, not
+            // something to show a guest — and because a saved field OVERWRITES the nicely formatted
+            // default built from EventStartAt above, the raw value was what actually reached the
+            // invitation. Format by the manifest's declared input kind.
+            if (fieldTypes is not null && fieldTypes.TryGetValue(path, out var kind))
+                text = FormatByKind(text, kind);
+
+            SetPath(data, path, text);
         }
     }
+
+    /// <summary>
+    /// Renders a stored field value the way a reader should see it, for the input kinds whose storage
+    /// format is not a display format. Anything that doesn't parse is passed through untouched — an
+    /// unreadable date is still better than a blank line where the date should be.
+    /// </summary>
+    private static string FormatByKind(string text, string? kind) => kind?.ToLowerInvariant() switch
+    {
+        // Same shapes the whitelisted defaults above use, so a field-supplied date and a fallback
+        // date read identically.
+        "date" => DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? d.ToString("dddd, d MMMM yyyy")
+            : text,
+        "time" => TimeOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t)
+            ? t.ToString("h:mm tt")
+            : text,
+        _ => text
+    };
 
     /// <summary>An empty or absent role list means "everyone"; otherwise the guest's role must be listed.</summary>
     private static bool AppliesTo(JsonArray? roles, string? guestRole)

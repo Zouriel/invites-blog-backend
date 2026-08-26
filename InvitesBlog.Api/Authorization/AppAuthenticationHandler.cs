@@ -82,12 +82,18 @@ public sealed class AppAuthenticationHandler(
         // Public permission set that gates open endpoints.
         var identity = new ClaimsIdentity(authenticated ? SchemeName : null);
 
+        // Roles that arrived on the token already; only the rest need synthesizing. Checking the
+        // claims themselves rather than "was `extra` supplied" — an invitee JWT carries contact claims
+        // but NO role, and a campaign possession token carries only campaign_id, so both used to end
+        // up with the right PERMISSIONS but no role claim at all, leaving CurrentUser.Role reading
+        // Public for every authenticated caller.
+        var present = extra?.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value)
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+
         var granted = new HashSet<string>(StringComparer.Ordinal);
         foreach (var role in roles)
         {
-            // The role claim may already be among `extra` (it came off the JWT); adding it twice
-            // would duplicate it, so only synthesize roles for the non-JWT paths.
-            if (extra is null) identity.AddClaim(new Claim(ClaimTypes.Role, role));
+            if (!present.Contains(role)) identity.AddClaim(new Claim(ClaimTypes.Role, role));
             if (Roles.Definitions.TryGetValue(role, out var perms)) granted.UnionWith(perms);
         }
         foreach (var p in granted) identity.AddClaim(new Claim(AppClaims.Permission, p));

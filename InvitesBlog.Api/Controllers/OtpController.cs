@@ -19,7 +19,7 @@ public sealed class OtpController(IOtpService otp) : BaseApiController
     // Named RequestCode, not Request: an action called Request hides ControllerBase.Request (the
     // incoming HttpRequest), which is a trap for anyone who later reaches for it here.
     public async Task<IActionResult> RequestCode([FromBody] SendOtpRequest req, CancellationToken ct) =>
-        Success(await otp.RequestAsync(req, ct));
+        Success(await otp.RequestAsync(req, ct: ct));
 
     [HttpPost("verify")]
     [AllowAnonymous]

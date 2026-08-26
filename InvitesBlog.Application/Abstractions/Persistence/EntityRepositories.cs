@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Domain.Entities;
 
 namespace InvitesBlog.Application.Abstractions.Persistence;
@@ -50,7 +51,7 @@ public interface IPaymentRepository : IRepository<Payment>
 
 public interface IOtpChallengeRepository : IRepository<OtpChallenge>
 {
-    Task<int> CountRecentSendsAsync(string? phone, string? email, DateTimeOffset since, CancellationToken ct = default);
+    Task<int> CountRecentSendsAsync(string? phone, string? email, OtpPurpose purpose, DateTimeOffset since, CancellationToken ct = default);
 }
 
 public interface ISuppressionRepository : IRepository<SuppressionEntry>

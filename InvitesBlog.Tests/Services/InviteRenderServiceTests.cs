@@ -256,4 +256,62 @@ public class InviteRenderServiceTests
         var blocks = Assert.IsType<JsonArray>(data["resolvedBlocks"]);
         Assert.Contains(blocks, b => b!.ToString() == "vipSchedule");
     }
+
+    // --- Date and time fields are stored in a machine format and must not reach a guest that way ---
+
+    private const string DateTimeManifest = """
+        {"fields":[
+          {"key":"event.date","label":"Date","type":"date"},
+          {"key":"event.time","label":"Time","type":"time"},
+          {"key":"event.note","label":"Note","type":"text"}
+        ]}
+        """;
+
+    [Fact]
+    public void A_date_field_is_shown_the_way_the_fallback_would_have_shown_it()
+    {
+        // The builder's date picker stores 2026-08-28. Because a saved field OVERWRITES the formatted
+        // default built from EventStartAt, that raw value used to be what the guest actually read.
+        var campaign = Campaign(
+            """{"fields":{"event.date":"2026-08-28","event.time":"22:00"}}""",
+            manifest: DateTimeManifest);
+
+        var data = Render(campaign, Guest("guest"));
+
+        Assert.Equal("Friday, 28 August 2026", At(data, "event.date"));
+        Assert.Equal("10:00 PM", At(data, "event.time"));
+    }
+
+    [Fact]
+    public void A_field_that_is_not_a_date_is_left_exactly_as_entered()
+    {
+        var campaign = Campaign(
+            """{"fields":{"event.note":"2026-08-28 was the day we met"}}""",
+            manifest: DateTimeManifest);
+
+        Assert.Equal("2026-08-28 was the day we met", At(Render(campaign, Guest("guest")), "event.note"));
+    }
+
+    [Fact]
+    public void A_date_that_cannot_be_parsed_is_passed_through_rather_than_blanked()
+    {
+        // An unreadable date still beats an empty line where the date should be.
+        var campaign = Campaign(
+            """{"fields":{"event.date":"the last Friday in August"}}""",
+            manifest: DateTimeManifest);
+
+        Assert.Equal("the last Friday in August", At(Render(campaign, Guest("guest")), "event.date"));
+    }
+
+    [Fact]
+    public void A_field_the_manifest_does_not_declare_is_left_alone()
+    {
+        // Fields outside the manifest still resolve — that is the point of the path map — they just
+        // get no formatting, because nothing said what kind of value they hold.
+        var campaign = Campaign(
+            """{"fields":{"event.somethingNew":"2026-08-28"}}""",
+            manifest: DateTimeManifest);
+
+        Assert.Equal("2026-08-28", At(Render(campaign, Guest("guest")), "event.somethingNew"));
+    }
 }
