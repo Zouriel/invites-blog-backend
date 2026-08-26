@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
@@ -167,6 +168,71 @@ public sealed class InviteService(
     {
         var invite = await invites.GetByIdAsync(inviteId, ct);
         return invite is null ? null : (invite.CampaignId, invite.GuestId);
+    }
+
+    /// <summary>
+    /// The palette the guest's own invitation renders in.
+    ///
+    /// <para>The pages either side of the invitation used to paint themselves in one fixed dark gold,
+    /// which matched exactly the templates that happened to be dark and gold. Every other campaign
+    /// sent its guests from their invitation to an RSVP form that looked like a different product.
+    /// The colours are read from the same two places the invitation reads them: the frozen manifest's
+    /// declared defaults, with the campaign's own theme choices laid over the top.</para>
+    /// </summary>
+    public async Task<GuestThemeResponse?> GuestThemeAsync(Guid inviteId, CancellationToken ct = default)
+    {
+        var invite = await invites.GetByIdAsync(inviteId, ct);
+        if (invite is null) return null;
+
+        var campaign = await campaigns.GetByIdAsync(invite.CampaignId, ct);
+        if (campaign is null) return null;
+
+        var guest = await guests.GetByIdAsync(invite.GuestId, ct);
+
+        // The template's authored defaults, from the manifest the campaign froze at booking.
+        var declared = ParseJsonObject(campaign.TemplateManifestJson)?["theme"] as JsonObject;
+        var accent = declared?["accentColor"]?.ToString();
+        var background = declared?["backgroundColor"]?.ToString();
+        var text = declared?["textColor"]?.ToString();
+
+        // The inviter's choices, shared first and then anything scoped to this guest's role.
+        foreach (var layer in ThemeLayers(campaign.ThemeOverridesJson, guest?.Role))
+        {
+            if (layer["accentColor"]?.ToString() is { Length: > 0 } a) accent = a;
+            if (layer["backgroundColor"]?.ToString() is { Length: > 0 } b) background = b;
+            if (layer["textColor"]?.ToString() is { Length: > 0 } t) text = t;
+        }
+
+        return new GuestThemeResponse(accent, background, text);
+    }
+
+    /// <summary>
+    /// The override objects to apply, in order. A flat object is the old shape and counts as shared;
+    /// the newer shape splits <c>shared</c> from per-role blocks. Mirrors the renderer's resolution so
+    /// the pages either side of an invitation cannot disagree with it about the colours.
+    /// </summary>
+    private static IEnumerable<JsonObject> ThemeLayers(string themeJson, string? role)
+    {
+        if (ParseJsonObject(themeJson) is not { } theme) yield break;
+
+        var structured = theme["shared"] is JsonObject || theme["roles"] is JsonObject;
+        if (!structured) { yield return theme; yield break; }
+
+        if (theme["shared"] is JsonObject shared) yield return shared;
+
+        if (!string.IsNullOrWhiteSpace(role) && theme["roles"] is JsonObject byRole)
+        {
+            var match = byRole.FirstOrDefault(kv =>
+                string.Equals(kv.Key, role, StringComparison.OrdinalIgnoreCase)).Value;
+            if (match is JsonObject scoped) yield return scoped;
+        }
+    }
+
+    private static JsonObject? ParseJsonObject(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return JsonNode.Parse(json) as JsonObject; }
+        catch (JsonException) { return null; }
     }
 
     public async Task<Guid?> MyGuestIdAsync(Guid campaignId, CancellationToken ct = default)

@@ -55,6 +55,16 @@ public sealed class Campaign
     public bool HasDesignerDiscount { get; set; }
     public bool IsSensitive { get; set; }                     // §4.9.1 OTP-before-view
     public int RetentionDays { get; set; } = 90;              // §15.4
+
+    /// <summary>
+    /// When the last "new photos" digest went out for this campaign, or null if none ever has.
+    /// <para>
+    /// This is what makes the digest a digest. Photos newer than this are what the next one covers,
+    /// and nothing is sent until a quiet period has passed since it — so a party where fifteen people
+    /// upload all evening produces one email, not one per upload and certainly not one per photo.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? PhotosNotifiedAt { get; set; }
     public string CustomContentJson { get; set; } = "{}";
     public string ThemeOverridesJson { get; set; } = "{}";
     public string DeliverySettingsJson { get; set; } = "{}";

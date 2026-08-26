@@ -41,6 +41,12 @@ public interface IInviteService
     Task<(Guid CampaignId, Guid GuestId)?> InviteSubjectAsync(Guid inviteId, CancellationToken ct = default);
 
     /// <summary>
+    /// The palette the guest's invitation actually renders in — the template's declared defaults with
+    /// the campaign's theme choices laid over them, resolved for this guest's role.
+    /// </summary>
+    Task<GuestThemeResponse?> GuestThemeAsync(Guid inviteId, CancellationToken ct = default);
+
+    /// <summary>
     /// Builds the payload for an invite the caller has ALREADY been authorized to see. Does no access
     /// check of its own — it is the tail of a flow whose head did the checking, which is why it takes
     /// an id rather than a token. The server-rendered guest path uses it: admission happens once at

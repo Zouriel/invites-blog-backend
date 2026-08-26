@@ -1,6 +1,7 @@
 using InvitesBlog.Api;
 using InvitesBlog.Api.Middleware;
 using InvitesBlog.Infrastructure;
+using InvitesBlog.Infrastructure.Notifications;
 using InvitesBlog.Infrastructure.Seed;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -8,6 +9,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInvitesBlogInfrastructure(builder.Configuration);
 builder.Services.AddInvitesBlogApi(builder.Configuration);
+// Tells an event's people about new photos, once per quiet period. Registered here rather than in the
+// worker because the worker is not deployed; it must stay registered in exactly one host, or the
+// digest goes out twice. Dormant unless Notifications:PhotoDigest:Enabled is true.
+builder.Services.AddHostedService<PhotoDigestService>();
 
 var app = builder.Build();
 

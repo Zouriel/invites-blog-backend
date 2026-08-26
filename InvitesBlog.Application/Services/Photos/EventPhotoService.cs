@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Photos;
@@ -33,6 +34,23 @@ public interface IEventPhotoService
     /// host holding <see cref="Permissions.Photos.Moderate"/> over the campaign.
     /// </summary>
     Task DeleteAsync(Guid campaignId, Guid photoId, Guid? actingGuestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes the originals as a zip into <paramref name="destination"/>. Pass the ids to take some of
+    /// them, or null/empty for the whole box.
+    ///
+    /// <para>Gated by the same two doors as <see cref="GetAsync"/> and nothing more: anyone who can
+    /// SEE the gallery can keep what is in it. Everyone in these photographs was at the same party.</para>
+    /// </summary>
+    /// <param name="begin">
+    /// Called once with the filename to offer, after the caller is authorized and there is known to be
+    /// something to send, and before a single byte is written. It returns the stream to write into.
+    /// The handshake exists because a response's headers are gone the moment the body starts — a name
+    /// worked out afterwards would never reach the browser.
+    /// </param>
+    Task WriteArchiveAsync(
+        Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids,
+        Func<string, Stream> begin, CancellationToken ct = default);
 }
 
 /// <inheritdoc cref="IEventPhotoService"/>
@@ -172,6 +190,108 @@ public sealed class EventPhotoService(
         photo.DeletedAt = DateTimeOffset.UtcNow;
         photos.Update(photo);
         await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task WriteArchiveAsync(
+        Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids,
+        Func<string, Stream> begin, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+
+        if (!await MayHostAsync(campaignId, ct) && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
+            throw new ForbiddenException("This photo box belongs to an event you're not on.");
+
+        var wanted = ids is { Count: > 0 } ? ids.ToHashSet() : null;
+        var chosen = await photos.Query()
+            .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
+            .Where(p => wanted == null || wanted.Contains(p.Id))
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync(ct);
+
+        if (chosen.Count == 0)
+            throw new BusinessRuleException("There are no photos to download.", "no_photos");
+
+        // Everything that can refuse this request has now refused it, so the response may commit.
+        var destination = begin(ArchiveName(campaign.Title));
+
+        // leaveOpen: the destination is the response body, and disposing that here would truncate it.
+        // NoCompression because every entry is already a JPEG — deflating it again spends CPU per
+        // megabyte to save almost nothing, and this runs while somebody waits.
+        using (var zip = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var index = 0;
+
+            foreach (var photo in chosen)
+            {
+                index++;
+                var key = StorageKeyOf(photo.OriginalUrl) ?? StorageKeyOf(photo.Url);
+                if (key is null) continue;
+
+                var bytes = await storage.GetAsync(key, ct);
+                // One object that has gone from storage must not cost the guest the other ninety-nine.
+                if (bytes is null || bytes.Length == 0) continue;
+
+                var entry = zip.CreateEntry(EntryName(photo, index, key, used), CompressionLevel.NoCompression);
+                entry.LastWriteTime = photo.CreatedAt;
+                await using var into = entry.Open();
+                await into.WriteAsync(bytes, ct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The stored object's key, recovered from its public URL. Keys always begin at
+    /// <c>campaigns/</c>, which holds whether the URL is a production-relative path or the absolute
+    /// one the asset domain serves — so this survives the storage backend changing underneath it.
+    /// </summary>
+    private static string? StorageKeyOf(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var start = url.IndexOf("campaigns/", StringComparison.Ordinal);
+        return start < 0 ? null : url[start..].Split('?')[0];
+    }
+
+    /// <summary>
+    /// What each photo is called inside the zip. Numbered so the order they were taken in survives
+    /// unzipping, and credited where we know who took it.
+    /// </summary>
+    private static string EntryName(EventPhoto photo, int index, string key, HashSet<string> used)
+    {
+        var ext = Path.GetExtension(key);
+        if (string.IsNullOrWhiteSpace(ext)) ext = ".jpg";
+
+        var who = Sanitize(photo.UploaderName);
+        var name = string.IsNullOrEmpty(who) ? $"{index:D3}{ext}" : $"{index:D3}-{who}{ext}";
+
+        // A zip with two identical names is a zip that unpacks to one file in some readers.
+        var candidate = name;
+        var attempt = 1;
+        while (!used.Add(candidate))
+            candidate = $"{Path.GetFileNameWithoutExtension(name)}-{++attempt}{ext}";
+        return candidate;
+    }
+
+    private static string ArchiveName(string? title)
+    {
+        var stem = Sanitize(title);
+        return string.IsNullOrEmpty(stem) ? "event-photos.zip" : $"{stem}-photos.zip";
+    }
+
+    /// <summary>
+    /// Reduces a title or a person's name to something every filesystem accepts. Deliberately strict
+    /// — a guest called their photo whatever their phone called it, and a zip entry name is a path.
+    /// </summary>
+    private static string Sanitize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var cleaned = new string(value.Trim()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray());
+        while (cleaned.Contains("--", StringComparison.Ordinal))
+            cleaned = cleaned.Replace("--", "-", StringComparison.Ordinal);
+        return cleaned.Trim('-')[..Math.Min(cleaned.Trim('-').Length, 40)];
     }
 
     /// <summary>

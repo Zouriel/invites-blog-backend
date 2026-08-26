@@ -129,6 +129,19 @@ public sealed class GuestController(
         return Content(html, "text/html; charset=utf-8");
     }
 
+    /// <summary>
+    /// The colours the guest's own invitation is painted in. These pages sit either side of it, so
+    /// wearing one fixed palette made every campaign that wasn't dark-and-gold feel like a hand-off to
+    /// somewhere else. Falls back to the original palette when the template declared nothing.
+    /// </summary>
+    private async Task<GuestPalette> PaletteAsync(Guid inviteId, CancellationToken ct)
+    {
+        var theme = await invites.GuestThemeAsync(inviteId, ct);
+        return theme is null
+            ? GuestPalette.Fallback
+            : GuestPalette.From(theme.Accent, theme.Background, theme.Text);
+    }
+
     // ---------- rsvp ----------
 
     /// <summary>RSVP from inside a rendered invitation. The cookie is the authorization.</summary>
@@ -143,7 +156,8 @@ public sealed class GuestController(
 
         return Html(GuestPages.Rsvp($"/r/{renderId}/rsvp",
             payload.Data["guest"]?["name"]?.ToString() ?? "Friend",
-            payload.Data["event"]?["title"]?.ToString() ?? "You're invited", null));
+            payload.Data["event"]?["title"]?.ToString() ?? "You're invited", null,
+            await PaletteAsync(inviteId.Value, ct)));
     }
 
     [HttpPost("/r/{renderId}/rsvp")]
@@ -158,11 +172,12 @@ public sealed class GuestController(
         {
             var result = await invites.RsvpAuthorizedAsync(inviteId.Value,
                 new RsvpRequest(status, guestCount, null, comment, null, null, null), ct);
-            return Html(GuestPages.RsvpDone(result.Rsvp, renderId));
+            return Html(GuestPages.RsvpDone(result.Rsvp, renderId, await PaletteAsync(inviteId.Value, ct)));
         }
         catch (AppException e)
         {
-            return Html(GuestPages.Rsvp($"/r/{renderId}/rsvp", "Friend", "You're invited", e.Message));
+            return Html(GuestPages.Rsvp($"/r/{renderId}/rsvp", "Friend", "You're invited", e.Message,
+                await PaletteAsync(inviteId.Value, ct)));
         }
     }
 
@@ -255,7 +270,8 @@ public sealed class GuestController(
                 .Select(p => (p.Id, p.ThumbUrl, p.Url, p.OriginalUrl, p.UploaderName, p.CanDelete))
                 .ToList(),
             box.CanUpload,
-            error);
+            error,
+            await PaletteAsync(inviteId, ct));
 
         // Unlike the other guest pages this one is mostly photographs, so it needs img-src — and
         // unlike the invitation it is NOT sandboxed, because it holds the session and posts forms.
@@ -277,7 +293,8 @@ public sealed class GuestController(
         return Html(GuestPages.Rsvp($"/i/{token}/rsvp",
             data["guest"]?["name"]?.ToString() ?? "Friend",
             data["event"]?["title"]?.ToString() ?? "You're invited",
-            null));
+            null,
+            await PaletteAsync(view.InviteId, ct)));
     }
 
     [HttpPost("/i/{token}/rsvp")]

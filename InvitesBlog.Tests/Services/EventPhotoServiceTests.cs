@@ -8,6 +8,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using System.IO.Compression;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
@@ -92,6 +93,164 @@ public class EventPhotoServiceTests
         _storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(c => $"/assets/{c.ArgAt<string>(0)}");
         return (campaign, guest);
+    }
+
+    /// <summary>A stored photo, with its bytes sitting where the archive will look for them.</summary>
+    private EventPhoto Stored(Guid campaignId, string? who = null, string ext = ".jpg",
+        byte[]? bytes = null, DateTimeOffset? at = null)
+    {
+        var id = Guid.NewGuid();
+        var key = $"campaigns/{campaignId:N}/photos/{id:N}_o{ext}";
+        _storage.GetAsync(key, Arg.Any<CancellationToken>()).Returns(bytes ?? [1, 2, 3, 4]);
+        return new EventPhoto
+        {
+            Id = id, CampaignId = campaignId, UploaderName = who,
+            OriginalUrl = $"/assets/{key}", Url = $"/assets/{key}", ThumbUrl = $"/assets/{key}",
+            ContentType = "image/jpeg", SizeBytes = 4, Width = 10, Height = 10,
+            CreatedAt = at ?? DateTimeOffset.UtcNow,
+        };
+    }
+
+    /// <summary>Runs the archive into memory and hands back the zip plus the offered filename.</summary>
+    private async Task<(string Name, ZipArchive Zip, MemoryStream Raw)> ArchiveAsync(
+        Guid campaignId, Guid? viewer, IReadOnlyCollection<Guid>? ids = null)
+    {
+        var buffer = new MemoryStream();
+        var offered = string.Empty;
+        await Sut().WriteArchiveAsync(campaignId, viewer, ids, name => { offered = name; return buffer; });
+        buffer.Position = 0;
+        return (offered, new ZipArchive(buffer, ZipArchiveMode.Read), buffer);
+    }
+
+    // ----- keeping the photographs -------------------------------------------------------------
+
+    [Fact]
+    public async Task A_guest_can_download_the_whole_box()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        // Seeded before the query is stubbed: configuring one substitute inside another's Returns()
+        // is the one thing NSubstitute cannot see through.
+        EventPhoto[] taken = [Stored(campaign.Id), Stored(campaign.Id)];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var (name, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+
+        Assert.Equal(2, zip.Entries.Count);
+        Assert.EndsWith("-photos.zip", name);
+    }
+
+    /// <summary>Selecting some of them is the point of the checkboxes.</summary>
+    [Fact]
+    public async Task Only_the_named_photos_are_packed()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var wanted = Stored(campaign.Id);
+        EventPhoto[] taken = [wanted, Stored(campaign.Id), Stored(campaign.Id)];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id, new[] { wanted.Id });
+
+        Assert.Single(zip.Entries);
+    }
+
+    /// <summary>The same door that guards looking. A stranger cannot keep what they cannot see.</summary>
+    [Fact]
+    public async Task A_guest_of_a_different_event_cannot_download_this_one()
+    {
+        var (campaign, _) = OnTheGuestList();
+        var elsewhere = TestData.Guest(Guid.NewGuid());
+        EventPhoto[] taken = [Stored(campaign.Id)];
+        _guests.GetByIdAsync(elsewhere.Id, Arg.Any<CancellationToken>()).Returns(elsewhere);
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        await Assert.ThrowsAsync<ForbiddenException>(
+            () => ArchiveAsync(campaign.Id, elsewhere.Id));
+    }
+
+    /// <summary>
+    /// Nothing may be written before the caller is known to be allowed — the response commits its
+    /// status the moment the body starts, so a refusal that arrived late would read as a corrupt file.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_never_opens_the_response()
+    {
+        var (campaign, _) = OnTheGuestList();
+        var elsewhere = TestData.Guest(Guid.NewGuid());
+        EventPhoto[] taken = [Stored(campaign.Id)];
+        _guests.GetByIdAsync(elsewhere.Id, Arg.Any<CancellationToken>()).Returns(elsewhere);
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var opened = false;
+        await Assert.ThrowsAsync<ForbiddenException>(() => Sut().WriteArchiveAsync(
+            campaign.Id, elsewhere.Id, null, _ => { opened = true; return new MemoryStream(); }));
+
+        Assert.False(opened);
+    }
+
+    [Fact]
+    public async Task An_empty_box_is_refused_rather_than_sent_as_an_empty_zip()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
+
+        await Assert.ThrowsAsync<BusinessRuleException>(() => ArchiveAsync(campaign.Id, guest.Id));
+    }
+
+    /// <summary>
+    /// A photo whose object has gone from storage must cost only itself. The rest of somebody's
+    /// evening still comes down.
+    /// </summary>
+    [Fact]
+    public async Task A_missing_object_does_not_lose_the_rest_of_the_archive()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var gone = Stored(campaign.Id);
+        EventPhoto[] taken = [gone, Stored(campaign.Id)];
+        _storage.GetAsync(Arg.Is<string>(k => k.Contains(gone.Id.ToString("N"))), Arg.Any<CancellationToken>())
+            .Returns((byte[]?)null);
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+
+        Assert.Single(zip.Entries);
+    }
+
+    /// <summary>
+    /// Two guests with the same name would otherwise write the same entry twice, and some readers
+    /// unpack that to one file.
+    /// </summary>
+    [Fact]
+    public async Task Entries_are_numbered_credited_and_never_collide()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var t = DateTimeOffset.UtcNow;
+        EventPhoto[] taken = [
+            Stored(campaign.Id, who: "Ali", at: t),
+            Stored(campaign.Id, who: "Ali", at: t.AddMinutes(1)),
+        ];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+
+        var names = zip.Entries.Select(e => e.FullName).OrderBy(n => n).ToList();
+        Assert.Equal(2, names.Distinct().Count());
+        Assert.All(names, n => Assert.Contains("Ali", n));
+        Assert.Contains(names, n => n.StartsWith("001"));
+    }
+
+    /// <summary>A guest names their file whatever their phone named it; a zip entry name is a path.</summary>
+    [Fact]
+    public async Task A_hostile_uploader_name_cannot_escape_the_archive()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        EventPhoto[] taken = [Stored(campaign.Id, who: "../../etc/passwd")];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+
+        var entry = Assert.Single(zip.Entries).FullName;
+        Assert.DoesNotContain("..", entry);
+        Assert.DoesNotContain("/", entry);
     }
 
     // ----- who may look -------------------------------------------------------------------------

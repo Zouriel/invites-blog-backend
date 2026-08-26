@@ -56,6 +56,14 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         return SuccessMessage("Photo removed.");
     }
 
+    /// <summary>
+    /// The whole box, or the ones named in <paramref name="ids"/>, as a zip of the originals.
+    /// </summary>
+    [HttpGet("/api/campaigns/{campaignId:guid}/photos/download")]
+    [HasPermission(Permissions.Photos.Read)]
+    public Task DownloadAsHost(Guid campaignId, [FromQuery] Guid[]? ids, CancellationToken ct) =>
+        WriteArchiveAsync(campaignId, viewerGuestId: null, ids, ct);
+
     // ---------- a guest, from an invitation open in the app ----------
 
     [HttpGet("/api/me/invitations/{campaignId:guid}/photos")]
@@ -79,6 +87,15 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         return SuccessMessage("Photo removed.");
     }
 
+    /// <summary>
+    /// The same archive for a guest. Anyone who can see the gallery can keep what is in it — the
+    /// people in these photographs were all at the same party.
+    /// </summary>
+    [HttpGet("/api/me/invitations/{campaignId:guid}/photos/download")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task DownloadAsGuest(Guid campaignId, [FromQuery] Guid[]? ids, CancellationToken ct) =>
+        await WriteArchiveAsync(campaignId, await GuestAsync(campaignId, ct), ids, ct);
+
     // ---------- shared ----------
 
     /// <summary>
@@ -88,6 +105,32 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     /// </summary>
     private async Task<Guid?> GuestAsync(Guid campaignId, CancellationToken ct) =>
         await invites.MyGuestIdAsync(campaignId, ct);
+
+    /// <summary>
+    /// Streams the zip straight into the response.
+    ///
+    /// <para>Written to the body rather than buffered and returned: an event's originals are full-
+    /// resolution photographs and a whole box can run to gigabytes, which is a number the server must
+    /// never be holding in memory on behalf of one guest tapping a button. The consequence is that the
+    /// status code and headers are committed BEFORE the first photo is read, so a failure part-way
+    /// through can only truncate the download — hence the authorization and the emptiness check both
+    /// happen in the service before anything is written.</para>
+    /// </summary>
+    private async Task WriteArchiveAsync(
+        Guid campaignId, Guid? viewerGuestId, Guid[]? ids, CancellationToken ct)
+    {
+        // Buffered off, or Kestrel holds the whole archive to work out Content-Length.
+        var buffering = HttpContext.Features.Get<IHttpResponseBodyFeature>();
+        buffering?.DisableBuffering();
+
+        await photos.WriteArchiveAsync(campaignId, viewerGuestId, ids, name =>
+        {
+            // Runs once, after the service has authorized the caller and found something to send.
+            Response.ContentType = "application/zip";
+            Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
+            return Response.Body;
+        }, ct);
+    }
 
     /// <summary>
     /// A phone's photo picker sends several at once, so the multi-file field is the normal case here

@@ -39,6 +39,13 @@ public sealed record InviteReauthRequestedResponse(Guid ChallengeId, int Expires
 
 // ----- other responses -----
 
+/// <summary>
+/// The three colours the guest's own invitation is painted with, for the plain pages either side of
+/// it (RSVP, the photo box). Any of them may be null when the template never declared it and the
+/// inviter never picked one — callers keep their own default for that.
+/// </summary>
+public sealed record GuestThemeResponse(string? Accent, string? Background, string? Text);
+
 public sealed record RsvpResultResponse(string Rsvp);
 public sealed record InboxCardResponse(
     Guid InviteId, Guid CampaignId, string EventTitle, DateTimeOffset EventDate, string VenueType,

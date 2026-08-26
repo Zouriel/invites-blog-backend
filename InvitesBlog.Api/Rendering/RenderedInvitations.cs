@@ -53,11 +53,16 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         // normalises every attribute to double quotes — this is not run against author markup.
         if (html.Contains("data-href=\"photos.link\"", StringComparison.Ordinal)) return html;
 
+        // Colours come from the template's OWN custom properties, with the old fixed pair as the
+        // fallback. This bar is appended inside the invitation, so `var()` resolves against whatever
+        // the template actually declared — a pale invitation stops ending in a black slab, and no
+        // server-side guess about the palette is needed.
         var bar = $"""
             <a href="{WebUtility.HtmlEncode(link)}" style="display:block;padding:18px 16px;
                font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-               text-align:center;text-decoration:none;color:#fff;background:#17131a;
-               border-top:1px solid rgba(255,255,255,.14)">Upload what you captured &rarr;</a>
+               text-align:center;text-decoration:none;color:var(--ib-accent,#fff);
+               background:var(--ib-bg,#17131a);
+               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)">Upload what you captured &rarr;</a>
             """;
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);

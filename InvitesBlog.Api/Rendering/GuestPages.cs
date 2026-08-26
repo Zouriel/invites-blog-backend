@@ -18,9 +18,10 @@ public static class GuestPages
     /// <summary>Escapes text for HTML. Everything interpolated below goes through this.</summary>
     private static string E(string? text) => WebUtility.HtmlEncode(text ?? string.Empty);
 
-    private const string Css = """
-        :root { color-scheme: dark; --bg:#17131a; --card:#211b25; --ink:#f4eef6; --muted:#b9adbf;
-                --accent:#c9a227; --line:#372e3d; --bad:#ff8f8f; }
+    /// <summary>The card pages' styles, over whichever palette the guest's invitation uses.</summary>
+    private static string Css(GuestPalette p) => p.Root + "\n" + CssBody;
+
+    private const string CssBody = """
         * { box-sizing: border-box; }
         body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
                background:var(--bg); color:var(--ink);
@@ -31,11 +32,11 @@ public static class GuestPages
         p { margin:0 0 1rem; color:var(--muted); }
         label { display:block; font-size:.85rem; color:var(--muted); margin:1.2rem 0 .4rem; }
         input { width:100%; padding:.85rem 1rem; font-size:1.35rem; letter-spacing:.35em;
-                text-align:center; background:#171320; color:var(--ink);
+                text-align:center; background:var(--card); color:var(--ink);
                 border:1px solid var(--line); border-radius:10px; }
         input.text { font-size:1rem; letter-spacing:normal; text-align:left; }
         button { width:100%; margin-top:1.2rem; padding:.9rem 1rem; font-size:1rem; font-weight:600;
-                 color:#241d06; background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+                 color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
         button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
         .err { color:var(--bad); font-size:.9rem; margin:.8rem 0 0; }
         .foot { margin-top:1.6rem; font-size:.8rem; color:var(--muted); }
@@ -47,9 +48,9 @@ public static class GuestPages
     /// a 26rem card centred in the viewport, and a grid of photographs is the one page that wants the
     /// whole screen.
     /// </summary>
-    private const string BoxCss = """
-        :root { color-scheme: dark; --bg:#17131a; --card:#211b25; --ink:#f4eef6; --muted:#b9adbf;
-                --accent:#c9a227; --line:#372e3d; --bad:#ff8f8f; }
+    private static string BoxCss(GuestPalette p) => p.Root + "\n" + BoxCssBody;
+
+    private const string BoxCssBody = """
         * { box-sizing: border-box; }
         body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
                font:16px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -76,23 +77,23 @@ public static class GuestPages
                  border:1px dashed var(--line); border-radius:14px; }
         /* Fixed, because the point of this page is the button and the grid can be a thousand tiles. */
         .bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom));
-               background:rgba(23,19,26,.94); border-top:1px solid var(--line); }
+               background:var(--bg); border-top:1px solid var(--line); }
         .bar form { max-width:56rem; margin:0 auto; display:flex; gap:10px; align-items:center; }
         .bar input[type=file] { flex:1; min-width:0; font-size:.85rem; color:var(--muted); }
         .bar button { width:auto; margin:0; padding:.7rem 1.1rem; font-size:.95rem; font-weight:600;
-                      color:#241d06; background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+                      color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
         .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
         a { color:var(--accent); }
         """;
 
-    private static string Shell(string title, string body) => $"""
+    private static string Shell(string title, string body, GuestPalette? palette = null) => $"""
         <!doctype html>
         <html lang="en"><head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="robots" content="noindex, nofollow">
         <title>{E(title)}</title>
-        <style>{Css}</style>
+        <style>{Css(palette ?? GuestPalette.Fallback)}</style>
         </head><body><main class="card">{body}</main></body></html>
         """;
 
@@ -140,7 +141,8 @@ public static class GuestPages
     /// <summary>The RSVP form. A plain POST — the invitation links here rather than embedding it.</summary>
     /// <param name="action">Where to post — the caller decides, because the path a guest arrived by
     /// (token or cookie) is what authorizes their answer.</param>
-    public static string Rsvp(string action, string guestName, string eventTitle, string? error)
+    public static string Rsvp(string action, string guestName, string eventTitle, string? error,
+        GuestPalette? palette = null)
     {
         var body = $"""
             <h1>{E(eventTitle)}</h1>
@@ -156,14 +158,15 @@ public static class GuestPages
               {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
             </form>
             """;
-        return Shell("RSVP", body);
+        return Shell("RSVP", body, palette);
     }
 
-    public static string RsvpDone(string status, string renderId) => Shell("Thank you", $"""
+    public static string RsvpDone(string status, string renderId, GuestPalette? palette = null) =>
+        Shell("Thank you", $"""
         <h1>{(status == "Going" ? "Wonderful — see you there" : "Thank you for letting us know")}</h1>
         <p>Your reply has been sent to the host.</p>
         <p><a href="/r/{E(renderId)}">Back to the invitation</a></p>
-        """);
+        """, palette);
 
     /// <summary>
     /// The event photo box, as a guest on a server-rendered invitation sees it (§5). A plain
@@ -179,7 +182,7 @@ public static class GuestPages
     public static string Photos(
         string action, string backTo, string eventTitle,
         IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who, bool CanDelete)> photos,
-        bool canUpload, string? error)
+        bool canUpload, string? error, GuestPalette? palette = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -232,7 +235,7 @@ public static class GuestPages
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="robots" content="noindex, nofollow">
             <title>{E(eventTitle)} — photos</title>
-            <style>{BoxCss}</style>
+            <style>{BoxCss(palette ?? GuestPalette.Fallback)}</style>
             </head><body>{body}</body></html>
             """;
     }
