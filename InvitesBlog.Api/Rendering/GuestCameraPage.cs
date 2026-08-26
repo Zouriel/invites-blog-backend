@@ -145,8 +145,8 @@ public static class GuestCameraPage
           <div class="gate">
             <h1 style="margin:0;font:600 1.3rem/1.3 Georgia,serif;">The camera isn't available</h1>
             <p id="why"></p>
-            <p>You can still see everything the night has collected, and add photos from your library
-               by signing in at invites.blog.</p>
+            <p>You can still see everything the night has collected — and add photos straight from
+               this phone's library there instead.</p>
             <a class="btn" href="{{E(galleryPath)}}">See the photos</a>
           </div>
 

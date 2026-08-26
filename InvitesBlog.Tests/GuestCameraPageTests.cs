@@ -81,6 +81,20 @@ public class GuestCameraPageTests
         Assert.DoesNotContain("height:100vh", html);
     }
 
+    /// <summary>
+    /// A guest who cannot open the camera must not be left with nothing. The gallery takes library
+    /// uploads, so the gate points there rather than at a sign-in they do not have.
+    /// </summary>
+    [Fact]
+    public void The_denied_state_sends_them_somewhere_they_can_still_contribute()
+    {
+        var html = Page();
+
+        Assert.Contains("id=\"why\"", html);
+        Assert.Contains("library", html);
+        Assert.Contains("See the photos", html);
+    }
+
     /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
     [Fact]
     public void The_selfie_preview_is_mirrored()

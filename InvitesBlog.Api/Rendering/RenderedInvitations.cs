@@ -57,7 +57,10 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
 
         // Safe as a plain string check because the markup has just been through AngleSharp, which
         // normalises every attribute to double quotes — this is not run against author markup.
-        if (html.Contains("data-href=\"photos.link\"", StringComparison.Ordinal)) return html;
+        // Either binding counts as the designer having placed it: an older template links the gallery,
+        // a current one links the camera, and both mean this floor is not needed.
+        if (html.Contains("data-href=\"photos.link\"", StringComparison.Ordinal)
+            || html.Contains("data-href=\"camera.link\"", StringComparison.Ordinal)) return html;
 
         // Colours come from the template's OWN custom properties, with the old fixed pair as the
         // fallback. This bar is appended inside the invitation, so `var()` resolves against whatever
@@ -68,7 +71,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
                font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
                text-align:center;text-decoration:none;color:var(--ib-accent,#fff);
                background:var(--ib-bg,#17131a);
-               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)">Open the camera &rarr;</a>
+               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1em;height:1em;vertical-align:-.14em;margin-right:.5em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Capture moments &rarr;</a>
             """;
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);

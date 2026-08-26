@@ -80,7 +80,10 @@ public class RawTemplateContractTests
     [InlineData("a-love-story")]
     [InlineData("gilded-hour")]
     public void Offers_a_way_into_the_event_photo_box(string slug) =>
-        Assert.Contains("data-href=\"photos.link\"", Html(slug), StringComparison.Ordinal);
+        // camera.link, not photos.link: the button belongs at the moment a guest is standing at the
+        // party with nothing captured yet, so it opens a viewfinder. The gallery is one tap on from
+        // there, and offers the camera roll as well.
+        Assert.Contains("data-href=\"camera.link\"", Html(slug), StringComparison.Ordinal);
 
     [Theory]
     [InlineData("aurora-vows")]

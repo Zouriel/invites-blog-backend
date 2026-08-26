@@ -78,12 +78,17 @@ public static class GuestPages
         /* Fixed, because the point of this page is the button and the grid can be a thousand tiles. */
         .bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom));
                background:var(--bg); border-top:1px solid var(--line); }
-        .bar form { max-width:56rem; margin:0 auto; display:flex; gap:10px; align-items:center; }
+        .acts { max-width:56rem; margin:0 auto; display:flex; flex-direction:column; gap:10px; }
+        .bar form { display:flex; gap:10px; align-items:center; }
         .bar input[type=file] { flex:1; min-width:0; font-size:.85rem; color:var(--muted); }
+        /* Side by side once there is room; stacked on a phone, camera first. */
+        @media (min-width:34rem) {
+          .acts { flex-direction:row; align-items:center; }
+          .bar form { flex:1; }
+        }
         .bar button, .bar .cam { width:auto; margin:0; padding:.7rem 1.1rem; font-size:.95rem; font-weight:600;
                       color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
-        .bar .cam { display:block; text-align:center; text-decoration:none; }
-        .bar form { display:block; }
+        .bar .cam { display:block; text-align:center; text-decoration:none; flex:0 0 auto; }
         .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
         a { color:var(--accent); }
         """;
@@ -208,12 +213,20 @@ public static class GuestPages
                </div>
                """;
 
-        // The camera, not a file field. Choosing from a library is the signed-in flow on invites.blog;
-        // what a guest wants with a drink in one hand is a viewfinder.
+        // Both doors. The camera leads, because a guest standing at the party has not "captured"
+        // anything yet and a viewfinder is what they actually want — but the shot they care about is
+        // often already in their camera roll, and the phone that took it is the one in their hand.
         var bar = canUpload
             ? $"""
                <div class="bar">
-                 <a class="cam" href="{E(cameraPath)}">Open the camera</a>
+                 <div class="acts">
+                   <a class="cam" href="{E(cameraPath)}">Open the camera</a>
+                   <form method="post" action="{E(action)}" enctype="multipart/form-data">
+                     <input type="file" name="files" accept="image/*" multiple required
+                            aria-label="Choose photos from this device">
+                     <button type="submit">Add</button>
+                   </form>
+                 </div>
                </div>
                """
             : "";
