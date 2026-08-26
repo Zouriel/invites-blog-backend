@@ -6,6 +6,10 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The camera client, authored as a real .js file and inlined under a nonce at render time. -->
+    <EmbeddedResource Include="Rendering\Assets\camera.js" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\InvitesBlog.Domain\InvitesBlog.Domain.csproj" />
     <ProjectReference Include="..\InvitesBlog.Application\InvitesBlog.Application.csproj" />
     <ProjectReference Include="..\InvitesBlog.Infrastructure\InvitesBlog.Infrastructure.csproj" />

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using InvitesBlog.Api.Rendering;
 using InvitesBlog.Application.Dtos.Invites;
 using InvitesBlog.Application.Dtos.Otp;
@@ -254,6 +255,92 @@ public sealed class GuestController(
         return await RenderBoxAsync(renderId, inviteId.Value, error, ct);
     }
 
+    /// <summary>
+    /// The viewfinder. Replaces the file picker on this path deliberately: a guest standing at the
+    /// party has not "captured" anything yet, and choosing from a library is the signed-in flow on
+    /// invites.blog rather than something this page needs to duplicate.
+    /// </summary>
+    [HttpGet("/r/{renderId}/camera")]
+    public async Task<IActionResult> Camera(string renderId, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        var box = await photos.GetAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
+        if (!box.CanUpload)
+            return Html(GuestPages.Cancelled("This event has been cancelled, so its camera is closed."));
+
+        // Ties the one inline script to this response. Cheaper than a bundler and stronger than
+        // opening the page to script-src 'unsafe-inline'.
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+
+        var html = GuestCameraPage.Render(
+            $"/r/{renderId}/photos/capture",
+            $"/r/{renderId}/photos",
+            box.EventTitle,
+            await PaletteAsync(inviteId.Value, ct),
+            nonce);
+
+        return CameraHtml(html, nonce);
+    }
+
+    /// <summary>
+    /// One captured frame. Answers JSON because the caller is a queue, not a form — the HTML upload
+    /// re-renders the whole box, which is the wrong shape for something uploading in the background
+    /// while its user keeps shooting.
+    /// </summary>
+    [HttpPost("/r/{renderId}/photos/capture")]
+    [DisableRequestSizeLimit]
+    [Microsoft.AspNetCore.Mvc.RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
+    public async Task<IActionResult> Capture(
+        string renderId, IFormFile? file, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return NotFound(new { error = "not_found" });
+        if (file is null || file.Length == 0) return BadRequest(new { error = "empty" });
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, ct);
+
+            var photo = await photos.AddAsync(
+                subject.Value.CampaignId, subject.Value.GuestId,
+                buffer.ToArray(), file.ContentType, file.FileName, ct);
+
+            return Ok(new { id = photo.Id, thumbUrl = photo.ThumbUrl });
+        }
+        catch (AppException e)
+        {
+            // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
+            return BadRequest(new { error = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// The camera page's policy. Unlike its siblings this one runs a script and talks to the API, so
+    /// it needs script/connect/img of its own — and a Permissions-Policy that actually admits the
+    /// camera, which is otherwise denied to the document however the user answers the prompt.
+    /// </summary>
+    private IActionResult CameraHtml(string html, string nonce)
+    {
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()";
+        Response.Headers["Content-Security-Policy"] =
+            $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+            + "img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; "
+            + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+        return Content(html, "text/html; charset=utf-8");
+    }
+
     private async Task<IActionResult> RenderBoxAsync(
         string renderId, Guid inviteId, string? error, CancellationToken ct)
     {
@@ -271,6 +358,7 @@ public sealed class GuestController(
                 .ToList(),
             box.CanUpload,
             error,
+            $"/r/{renderId}/camera",
             await PaletteAsync(inviteId, ct));
 
         // Unlike the other guest pages this one is mostly photographs, so it needs img-src — and

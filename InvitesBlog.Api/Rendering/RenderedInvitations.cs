@@ -47,7 +47,13 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
     /// </summary>
     private static string WithPhotoBox(string html, JsonObject data)
     {
-        if (data["photos"]?["link"]?.ToString() is not { Length: > 0 } link) return html;
+        // Prefers the camera: a guest standing at the party has not "captured" anything yet, and the
+        // thing they want is a viewfinder, not a file picker. Falls back to the gallery for a payload
+        // rendered before the camera existed.
+        var link = data["camera"]?["link"]?.ToString() is { Length: > 0 } camera
+            ? camera
+            : data["photos"]?["link"]?.ToString();
+        if (string.IsNullOrEmpty(link)) return html;
 
         // Safe as a plain string check because the markup has just been through AngleSharp, which
         // normalises every attribute to double quotes — this is not run against author markup.
@@ -62,7 +68,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
                font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
                text-align:center;text-decoration:none;color:var(--ib-accent,#fff);
                background:var(--ib-bg,#17131a);
-               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)">Upload what you captured &rarr;</a>
+               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)">Open the camera &rarr;</a>
             """;
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);

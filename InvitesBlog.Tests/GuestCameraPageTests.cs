@@ -1,0 +1,90 @@
+using InvitesBlog.Api.Rendering;
+using Xunit;
+
+namespace InvitesBlog.Tests;
+
+/// <summary>
+/// The camera page a guest shoots from.
+///
+/// <para>Most of what this feature is cannot be tested here — a camera needs a camera. What CAN be
+/// pinned is the part that would fail silently: the client is an embedded resource, so a rename or a
+/// dropped csproj entry would ship a page that looks right, opens no viewfinder, and says nothing.</para>
+/// </summary>
+public class GuestCameraPageTests
+{
+    private static string Page(string title = "Raniya's birthday", string nonce = "n0nc3") =>
+        GuestCameraPage.Render(
+            "/r/abc/photos/capture", "/r/abc/photos", title,
+            GuestPalette.From("#4d0000", "#1b1019", "#f7eee3"), nonce);
+
+    /// <summary>
+    /// The one that matters. An empty script is a page with a shutter that does nothing, and nothing
+    /// else in the build would notice.
+    /// </summary>
+    [Fact]
+    public void The_camera_client_is_actually_embedded()
+    {
+        var html = Page();
+
+        Assert.Contains("__ibCamera", html);
+        // A marker from inside camera.js itself, so this fails if the resource resolves to empty.
+        Assert.Contains("getUserMedia", html);
+        Assert.Contains("indexedDB", html);
+    }
+
+    /// <summary>The script runs only because the nonce matches the one in the response's CSP.</summary>
+    [Fact]
+    public void The_inline_script_carries_the_nonce()
+    {
+        Assert.Contains("<script nonce=\"n0nc3\">", Page(nonce: "n0nc3"));
+    }
+
+    [Fact]
+    public void It_knows_where_to_upload_and_where_the_gallery_is()
+    {
+        var html = Page();
+
+        Assert.Contains("upload: \"/r/abc/photos/capture\"", html);
+        Assert.Contains("href=\"/r/abc/photos\"", html);
+    }
+
+    /// <summary>Same palette as the pages either side of it, so the camera is not a second product.</summary>
+    [Fact]
+    public void It_wears_the_campaign_colours()
+    {
+        var html = Page();
+
+        Assert.Contains("--accent:#4d0000", html);
+        Assert.Contains("--bg:#1b1019", html);
+    }
+
+    /// <summary>An event title is inviter-supplied text sitting in a document that runs a script.</summary>
+    [Fact]
+    public void The_event_title_is_escaped()
+    {
+        var html = Page(title: "<img src=x onerror=alert(1)>");
+
+        Assert.DoesNotContain("<img src=x", html);
+        Assert.Contains("&lt;img src=x", html);
+    }
+
+    /// <summary>
+    /// The viewfinder must fill the phone without the URL bar being able to push the shutter off the
+    /// bottom — svh is fixed per orientation where vh is not.
+    /// </summary>
+    [Fact]
+    public void The_stage_is_sized_so_the_shutter_cannot_be_pushed_off_screen()
+    {
+        var html = Page();
+
+        Assert.Contains("100svh", html);
+        Assert.DoesNotContain("height:100vh", html);
+    }
+
+    /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
+    [Fact]
+    public void The_selfie_preview_is_mirrored()
+    {
+        Assert.Contains("video.mirror { transform: scaleX(-1); }", Page());
+    }
+}

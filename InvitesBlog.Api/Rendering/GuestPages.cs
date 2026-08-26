@@ -80,8 +80,10 @@ public static class GuestPages
                background:var(--bg); border-top:1px solid var(--line); }
         .bar form { max-width:56rem; margin:0 auto; display:flex; gap:10px; align-items:center; }
         .bar input[type=file] { flex:1; min-width:0; font-size:.85rem; color:var(--muted); }
-        .bar button { width:auto; margin:0; padding:.7rem 1.1rem; font-size:.95rem; font-weight:600;
+        .bar button, .bar .cam { width:auto; margin:0; padding:.7rem 1.1rem; font-size:.95rem; font-weight:600;
                       color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+        .bar .cam { display:block; text-align:center; text-decoration:none; }
+        .bar form { display:block; }
         .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
         a { color:var(--accent); }
         """;
@@ -182,7 +184,7 @@ public static class GuestPages
     public static string Photos(
         string action, string backTo, string eventTitle,
         IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who, bool CanDelete)> photos,
-        bool canUpload, string? error, GuestPalette? palette = null)
+        bool canUpload, string? error, string cameraPath, GuestPalette? palette = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -206,13 +208,12 @@ public static class GuestPages
                </div>
                """;
 
+        // The camera, not a file field. Choosing from a library is the signed-in flow on invites.blog;
+        // what a guest wants with a drink in one hand is a viewfinder.
         var bar = canUpload
             ? $"""
                <div class="bar">
-                 <form method="post" action="{E(action)}" enctype="multipart/form-data">
-                   <input type="file" name="files" accept="image/*" multiple required>
-                   <button type="submit">Add photos</button>
-                 </form>
+                 <a class="cam" href="{E(cameraPath)}">Open the camera</a>
                </div>
                """
             : "";

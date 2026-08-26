@@ -85,6 +85,9 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             // rule as rsvp.link, so the template's own button stays inside whichever flow they came
             // through instead of bouncing to one that wants a session they don't have.
             ["photos"] = new JsonObject { ["link"] = $"{inviteLink}/photos" },
+            // The camera (§5). Separate from photos.link, which is the gallery: a template that binds
+            // the gallery itself keeps doing so, and the appended bar prefers this.
+            ["camera"] = new JsonObject { ["link"] = $"{inviteLink}/camera" },
             ["theme"] = theme,
             // The same overrides keyed by the CSS custom property each one drives, which is what the
             // injector actually sets on the document. Resolved here because the manifest — the only
