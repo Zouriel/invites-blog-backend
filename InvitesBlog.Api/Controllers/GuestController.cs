@@ -236,6 +236,24 @@ public sealed class GuestController(
     }
 
     /// <summary>
+    /// Asks first. The remove control sits on the corner of the photograph it deletes, which is where
+    /// a thumb lands to open one — so this is the step between a mis-tap and a lost picture. A page
+    /// rather than a dialog because the gallery is served with no script to raise one.
+    /// </summary>
+    [HttpGet("/r/{renderId}/photos/{photoId:guid}/remove")]
+    public async Task<IActionResult> ConfirmRemovePhoto(
+        string renderId, Guid photoId, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        return Html(GuestPages.ConfirmRemove(
+            $"/r/{renderId}/photos/{photoId}/delete",
+            $"/r/{renderId}/photos",
+            await PaletteAsync(inviteId.Value, ct)));
+    }
+
+    /// <summary>
     /// A POST rather than a DELETE: this page has no JavaScript, and a form is the only thing a plain
     /// document can send.
     /// </summary>

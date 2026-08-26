@@ -71,8 +71,8 @@ public static class GuestPages
         .dl { position:absolute; top:4px; left:4px; width:22px; height:22px; display:grid;
               place-items:center; font-size:.8rem; text-decoration:none; color:#fff;
               background:rgba(0,0,0,.55); border-radius:999px; }
-        .rm button { width:auto; margin:0; padding:2px 7px; font-size:.75rem; line-height:1.5;
-                     color:#fff; background:rgba(0,0,0,.55); border:0; border-radius:999px; cursor:pointer; }
+        .rm { display:inline-block; padding:2px 7px; font-size:.75rem; line-height:1.5;
+              color:#fff; background:rgba(0,0,0,.55); border-radius:999px; text-decoration:none; }
         .empty { padding:44px 20px; text-align:center; color:var(--muted);
                  border:1px dashed var(--line); border-radius:14px; }
         /* Fixed, because the point of this page is the button and the grid can be a thousand tiles. */
@@ -204,9 +204,8 @@ public static class GuestPages
                      <a class="dl" href="{E(p.OriginalUrl)}" download title="Save the original">&#8615;</a>
                      {(p.Who is null ? "" : $"<span class=\"who\">{E(p.Who)}</span>")}
                      {(p.CanDelete ? $"""
-                       <form class="rm" method="post" action="{E(action)}/{p.Id}/delete">
-                         <button type="submit" title="Remove this photo">Remove</button>
-                       </form>
+                       <a class="rm" href="{E(action)}/{p.Id}/remove"
+                          title="Remove this photo">Remove</a>
                        """ : "")}
                    </div>
                    """))}
@@ -253,6 +252,24 @@ public static class GuestPages
             </head><body>{body}</body></html>
             """;
     }
+
+    /// <summary>
+    /// Asks before removing a photograph.
+    ///
+    /// <para>The button sits on the corner of the picture it deletes, which on a phone is the same
+    /// place a thumb lands to open it — so a tap meant to look at a photo was destroying it, with no
+    /// undo. The app-side box has always asked; this is the same question, as a page, because the
+    /// gallery is served under a policy with no script to raise a dialog with.</para>
+    /// </summary>
+    public static string ConfirmRemove(string postAction, string backTo, GuestPalette? palette = null) =>
+        Shell("Remove this photo?", $"""
+            <h1>Remove this photo?</h1>
+            <p>It disappears from everyone's photo box. This cannot be undone.</p>
+            <form method="post" action="{E(postAction)}">
+              <button type="submit">Remove it</button>
+            </form>
+            <p class="foot"><a href="{E(backTo)}">Keep it — back to the photos</a></p>
+            """, palette);
 
     public static string Cancelled(string? message) => Shell("Event cancelled", $"""
         <h1>This event has been cancelled</h1>

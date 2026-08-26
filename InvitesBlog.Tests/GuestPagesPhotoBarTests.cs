@@ -40,6 +40,31 @@ public class GuestPagesPhotoBarTests
         Assert.Contains("multiple", html);
     }
 
+    /// <summary>
+    /// The remove control overlaps the corner of the photograph it deletes, which is exactly where a
+    /// thumb lands to open one. It must lead to a question, not straight to a POST.
+    /// </summary>
+    [Fact]
+    public void Removing_a_photo_asks_first()
+    {
+        var photos = new List<(Guid, string, string, string, string?, bool)>
+        {
+            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true),
+        };
+        var html = GuestPages.Photos(
+            "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
+            GuestPalette.Fallback);
+
+        Assert.Contains("/r/abc/photos/11111111-1111-1111-1111-111111111111/remove", html);
+        // The one-tap POST is gone from the grid; it now lives behind the confirmation.
+        Assert.DoesNotContain("/delete\"", html);
+
+        var confirm = GuestPages.ConfirmRemove("/r/abc/photos/1/delete", "/r/abc/photos");
+        Assert.Contains("This cannot be undone", confirm);
+        Assert.Contains("action=\"/r/abc/photos/1/delete\"", confirm);
+        Assert.Contains("Keep it", confirm);
+    }
+
     /// <summary>A cancelled event's box is a read-only archive — neither door opens.</summary>
     [Fact]
     public void A_closed_box_offers_neither()
