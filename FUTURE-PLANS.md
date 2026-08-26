@@ -445,8 +445,10 @@ on the way in. It is not a defence that can be added later: **never put a creden
 The header goes on `/r/*` only. The auth pages are ordinary documents on the same host and run nobody
 else's code.
 
-> **Still unverified: iOS Safari.** Everything above was measured in Chromium. The engine that matters
-> most for guests has not been checked.
+> **Confirmed in Safari** (2026-08-26) — the author opened the live birthday invitation through the
+> deployed path and it rendered. That was the mechanism most worth checking: WebKit on a phone is
+> where the `vh`-in-a-resizing-frame bug lived, and it is the engine most of these guests use.
+> Everything else above was measured in Chromium.
 
 **And `/assets/*` must resolve on the render origin.** Campaign photos are stored relative
 (`Urls:AssetsBase=/assets`) and the CSP is `img-src 'self'`. Caddy already routes `/assets/*` → MinIO on
