@@ -342,7 +342,14 @@ public sealed class AccountService(
 
         // One grouped count for the whole page rather than a query per campaign — a person with
         // twenty invitations would otherwise pay twenty round trips to render twenty small numbers.
+        // Both counts, not just the photos: this is the page signing in lands on.
         var mineIds = mine.Select(c => c.Id).ToList();
+        var guestCounts = await guests.Query()
+            .Where(g => mineIds.Contains(g.CampaignId))
+            .GroupBy(g => g.CampaignId)
+            .Select(g => new { CampaignId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
+
         var photoCounts = await photos.Query()
             .Where(p => mineIds.Contains(p.CampaignId) && p.DeletedAt == null)
             .GroupBy(p => p.CampaignId)
@@ -355,7 +362,9 @@ public sealed class AccountService(
             var template = byTemplate.GetValueOrDefault(c.TemplateId);
             result.Add(new MyCampaignDto(
                 c.Id, c.Title, c.Slug, c.Status.ToString(), c.EventType, c.EventStartAt,
-                await guests.CountByCampaignAsync(c.Id, ct),
+                // A campaign with no guests is simply absent from the grouped result, which is the
+                // same zero the per-campaign count returned.
+                guestCounts.GetValueOrDefault(c.Id),
                 template?.Name, c.CreatedAt,
                 // The host's own cover first. A template preview is a marketing poster rendered from
                 // the template's demo content, so leading with it put a stranger's name on somebody's

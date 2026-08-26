@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Accounts;
@@ -71,8 +72,10 @@ public class AccountServiceTests
 
     private AccountService Sut()
     {
-        // Sent counts each campaign's photos; without a queryable there is nothing to count.
+        // The invitations list counts each campaign's photos and guests in one grouped query each;
+        // without a queryable behind them there is nothing to group.
         _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
+        _guests.Query().Returns(Array.Empty<Guest>().AsAsyncQueryable());
         return new(
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
             _templates, _photos, _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
@@ -296,6 +299,43 @@ public class AccountServiceTests
 
         Assert.Equal("sms_not_configured", ex.ErrorCode);
     }
+    // ----- The invitations list ------------------------------------------------------------------
+
+    /// <summary>
+    /// Both counts on the list are grouped queries, not a query per campaign. This is the page
+    /// signing in lands on, so the cost of getting it wrong is paid by everyone, every time.
+    /// </summary>
+    [Fact]
+    public async Task The_invitations_list_counts_guests_without_a_query_per_campaign()
+    {
+        var me = User(email: "host@example.com", roleNames: "Customer");
+        Existing(me);
+        _currentUser.UserId.Returns(me.Id);
+        _inviters.Query(Arg.Any<bool>()).Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+
+        var a = TestData.Campaign(status: CampaignStatus.Dispatched);
+        var b = TestData.Campaign(status: CampaignStatus.Dispatched);
+        a.CreatedByUserId = me.Id;
+        b.CreatedByUserId = me.Id;
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { a, b }.AsAsyncQueryable());
+
+        // Sut() stubs the guest queryable itself, so it has to be built before this overrides it.
+        var sut = Sut();
+
+        // Three guests on the first campaign, none on the second.
+        Guest[] guestRows = [TestData.Guest(a.Id), TestData.Guest(a.Id), TestData.Guest(a.Id)];
+        _guests.Query().Returns(guestRows.AsAsyncQueryable());
+
+        var list = await sut.MyCampaignsAsync();
+
+        Assert.Equal(3, list.Single(c => c.Id == a.Id).GuestCount);
+        // Absent from the grouped result is the same zero the per-campaign count used to return.
+        Assert.Equal(0, list.Single(c => c.Id == b.Id).GuestCount);
+
+        // The whole point: nothing asks per campaign any more.
+        await _guests.DidNotReceive().CountByCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
     // ----- Designer sign-up ---------------------------------------------------------------------
 
     [Fact]
