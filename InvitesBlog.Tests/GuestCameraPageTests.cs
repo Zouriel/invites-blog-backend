@@ -95,6 +95,21 @@ public class GuestCameraPageTests
         Assert.Contains("See the photos", html);
     }
 
+    /// <summary>
+    /// The first moment on this page is the browser's permission prompt, during which there is no
+    /// video to show. Without a state of its own that reads as a black rectangle under a shutter
+    /// that does nothing.
+    /// </summary>
+    [Fact]
+    public void It_says_something_while_the_camera_is_still_opening()
+    {
+        var html = Page();
+
+        Assert.Contains("Starting the camera", html);
+        // Keyed on the absence of a state, so it clears the moment the stream arrives or is refused.
+        Assert.Contains("body:not([data-state]) .starting", html);
+    }
+
     /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
     [Fact]
     public void The_selfie_preview_is_mirrored()

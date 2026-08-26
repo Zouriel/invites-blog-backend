@@ -112,6 +112,16 @@ public static class GuestCameraPage
                 justify-content:center; gap:14px; text-align:center; padding:32px 24px; background:#0d0b0e; }
         body[data-state="denied"] .gate { display:flex; }
         body[data-state="denied"] .bottom, body[data-state="denied"] video { display:none; }
+
+        /* Between load and the guest answering the permission prompt there is nothing to show —
+           without this it is a black rectangle under a shutter that does nothing yet. */
+        .starting { position:absolute; inset:0; display:none; flex-direction:column; align-items:center;
+                    justify-content:center; gap:12px; color:#b9adbf; pointer-events:none; }
+        body:not([data-state]) .starting { display:flex; }
+        body:not([data-state]) .bottom { opacity:.35; pointer-events:none; }
+        .spin { width:26px; height:26px; border-radius:999px; border:2px solid rgba(255,255,255,.25);
+                border-top-color:#fff; animation:spin .9s linear infinite; }
+        @keyframes spin { to { transform:rotate(360deg); } }
         .gate p { margin:0; color:#b9adbf; max-width:34ch; }
         @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
         """;
@@ -140,6 +150,11 @@ public static class GuestCameraPage
             <a class="btn" href="{{E(galleryPath)}}">Gallery</a>
             <span class="title">{{E(eventTitle)}}</span>
             <span class="badge" id="pending" hidden></span>
+          </div>
+
+          <div class="starting">
+            <span class="spin" aria-hidden="true"></span>
+            <p style="margin:0;">Starting the camera…</p>
           </div>
 
           <div class="gate">

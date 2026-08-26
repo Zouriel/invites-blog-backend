@@ -52,6 +52,7 @@
   })();
 
   async function start(next) {
+    const previous = facing;
     stop();
     facing = next || facing;
 
@@ -68,6 +69,15 @@
     try {
       stream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err) {
+      // A device with one camera refuses the facing it does not have. That must not take down a
+      // viewfinder that was already working — go back to the camera we had and stay live. Only a
+      // failure with nothing to fall back to is a dead end worth showing the gate for.
+      if (document.body.dataset.state === 'live' && previous !== facing) {
+        facing = previous;
+        await start(previous);
+        $('flip').hidden = true;
+        return;
+      }
       fail(err);
       return;
     }
