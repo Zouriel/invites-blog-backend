@@ -19,6 +19,21 @@ public interface IInviteService
     Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default);
 
     /// <summary>
+    /// Which guest the caller IS on this campaign, matched on every verified identifier they hold —
+    /// or null if they are not on its guest list. The photo box is authorized on this: being a guest
+    /// of the event is what earns the right to see what everyone shot at it.
+    /// </summary>
+    Task<Guid?> MyGuestIdAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The campaign and guest an invite belongs to. Like <see cref="RenderAuthorizedAsync"/> it does
+    /// no access check of its own — it is for a caller whose admission already happened, and exists so
+    /// the server-rendered guest path can name the guest it is acting as without re-deriving them
+    /// from a token it no longer holds. Null when the invite has gone.
+    /// </summary>
+    Task<(Guid CampaignId, Guid GuestId)?> InviteSubjectAsync(Guid inviteId, CancellationToken ct = default);
+
+    /// <summary>
     /// Builds the payload for an invite the caller has ALREADY been authorized to see. Does no access
     /// check of its own — it is the tail of a flow whose head did the checking, which is why it takes
     /// an id rather than a token. The server-rendered guest path uses it: admission happens once at

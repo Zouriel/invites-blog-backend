@@ -95,9 +95,63 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
         }
     }
 
+    /// <inheritdoc />
+    public OptimizedImage Preserve(byte[] content, string contentType)
+    {
+        var type = (contentType ?? string.Empty).ToLowerInvariant();
+
+        // Same formats the resize path refuses to rewrite: SVG is vector, a re-encoded GIF loses its
+        // animation, and this ImageSharp line cannot decode AVIF at all. Passing them through means
+        // their metadata survives — accepted, because mangling somebody's photograph is worse, and
+        // none of the three is what a phone camera produces.
+        if (type is "image/svg+xml" or "image/gif" or "image/avif")
+            return Passthrough(content, contentType);
+
+        try
+        {
+            using var image = Image.Load(content);
+
+            // No resize. This is the whole difference from Optimize: an event photo is the picture
+            // somebody took, and the copy they may want back is the one they took.
+            image.Metadata.ExifProfile = null;
+            image.Metadata.IptcProfile = null;
+            image.Metadata.XmpProfile = null;
+
+            using var output = new MemoryStream();
+            if (!Encode(image, output, type, PngCompressionLevel.DefaultCompression))
+                return Passthrough(content, contentType);
+
+            var bytes = output.ToArray();
+
+            // Re-encoding at full resolution can easily come out LARGER than a camera's own encode.
+            // Nothing was resized, so if the bytes grew there is nothing to gain by keeping them —
+            // except the stripped metadata, which is the point. Keep the smaller file only when the
+            // metadata was not the reason we were here.
+            var hadMetadata = bytes.Length < content.Length;
+            logger.LogInformation(
+                "Event photo kept at full size: {OldKb} KB -> {NewKb} KB ({W}x{H}, metadata stripped).",
+                content.Length / 1024, bytes.Length / 1024, image.Width, image.Height);
+
+            return new OptimizedImage(bytes, contentType, image.Width, image.Height, hadMetadata);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidImageContentException or ImageFormatException)
+        {
+            logger.LogWarning(ex, "Could not re-encode an uploaded photo ({ContentType}); storing it unchanged.", contentType);
+            return Passthrough(content, contentType);
+        }
+    }
+
     /// <summary>Writes the image back in the SAME format it arrived as. Changing it would invalidate
     /// the content type and extension already chosen by the caller.</summary>
-    private static bool Encode(Image image, Stream output, string contentType)
+    /// <param name="png">
+    /// How hard to compress a PNG. <see cref="PngCompressionLevel.BestCompression"/> is right for the
+    /// images a template renders — paid once, and every guest pays the download. It is the wrong trade
+    /// for a full-resolution event-photo original: measured on a 4000x3000 PNG it cost about twelve
+    /// seconds of a guest's upload for a few percent of a file almost nobody downloads.
+    /// </param>
+    private static bool Encode(
+        Image image, Stream output, string contentType,
+        PngCompressionLevel png = PngCompressionLevel.BestCompression)
     {
         switch (contentType)
         {
@@ -105,9 +159,7 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
                 image.Save(output, new JpegEncoder { Quality = JpegQuality });
                 return true;
             case "image/png":
-                // Photographic PNGs are huge; the highest compression is worth the CPU here since it
-                // happens once per upload and every guest pays the download.
-                image.Save(output, new PngEncoder { CompressionLevel = PngCompressionLevel.BestCompression });
+                image.Save(output, new PngEncoder { CompressionLevel = png });
                 return true;
             case "image/webp":
                 image.Save(output, new WebpEncoder { Quality = WebpQuality });

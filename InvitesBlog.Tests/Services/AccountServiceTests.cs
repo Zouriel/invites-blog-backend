@@ -67,10 +67,17 @@ public class AccountServiceTests
         _config["Sms:MsgOwl:ApiKey"].Returns("configured");
     }
 
-    private AccountService Sut() => new(
-        _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests, _templates,
-        _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(), [_sms], _otp, _uow, _tokens,
-        new PhoneNormalizer(), _config);
+    private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
+
+    private AccountService Sut()
+    {
+        // Sent counts each campaign's photos; without a queryable there is nothing to count.
+        _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
+        return new(
+            _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
+            _templates, _photos, _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
+            [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config);
+    }
 
     private static AppUser User(
         string? email = null, string? phone = null, string? password = null,

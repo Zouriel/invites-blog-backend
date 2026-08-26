@@ -30,6 +30,7 @@ public sealed class InviteService(
     IRepository<RsvpResponse> rsvpResponses,
     IRepository<VerifiedContactLink> contactLinks,
     IRepository<InviteTrustedIp> trustedIps,
+    IRepository<EventPhoto> photos,
     IOtpService otp,
     IUnitOfWork uow,
     ICurrentUser currentUser,
@@ -166,6 +167,24 @@ public sealed class InviteService(
     /// Guest-list-only: the verified email must match a guest on the campaign, otherwise access is refused.
     /// The invite row is created on first view (no upfront dispatch needed). Returns the rendered invite.
     /// </summary>
+    public async Task<(Guid CampaignId, Guid GuestId)?> InviteSubjectAsync(
+        Guid inviteId, CancellationToken ct = default)
+    {
+        var invite = await invites.GetByIdAsync(inviteId, ct);
+        return invite is null ? null : (invite.CampaignId, invite.GuestId);
+    }
+
+    public async Task<Guid?> MyGuestIdAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var (email, phone) = await IdentifiersAsync(ct);
+        if (email is null && phone is null) return null;
+
+        // Opted-out guests are included deliberately, unlike the invitation lookup: removing yourself
+        // from a mailing list is not the same as giving up the photos you took at the party.
+        var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: true, ct);
+        return guestList.FirstOrDefault(g => Owns(g, email, phone))?.Id;
+    }
+
     public async Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default)
     {
         var (email, phone) = await IdentifiersAsync(ct);
@@ -281,6 +300,20 @@ public sealed class InviteService(
             .Where(i => inviterIds.Contains(i.Id))
             .ToDictionaryAsync(i => i.Id, i => i.Name, ct);
 
+        // What each invitation looks like, so the inbox can show them as a grid rather than a list of
+        // titles. The TEMPLATE's preview, not the campaign's own photos — those belong to the host.
+        var templateIds = campaignList.Select(c => c.TemplateId).Distinct().ToList();
+        var previews = await templates.Query()
+            .Where(t => templateIds.Contains(t.Id))
+            .ToDictionaryAsync(t => t.Id, t => t.PreviewImageUrl, ct);
+
+        // One grouped count for the page, not one query per invitation.
+        var photoCounts = await photos.Query()
+            .Where(p => campaignIds.Contains(p.CampaignId) && p.DeletedAt == null)
+            .GroupBy(p => p.CampaignId)
+            .Select(g => new { CampaignId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
+
         var now = DateTimeOffset.UtcNow;
         return inviteList
             .Select(i =>
@@ -291,7 +324,9 @@ public sealed class InviteService(
                     i.Id, c.Id, c.Title, c.EventStartAt, c.EventType,
                     i.RsvpStatus.ToString(), i.ViewedAt is null,
                     c.EventStartAt < now, c.Status == CampaignStatus.Cancelled,
-                    c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null);
+                    c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null,
+                    previews.GetValueOrDefault(c.TemplateId),
+                    photoCounts.GetValueOrDefault(c.Id));
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)

@@ -42,7 +42,8 @@ public sealed record InviteReauthRequestedResponse(Guid ChallengeId, int Expires
 public sealed record RsvpResultResponse(string Rsvp);
 public sealed record InboxCardResponse(
     Guid InviteId, Guid CampaignId, string EventTitle, DateTimeOffset EventDate, string VenueType,
-    string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled, string? InviterName = null);
+    string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled, string? InviterName = null,
+    string? PreviewImageUrl = null, int PhotoCount = 0);
 public sealed record ClaimResponse(bool Claimed);
 
 /// <summary>

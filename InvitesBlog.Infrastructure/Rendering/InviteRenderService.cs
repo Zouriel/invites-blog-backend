@@ -81,6 +81,10 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
                 ["status"] = invite.RsvpStatus.ToString()
             },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
+            // The event photo box (§5), derived from the path the guest actually arrived by — same
+            // rule as rsvp.link, so the template's own button stays inside whichever flow they came
+            // through instead of bouncing to one that wants a session they don't have.
+            ["photos"] = new JsonObject { ["link"] = $"{inviteLink}/photos" },
             ["theme"] = theme,
             // The same overrides keyed by the CSS custom property each one drives, which is what the
             // injector actually sets on the document. Resolved here because the manifest — the only

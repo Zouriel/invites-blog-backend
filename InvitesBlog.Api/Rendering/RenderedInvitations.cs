@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using InvitesBlog.Application.Abstractions;
@@ -26,7 +27,41 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         var bytes = await storage.GetAsync(key, ct);
         if (bytes is null || bytes.Length == 0) return null;
 
-        return ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data);
+        return WithPhotoBox(ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data), data);
+    }
+
+    /// <summary>
+    /// Gives an invitation a way into its photo box even when its template has no
+    /// <c>[data-href="photos.link"]</c> of its own.
+    ///
+    /// <para><b>Why this exists at all.</b> A campaign PINS its template package, so every invitation
+    /// already sent renders from the markup as it was the day it was booked. Adding the element to the
+    /// templates reaches new campaigns and no existing one — a wedding invited last month would show
+    /// its guests no photo box, forever. This is that floor: a plain link, appended once, in the
+    /// place a template would have put one.</para>
+    ///
+    /// <para>A link, specifically, and never a form or a fetch — the rendered invitation is served
+    /// under a CSP with <c>default-src 'none'</c> and <c>form-action 'none'</c>, so navigation is the
+    /// only thing it can do. Designers who place the element themselves get their own styling and
+    /// this never fires.</para>
+    /// </summary>
+    private static string WithPhotoBox(string html, JsonObject data)
+    {
+        if (data["photos"]?["link"]?.ToString() is not { Length: > 0 } link) return html;
+
+        // Safe as a plain string check because the markup has just been through AngleSharp, which
+        // normalises every attribute to double quotes — this is not run against author markup.
+        if (html.Contains("data-href=\"photos.link\"", StringComparison.Ordinal)) return html;
+
+        var bar = $"""
+            <a href="{WebUtility.HtmlEncode(link)}" style="display:block;padding:18px 16px;
+               font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+               text-align:center;text-decoration:none;color:#fff;background:#17131a;
+               border-top:1px solid rgba(255,255,255,.14)">Photos from the night &rarr;</a>
+            """;
+
+        var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return close < 0 ? html + bar : html[..close] + bar + html[close..];
     }
 
     /// <summary>

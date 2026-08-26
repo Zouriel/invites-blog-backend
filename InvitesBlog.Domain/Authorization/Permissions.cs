@@ -56,6 +56,18 @@ public static class Permissions
         public const string Read = "inbox.read";
     }
 
+    /// <summary>
+    /// The event photo box (§5). Read and Upload are GUEST rights — the people at the party are the
+    /// ones with cameras. Moderate is the host's, and is what "delete someone else's photo" needs;
+    /// removing your OWN photo is checked against the uploader, not against this.
+    /// </summary>
+    public static class Photos
+    {
+        public const string Read = "photos.read";
+        public const string Upload = "photos.upload";
+        public const string Moderate = "photos.moderate";
+    }
+
     public static class Otp
     {
         public const string Request = "otp.request";
@@ -104,6 +116,9 @@ public static class Permissions
         (Invites.Rsvp, "invites", "RSVP to an invite"),
         (Invites.Claim, "invites", "Claim an invite to the inbox"),
         (Inbox.Read, "inbox", "Read the invite inbox"),
+        (Photos.Read, "photos", "See an event's photo box"),
+        (Photos.Upload, "photos", "Add a photo to an event"),
+        (Photos.Moderate, "photos", "Remove any photo from an event"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),
@@ -137,6 +152,7 @@ public static class Roles
         {
             Permissions.Templates.Read, Permissions.Designer.Manage,
             Permissions.Dashboard.Read, Permissions.Campaigns.Read, Permissions.Inbox.Read,
+            Permissions.Photos.Read,
         },
 
         // A signed-in customer is the same person as an Inviter — the difference is only which key
@@ -155,6 +171,7 @@ public static class Roles
             Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write,
             Permissions.Guests.Resend, Permissions.Payments.Read,
+            Permissions.Photos.Read, Permissions.Photos.Upload, Permissions.Photos.Moderate,
         },
 
         [Inviter] = new[]
@@ -164,12 +181,16 @@ public static class Roles
             Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write, Permissions.Guests.Resend,
             Permissions.Payments.Read, Permissions.Dashboard.Read,
+            Permissions.Photos.Read, Permissions.Photos.Upload, Permissions.Photos.Moderate,
         },
 
         [Invitee] = new[]
         {
             Permissions.Invites.View, Permissions.Invites.Rsvp, Permissions.Invites.Claim,
             Permissions.Inbox.Read,
+            // A guest sees the box and shoots into it; they may remove their own photo, which is
+            // checked against the uploader rather than granted as a permission.
+            Permissions.Photos.Read, Permissions.Photos.Upload,
         },
 
         [Public] = new[]

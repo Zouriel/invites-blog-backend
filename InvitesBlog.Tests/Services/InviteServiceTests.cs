@@ -58,9 +58,18 @@ public class InviteServiceTests
             .Do(ci => _trustedIpRows.Remove(ci.Arg<InviteTrustedIp>()));
     }
 
-    private InviteService Sut() => new(
-        _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks, _trustedIps, _otp, _uow,
-        _currentUser, _config, _rsvpValidator);
+    private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
+
+    private InviteService Sut()
+    {
+        // The inbox shows each invitation's preview and counts its photos, so both need a queryable
+        // to read from. Only set when a test hasn't provided its own.
+        _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
+        _templates.Query().Returns(Array.Empty<Template>().AsAsyncQueryable());
+        return new(
+            _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks,
+            _trustedIps, _photos, _otp, _uow, _currentUser, _config, _rsvpValidator);
+    }
 
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());

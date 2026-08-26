@@ -69,6 +69,19 @@ public class RawTemplateContractTests
         Assert.Equal("template_external_script_not_allowed", ex.ErrorCode);
     }
 
+    /// <summary>
+    /// Every invitation must offer a way into its event's photo box (§5). The server appends a plain
+    /// bar when a template has no link of its own — which exists for campaigns pinned to packages
+    /// that predate the element, not as a licence for new templates to skip it. A designer placing it
+    /// themselves is what makes it fit the design instead of being bolted to the bottom.
+    /// </summary>
+    [Theory]
+    [InlineData("aurora-vows")]
+    [InlineData("a-love-story")]
+    [InlineData("gilded-hour")]
+    public void Offers_a_way_into_the_event_photo_box(string slug) =>
+        Assert.Contains("data-href=\"photos.link\"", Html(slug), StringComparison.Ordinal);
+
     [Theory]
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]

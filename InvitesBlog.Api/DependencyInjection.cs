@@ -32,6 +32,11 @@ public static class DependencyInjection
         // boundaries, headers and any other form fields — so a file exactly at the cap would trip a
         // limit set to the same number, and the caller would see a protocol error instead of the
         // "Images must be 20 MB or smaller." message the service is there to give them.
+        //
+        // This is the TEMPLATE-image ceiling, and it stays. Event photo uploads are exempt from it
+        // per-endpoint ([RequestFormLimits] + [DisableRequestSizeLimit] on the photo actions), because
+        // a guest's photograph of the night is not something to refuse for being large. Raising this
+        // globally instead would have quietly lifted the cap on template images too.
         services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 24 * 1024 * 1024);
 
         // The server-rendered guest path (/i, /r, rsvp).

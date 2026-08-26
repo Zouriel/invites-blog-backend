@@ -25,6 +25,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UploadedGuestFile> UploadedGuestFiles => Set<UploadedGuestFile>();
     public DbSet<TemplateAsset> TemplateAssets => Set<TemplateAsset>();
     public DbSet<CampaignAsset> CampaignAssets => Set<CampaignAsset>();
+    public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
@@ -205,6 +206,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         b.Entity<TemplateAsset>(e => { e.ToTable("template_assets"); e.HasKey(x => x.Id); e.HasIndex(x => x.TemplateId); });
         b.Entity<CampaignAsset>(e => { e.ToTable("campaign_assets"); e.HasKey(x => x.Id); e.HasIndex(x => x.CampaignId); });
+
+        b.Entity<EventPhoto>(e =>
+        {
+            e.ToTable("event_photos");
+            e.HasKey(x => x.Id);
+            // The photo box is read one way and one way only: this campaign's live photos, newest
+            // first. An unbounded table read on every guest's page load is worth an index that
+            // matches the query exactly rather than one that merely narrows it.
+            e.HasIndex(x => new { x.CampaignId, x.DeletedAt, x.CreatedAt });
+            e.HasIndex(x => x.GuestId);
+        });
 
         b.Entity<SuppressionEntry>(e =>
         {

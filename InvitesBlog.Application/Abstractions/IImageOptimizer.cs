@@ -55,4 +55,20 @@ public interface IImageOptimizer
     /// full cover resolution buys nothing visible and costs the browser a much larger bitmap.
     /// </param>
     OptimizedImage Optimize(byte[] content, string contentType, int? maxEdge = null);
+
+    /// <summary>
+    /// Every pixel as uploaded, with the camera metadata removed. For the one thing we store that is
+    /// somebody's own photograph rather than an image a template renders: an event photo is a keepsake
+    /// people download afterwards, so shrinking it is a loss rather than an optimisation.
+    ///
+    /// <para>The metadata still goes. EXIF carries GPS, and these are photographs OF other people's
+    /// guests — a location tag would publish where someone's wedding was to anyone who saves a picture
+    /// of it. Orientation is baked in by the decoder first, so dropping the rest costs nothing
+    /// visible.</para>
+    ///
+    /// <para>Like <see cref="Optimize"/> it is conservative: same format, and the original bytes come
+    /// back untouched whenever the file cannot be safely rewritten. A failure to decode is never a
+    /// failed upload.</para>
+    /// </summary>
+    OptimizedImage Preserve(byte[] content, string contentType);
 }

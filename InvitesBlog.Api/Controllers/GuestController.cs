@@ -3,6 +3,7 @@ using InvitesBlog.Application.Dtos.Invites;
 using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Invites;
+using InvitesBlog.Application.Services.Photos;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Rendering;
 using InvitesBlog.TemplateCompiler;
@@ -31,6 +32,7 @@ namespace InvitesBlog.Api.Controllers;
 [AllowAnonymous]
 public sealed class GuestController(
     IInviteService invites,
+    IEventPhotoService photos,
     InviteRenderService renderer,
     RenderedInvitations rendered,
     RenderTickets tickets) : ControllerBase
@@ -164,6 +166,102 @@ public sealed class GuestController(
         }
     }
 
+    // ---------- the event photo box ----------
+
+    /// <summary>
+    /// What everyone shot at the event (§5). Reached from the invitation's own
+    /// <c>[data-href="photos.link"]</c>, for the same reason RSVP is: the rendered invitation is
+    /// sandboxed under <c>default-src 'none'</c> and cannot upload — or fetch — anything itself. A
+    /// link out to an ordinary page is the only door, and it is enough.
+    /// </summary>
+    [HttpGet("/r/{renderId}/photos")]
+    public async Task<IActionResult> PhotoBox(string renderId, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        return await RenderBoxAsync(renderId, inviteId.Value, null, ct);
+    }
+
+    [HttpPost("/r/{renderId}/photos")]
+    // No ceiling: a phone picker sends several photos at once and each one is somebody's own
+    // photograph. Both framework defaults have to go — Kestrel's 30 MB body limit and the 24 MB
+    // multipart cap configured globally for template images, which stays in force everywhere else.
+    [DisableRequestSizeLimit]
+    [Microsoft.AspNetCore.Mvc.RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
+    public async Task<IActionResult> AddPhotos(
+        string renderId, [FromForm] IFormFileCollection? files, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        string? error = null;
+        try
+        {
+            foreach (var upload in (files ?? (IFormFileCollection)new FormFileCollection()).Where(f => f.Length > 0))
+            {
+                await using var stream = upload.OpenReadStream();
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, ct);
+                await photos.AddAsync(subject.Value.CampaignId, subject.Value.GuestId,
+                    buffer.ToArray(), upload.ContentType, upload.FileName, ct);
+            }
+        }
+        catch (AppException e)
+        {
+            // One bad file in a multi-select must not lose the ones that already uploaded, and the
+            // guest is standing at a party — re-render the box with what worked and say what didn't.
+            error = e.Message;
+        }
+
+        return await RenderBoxAsync(renderId, inviteId.Value, error, ct);
+    }
+
+    /// <summary>
+    /// A POST rather than a DELETE: this page has no JavaScript, and a form is the only thing a plain
+    /// document can send.
+    /// </summary>
+    [HttpPost("/r/{renderId}/photos/{photoId:guid}/delete")]
+    public async Task<IActionResult> RemovePhoto(string renderId, Guid photoId, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        string? error = null;
+        try { await photos.DeleteAsync(subject.Value.CampaignId, photoId, subject.Value.GuestId, ct); }
+        catch (AppException e) { error = e.Message; }
+
+        return await RenderBoxAsync(renderId, inviteId.Value, error, ct);
+    }
+
+    private async Task<IActionResult> RenderBoxAsync(
+        string renderId, Guid inviteId, string? error, CancellationToken ct)
+    {
+        var subject = await invites.InviteSubjectAsync(inviteId, ct);
+        if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        var box = await photos.GetAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
+
+        var html = GuestPages.Photos(
+            $"/r/{renderId}/photos",
+            $"/r/{renderId}",
+            box.EventTitle,
+            box.Photos
+                .Select(p => (p.Id, p.ThumbUrl, p.Url, p.OriginalUrl, p.UploaderName, p.CanDelete))
+                .ToList(),
+            box.CanUpload,
+            error);
+
+        // Unlike the other guest pages this one is mostly photographs, so it needs img-src — and
+        // unlike the invitation it is NOT sandboxed, because it holds the session and posts forms.
+        return Html(html, imagesFrom: "'self'");
+    }
+
     [HttpGet("/i/{token}/rsvp")]
     public async Task<IActionResult> RsvpForm(string token, CancellationToken ct)
     {
@@ -247,7 +345,12 @@ public sealed class GuestController(
         Expires = DateTimeOffset.UtcNow.AddMinutes(15),
     };
 
-    private IActionResult Html(string html, int status = StatusCodes.Status200OK)
+    /// <param name="imagesFrom">
+    /// An <c>img-src</c> source list, for the one page here that shows pictures. Every other guest
+    /// page is text and buttons, and stays on the tighter policy that permits no images at all —
+    /// which is the right default when the alternative is a page that renders a remote pixel.
+    /// </param>
+    private IActionResult Html(string html, int status = StatusCodes.Status200OK, string? imagesFrom = null)
     {
         Response.StatusCode = status;
         Response.Headers.CacheControl = "private, no-store";
@@ -255,7 +358,9 @@ public sealed class GuestController(
         // These pages hold the session and post forms, so they are NOT sandboxed — but they run no
         // template code either, so everything they need is first-party and inline.
         Response.Headers["Content-Security-Policy"] =
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; "
+            + "frame-ancestors 'none'"
+            + (imagesFrom is null ? "" : $"; img-src {imagesFrom}");
         return Content(html, "text/html; charset=utf-8");
     }
 

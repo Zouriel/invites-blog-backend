@@ -35,6 +35,7 @@ public sealed class AccountService(
     ICampaignRepository campaigns,
     IGuestRepository guests,
     ITemplateRepository templates,
+    IRepository<EventPhoto> photos,
     IEnumerable<IExternalAuthProvider> authProviders,
     IValidator<RegisterDesignerRequest> registerValidator,
     IEnumerable<IOtpSender> otpSenders,
@@ -333,17 +334,30 @@ public sealed class AccountService(
         if (mine.Count == 0) return [];
 
         var templateIds = mine.Select(c => c.TemplateId).Distinct().ToList();
-        var names = await templates.Query()
+        // The preview comes along with the name now: the inbox shows these as a grid of what each
+        // invitation looks like, and a row of identical placeholders is not a grid worth having.
+        var byTemplate = await templates.Query()
             .Where(t => templateIds.Contains(t.Id))
-            .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+            .ToDictionaryAsync(t => t.Id, t => new { t.Name, t.PreviewImageUrl }, ct);
+
+        // One grouped count for the whole page rather than a query per campaign — a person with
+        // twenty invitations would otherwise pay twenty round trips to render twenty small numbers.
+        var mineIds = mine.Select(c => c.Id).ToList();
+        var photoCounts = await photos.Query()
+            .Where(p => mineIds.Contains(p.CampaignId) && p.DeletedAt == null)
+            .GroupBy(p => p.CampaignId)
+            .Select(g => new { CampaignId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
         var result = new List<MyCampaignDto>(mine.Count);
         foreach (var c in mine)
         {
+            var template = byTemplate.GetValueOrDefault(c.TemplateId);
             result.Add(new MyCampaignDto(
                 c.Id, c.Title, c.Slug, c.Status.ToString(), c.EventType, c.EventStartAt,
                 await guests.CountByCampaignAsync(c.Id, ct),
-                names.GetValueOrDefault(c.TemplateId), c.CreatedAt));
+                template?.Name, c.CreatedAt,
+                template?.PreviewImageUrl, photoCounts.GetValueOrDefault(c.Id)));
         }
         return result;
     }

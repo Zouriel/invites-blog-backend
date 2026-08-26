@@ -42,6 +42,49 @@ public static class GuestPages
         a { color:var(--accent); }
         """;
 
+    /// <summary>
+    /// The photo box's own styles. Kept apart from <see cref="Css"/> because everything else here is
+    /// a 26rem card centred in the viewport, and a grid of photographs is the one page that wants the
+    /// whole screen.
+    /// </summary>
+    private const string BoxCss = """
+        :root { color-scheme: dark; --bg:#17131a; --card:#211b25; --ink:#f4eef6; --muted:#b9adbf;
+                --accent:#c9a227; --line:#372e3d; --bad:#ff8f8f; }
+        * { box-sizing: border-box; }
+        body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+               font:16px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        .wrap { max-width:56rem; margin:0 auto; padding:24px 16px 96px; }
+        h1 { font:600 1.5rem/1.25 Georgia, serif; margin:0 0 .3rem; }
+        .sub { color:var(--muted); font-size:.9rem; margin:0 0 1.4rem; }
+        .err { color:var(--bad); font-size:.9rem; margin:0 0 1rem; }
+        /* Square tiles, gapless-ish — the shape everyone already reads as "a photo grid". */
+        .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; }
+        @media (min-width:40rem) { .grid { grid-template-columns:repeat(4, 1fr); gap:6px; } }
+        .tile { position:relative; display:block; aspect-ratio:1; background:var(--card);
+                border-radius:4px; overflow:hidden; }
+        .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+        .who { position:absolute; left:0; right:0; bottom:0; padding:14px 6px 4px; font-size:.7rem;
+               color:#fff; background:linear-gradient(transparent, rgba(0,0,0,.6));
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .rm { position:absolute; top:4px; right:4px; }
+        .dl { position:absolute; top:4px; left:4px; width:22px; height:22px; display:grid;
+              place-items:center; font-size:.8rem; text-decoration:none; color:#fff;
+              background:rgba(0,0,0,.55); border-radius:999px; }
+        .rm button { width:auto; margin:0; padding:2px 7px; font-size:.75rem; line-height:1.5;
+                     color:#fff; background:rgba(0,0,0,.55); border:0; border-radius:999px; cursor:pointer; }
+        .empty { padding:44px 20px; text-align:center; color:var(--muted);
+                 border:1px dashed var(--line); border-radius:14px; }
+        /* Fixed, because the point of this page is the button and the grid can be a thousand tiles. */
+        .bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+               background:rgba(23,19,26,.94); border-top:1px solid var(--line); }
+        .bar form { max-width:56rem; margin:0 auto; display:flex; gap:10px; align-items:center; }
+        .bar input[type=file] { flex:1; min-width:0; font-size:.85rem; color:var(--muted); }
+        .bar button { width:auto; margin:0; padding:.7rem 1.1rem; font-size:.95rem; font-weight:600;
+                      color:#241d06; background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+        .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
+        a { color:var(--accent); }
+        """;
+
     private static string Shell(string title, string body) => $"""
         <!doctype html>
         <html lang="en"><head>
@@ -121,6 +164,78 @@ public static class GuestPages
         <p>Your reply has been sent to the host.</p>
         <p><a href="/r/{E(renderId)}">Back to the invitation</a></p>
         """);
+
+    /// <summary>
+    /// The event photo box, as a guest on a server-rendered invitation sees it (§5). A plain
+    /// multipart form, because the rendered invitation this is reached from is sandboxed under a CSP
+    /// with <c>default-src 'none'</c> and could not upload anything itself even if it wanted to — it
+    /// links here, exactly as it links to the RSVP.
+    /// </summary>
+    /// <param name="action">
+    /// The base path this box lives at. Upload posts to it, and each delete posts to
+    /// <c>{action}/{photoId}/delete</c> — so the caller's own path is what authorizes both, and a
+    /// guest who arrived by one route never has their actions routed through another.
+    /// </param>
+    public static string Photos(
+        string action, string backTo, string eventTitle,
+        IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who, bool CanDelete)> photos,
+        bool canUpload, string? error)
+    {
+        var tiles = photos.Count == 0
+            ? """
+              <p class="empty">No photos yet. Be the first — whatever you shoot tonight lands here for
+                 everyone who was there.</p>
+              """
+            : $"""
+               <div class="grid">
+                 {string.Concat(photos.Select(p => $"""
+                   <div class="tile">
+                     <a href="{E(p.Url)}"><img src="{E(p.ThumbUrl)}" alt="" loading="lazy"></a>
+                     <a class="dl" href="{E(p.OriginalUrl)}" download title="Save the original">&#8615;</a>
+                     {(p.Who is null ? "" : $"<span class=\"who\">{E(p.Who)}</span>")}
+                     {(p.CanDelete ? $"""
+                       <form class="rm" method="post" action="{E(action)}/{p.Id}/delete">
+                         <button type="submit" title="Remove this photo">Remove</button>
+                       </form>
+                       """ : "")}
+                   </div>
+                   """))}
+               </div>
+               """;
+
+        var bar = canUpload
+            ? $"""
+               <div class="bar">
+                 <form method="post" action="{E(action)}" enctype="multipart/form-data">
+                   <input type="file" name="files" accept="image/*" multiple required>
+                   <button type="submit">Add photos</button>
+                 </form>
+               </div>
+               """
+            : "";
+
+        var body = $"""
+            <div class="wrap">
+              <h1>{E(eventTitle)}</h1>
+              <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the night</p>
+              {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
+              {tiles}
+              <a class="back" href="{E(backTo)}">Back to the invitation</a>
+            </div>
+            {bar}
+            """;
+
+        return $"""
+            <!doctype html>
+            <html lang="en"><head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="robots" content="noindex, nofollow">
+            <title>{E(eventTitle)} — photos</title>
+            <style>{BoxCss}</style>
+            </head><body>{body}</body></html>
+            """;
+    }
 
     public static string Cancelled(string? message) => Shell("Event cancelled", $"""
         <h1>This event has been cancelled</h1>

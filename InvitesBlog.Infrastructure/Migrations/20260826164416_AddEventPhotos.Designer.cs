@@ -3,6 +3,7 @@ using System;
 using InvitesBlog.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826164416_AddEventPhotos")]
+    partial class AddEventPhotos
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -492,11 +495,6 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<int>("Height")
                         .HasColumnType("integer")
                         .HasColumnName("height");
-
-                    b.Property<string>("OriginalUrl")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("original_url");
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("bigint")

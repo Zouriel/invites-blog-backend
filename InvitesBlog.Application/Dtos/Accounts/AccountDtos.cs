@@ -66,10 +66,15 @@ public sealed record OAuthLoginRequest(string IdToken);
 /// </summary>
 public sealed record RegisterDesignerRequest(string Email, string Password, string DisplayName);
 
-/// <summary>One invitation the signed-in customer created, for their history.</summary>
+/// <summary>
+/// One invitation the signed-in customer created, for their history.
+/// <para><c>PreviewImageUrl</c> is the template's own preview — what the invitation LOOKS like, which
+/// is how a person picks theirs out of a grid of them.</para>
+/// </summary>
 public sealed record MyCampaignDto(
     Guid Id, string Title, string Slug, string Status, string EventType,
-    DateTimeOffset EventStartAt, int GuestCount, string? TemplateName, DateTimeOffset CreatedAt);
+    DateTimeOffset EventStartAt, int GuestCount, string? TemplateName, DateTimeOffset CreatedAt,
+    string? PreviewImageUrl = null, int PhotoCount = 0);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(
