@@ -328,8 +328,15 @@
     count();
   }
 
+  /**
+   * Still on its way: neither uploaded nor permanently refused. Both states are terminal, and a
+   * refused frame has already been dropped from the store — counting it as pending would leave a
+   * badge that never clears and a leave-the-page warning that fires forever.
+   */
+  const PENDING = '.shot:not([data-state="done"]):not([data-state="rejected"])';
+
   function count() {
-    const pending = strip.querySelectorAll('.shot:not([data-state="done"])').length;
+    const pending = strip.querySelectorAll(PENDING).length;
     $('pending').textContent = pending ? String(pending) : '';
     $('pending').hidden = pending === 0;
   }
@@ -460,7 +467,7 @@
     });
 
     window.addEventListener('beforeunload', (e) => {
-      if (strip.querySelector('.shot:not([data-state="done"])')) {
+      if (strip.querySelector(PENDING)) {
         e.preventDefault();
         e.returnValue = '';
       }
