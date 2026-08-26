@@ -173,6 +173,23 @@ public class InviteRenderServiceTests
         Assert.Equal("https://cdn.test/templates/golden-bloom@1.0.0/", payload.PackageUrl);
     }
 
+    /// <summary>
+    /// Every template's photo button binds camera.link. If the payload stops carrying it the binder
+    /// leaves href="#", the button goes quiet, and nothing else in the build notices — which is the
+    /// whole path a guest at the party uses.
+    /// </summary>
+    [Fact]
+    public void The_payload_carries_the_camera_and_the_gallery()
+    {
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.NoResponse };
+        var payload = Sut().Build(
+            Campaign("{}"), TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.Equal("https://me.invites.blog/r/abc/camera", payload.Data["camera"]?["link"]?.ToString());
+        Assert.Equal("https://me.invites.blog/r/abc/photos", payload.Data["photos"]?["link"]?.ToString());
+    }
+
     // --- Theme → CSS custom properties -----------------------------------------------------------
 
     [Fact]
