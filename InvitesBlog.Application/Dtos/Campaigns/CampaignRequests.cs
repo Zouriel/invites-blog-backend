@@ -7,6 +7,9 @@ namespace InvitesBlog.Application.Dtos.Campaigns;
 public sealed record CreateCampaignRequest(Guid TemplateId, string Title);
 
 /// <summary>Patch the campaign content/theme/rules and event metadata (partial — nulls are ignored).</summary>
+/// <summary>The campaign's cover photo. Null clears it, falling back to the template's preview.</summary>
+public sealed record SetCoverRequest(string? Url);
+
 public sealed record UpdateContentRequest(
     string? CustomContentJson,
     string? ThemeOverridesJson,

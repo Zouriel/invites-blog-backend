@@ -12,6 +12,14 @@ public interface ICampaignService
 {
     Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default);
     Task UpdateContentAsync(Guid id, UpdateContentRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets the campaign's cover photo, or clears it when <paramref name="url"/> is null. Separate
+    /// from <see cref="UpdateContentAsync"/> because the dashboard changes the cover without ever
+    /// loading the rest of the content — routing it through the content save would have that screen
+    /// post a blob it never read, overwriting whatever the builder last wrote.
+    /// </summary>
+    Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default);
     Task UpdateVenueAsync(Guid id, UpdateVenueRequest req, CancellationToken ct = default);
 
     Task<RsvpQuestionsResponse> GetRsvpQuestionsAsync(Guid id, CancellationToken ct = default);

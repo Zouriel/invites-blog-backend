@@ -341,7 +341,7 @@ public sealed class InviteService(
             .ToDictionaryAsync(i => i.Id, i => i.Name, ct);
 
         // What each invitation looks like, so the inbox can show them as a grid rather than a list of
-        // titles. The TEMPLATE's preview, not the campaign's own photos — those belong to the host.
+        // titles. The template preview is the FALLBACK; the host's chosen cover wins — see below.
         var templateIds = campaignList.Select(c => c.TemplateId).Distinct().ToList();
         var previews = await templates.Query()
             .Where(t => templateIds.Contains(t.Id))
@@ -365,7 +365,10 @@ public sealed class InviteService(
                     i.RsvpStatus.ToString(), i.ViewedAt is null,
                     c.EventStartAt < now, c.Status == CampaignStatus.Cancelled,
                     c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null,
-                    previews.GetValueOrDefault(c.TemplateId),
+                    // The host's own cover first: a template preview is a marketing poster rendered
+                    // from demo content, so leading with it showed a stranger's name on the tile.
+                    Application.Campaigns.CampaignCover.Read(c.CustomContentJson)
+                        ?? previews.GetValueOrDefault(c.TemplateId),
                     photoCounts.GetValueOrDefault(c.Id));
             })
             .OfType<InboxCardResponse>()

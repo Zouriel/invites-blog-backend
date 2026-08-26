@@ -335,7 +335,7 @@ public sealed class AccountService(
 
         var templateIds = mine.Select(c => c.TemplateId).Distinct().ToList();
         // The preview comes along with the name now: the inbox shows these as a grid of what each
-        // invitation looks like, and a row of identical placeholders is not a grid worth having.
+        // invitation looks like. It is only the FALLBACK though — see the cover lookup below.
         var byTemplate = await templates.Query()
             .Where(t => templateIds.Contains(t.Id))
             .ToDictionaryAsync(t => t.Id, t => new { t.Name, t.PreviewImageUrl }, ct);
@@ -357,7 +357,11 @@ public sealed class AccountService(
                 c.Id, c.Title, c.Slug, c.Status.ToString(), c.EventType, c.EventStartAt,
                 await guests.CountByCampaignAsync(c.Id, ct),
                 template?.Name, c.CreatedAt,
-                template?.PreviewImageUrl, photoCounts.GetValueOrDefault(c.Id)));
+                // The host's own cover first. A template preview is a marketing poster rendered from
+                // the template's demo content, so leading with it put a stranger's name on somebody's
+                // event — it identifies the design, never the occasion.
+                InvitesBlog.Application.Campaigns.CampaignCover.Read(c.CustomContentJson) ?? template?.PreviewImageUrl,
+                photoCounts.GetValueOrDefault(c.Id)));
         }
         return result;
     }

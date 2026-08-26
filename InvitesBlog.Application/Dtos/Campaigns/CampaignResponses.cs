@@ -9,7 +9,13 @@ namespace InvitesBlog.Application.Dtos.Campaigns;
 public sealed record CreateCampaignResponse(Guid CampaignId, string Status, string AccessToken);
 
 /// <summary>Template snippet embedded in the campaign summary.</summary>
-public sealed record CampaignSummaryTemplateDto(string Name, string Slug, string PackageUrl, string ManifestJson);
+/// <param name="PreviewImageUrl">
+/// The template's own marketing poster. Shown in the builder ONLY as "this is what your invitation
+/// falls back to without a cover" — it is rendered from the template's demo content, so it carries
+/// example names, and the whole point of showing it is that the host sees why to replace it.
+/// </param>
+public sealed record CampaignSummaryTemplateDto(
+    string Name, string Slug, string PackageUrl, string ManifestJson, string? PreviewImageUrl = null);
 
 /// <summary>The full campaign builder summary (§10.3 GET summary).</summary>
 public sealed record CampaignSummaryDto(
@@ -50,7 +56,14 @@ public sealed record DashboardCampaignDto(
     Guid Id, string Title, string Status, int PaidInviteCapacity,
     /// <summary>Raw roles blob, same shape/parsing as the builder summary — lets the dashboard offer
     /// a role picker on "Add guest" instead of free text.</summary>
-    string RolesJson);
+    string RolesJson,
+    /// <summary>The host's chosen cover, or null when they haven't set one.</summary>
+    string? CoverImageUrl = null,
+    /// <summary>
+    /// What the tile falls back to without a cover — the TEMPLATE's marketing poster, rendered from
+    /// its demo content. Shown in the picker so the host can see why it is worth replacing.
+    /// </summary>
+    string? TemplatePreviewImageUrl = null);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

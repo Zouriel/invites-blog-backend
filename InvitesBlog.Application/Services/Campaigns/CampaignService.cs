@@ -400,6 +400,18 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
+    public async Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+
+        // Merged into the existing content rather than replacing it — see the interface note.
+        campaign.CustomContentJson = InvitesBlog.Application.Campaigns.CampaignCover.Write(campaign.CustomContentJson, url);
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+
+        return new CampaignImageDto(url ?? string.Empty);
+    }
+
     public async Task<CampaignImageDto> AddImageAsync(
         Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default)
     {
@@ -507,7 +519,7 @@ public sealed class CampaignService(
             // The manifest served to the wizard is the campaign's frozen snapshot, never the live template's.
             template is null ? null : new CampaignSummaryTemplateDto(
                 template.Name, template.Slug, SnapshotPackageUrl(campaign, template),
-                SnapshotManifest(campaign, template)),
+                SnapshotManifest(campaign, template), template.PreviewImageUrl),
             price);
     }
 
@@ -627,7 +639,9 @@ public sealed class CampaignService(
         return new DashboardResponse(
             new DashboardCampaignDto(
                 campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity,
-                campaign.RolesJson),
+                campaign.RolesJson,
+                InvitesBlog.Application.Campaigns.CampaignCover.Read(campaign.CustomContentJson),
+                (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl),
             report, guestRows, questions);
     }
 

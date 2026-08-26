@@ -114,6 +114,16 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return Created(results.Count == 1 ? results[0] : (object)results);
     }
 
+    /// <summary>
+    /// Sets the campaign's cover photo — the tile it shows wherever it is listed rather than opened.
+    /// Send <c>null</c> to clear it and fall back to the template's preview.
+    /// </summary>
+    [HttpPut("{id:guid}/cover")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> SetCover(
+        Guid id, [FromBody] SetCoverRequest req, CancellationToken ct) =>
+        Success(await campaigns.SetCoverAsync(id, req.Url, ct));
+
     [HttpGet("{id:guid}/summary")]
     [HasPermission(Permissions.Campaigns.Read)]
     public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>
