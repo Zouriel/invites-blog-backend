@@ -25,7 +25,12 @@ public sealed record AccountDto(
     bool IsActive,
     bool HasPassword,
     IReadOnlyList<string> Roles,
-    IReadOnlyList<string> LinkedProviders);
+    IReadOnlyList<string> LinkedProviders,
+    /// <summary>"light" or "dark", or null to take the default. Follows the account, not the browser.</summary>
+    string? ThemePreference = null);
+
+/// <summary>Sets the account's light/dark preference. Anything but "dark" is treated as light.</summary>
+public sealed record SetThemeRequest(string? Theme);
 
 /// <summary>A successful sign-in: the session token plus the account it belongs to.</summary>
 public sealed record AuthResultDto(string Token, DateTimeOffset ExpiresAt, AccountDto Account);

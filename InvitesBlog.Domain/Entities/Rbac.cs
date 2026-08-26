@@ -22,6 +22,13 @@ public sealed class AppUser
     public string DisplayName { get; set; } = default!;
     public string? PasswordHash { get; set; }            // null for OTP-only accounts
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// "light" or "dark", or null for the default. Kept on the ACCOUNT rather than in the browser so
+    /// it follows the person: someone who prefers dark prefers it on their phone as well as the
+    /// laptop they set it on, and a per-browser preference silently disagrees with itself.
+    /// </summary>
+    public string? ThemePreference { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

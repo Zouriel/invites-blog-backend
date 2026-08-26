@@ -63,6 +63,16 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     /// Opt the signed-in account into publishing templates. Gated on being signed in at all, not on
     /// any designer permission — asking for the role is exactly what someone who lacks it does.
     /// </summary>
+    /// <summary>
+    /// The account's light/dark preference. Stored on the account, not in the browser, so it follows
+    /// the person rather than the device they happened to set it on.
+    /// </summary>
+    [HttpPut("me/theme")]
+    // Same "signed in at all" gate its siblings use — the controller is AllowAnonymous by default.
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> SetTheme([FromBody] SetThemeRequest req, CancellationToken ct) =>
+        Success(await accounts.SetThemeAsync(req, ct));
+
     [HttpPost("me/become-designer")]
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> BecomeDesigner(CancellationToken ct) =>

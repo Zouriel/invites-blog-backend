@@ -35,6 +35,12 @@ public interface IAccountService
 
     Task<AccountDto> MeAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Sets the account's light/dark preference. On the account rather than in the browser so it
+    /// follows the person to whatever they next sign in on.
+    /// </summary>
+    Task<AccountDto> SetThemeAsync(SetThemeRequest req, CancellationToken ct = default);
+
     /// <summary>Adds the Designer role to the signed-in account and re-issues its token.</summary>
     Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default);
 

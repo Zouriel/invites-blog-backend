@@ -536,6 +536,20 @@ public sealed class AccountService(
         return new AuthResultDto(token, DateTimeOffset.UtcNow.Add(SessionLifetime), await ToDtoAsync(user, ct));
     }
 
+    public async Task<AccountDto> SetThemeAsync(SetThemeRequest req, CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+
+        // Only two values are meaningful, and the column is what a browser will be handed on the next
+        // sign-in — so anything else collapses to the default rather than being stored and echoed back.
+        user.ThemePreference = string.Equals(req.Theme, "dark", StringComparison.OrdinalIgnoreCase)
+            ? "dark"
+            : "light";
+        await uow.SaveChangesAsync(ct);
+
+        return await ToDtoAsync(user, ct);
+    }
+
     private async Task<AppUser> CurrentAsync(CancellationToken ct)
     {
         var id = currentUser.UserId ?? throw new UnauthorizedException();
@@ -559,7 +573,8 @@ public sealed class AccountService(
             user.Id, user.Email, user.PhoneE164, user.DisplayName, user.IsActive,
             !string.IsNullOrEmpty(user.PasswordHash),
             RoleNames(user).Order().ToList(),
-            providers);
+            providers,
+            user.ThemePreference);
     }
 
     /// <summary>
