@@ -15,6 +15,13 @@ public interface IInviteService
     /// requires-OTP is returned for any later open from an IP not among the (up to 3) already trusted.
     /// </summary>
     Task<object> GetByTokenAsync(string token, string? ipAddress, InviteRenderer render, CancellationToken ct = default);
+    /// <summary>
+    /// The id of the signed-in caller's own invite for a campaign, creating it on first view exactly
+    /// as <see cref="GetMyInviteAsync"/> does. Used to hand a guest over to the server-rendered
+    /// invitation without rendering it here first. Throws if they are not on the guest list.
+    /// </summary>
+    Task<Guid> ResolveMyInviteIdAsync(Guid campaignId, CancellationToken ct = default);
+
     /// <summary>Rendered invite for the OTP-authenticated caller via the shared campaign link (<c>/e/{id}</c>).</summary>
     Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default);
 

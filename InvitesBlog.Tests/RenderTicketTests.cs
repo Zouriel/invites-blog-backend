@@ -24,7 +24,79 @@ public class RenderTicketTests
         var invite = Guid.NewGuid();
         var sut = Sut();
 
-        Assert.Equal(invite, sut.ReadTicket(sut.IssueTicket(invite, Now), Now));
+        Assert.Equal([invite], sut.ReadTicket(sut.IssueTicket([invite], Now), Now));
+    }
+
+    [Fact]
+    public void Opening_a_second_invitation_does_not_lock_you_out_of_the_first()
+    {
+        // A couple invited to two weddings. Admitting them to the second used to overwrite the
+        // first, so going back to it answered "please open your invitation again".
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var sut = Sut();
+
+        var ticket = sut.Admit(sut.IssueTicket([first], Now), second, Now);
+
+        Assert.Contains(first, sut.ReadTicket(ticket, Now));
+        Assert.Contains(second, sut.ReadTicket(ticket, Now));
+    }
+
+    [Fact]
+    public void Admitting_the_same_invitation_twice_does_not_accumulate()
+    {
+        var invite = Guid.NewGuid();
+        var sut = Sut();
+
+        var ticket = sut.Admit(sut.IssueTicket([invite], Now), invite, Now);
+
+        Assert.Equal([invite], sut.ReadTicket(ticket, Now));
+    }
+
+    [Fact]
+    public void Beyond_the_cap_the_oldest_admission_drops_out_first()
+    {
+        var sut = Sut();
+        var ids = Enumerable.Range(0, RenderTickets.MaxAdmitted + 3).Select(_ => Guid.NewGuid()).ToList();
+
+        var ticket = sut.IssueTicket([ids[0]], Now);
+        foreach (var id in ids.Skip(1)) ticket = sut.Admit(ticket, id, Now);
+
+        var admitted = sut.ReadTicket(ticket, Now);
+        Assert.Equal(RenderTickets.MaxAdmitted, admitted.Count);
+        Assert.Contains(ids[^1], admitted);   // most recent kept
+        Assert.DoesNotContain(ids[0], admitted); // oldest gone
+    }
+
+    // --- the cross-host handoff ---
+
+    [Fact]
+    public void A_handoff_reads_back_as_the_invitation_it_admits()
+    {
+        var invite = Guid.NewGuid();
+        var sut = Sut();
+
+        Assert.Equal(invite, sut.ReadHandoff(sut.IssueHandoff(invite, Now), Now));
+    }
+
+    [Fact]
+    public void A_handoff_stops_working_within_the_minute()
+    {
+        var sut = Sut();
+        var handoff = sut.IssueHandoff(Guid.NewGuid(), Now);
+
+        Assert.Null(sut.ReadHandoff(handoff, Now.Add(RenderTickets.HandoffLifetime).AddSeconds(1)));
+    }
+
+    [Fact]
+    public void A_ticket_cannot_be_replayed_as_a_handoff_or_the_other_way_round()
+    {
+        // Separate HMAC contexts: a long-lived cookie must never be usable as a cross-host admission.
+        var invite = Guid.NewGuid();
+        var sut = Sut();
+
+        Assert.Null(sut.ReadHandoff(sut.IssueTicket([invite], Now), Now));
+        Assert.Empty(sut.ReadTicket(sut.IssueHandoff(invite, Now), Now));
     }
 
     [Fact]
@@ -59,17 +131,17 @@ public class RenderTicketTests
     public void An_expired_ticket_is_refused()
     {
         var sut = Sut();
-        var ticket = sut.IssueTicket(Guid.NewGuid(), Now);
+        var ticket = sut.IssueTicket([Guid.NewGuid()], Now);
 
-        Assert.Null(sut.ReadTicket(ticket, Now.Add(RenderTickets.TicketLifetime).AddMinutes(1)));
+        Assert.Empty(sut.ReadTicket(ticket, Now.Add(RenderTickets.TicketLifetime).AddMinutes(1)));
     }
 
     [Fact]
     public void A_ticket_signed_with_another_key_is_refused()
     {
-        var ticket = Sut("one-signing-key-that-is-long-enough-xxxxx").IssueTicket(Guid.NewGuid(), Now);
+        var ticket = Sut("one-signing-key-that-is-long-enough-xxxxx").IssueTicket([Guid.NewGuid()], Now);
 
-        Assert.Null(Sut("a-different-signing-key-also-long-enough").ReadTicket(ticket, Now));
+        Assert.Empty(Sut("a-different-signing-key-also-long-enough").ReadTicket(ticket, Now));
     }
 
     [Fact]
@@ -77,21 +149,21 @@ public class RenderTicketTests
     {
         // The whole point: the payload is readable, so it must not be *changeable*.
         var sut = Sut();
-        var ticket = sut.IssueTicket(Guid.NewGuid(), Now);
+        var ticket = sut.IssueTicket([Guid.NewGuid()], Now);
         var parts = ticket.Split('.');
         var forged = $"{Guid.NewGuid():N}.{parts[1]}.{parts[2]}";
 
-        Assert.Null(sut.ReadTicket(forged, Now));
+        Assert.Empty(sut.ReadTicket(forged, Now));
     }
 
     [Fact]
     public void Extending_the_expiry_inside_a_ticket_invalidates_it()
     {
         var sut = Sut();
-        var parts = sut.IssueTicket(Guid.NewGuid(), Now).Split('.');
+        var parts = sut.IssueTicket([Guid.NewGuid()], Now).Split('.');
         var forged = $"{parts[0]}.{long.Parse(parts[1]) + 86_400}.{parts[2]}";
 
-        Assert.Null(sut.ReadTicket(forged, Now));
+        Assert.Empty(sut.ReadTicket(forged, Now));
     }
 
     [Theory]
@@ -107,6 +179,6 @@ public class RenderTicketTests
     public void Rubbish_in_the_cookie_is_refused_rather_than_thrown_on(string? ticket)
     {
         // This parses a cookie. Cookies arrive from anywhere, including from people trying things.
-        Assert.Null(Sut().ReadTicket(ticket, Now));
+        Assert.Empty(Sut().ReadTicket(ticket, Now));
     }
 }

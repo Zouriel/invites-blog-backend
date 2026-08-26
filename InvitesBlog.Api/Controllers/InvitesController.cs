@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Invites;
 using InvitesBlog.Application.Dtos.Otp;
@@ -14,7 +15,9 @@ namespace InvitesBlog.Api.Controllers;
 /// <see cref="IInviteService"/>. It also bridges the Infrastructure <see cref="InviteRenderService"/>
 /// into the service (the Application layer cannot reference Infrastructure).</summary>
 [Route("api/invites")]
-public sealed class InvitesController(IInviteService invites, InviteRenderService renderer) : BaseApiController
+public sealed class InvitesController(
+    IInviteService invites, InviteRenderService renderer,
+    InvitesBlog.Api.Rendering.RenderTickets tickets, IConfiguration config) : BaseApiController
 {
     [HttpGet("by-token/{token}")]
     [AllowAnonymous]
@@ -63,6 +66,24 @@ public sealed class InvitesController(IInviteService invites, InviteRenderServic
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> MyInvite(Guid campaignId, CancellationToken ct) =>
         Success(await invites.GetMyInviteAsync(campaignId, Render, ct));
+
+    /// <summary>
+    /// Hands the signed-in caller over to their server-rendered invitation. Returns the URL to
+    /// navigate to; the render host redeems the one-hop admission in it and turns it into a cookie.
+    ///
+    /// A handoff rather than a cookie set directly, because the app holding the session and the app
+    /// rendering the invitation are different origins, and a cookie's Domain may name the setting
+    /// host or a parent — never a sibling. It lives 60 seconds, exists only inside one redirect, and
+    /// never reaches the rendered document.
+    /// </summary>
+    [HttpGet("/api/me/invitations/{campaignId:guid}/render-link")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> RenderLink(Guid campaignId, CancellationToken ct)
+    {
+        var inviteId = await invites.ResolveMyInviteIdAsync(campaignId, ct);
+        var renderBase = (config["Urls:InviteeBase"] ?? "https://me.invites.blog").TrimEnd('/');
+        return Success(new { url = $"{renderBase}/h/{tickets.IssueHandoff(inviteId, DateTimeOffset.UtcNow)}" });
+    }
 
     // Claim by possession of the raw token (not by invite id — see ClaimAsync).
     [HttpPost("by-token/{token}/claim")]

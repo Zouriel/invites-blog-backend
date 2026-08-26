@@ -166,6 +166,46 @@ public sealed class InviteService(
     /// Guest-list-only: the verified email must match a guest on the campaign, otherwise access is refused.
     /// The invite row is created on first view (no upfront dispatch needed). Returns the rendered invite.
     /// </summary>
+    public async Task<Guid> ResolveMyInviteIdAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var (email, phone) = await IdentifiersAsync(ct);
+        if (email is null && phone is null) throw new UnauthorizedException();
+
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new InviteNotFoundException();
+        if (campaign.Status == CampaignStatus.Cancelled) throw new InviteNotFoundException();
+
+        // Guest-list-only, matched on the VERIFIED identifier — the same rule GetMyInviteAsync uses.
+        var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        var guest = guestList.FirstOrDefault(g => Owns(g, email, phone))
+            ?? throw new InviteNotFoundException();
+
+        var invite = await invites.GetByGuestIdAsync(guest.Id, ct);
+        if (invite is null)
+        {
+            invite = new Invite
+            {
+                Id = Guid.NewGuid(),
+                CampaignId = campaignId,
+                GuestId = guest.Id,
+                // token_hash is NOT NULL; this path never uses it, but it must not be guessable.
+                TokenHash = TokenService.Hash(TokenService.GenerateToken()),
+                Status = InviteStatus.Sent,
+                RsvpStatus = RsvpStatus.NoResponse,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            await invites.AddAsync(invite, ct);
+        }
+
+        if (invite.ViewedAt is null)
+        {
+            invite.ViewedAt = DateTimeOffset.UtcNow;
+            if (invite.Status != InviteStatus.Viewed) invite.Status = InviteStatus.Viewed;
+        }
+        await uow.SaveChangesAsync(ct);
+
+        return invite.Id;
+    }
+
     public async Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default)
     {
         var (email, phone) = await IdentifiersAsync(ct);

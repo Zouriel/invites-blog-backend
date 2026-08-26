@@ -192,8 +192,9 @@ public sealed class GuestController(
             var result = await invites.RsvpAsync(token, ClientIp(),
                 new RsvpRequest(status, guestCount, null, comment, null, null, null), ct);
 
-            var inviteId = tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow);
-            var back = inviteId is null ? string.Empty : tickets.RenderId(inviteId.Value);
+            // "Back to the invitation" only if this browser is actually admitted to one.
+            var admitted = tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow);
+            var back = admitted.Count == 0 ? string.Empty : tickets.RenderId(admitted[0]);
             return Html(GuestPages.RsvpDone(result.Rsvp, back));
         }
         catch (AppException e)
@@ -204,12 +205,28 @@ public sealed class GuestController(
 
     // ---------- plumbing ----------
 
+    /// <summary>
+    /// Redeems a cross-host handoff: the app holding the session minted it, this host turns it into a
+    /// cookie. Exists because a cookie's Domain may name the setting host or a parent, never a
+    /// sibling, so `invites.blog` cannot admit anyone to `me.invites.blog` directly.
+    /// </summary>
+    [HttpGet("/h/{handoff}")]
+    public IActionResult Handoff(string handoff)
+    {
+        var inviteId = tickets.ReadHandoff(handoff, DateTimeOffset.UtcNow);
+        return inviteId is null
+            ? Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized)
+            : Admit(inviteId.Value);
+    }
+
     /// <summary>Issues the cookie and sends the guest on to a URL that authorizes nothing.</summary>
     private IActionResult Admit(Guid inviteId)
     {
         Response.Cookies.Append(
             RenderTickets.CookieName,
-            tickets.IssueTicket(inviteId, DateTimeOffset.UtcNow),
+            // Added to whatever this browser was already admitted to, so opening a second invitation
+            // does not lock the guest out of the first.
+            tickets.Admit(Request.Cookies[RenderTickets.CookieName], inviteId, DateTimeOffset.UtcNow),
             new CookieOptions
             {
                 HttpOnly = true,          // a template's script must never be able to read this
@@ -223,14 +240,15 @@ public sealed class GuestController(
         return Redirect($"/r/{tickets.RenderId(inviteId)}");
     }
 
-    /// <summary>The invite this request is admitted to, if its cookie matches this render id.</summary>
+    /// <summary>
+    /// The invitation this request is admitted to, if any of the ones in its cookie matches this
+    /// render id. A browser may hold several at once.
+    /// </summary>
     private Guid? Admitted(string renderId)
     {
-        var inviteId = tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow);
-        if (inviteId is null) return null;
-        return string.Equals(tickets.RenderId(inviteId.Value), renderId, StringComparison.Ordinal)
-            ? inviteId
-            : null;
+        foreach (var id in tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow))
+            if (string.Equals(tickets.RenderId(id), renderId, StringComparison.Ordinal)) return id;
+        return null;
     }
 
     /// <summary>Absolute URL for a path on this host, so links inside the invitation are shareable.</summary>
