@@ -638,6 +638,39 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
   font-family: var(--sans); font-style: normal; font-size: .92rem; font-weight: 600;
   letter-spacing: .04em; padding: 11px 26px;
 }
+/* After the night this is the ask, not a footnote — the invitation is read once and the photographs
+   are why anyone comes back. So it gets a filled button of its own and room to breathe, rather than
+   the quiet outline it started as. Rose leads instead of gold so it reads as a DIFFERENT action from
+   Reply now rather than a second attempt at the same one, and the rule above it separates the two
+   without needing a heading. */
+.rsvp .capture {
+  margin: 38px auto 0;
+  padding-top: 30px;
+  max-width: 30rem;
+  border-top: 1px solid var(--line);
+}
+.capture__btn {
+  background: linear-gradient(120deg, var(--rose), var(--gold));
+  font-family: var(--sans);
+  font-style: normal;
+  letter-spacing: .03em;
+  padding: 17px 38px;
+  font-size: 1.05rem;
+  box-shadow: 0 10px 30px rgba(217, 143, 160, .22);
+}
+@media (hover: hover) and (pointer: fine) {
+  .capture__btn:hover { box-shadow: 0 16px 38px rgba(217, 143, 160, .34); }
+}
+.capture__hint {
+  display: block;
+  margin-top: 14px;
+  font-family: var(--sans);
+  font-size: .78rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* The when and the where, moved here off the photo slide. The date leads in the accent, the venue
    sits under it in the serif — the same pairing the details section uses, so the two read as one
    voice rather than two different treatments of the same facts. */
@@ -784,7 +817,10 @@ footer .from { font-family: var(--serif); font-style: italic; color: var(--ink);
       <p class="where" data-var="event.venue.name">The venue</p>
       <p class="rsvp-map" data-optional><a class="btn ghost" data-href="event.venue.mapLink" href="#" target="_blank" rel="noopener">Open the location</a></p>
       <a class="btn" data-href="rsvp.link" href="#">Reply now</a>
-      <p class="photos"><a class="btn ghost" data-href="photos.link" href="#">Photos from the night</a></p>
+      <div class="capture">
+        <a class="btn capture__btn" data-href="photos.link" href="#">Upload what you captured</a>
+        <span class="capture__hint">Everything everyone shot, in one place</span>
+      </div>
       <p class="hashtag" data-optional data-var="event.hashtag">#HerGildedHour</p>
     </section>
 

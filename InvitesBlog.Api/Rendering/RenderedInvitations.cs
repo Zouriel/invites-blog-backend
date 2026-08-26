@@ -57,7 +57,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
             <a href="{WebUtility.HtmlEncode(link)}" style="display:block;padding:18px 16px;
                font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
                text-align:center;text-decoration:none;color:#fff;background:#17131a;
-               border-top:1px solid rgba(255,255,255,.14)">Photos from the night &rarr;</a>
+               border-top:1px solid rgba(255,255,255,.14)">Upload what you captured &rarr;</a>
             """;
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
