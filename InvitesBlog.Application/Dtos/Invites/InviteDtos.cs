@@ -17,7 +17,10 @@ public sealed record InviteCancelledResponse(bool Cancelled, string Message);
 public sealed record InviteRequiresOtpResponse(bool RequiresOtp);
 public sealed record InviteViewResponse(
     string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus,
-    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
+    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null,
+    // Additive: the server-rendered guest path mints its cookie from this rather than looking the
+    // invite up a second time. Existing clients simply ignore it.
+    Guid InviteId = default);
 
 /// <summary>
 /// The rendered invite for an OTP-authenticated guest opening the shared campaign link

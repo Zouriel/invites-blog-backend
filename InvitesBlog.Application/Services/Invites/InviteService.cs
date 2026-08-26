@@ -81,7 +81,43 @@ public sealed class InviteService(
             inviter?.Name, inviter?.PhoneE164, inviter?.Email);
 
         return new InviteViewResponse(payload.PackageUrl, payload.Data, false, payload.CampaignStatus,
-            RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
+            RsvpQuestions.Parse(campaign.RsvpQuestionsJson), invite.Id);
+    }
+
+    /// <summary>
+    /// The render half of <see cref="GetByTokenAsync"/>, without the access check — see the interface.
+    /// Deliberately mirrors what that method does once its checks have passed, including the frozen
+    /// manifest and pinned package the campaign carries.
+    /// </summary>
+    public async Task<InviteRenderData?> RenderAuthorizedAsync(
+        Guid inviteId, string inviteLink, InviteRenderer render, CancellationToken ct = default)
+    {
+        var invite = await invites.GetByIdAsync(inviteId, ct);
+        if (invite is null) return null;
+
+        var campaign = await campaigns.GetByIdAsync(invite.CampaignId, ct);
+        var guest = await guests.GetByIdAsync(invite.GuestId, ct);
+        if (campaign is null || guest is null) return null;
+
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        if (template is null) return null;
+
+        var inviter = campaign.InviterId is null
+            ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
+
+        var payload = render(campaign, template, guest, invite, inviteLink,
+            inviter?.Name, inviter?.PhoneE164, inviter?.Email);
+
+        return new InviteRenderData(
+            payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString());
+    }
+
+    public async Task<RsvpResultResponse> RsvpAuthorizedAsync(
+        Guid inviteId, RsvpRequest req, CancellationToken ct = default)
+    {
+        await rsvpValidator.ValidateAndThrowAsync(req, ct);
+        var invite = await invites.GetByIdAsync(inviteId, ct) ?? throw new InviteNotFoundException();
+        return await RecordRsvpAsync(invite, req, ct);
     }
 
     public async Task<RsvpResultResponse> RsvpAsync(string token, string? ipAddress, RsvpRequest req, CancellationToken ct = default)

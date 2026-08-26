@@ -14,5 +14,6 @@
     <ProjectReference Include="..\InvitesBlog.Application\InvitesBlog.Application.csproj" />
     <ProjectReference Include="..\InvitesBlog.Infrastructure\InvitesBlog.Infrastructure.csproj" />
     <ProjectReference Include="..\InvitesBlog.TemplateCompiler\InvitesBlog.TemplateCompiler.csproj" />
+    <ProjectReference Include="..\InvitesBlog.Api\InvitesBlog.Api.csproj" />
   </ItemGroup>
 </Project>

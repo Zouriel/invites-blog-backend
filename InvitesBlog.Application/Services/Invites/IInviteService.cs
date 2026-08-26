@@ -18,6 +18,28 @@ public interface IInviteService
     /// <summary>Rendered invite for the OTP-authenticated caller via the shared campaign link (<c>/e/{id}</c>).</summary>
     Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default);
 
+    /// <summary>
+    /// Builds the payload for an invite the caller has ALREADY been authorized to see. Does no access
+    /// check of its own — it is the tail of a flow whose head did the checking, which is why it takes
+    /// an id rather than a token. The server-rendered guest path uses it: admission happens once at
+    /// <c>/i/{token}</c> and is carried afterwards by an HttpOnly cookie, so the render itself has no
+    /// token to re-check. Returns null when the invite, its campaign or its template has gone.
+    /// </summary>
+    /// <param name="inviteLink">
+    /// The URL this invitation is being served at. It becomes <c>invite.link</c>, and
+    /// <c>rsvp.link</c> is derived from it, so the template's own RSVP button stays on whatever path
+    /// the guest actually arrived by.
+    /// </param>
+    Task<InviteRenderData?> RenderAuthorizedAsync(
+        Guid inviteId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records an RSVP for an invite the caller has ALREADY been authorized to answer for — the
+    /// cookie-carried counterpart of <see cref="RsvpAsync"/>. Like
+    /// <see cref="RenderAuthorizedAsync"/> it performs no access check of its own.
+    /// </summary>
+    Task<RsvpResultResponse> RsvpAuthorizedAsync(Guid inviteId, RsvpRequest req, CancellationToken ct = default);
+
     Task<RsvpResultResponse> RsvpAsync(string token, string? ipAddress, RsvpRequest req, CancellationToken ct = default);
     /// <summary>Authenticated RSVP from the inbox (by invite id, ownership-checked).</summary>
     Task<RsvpResultResponse> RsvpByInviteIdAsync(Guid inviteId, RsvpRequest req, CancellationToken ct = default);

@@ -34,6 +34,10 @@ public static class DependencyInjection
         // "Images must be 20 MB or smaller." message the service is there to give them.
         services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 24 * 1024 * 1024);
 
+        // The server-rendered guest path (/i, /r, rsvp).
+        services.AddSingleton<Rendering.RenderTickets>();
+        services.AddScoped<Rendering.RenderedInvitations>();
+
         services.AddCors(o => o.AddDefaultPolicy(p => p
             .WithOrigins(
                 config["Urls:InviterBase"] ?? "http://localhost:4200",
