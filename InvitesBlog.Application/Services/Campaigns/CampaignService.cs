@@ -536,10 +536,6 @@ public sealed class CampaignService(
             price);
     }
 
-    /// <summary>
-    /// The campaign's frozen manifest, falling back to the live template's only for campaigns created
-    /// before the snapshot column existed and never backfilled (defensive — the migration backfills them).
-    /// </summary>
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
     /// created before it was stored (the migration backfills those).</summary>
     private static string SnapshotPackageUrl(Campaign campaign, Template template) =>
@@ -547,6 +543,10 @@ public sealed class CampaignService(
             ? template.PackageUrl
             : campaign.TemplatePackageUrl;
 
+    /// <summary>
+    /// The campaign's frozen manifest, falling back to the live template's only for campaigns created
+    /// before the snapshot column existed and never backfilled (defensive — the migration backfills them).
+    /// </summary>
     private static string SnapshotManifest(Campaign campaign, Template template) =>
         string.IsNullOrWhiteSpace(campaign.TemplateManifestJson) || campaign.TemplateManifestJson.Trim() is "{}"
             ? template.ManifestJson
