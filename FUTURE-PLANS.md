@@ -6,7 +6,12 @@ we already know about — so whoever picks it up isn't rediscovering them.
 **Order:** R2 first (it's small and it unblocks cost/scale), then the app topology, then the auth
 model, then the render app, then invites.lens. The topology and auth work come before the render app
 on purpose: §2 decides which hosts exist and what runs on them, and §3 shrinks what a leaked session is
-worth — which is the render app's whole reason for existing. Nothing here is started.
+worth — which is the render app's whole reason for existing.
+
+**Status (2026-08-26).** §4 is **live for the personal link**: `me.invites.blog/i/{token}` and
+`/r/{renderId}` are served by the API, and a guest now gets a server-rendered invitation with no
+iframe. Everything else on that host still goes to the Angular app. §1, §2's app dissolution, §3
+and §5 are not started.
 
 ---
 
@@ -215,7 +220,19 @@ contained risk into a small one.
 
 ---
 
-## 4. Server-rendered invitation (the "render app")
+## 4. Server-rendered invitation (the "render app") — *shipped for the personal link*
+
+> **Live.** `GET /i/{token}` runs the existing token + IP-trust check, renders the OTP challenge as a
+> page when the network is unrecognised, then sets an HttpOnly cookie and redirects to
+> `GET /r/{renderId}` — the invitation, bound by `ServerBinder`, under the CSP `sandbox` policy.
+> `GET/POST /r/{renderId}/rsvp` is the RSVP, authorized by the same cookie, and `rsvp.link` points at
+> it so the template's own button stays inside the flow. Caddy routes `/i/*` and `/r/*` on
+> `me.invites.blog` to the API; deleting those two blocks rolls it all back.
+>
+> **Not yet.** `/e/{campaignId}`, `/invites/{id}` and `privacy/remove` still run on the Angular app,
+> so `web-invitee` is not dissolved and `/api/*` still has to be proxied on that host. "Save this to
+> my inbox", which the Angular `/i` page offered, has no equivalent. The editor preview still uses the
+> JS binder.
 
 **Today.** A guest's invitation is an Angular page that creates a **sandboxed iframe**, then posts the
 invitation data into it, and a script inside binds it to the markup.
