@@ -1,11 +1,42 @@
 # invites-blog-backend
 
-The API for **invites.blog** — a premium animated digital-invitation platform. Inviters create
-beautiful, role-aware, personalized invites **with no account** and send unique links by email;
-invitees open their link and RSVP with **zero login**.
+The API for **invites.blog** — animated digital invitations, and what happens around them.
+
+A host picks or commissions a template, builds an invitation, and sends every guest their own
+link. Each guest opens a **server-rendered, personalized** invitation — their name, their role,
+the blocks that apply to them — and replies without creating anything. On the night, they open a
+**camera inside that same invitation**, and everything anyone shoots collects in one place for
+everyone who was there.
 
 This repo is the ASP.NET Core / .NET 10 backend: REST API, domain and business logic, EF Core
-persistence, the template compiler, and the retention worker.
+persistence, the template compiler, the server-rendered guest path, and the worker.
+
+## What it does
+
+**Invitations.** A builder that walks content → theme → roles → guests → venue → RSVP questions →
+delivery. Guest lists arrive by hand or as an uploaded spreadsheet. Personalization is per guest:
+their name, role-scoped content blocks, gender variants, and a rules engine deciding what each
+person sees. A campaign **pins** its template package at booking, so an invitation sent months ago
+still renders exactly as it did the day it was sent.
+
+**Delivery and replies.** Every guest gets a unique tokenized link by **email**. Opening it needs no
+account at all; the token is the credential, and an unfamiliar network is challenged with a code.
+RSVPs land live on the host's dashboard. A guest who would rather use an account can sign in with an
+email code, Google or Microsoft, and find every invitation ever sent to their address — including
+ones sent before they signed up.
+
+**The event photo box.** Guests open a camera from their invitation — front and rear, colour grades,
+tap to focus, an exposure bias for a dark room — and every shot queues to a store that survives a
+locked phone or a dead connection. Nothing is capped: the shot as taken is kept, alongside a
+screen-sized copy and a grid tile. Everyone at the event sees the grid; the host moderates it.
+
+**Templates.** Three sources: first-party templates in this repo, community templates submitted by
+designers and reviewed before publication, and bespoke commissions arranged through an inquiry.
+Designers set a per-use fee; commissioned templates can be reserved to one customer.
+
+**Privacy.** EXIF, IPTC and XMP are stripped from every uploaded image — these are photographs of
+other people's guests, and a GPS tag would publish where a wedding was. There is a suppression list,
+per-guest data removal by token, and a retention job that deletes a campaign's data on a timer.
 
 ## Companion repos
 
@@ -100,6 +131,29 @@ dotnet test          # 138 tests
 - **Email-only OTP at launch** (phone OTP disabled).
 - **Resend** email provider with a signature-verified delivery webhook
   (delivered/bounced/complained → suppression, idempotent).
+- **Server-rendered invitations** — the guest path renders on the server and is served as one
+  top-level document under `sandbox; default-src 'none'`. No iframe, and the authority is an
+  HttpOnly cookie rather than the URL, because a template may ship its own JavaScript and a
+  document can read its own address.
+- **The event photo box and camera** — an in-browser camera on the guest path: front/rear, colour
+  grades baked in at capture, tap to focus, an exposure bias for a dark room, and an upload queue
+  in IndexedDB so a shutter press never waits for the network. Originals are kept uncapped, with a
+  2048px viewing copy and a 400px tile derived from each.
+- **Cloudflare R2** for assets behind a custom domain, with cache headers set per key so template
+  packages revalidate while campaign images stay immutable.
+
+## Not yet real
+
+Worth knowing before reading the pricing code:
+
+- **Payments are not live.** `PricingCalculator` is complete and tested — $5 minimum, 50 invites
+  included, $1 per block beyond, a per-use designer fee — but the only registered `IPaymentProvider`
+  is `FakePaymentProvider`. No real money has moved through this.
+- **Delivery is email only.** The landing page's Telegram and WhatsApp are marked "coming soon"
+  and there is no provider behind either.
+- **The worker is not deployed.** `RetentionCleanupService` lives in `InvitesBlog.Worker`, which has
+  no container in production, so retention does not currently run. Background work that must run is
+  registered in the API host instead.
 
 ## Security & privacy
 
