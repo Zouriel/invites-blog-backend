@@ -61,9 +61,16 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
                 }));
             }
 
-            // Camera EXIF carries orientation, GPS and thumbnails. Orientation is already baked in by
-            // the decoder, so dropping the rest costs nothing and avoids publishing where a photo was
-            // taken. Done for every image, resized or not.
+            // Camera EXIF carries orientation, GPS and thumbnails. Rotate FIRST, then drop the lot:
+            // a phone writes the sensor's pixels unrotated and records which way up they go in a tag,
+            // so discarding the tag without applying it is what turns a portrait on its side. That
+            // was invisible while every capture came through a canvas — canvas output has no EXIF and
+            // its pixels are already the right way up — and the moment anything handed over an
+            // untouched camera file, this dropped the only thing that said which way up it was.
+            image.Mutate(x => x.AutoOrient());
+
+            // Everything else goes, and this is the reason: these are photographs OF other people's
+            // guests, and a GPS tag would publish where somebody's wedding was to anyone who saved one.
             image.Metadata.ExifProfile = null;
             image.Metadata.IptcProfile = null;
             image.Metadata.XmpProfile = null;
@@ -113,6 +120,11 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
 
             // No resize. This is the whole difference from Optimize: an event photo is the picture
             // somebody took, and the copy they may want back is the one they took.
+            //
+            // The rotation still has to be applied before the tag carrying it is dropped — see the
+            // note in Optimize. "The picture they took" means the right way up.
+            image.Mutate(x => x.AutoOrient());
+
             image.Metadata.ExifProfile = null;
             image.Metadata.IptcProfile = null;
             image.Metadata.XmpProfile = null;
