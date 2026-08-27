@@ -57,7 +57,12 @@ public static class GuestCameraPage
                background:linear-gradient(rgba(0,0,0,.55), transparent); }
         .title { font-size:.85rem; opacity:.9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-        .btn { display:grid; place-items:center; min-width:44px; height:44px; padding:0 12px;
+        /* flex:0 0 auto matters: this button shares a row with the zoom slider, and a range input
+           has an intrinsic minimum width it will not go below. Left to shrink, the BUTTON gave way
+           instead — squeezed under its own label, which then overflowed its centred area and read
+           as text sitting off to one side. */
+        .btn { display:grid; place-items:center; flex:0 0 auto; white-space:nowrap;
+               min-width:44px; height:44px; padding:0 12px;
                border:0; border-radius:999px; background:rgba(0,0,0,.42); color:#fff;
                font:inherit; font-size:.85rem; cursor:pointer; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
         .btn.on { background:var(--accent,#c9a227); color:var(--on-accent,#241d06); }
@@ -86,7 +91,8 @@ public static class GuestCameraPage
         .side { flex:1 1 0; display:flex; align-items:center; gap:8px; }
         .side.right { justify-content:flex-end; }
 
-        input[type=range] { width:100%; max-width:130px; accent-color:#fff; }
+        /* min-width:0 lets it give up the space instead, which is what should yield here. */
+        input[type=range] { width:100%; min-width:0; max-width:130px; accent-color:#fff; }
 
         /* Shot strip: proof that what you took is going somewhere. */
         .queue { display:flex; gap:6px; overflow-x:auto; padding:0 2px 10px; scrollbar-width:none; }
