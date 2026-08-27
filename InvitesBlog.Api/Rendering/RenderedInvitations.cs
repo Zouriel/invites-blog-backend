@@ -74,8 +74,16 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         // to read as part of the invitation rather than as something appended to it. Colours and
         // type both come from the template's OWN custom properties, so it inherits whatever the
         // designer chose; the fixed pair is only the floor for a template that declared nothing.
+        //
+        // The stacking is load-bearing, not decoration. Templates build their scenery out of
+        // full-screen position:fixed layers — red-curtain-2 has four, the topmost a velvet curtain
+        // at z-index 9 — and an unpositioned block paints UNDERNEATH every one of them. So this
+        // rendered perfectly and was invisible: present in the markup, covered by the curtain. It is
+        // appended from outside the design and cannot know what it is landing on top of, so it
+        // claims a z-index no template would reasonably reach for.
         var bar = $"""
-            <section style="padding:56px 20px calc(48px + env(safe-area-inset-bottom));text-align:center;
+            <section style="position:relative;z-index:2147483000;
+               padding:56px 20px calc(48px + env(safe-area-inset-bottom));text-align:center;
                background:var(--ib-bg,#17131a);color:var(--ib-text,#f4eef6);
                border-top:1px solid color-mix(in srgb, currentColor 14%, transparent)">
               <a href="{WebUtility.HtmlEncode(link)}" style="display:inline-flex;align-items:center;

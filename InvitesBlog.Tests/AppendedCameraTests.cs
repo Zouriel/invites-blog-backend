@@ -98,6 +98,38 @@ public class AppendedCameraTests
             "the camera was appended outside <body>");
     }
 
+    /// <summary>
+    /// It has to paint above the template's scenery.
+    ///
+    /// <para>Templates build their backdrops from full-screen position:fixed layers — this one has
+    /// four, topping out at a velvet curtain on z-index 9 — and an unpositioned block paints under
+    /// every one of them. The section rendered correctly and was invisible for exactly that reason,
+    /// which no assertion about the markup would have caught.</para>
+    /// </summary>
+    [Fact]
+    public async Task The_appended_camera_paints_above_the_templates_fixed_layers()
+    {
+        var html = await RenderAsync(Payload(new JsonObject { ["link"] = "/r/abc/camera" }));
+
+        var section = System.Text.RegularExpressions.Regex.Match(
+            html, @"<section[^>]*Capture|<section[^>]*>(?=(?:(?!</section>).)*Capture moments)",
+            System.Text.RegularExpressions.RegexOptions.Singleline).Value;
+        Assert.NotEqual(string.Empty, section);
+        Assert.Contains("position:relative", section);
+
+        var z = System.Text.RegularExpressions.Regex.Match(section, @"z-index:(\d+)");
+        Assert.True(z.Success, "the appended camera declares no stacking order");
+
+        // Higher than anything this template — or any sane template — reaches for.
+        var declared = System.Text.RegularExpressions.Regex.Matches(Published(), @"z-index:\s*(\d+)")
+            .Select(m => int.Parse(m.Groups[1].Value))
+            .DefaultIfEmpty(0)
+            .Max();
+        Assert.True(
+            int.Parse(z.Groups[1].Value) > declared,
+            $"camera z-index {z.Groups[1].Value} does not clear the template's {declared}");
+    }
+
     /// <summary>A camera closed for this guest adds nothing at all.</summary>
     [Fact]
     public async Task A_closed_camera_appends_nothing()
