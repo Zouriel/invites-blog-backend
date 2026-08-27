@@ -216,9 +216,9 @@ public class InviteRenderServiceTests
         Assert.Equal("https://me.invites.blog/r/abc/photos", payload.Data["photos"]?["link"]?.ToString());
     }
 
-    /// <summary>Coming, but not tonight.</summary>
+    /// <summary>Coming, whenever the event happens to be.</summary>
     [Fact]
-    public void The_camera_has_no_link_before_the_day()
+    public void The_camera_is_offered_regardless_of_the_date()
     {
         var campaign = Campaign("{}");
         campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(9);
@@ -228,7 +228,8 @@ public class InviteRenderServiceTests
             campaign, TestData.Template(), Guest("Family"), invite,
             "https://me.invites.blog/r/abc", "Aisha", null, null);
 
-        Assert.Null(payload.Data["camera"]?["link"]);
+        // The date no longer gates it: coming is the whole condition.
+        Assert.NotNull(payload.Data["camera"]?["link"]);
     }
 
     // --- Theme → CSS custom properties -----------------------------------------------------------

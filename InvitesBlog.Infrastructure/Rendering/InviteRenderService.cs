@@ -76,9 +76,12 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
                 ["phone"] = inviterPhone,
                 ["email"] = inviterEmail
             },
+            // The link is absent for a guest who already said they are coming — see RsvpPrompt. The
+            // label goes with it, because a control with neither is what [data-optional] hides.
             ["rsvp"] = new JsonObject
             {
-                ["link"] = $"{inviteLink}/rsvp",
+                ["link"] = invite.RsvpStatus == RsvpStatus.Going ? null : $"{inviteLink}/rsvp",
+                ["label"] = RsvpPrompt(invite.RsvpStatus),
                 ["status"] = invite.RsvpStatus.ToString()
             },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
@@ -91,7 +94,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             // always present and the LINK is what comes and goes — that is how a template's
             // [data-optional] wrapper knows to hide itself, and how the appended bar tells a closed
             // camera apart from a payload rendered before there was one.
-            ["camera"] = CameraIsOpen(campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow)
+            ["camera"] = CameraIsOpen(invite.RsvpStatus)
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
                 : new JsonObject(),
             ["theme"] = theme,
@@ -224,30 +227,37 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
     /// over from an earlier version of the template — falls back to the documented naming convention
     /// rather than being silently dropped.
     /// </summary>
-    /// <summary>How long after the event begins the camera stays open.</summary>
-    private static readonly TimeSpan CameraClosesAfter = TimeSpan.FromHours(12);
+    /// <summary>
+    /// What the invitation's RSVP control should say, by what this guest has already answered.
+    ///
+    /// <para>Someone who said they are coming has nothing left to do, so they get an empty label and
+    /// no link, and the template's <c>[data-optional]</c> wrapper takes the control off the page. A
+    /// maybe is asked to settle it; a no is offered the chance to change their mind. Everyone else
+    /// gets the plain invitation to answer.</para>
+    ///
+    /// <para>The wording is bound rather than authored because the text has to change per guest, and
+    /// a missing bound value BLANKS an element rather than falling back to what the designer typed —
+    /// so a label always has to be supplied. The cost is that this is now the product's wording for
+    /// the button in every template, not each designer's.</para>
+    /// </summary>
+    public static string RsvpPrompt(RsvpStatus status) => status switch
+    {
+        RsvpStatus.Going => string.Empty,
+        RsvpStatus.Maybe => "Confirm your reply",
+        RsvpStatus.NotGoing => "Change your reply",
+        _ => "Reply now",
+    };
 
     /// <summary>
-    /// Whether this guest is offered the camera: they said they were coming, and it is the day.
+    /// Whether this guest is offered the camera. One condition: they said they were coming.
     ///
-    /// <para><b>Why a window and not a date.</b> "The event date" compared as a calendar date expires
-    /// at midnight, and a party that begins at 22:00 is two hours old by then — the camera would go
-    /// dark at exactly the point people are using it. Worse, no timezone is stored: Postgres
-    /// normalises the column to UTC and the offset the inviter typed is gone by the time it is read
-    /// back, so there is no local midnight to compare against even if that were the right edge.</para>
-    ///
-    /// <para>So it opens at the start of the event's day and closes
-    /// <see cref="CameraClosesAfter"/> after it begins, which covers the evening it was meant for
-    /// including the part after midnight.</para>
+    /// <para>It was briefly also gated on the day of the event, which is the more careful rule —
+    /// nobody shooting an event weeks before it happens — but it made the feature untestable and
+    /// left almost every guest without it, since most never answer at all. The date is gone rather
+    /// than merely widened, so the rule that runs is the rule that reads. Reinstating it is this
+    /// function and nothing else; the window it used is in the history.</para>
     /// </summary>
-    public static bool CameraIsOpen(DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now)
-    {
-        if (rsvp != RsvpStatus.Going) return false;
-
-        var opens = new DateTimeOffset(eventStartAt.UtcDateTime.Date, TimeSpan.Zero);
-        var closes = eventStartAt + CameraClosesAfter;
-        return now >= opens && now <= closes;
-    }
+    public static bool CameraIsOpen(RsvpStatus rsvp) => rsvp == RsvpStatus.Going;
 
     private static JsonObject ThemeVars(JsonObject theme, TemplateManifest? manifest)
     {

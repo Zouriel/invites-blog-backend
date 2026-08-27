@@ -90,6 +90,39 @@ public class ServerBinderTests
         new HtmlParser().ParseDocument(html);
 
     /// <summary>
+    /// The RSVP control disappears once a guest has said they are coming, and changes its wording
+    /// for anyone whose answer is not settled.
+    ///
+    /// <para>Asks whether anything is ON SCREEN rather than whether the link works — an unresolved
+    /// href stays "#" as authored, so a control left behind reads as passing while a guest still
+    /// sees a button that does nothing.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("aurora-vows")]
+    [InlineData("gilded-hour")]
+    public async Task The_rsvp_control_goes_once_they_have_said_they_are_coming(string slug)
+    {
+        var html = await PackagedHtml(slug);
+
+        var going = Payload();
+        going["rsvp"] = new JsonObject { ["link"] = null, ["label"] = "" };
+        var afterGoing = Parse(ServerBinder.Bind(html, going));
+        var control = afterGoing.QuerySelector("[data-href='rsvp.link']");
+        Assert.True(
+            control is null || Hidden(control),
+            $"{slug} still shows an RSVP control to a guest who is coming");
+
+        var maybe = Payload();
+        maybe["rsvp"] = new JsonObject { ["link"] = "/r/abc/rsvp", ["label"] = "Confirm your reply" };
+        var afterMaybe = Parse(ServerBinder.Bind(html, maybe));
+        var offered = afterMaybe.QuerySelector("[data-href='rsvp.link']");
+        Assert.NotNull(offered);
+        Assert.False(Hidden(offered!), $"{slug} hid the RSVP control from an unsettled guest");
+        Assert.Equal("/r/abc/rsvp", offered!.GetAttribute("href"));
+        Assert.Contains("Confirm your reply", offered.TextContent);
+    }
+
+    /// <summary>
     /// The camera is offered only to a guest who said they were coming, on the night. The rule lives
     /// in the payload — the LINK is present or it is not — and every template wraps its capture block
     /// in [data-optional], so an unresolved href takes the whole block with it.
