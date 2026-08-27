@@ -84,7 +84,11 @@
     // drops frames to do it — that IS its low-light behaviour — so demanding a steady 30 would
     // fight the one adaptation that makes an evening party usable, and buy a dim, noisy preview
     // in exchange for smooth motion nobody asked for.
-    const video = {
+    // NOT named `video`: that is the <video> element, declared at the top of this file, and
+    // shadowing it here left `video.srcObject = stream` quietly setting a property on a plain
+    // object and `video.classList` throwing on undefined — with the throw landing between the
+    // preview starting and the state being set, so the page sat on its loading spinner forever.
+    const wanted = {
       facingMode: { ideal: facing },
       width: { ideal: 4096 },
       height: { ideal: 4096 },
@@ -97,9 +101,9 @@
       // zoom control could quietly never appear. Devices that refuse the whole request over it
       // get a second, plainer ask rather than no camera.
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { ...video, zoom: true } });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { ...wanted, zoom: true } });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: wanted });
       }
     } catch (err) {
       // A device with one camera refuses the facing it does not have. That must not take down a
@@ -115,17 +119,25 @@
       return;
     }
 
-    video.srcObject = stream;
-    track = stream.getVideoTracks()[0] || null;
-    // A selfie preview is mirrored because that is how a mirror behaves and how every phone camera
-    // shows it. What gets SAVED is mirrored to match — a portrait that flips the moment you take it
-    // reads as broken, whatever the optics say.
-    video.classList.toggle('mirror', facing === 'user');
+    // Everything from here to 'live' is wrapped, because a throw in the middle of it leaves the
+    // page on its loading spinner with nothing to press — the state never becomes 'live' and
+    // nothing ever calls fail(). A bug that stops the camera should say so, not hang.
+    try {
+      video.srcObject = stream;
+      track = stream.getVideoTracks()[0] || null;
+      // A selfie preview is mirrored because that is how a mirror behaves and how every phone
+      // camera shows it. What gets SAVED is mirrored to match — a portrait that flips the moment
+      // you take it reads as broken, whatever the optics say.
+      video.classList.toggle('mirror', facing === 'user');
 
-    await maxOut();
-    await settle();
-    controls();
-    document.body.dataset.state = 'live';
+      await maxOut();
+      await settle();
+      controls();
+      document.body.dataset.state = 'live';
+    } catch (err) {
+      stop();
+      fail(err);
+    }
   }
 
   /** Push the track to the largest frame it admits to supporting. */
@@ -276,6 +288,8 @@
         ? 'The camera was blocked. Allow it in your browser settings and reload this page.'
         : err && err.name === 'NotFoundError'
           ? "This device doesn't seem to have a camera."
+          : err && err.name === 'NotReadableError'
+          ? 'Another app is using the camera. Close it and reload this page.'
           : 'The camera could not be opened on this browser.';
     $('why').textContent = why;
   }

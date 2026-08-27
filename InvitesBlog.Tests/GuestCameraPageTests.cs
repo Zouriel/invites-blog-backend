@@ -201,6 +201,50 @@ public class GuestCameraPageTests
         Assert.Contains("crop !== 1 || facing === 'user'", html);
     }
 
+    /// <summary>
+    /// The names the script relies on at the top of its scope must not be redeclared inside a
+    /// function.
+    ///
+    /// <para>This is not style. `video` is the &lt;video&gt; element; a constraints object of the
+    /// same name inside start() shadowed it, so `video.srcObject = stream` quietly set a property on
+    /// a plain object and `video.classList` threw on undefined. The throw landed between the preview
+    /// starting and the state being set, and the page sat on its loading spinner forever — with the
+    /// markup, the ids, the config and every other test still passing.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("video")]
+    [InlineData("track")]
+    [InlineData("stream")]
+    [InlineData("shutter")]
+    [InlineData("strip")]
+    public void The_scripts_top_level_names_are_never_shadowed(string name)
+    {
+        var html = Page();
+
+        // A declaration of that name indented past the top level of the IIFE is a redeclaration.
+        var shadowed = Regex.Matches(html, @"(?m)^\s{4,}(?:const|let|var)\s+" + name + @"\s*=")
+            .Select(m => m.Value.Trim())
+            .ToList();
+
+        Assert.True(
+            shadowed.Count == 0,
+            $"'{name}' is redeclared inside a function: {string.Join(" | ", shadowed)}");
+    }
+
+    /// <summary>
+    /// A fault while opening the camera must end somewhere. Between the stream arriving and the
+    /// state becoming live there is nothing on screen but a spinner, and no path out of it.
+    /// </summary>
+    [Fact]
+    public void A_failure_while_starting_cannot_leave_the_page_spinning()
+    {
+        var html = Page();
+
+        Assert.Contains("document.body.dataset.state = 'live';", html);
+        // The whole run-up to it is guarded, and the guard reports rather than swallowing.
+        Assert.Contains("} catch (err) {\n      stop();\n      fail(err);", html.Replace("\r\n", "\n"));
+    }
+
     /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
     [Fact]
     public void The_selfie_preview_is_mirrored()
