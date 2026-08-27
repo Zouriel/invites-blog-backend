@@ -33,6 +33,13 @@ public interface IAccountService
     /// </summary>
     Task<AuthResultDto> VerifyCodeAsync(VerifyCodeRequest request, CancellationToken ct = default);
 
+    /// <summary>
+    /// Creates a customer account: the code proves the address, the password is what they sign in
+    /// with from then on. The two-step exists because an account's email is trusted for matching
+    /// invitations, so an unproven one would read another person's post.
+    /// </summary>
+    Task<AuthResultDto> SignUpAsync(SignUpRequest request, CancellationToken ct = default);
+
     Task<AccountDto> MeAsync(CancellationToken ct = default);
 
     /// <summary>

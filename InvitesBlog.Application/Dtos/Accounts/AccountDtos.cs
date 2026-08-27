@@ -16,6 +16,13 @@ public sealed record CodeSentResponse(
 
 public sealed record VerifyCodeRequest(Guid ChallengeId, string Code);
 
+/// <summary>
+/// Finishing a customer sign-up: the code proves the address is theirs, and the password is what
+/// they will actually sign in with afterwards.
+/// </summary>
+public sealed record SignUpRequest(
+    Guid ChallengeId, string Code, string Password, string? DisplayName = null);
+
 /// <summary>The signed-in account: who they are, what they can do, and how they can be reached.</summary>
 public sealed record AccountDto(
     Guid Id,

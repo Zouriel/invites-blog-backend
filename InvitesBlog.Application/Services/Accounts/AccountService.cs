@@ -144,6 +144,49 @@ public sealed class AccountService(
     }
 
     /// <summary>
+    /// Creates a customer account from a proven address plus a password.
+    ///
+    /// <para><b>Why the code is not optional.</b> Once an account exists, invitations are matched to
+    /// it by <c>account.Email</c> with no further check — that is what lets someone who was invited
+    /// before they signed up find their post waiting. So an address nobody proved would hand its
+    /// owner's invitations to whoever typed it, and a self-service sign-up is exactly the front door
+    /// where that would be tried. The code is the proof; the password is only how they get back in.</para>
+    ///
+    /// <para>An address that already has a password belongs to somebody's login. Setting a new one
+    /// from an anonymous endpoint would be a takeover, however well the code proved the address —
+    /// so that case is sent to sign in instead.</para>
+    /// </summary>
+    public async Task<AuthResultDto> SignUpAsync(SignUpRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+            throw new BusinessRuleException("Choose a password of at least 8 characters.", "weak_password");
+
+        var verified = await otp.VerifyContactAsync(new VerifyOtpRequest(request.ChallengeId, request.Code), ct);
+
+        var user = await FindByContactAsync(verified, ct);
+        if (user is null)
+        {
+            user = await CreateFromContactAsync(verified, ct);
+        }
+        else if (!string.IsNullOrEmpty(user.PasswordHash))
+        {
+            throw new BusinessRuleException(
+                "That account already has a password. Sign in instead.", "already_registered");
+        }
+
+        if (!user.IsActive) throw new AccountSuspendedException();
+
+        user.PasswordHash = PasswordHasher.Hash(request.Password);
+        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+            user.DisplayName = request.DisplayName.Trim();
+
+        users.Update(user);
+        await uow.SaveChangesAsync(ct);
+
+        return await IssueAsync(user, ct);
+    }
+
+    /// <summary>
     /// Signs in with an ID token the browser got from Google or Microsoft. The token is verified
     /// against the provider's published keys before anything is trusted, and the PROVIDER'S SUBJECT
     /// ID is the linking key — not the email, which a provider could let someone change.

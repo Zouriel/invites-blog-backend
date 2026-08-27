@@ -336,6 +336,100 @@ public class AccountServiceTests
         await _guests.DidNotReceive().CountByCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
+    // ----- Customer sign-up ----------------------------------------------------------------------
+
+    private void CodeProves(string email)
+    {
+        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new VerifiedContact("email", email));
+    }
+
+    /// <summary>
+    /// The gap this closes: an address that is not a Google one, and no other way onto the platform.
+    /// </summary>
+    [Fact]
+    public async Task Signing_up_creates_a_customer_with_a_password()
+    {
+        Existing();
+        CodeProves("yaseen@ghoul.dev");
+        AppUser? created = null;
+        await _users.AddAsync(Arg.Do<AppUser>(u => created = u), Arg.Any<CancellationToken>());
+
+        await Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "123456", "a-good-password"));
+
+        Assert.Equal("yaseen@ghoul.dev", created!.Email);
+        Assert.Equal(_customerRoleId, Assert.Single(created.UserRoles).RoleId);
+        Assert.False(string.IsNullOrEmpty(created.PasswordHash));
+        Assert.NotEqual("a-good-password", created.PasswordHash);   // stored hashed, never as typed
+    }
+
+    /// <summary>
+    /// The reason the code is not optional. Invitations are matched to an account by its email with
+    /// no further check, so an address nobody proved would hand its owner's post to whoever typed it.
+    /// </summary>
+    [Fact]
+    public async Task Signing_up_without_proving_the_address_is_refused()
+    {
+        Existing();
+        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+            .Returns<VerifiedContact>(_ => throw new BusinessRuleException("bad code", "otp_invalid"));
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "000000", "a-good-password")));
+
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// An address that already has a password is somebody's login. Proving the address is not enough
+    /// to take it over — that is what the sign-in page is for.
+    /// </summary>
+    [Fact]
+    public async Task Signing_up_over_an_existing_login_is_refused()
+    {
+        var mine = User(email: "taken@ghoul.dev", password: "already-set", roleNames: "Customer");
+        Existing(mine);
+        CodeProves("taken@ghoul.dev");
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "123456", "a-good-password")));
+
+        Assert.Equal("already_registered", ex.ErrorCode);
+    }
+
+    /// <summary>
+    /// Somebody invited before they signed up already has an account with no password. Signing up
+    /// adopts it rather than making a second one, or their invitations would be on the other account.
+    /// </summary>
+    [Fact]
+    public async Task Signing_up_adopts_a_passwordless_account_rather_than_making_another()
+    {
+        var invited = User(email: "yaseen@ghoul.dev", roleNames: "Customer");
+        Existing(invited);
+        CodeProves("yaseen@ghoul.dev");
+
+        await Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "123456", "a-good-password"));
+
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+        Assert.False(string.IsNullOrEmpty(invited.PasswordHash));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("short")]
+    public async Task A_password_too_weak_to_be_one_is_refused(string password)
+    {
+        Existing();
+        CodeProves("yaseen@ghoul.dev");
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "123456", password)));
+
+        Assert.Equal("weak_password", ex.ErrorCode);
+        // Refused before the code is spent, so a second attempt does not need a new one.
+        await _otp.DidNotReceive().VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>());
+    }
+
     // ----- Designer sign-up ---------------------------------------------------------------------
 
     [Fact]

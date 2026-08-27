@@ -55,6 +55,25 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     public async Task<IActionResult> VerifyCode([FromBody] VerifyCodeRequest request, CancellationToken ct) =>
         Success(await accounts.VerifyCodeAsync(request, ct));
 
+    /// <summary>
+    /// Step one of a customer sign-up: send a code to the address being claimed. Rate-limited with
+    /// the other code-senders, since it is an anonymous endpoint that causes mail to be sent.
+    /// </summary>
+    [HttpPost("signup/start")]
+    [AllowAnonymous]
+    [EnableRateLimiting("otp")]
+    public async Task<IActionResult> StartSignUp([FromBody] RequestCodeRequest request, CancellationToken ct) =>
+        Success(await accounts.RequestCodeAsync(request, ct));
+
+    /// <summary>
+    /// Step two: the code proves the address, the password is what they sign in with afterwards.
+    /// </summary>
+    [HttpPost("signup")]
+    [AllowAnonymous]
+    [EnableRateLimiting("otp")]
+    public async Task<IActionResult> SignUp([FromBody] SignUpRequest request, CancellationToken ct) =>
+        Success(await accounts.SignUpAsync(request, ct));
+
     [HttpGet("me")]
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));
