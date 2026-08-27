@@ -46,7 +46,18 @@ public static class GuestCameraPage
         /* svh, not vh: the phone's URL bar must not be able to push the shutter off the screen. */
         .stage { position:relative; height:100svh; width:100%; overflow:hidden; background:#000; }
         video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
-        video.mirror { transform: scaleX(-1); }
+        /* --crop is the fallback zoom, used only where the track cannot zoom itself. Composed with
+           the mirror rather than replacing it, so a selfie stays both mirrored and framed in. */
+        video { transform: scale(var(--crop, 1)); }
+        video.mirror { transform: scaleX(-1) scale(var(--crop, 1)); }
+
+        /* Drawn only where focus can actually be steered — see focusAt(). */
+        .reticle { position:absolute; width:74px; height:74px; margin:-37px 0 0 -37px;
+                   border:2px solid rgba(255,255,255,.92); border-radius:8px; pointer-events:none;
+                   box-shadow:0 0 0 1px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.35); }
+        .reticle[hidden] { display:none; }
+        .reticle.go { animation: pull 420ms cubic-bezier(.2,.8,.2,1); }
+        @keyframes pull { from { transform: scale(1.45); opacity:.35; } to { transform: scale(1); opacity:1; } }
 
         .flash { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
         .flash.go { animation: pop 220ms ease-out; }
@@ -150,6 +161,7 @@ public static class GuestCameraPage
         <body>
         <div class="stage">
           <video id="cam" playsinline autoplay muted></video>
+          <div class="reticle" id="reticle" hidden></div>
           <div class="flash" id="flashfx"></div>
 
           <div class="top">

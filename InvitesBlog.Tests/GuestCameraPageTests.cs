@@ -135,6 +135,39 @@ public class GuestCameraPageTests
     [Fact]
     public void The_selfie_preview_is_mirrored()
     {
-        Assert.Contains("video.mirror { transform: scaleX(-1); }", Page());
+        var html = Page();
+
+        var rule = Regex.Match(html, @"video\.mirror \{[^}]*\}").Value;
+        Assert.Contains("scaleX(-1)", rule);
+        // Composed with the fallback zoom rather than replacing it, or a selfie would be mirrored
+        // OR framed in, never both.
+        Assert.Contains("--crop", rule);
+    }
+
+    /// <summary>
+    /// Tap-to-focus draws its mark only where focus can actually be steered. On a camera doing its
+    /// own continuous focus a reticle would be claiming credit for something the tap had no part in.
+    /// </summary>
+    [Fact]
+    public void The_focus_mark_exists_and_starts_hidden()
+    {
+        var html = Page();
+
+        Assert.Contains("id=\"reticle\"", html);
+        Assert.Contains("pointsOfInterest", html);
+        // The mirror inversion: a tap on the left of a selfie preview is the right of the sensor.
+        Assert.Contains("x = 1 - x", html);
+    }
+
+    /// <summary>Front cameras are wide enough that a selfie at arm's length is mostly room.</summary>
+    [Fact]
+    public void The_front_camera_opens_a_little_way_in()
+    {
+        var html = Page();
+
+        Assert.Contains("FRONT_ZOOM", html);
+        // Sensor zoom where the track has it, a crop only where it does not — never both.
+        Assert.Contains("caps.zoom", html);
+        Assert.Contains("crop = FRONT_ZOOM", html);
     }
 }

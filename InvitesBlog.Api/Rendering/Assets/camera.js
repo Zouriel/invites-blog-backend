@@ -42,6 +42,20 @@
   let facing = 'environment';
   let torchOn = false;
 
+  /**
+   * Front cameras are wide — wide enough that a selfie taken at arm's length is mostly room. A
+   * little in is the more flattering default, and anyone who disagrees can pull back out.
+   */
+  const FRONT_ZOOM = 1.25;
+
+  /**
+   * Set only when the track cannot zoom itself. Sensor zoom is real detail; this is a crop, so it
+   * is the fallback rather than the method — and exactly one of the two is ever in play, which is
+   * what stops the zoom control and this compounding into each other.
+   */
+  let crop = 1;
+  let canFocus = false;
+
   const canvasFilterWorks = (() => {
     try {
       const c = document.createElement('canvas').getContext('2d');
@@ -90,6 +104,7 @@
     video.classList.toggle('mirror', facing === 'user');
 
     await maxOut();
+    await settle();
     controls();
     document.body.dataset.state = 'live';
   }
@@ -107,6 +122,42 @@
       }
     } catch {
       /* A track that refuses simply keeps the resolution it negotiated. */
+    }
+  }
+
+  /**
+   * Opening state: how far in, and how the camera should hold focus.
+   *
+   * Sensor zoom is preferred wherever the track offers it — it is real detail rather than a bigger
+   * crop of the same pixels — and the slider then reflects and adjusts it. Where the track offers
+   * none, the same amount is taken as a crop instead, so a selfie frames the same on any phone.
+   */
+  async function settle() {
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    crop = 1;
+
+    if (facing === 'user') {
+      if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+        const target = Math.min(caps.zoom.max, (caps.zoom.min || 1) * FRONT_ZOOM);
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: target }] });
+        } catch {
+          crop = FRONT_ZOOM;
+        }
+      } else {
+        crop = FRONT_ZOOM;
+      }
+    }
+    video.style.setProperty('--crop', String(crop));
+
+    // Keeping focus without being asked is the behaviour of every phone camera; tapping is for
+    // overriding it, not for making it work at all.
+    canFocus = Array.isArray(caps.focusMode)
+      && (caps.focusMode.includes('single-shot') || caps.focusMode.includes('continuous'));
+    if (canFocus && caps.focusMode.includes('continuous')) {
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      } catch { /* it simply keeps whatever it was doing */ }
     }
   }
 
@@ -199,7 +250,14 @@
       ctx.translate(w, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(source, 0, 0, w, h);
+    if (crop !== 1) {
+      // The photograph has to match what was on screen, so the same crop is taken here.
+      const cw = w / crop;
+      const ch = h / crop;
+      ctx.drawImage(source, (w - cw) / 2, (h - ch) / 2, cw, ch, 0, 0, w, h);
+    } else {
+      ctx.drawImage(source, 0, 0, w, h);
+    }
 
     if (source.close) source.close();
 
@@ -244,6 +302,56 @@
       d[i + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
     }
     ctx.putImageData(img, 0, 0);
+  }
+
+  /**
+   * Tap to focus.
+   *
+   * <p>The point is handed to the camera in its own coordinates, which for a selfie are not the
+   * ones on screen: the preview is mirrored, so a tap on the left of the phone is the right of the
+   * sensor. Missing that inversion focuses the camera on the opposite side of whatever was
+   * tapped — right often enough to look like it works, and wrong exactly when someone is off
+   * centre.</p>
+   *
+   * <p>The mark is only drawn where focus can actually be steered. A reticle that lands on a
+   * camera doing continuous focus of its own would be theatre — it would claim credit for
+   * something the tap had no part in.</p>
+   */
+  async function focusAt(e) {
+    if (!track || !canFocus || document.body.dataset.state !== 'live') return;
+
+    const box = video.getBoundingClientRect();
+    const px = e.clientX - box.left;
+    const py = e.clientY - box.top;
+
+    let x = px / box.width;
+    let y = py / box.height;
+    if (facing === 'user') x = 1 - x;
+    x = Math.min(1, Math.max(0, x));
+    y = Math.min(1, Math.max(0, y));
+
+    mark(px, py);
+
+    try {
+      await track.applyConstraints({
+        advanced: [{ pointsOfInterest: [{ x, y }], focusMode: 'single-shot' }],
+      });
+    } catch {
+      // Some tracks list focusMode but refuse a point. The mark stays: the tap was still received.
+    }
+  }
+
+  let markTimer = 0;
+  function mark(x, y) {
+    const el = $('reticle');
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.hidden = false;
+    el.classList.remove('go');
+    void el.offsetWidth;
+    el.classList.add('go');
+    clearTimeout(markTimer);
+    markTimer = setTimeout(() => { el.hidden = true; }, 900);
   }
 
   function flash() {
@@ -443,6 +551,8 @@
     filters();
 
     shutter.addEventListener('click', shoot);
+    // On the video itself, so the controls layered over it keep their own taps.
+    video.addEventListener('click', focusAt);
     $('flip').addEventListener('click', () => start(facing === 'user' ? 'environment' : 'user'));
 
     $('torch').addEventListener('click', async () => {
