@@ -90,6 +90,36 @@ public class ServerBinderTests
         new HtmlParser().ParseDocument(html);
 
     /// <summary>
+    /// A binding that resolves to nothing must not leave something pressable.
+    ///
+    /// <para>An unresolved [data-href] used to keep the author's placeholder "#", which is not inert
+    /// — it is a link to the top of the document, so pressing the button scrolled the page away.
+    /// That stayed hidden while every optional link happened to sit in a [data-optional] wrapper.
+    /// The moment a payload withheld one that did not, every template lacking that wrapper — every
+    /// uploaded one, which nobody can go back and edit — grew a button that jumped to the top.</para>
+    /// </summary>
+    [Fact]
+    public void A_link_that_binds_to_nothing_is_taken_away_even_without_a_wrapper()
+    {
+        const string html = """
+            <html><body>
+              <a id="bare" class="btn" data-href="rsvp.link" href="#">Reply now</a>
+              <a id="real" data-href="rsvp.link" href="/already-here">Reply now</a>
+            </body></html>
+            """;
+
+        var doc = Parse(ServerBinder.Bind(html, new JsonObject { ["rsvp"] = new JsonObject() }));
+
+        // No wrapper, nothing to bind to: gone.
+        Assert.True(Hidden(doc.QuerySelector("#bare")!), "a dead placeholder link was left pressable");
+
+        // An element that carried a real href of its own is not ours to remove.
+        var real = doc.QuerySelector("#real")!;
+        Assert.False(Hidden(real));
+        Assert.Equal("/already-here", real.GetAttribute("href"));
+    }
+
+    /// <summary>
     /// The RSVP control disappears once a guest has said they are coming, and changes its wording
     /// for anyone whose answer is not settled.
     ///

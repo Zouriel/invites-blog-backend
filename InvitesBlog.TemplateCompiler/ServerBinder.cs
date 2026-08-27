@@ -95,12 +95,36 @@ public static class ServerBinder
         }
     }
 
+    /// <summary>
+    /// Binds every <c>[data-href]</c>, and takes away the ones that bound to nothing.
+    ///
+    /// <para>An unresolved binding used to leave the author's placeholder <c>href="#"</c> in place,
+    /// which is not an inert control — it is a link to the top of the document. So a guest pressed a
+    /// button and the page scrolled away from them. That was invisible for as long as every optional
+    /// link happened to sit inside a <c>[data-optional]</c> wrapper; the moment a payload started
+    /// withholding one that did not — the RSVP control, once a guest has said they are coming — every
+    /// template without that wrapper grew a button that jumped to the top.</para>
+    ///
+    /// <para>A wrapper is a designer's way of saying "take the whole row"; this is the floor beneath
+    /// it, and it applies to templates nobody can go back and edit.</para>
+    /// </summary>
     private static void ApplyHrefs(IHtmlDocument doc, JsonObject data)
     {
         foreach (var el in doc.QuerySelectorAll("[data-href]"))
         {
             var value = Resolve(data, el.GetAttribute("data-href"));
-            if (value is not null) el.SetAttribute("href", Stringify(value));
+            var resolved = value is null ? null : Stringify(value);
+
+            if (!string.IsNullOrEmpty(resolved))
+            {
+                el.SetAttribute("href", resolved);
+                continue;
+            }
+
+            // Only what the author left as a placeholder. An element carrying a real href of its own
+            // is not ours to remove.
+            var authored = el.GetAttribute("href");
+            if (string.IsNullOrEmpty(authored) || authored == "#") Hide(el);
         }
     }
 
