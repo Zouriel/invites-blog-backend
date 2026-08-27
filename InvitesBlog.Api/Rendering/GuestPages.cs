@@ -15,6 +15,24 @@ namespace InvitesBlog.Api.Rendering;
 /// </summary>
 public static class GuestPages
 {
+    /// <summary>
+    /// The delete enhancement, read from the assembly. Optional by design: the Remove control is a
+    /// link to a confirmation page that works without it, and this only makes the question instant.
+    /// </summary>
+    private static readonly string Enhancement = LoadAsset("gallery.js");
+
+    private static string LoadAsset(string name)
+    {
+        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+        var key = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("." + name, StringComparison.Ordinal));
+        if (key is null) return string.Empty;
+        using var stream = asm.GetManifestResourceStream(key);
+        if (stream is null) return string.Empty;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>Escapes text for HTML. Everything interpolated below goes through this.</summary>
     private static string E(string? text) => WebUtility.HtmlEncode(text ?? string.Empty);
 
@@ -90,6 +108,21 @@ public static class GuestPages
                       color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
         .bar .cam { display:block; text-align:center; text-decoration:none; flex:0 0 auto; }
         .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
+
+        /* Asked in the page rather than on one of its own: a round trip before the question is a
+           second of nothing happening, and it lands before any feedback that the tap registered. */
+        .ask { position:fixed; inset:0; z-index:10; display:grid; place-items:center; padding:24px;
+               background:rgba(0,0,0,.62); }
+        .ask[hidden] { display:none; }
+        .ask__card { width:100%; max-width:22rem; padding:26px 24px; border-radius:16px;
+                     background:var(--card); border:1px solid var(--line); }
+        .ask__card h2 { font:600 1.15rem/1.3 Georgia, serif; margin:0 0 .5rem; }
+        .ask__card p { margin:0 0 1.2rem; }
+        .ask__card button { width:100%; margin-top:.6rem; padding:.8rem 1rem; font-size:1rem; font-weight:600;
+                            border:0; border-radius:10px; cursor:pointer;
+                            color:var(--on-accent); background:var(--accent); }
+        .ask__card button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+        .ask__card button:disabled { opacity:.6; }
         a { color:var(--accent); }
         """;
 
@@ -189,7 +222,8 @@ public static class GuestPages
     public static string Photos(
         string action, string backTo, string eventTitle,
         IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who, bool CanDelete)> photos,
-        bool canUpload, string? error, string cameraPath, GuestPalette? palette = null)
+        bool canUpload, string? error, string cameraPath, GuestPalette? palette = null,
+        string? nonce = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -239,6 +273,20 @@ public static class GuestPages
               <a class="back" href="{E(backTo)}">Back to the invitation</a>
             </div>
             {bar}
+            {(nonce is null ? "" : $"""
+              <div class="ask" id="confirm" hidden>
+                <div class="ask__card">
+                  <h2>Remove this photo?</h2>
+                  <p>It disappears from everyone's photo box. This cannot be undone.</p>
+                  <button type="button" id="confirm-yes">Remove it</button>
+                  <button type="button" class="ghost" id="confirm-no">Keep it</button>
+                </div>
+              </div>
+              <script nonce="{nonce}">
+              window.__ibGallery = true;
+              {Enhancement}
+              </script>
+              """)}
             """;
 
         return $"""

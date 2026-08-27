@@ -8,6 +8,7 @@
   <ItemGroup>
     <!-- The camera client, authored as a real .js file and inlined under a nonce at render time. -->
     <EmbeddedResource Include="Rendering\Assets\camera.js" />
+    <EmbeddedResource Include="Rendering\Assets\gallery.js" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\InvitesBlog.Domain\InvitesBlog.Domain.csproj" />

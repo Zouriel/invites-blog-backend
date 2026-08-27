@@ -270,6 +270,12 @@ public sealed class GuestController(
         try { await photos.DeleteAsync(subject.Value.CampaignId, photoId, subject.Value.GuestId, ct); }
         catch (AppException e) { error = e.Message; }
 
+        // The page flow re-renders the whole grid, which is a second round trip and every tile
+        // again. The in-page path asks for JSON instead and drops the one tile itself. Same route
+        // deliberately — an enhanced path must not become a second way in.
+        if (WantsJson())
+            return error is null ? Ok(new { removed = photoId }) : BadRequest(new { error });
+
         return await RenderBoxAsync(renderId, inviteId.Value, error, ct);
     }
 
@@ -367,6 +373,10 @@ public sealed class GuestController(
 
         var box = await photos.GetAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
 
+        // Lets the page ask before deleting without a round trip first. Optional: the Remove control
+        // is a link to a confirmation page, which is what a browser running no script still gets.
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+
         var html = GuestPages.Photos(
             $"/r/{renderId}/photos",
             $"/r/{renderId}",
@@ -377,11 +387,19 @@ public sealed class GuestController(
             box.CanUpload,
             error,
             $"/r/{renderId}/camera",
-            await PaletteAsync(inviteId, ct));
+            await PaletteAsync(inviteId, ct),
+            nonce);
 
-        // Unlike the other guest pages this one is mostly photographs, so it needs img-src — and
-        // unlike the invitation it is NOT sandboxed, because it holds the session and posts forms.
-        return Html(html, imagesFrom: "'self'");
+        // Mostly photographs, so it needs img-src; and it carries one nonced script so a deletion
+        // can be confirmed and carried out without two page loads. Not sandboxed — it holds the
+        // session and posts forms.
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Content-Security-Policy"] =
+            $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+            + "img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; "
+            + "frame-ancestors 'none'";
+        return Content(html, "text/html; charset=utf-8");
     }
 
     [HttpGet("/i/{token}/rsvp")]
@@ -491,6 +509,10 @@ public sealed class GuestController(
     /// page is text and buttons, and stays on the tighter policy that permits no images at all —
     /// which is the right default when the alternative is a page that renders a remote pixel.
     /// </param>
+    private bool WantsJson() =>
+        Request.Headers.Accept.Any(a => a is not null
+            && a.Contains("application/json", StringComparison.OrdinalIgnoreCase));
+
     private IActionResult Html(string html, int status = StatusCodes.Status200OK, string? imagesFrom = null)
     {
         Response.StatusCode = status;
