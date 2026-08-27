@@ -255,14 +255,28 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
     private static readonly TimeSpan CameraClosesAfter = TimeSpan.FromHours(12);
 
     /// <summary>
+    /// Malé's offset, and the only local day this platform has. Hard-coded rather than looked up
+    /// because the Maldives has never observed daylight saving — +05:00 holds every day of the year
+    /// — and because a zone database id is spelled differently on Windows and Linux, which is a way
+    /// for this to fail in production and not in a test.
+    /// </summary>
+    private static readonly TimeSpan Male = TimeSpan.FromHours(5);
+
+    /// <summary>
     /// Whether this guest is offered the camera: they said they were coming, and it is the day.
     ///
     /// <para><b>Why a window and not a date.</b> A calendar-date comparison expires at midnight, and
     /// a party that begins at 22:00 is two hours old by then — the camera would go dark at exactly
-    /// the point people are using it. Nor is there a local midnight to compare against: the column
-    /// is normalised to UTC and the offset the inviter typed does not survive the round trip. So it
-    /// opens at the start of the event's day and closes <see cref="CameraClosesAfter"/> after it
-    /// begins, which covers the evening it was meant for including the part after midnight.</para>
+    /// the point people are using it. So it opens at the start of the event's day and closes
+    /// <see cref="CameraClosesAfter"/> after it begins, which covers the evening it was meant for
+    /// including the part after midnight.</para>
+    ///
+    /// <para><b>Whose day.</b> Malé's, not UTC's. The column is normalised to UTC and the offset the
+    /// inviter typed does not survive the round trip, so the day has to be reconstructed — and taking
+    /// UTC's opens the camera at 05:00 local, five hours into a day the guest has been living in
+    /// since midnight. Someone checking their invitation the night before the party is told it is not
+    /// the day yet when their own calendar says it is. <see cref="Male"/> is what everyone here means
+    /// by the date.</para>
     ///
     /// <para><b>The exemption</b> exists because the date makes the camera impossible to try outside
     /// one evening a year. Campaigns listed in <c>Camera:IgnoreDateForCampaigns</c> skip the window
@@ -276,7 +290,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
         if (rsvp != RsvpStatus.Going) return false;
         if (ignoreDate) return true;
 
-        var opens = new DateTimeOffset(eventStartAt.UtcDateTime.Date, TimeSpan.Zero);
+        var opens = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
         var closes = eventStartAt + CameraClosesAfter;
         return now >= opens && now <= closes;
     }

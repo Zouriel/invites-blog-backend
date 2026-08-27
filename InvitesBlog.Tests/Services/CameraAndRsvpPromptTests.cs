@@ -38,9 +38,26 @@ public class CameraAndRsvpPromptTests
         Assert.True(Open(twoHoursIn));
     }
 
+    /// <summary>23:59 in Malé on the 27th — still the day before by the only calendar anyone here reads.</summary>
     [Fact]
     public void Shut_the_day_before() =>
-        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 23, 59, 0, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 0, TimeSpan.Zero)));
+
+    /// <summary>
+    /// The regression this window was got wrong once. A guest opening their invitation just after
+    /// midnight on the day of the party is told it is the day — even though it is still yesterday
+    /// in UTC, where the timestamp happens to be stored. Taking UTC's date held the camera shut
+    /// until 05:00 local, five hours into the day.
+    /// </summary>
+    [Fact]
+    public void Open_from_local_midnight_not_from_UTC_midnight()
+    {
+        var justAfterMidnightInMale = new DateTimeOffset(2026, 8, 27, 19, 17, 0, TimeSpan.Zero);
+
+        Assert.Equal(27, justAfterMidnightInMale.UtcDateTime.Day);
+        Assert.Equal(28, justAfterMidnightInMale.ToOffset(TimeSpan.FromHours(5)).Day);
+        Assert.True(Open(justAfterMidnightInMale));
+    }
 
     [Fact]
     public void Shut_once_the_night_is_over() =>
@@ -57,8 +74,9 @@ public class CameraAndRsvpPromptTests
     [Fact]
     public void The_edges_are_inclusive()
     {
-        Assert.True(Open(new DateTimeOffset(2026, 8, 28, 0, 0, 0, TimeSpan.Zero)));
-        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 23, 59, 59, TimeSpan.Zero)));
+        // Midnight in Malé, and the second before it.
+        Assert.True(Open(new DateTimeOffset(2026, 8, 27, 19, 0, 0, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 59, TimeSpan.Zero)));
         Assert.True(Open(Start.AddHours(12)));
         Assert.False(Open(Start.AddHours(12).AddSeconds(1)));
     }
