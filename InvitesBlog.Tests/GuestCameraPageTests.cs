@@ -131,6 +131,76 @@ public class GuestCameraPageTests
         Assert.True(missing.Count == 0, "Script asks for ids the page does not have: " + string.Join(", ", missing));
     }
 
+    /// <summary>
+    /// Zoom has to be asked for in the getUserMedia call itself. A camera permission granted
+    /// without pan-tilt-zoom never gains it afterwards, so requesting it at applyConstraints time
+    /// is too late — which is exactly how the zoom control could quietly never appear.
+    /// </summary>
+    [Fact]
+    public void Zoom_permission_is_requested_when_the_camera_is_opened()
+    {
+        var html = Page();
+
+        Assert.Contains("zoom: true", html);
+        // And a device that refuses the whole request over it still gets a camera.
+        Assert.Contains("getUserMedia({ audio: false, video })", html);
+    }
+
+    /// <summary>
+    /// A camera in a dark room lengthens its exposure and drops frames to do it. Demanding a steady
+    /// rate fights the one adaptation that makes an evening usable.
+    /// </summary>
+    [Fact]
+    public void The_frame_rate_floor_leaves_room_for_a_long_exposure()
+    {
+        Assert.Contains("frameRate: { ideal: 30, min: 5 }", Page());
+    }
+
+    /// <summary>
+    /// Metering stays automatic. A fixed exposure is the wrong instrument for a party — the light
+    /// changes as people move — and manual settings persist onto whatever the browser points at
+    /// that camera next, which is not ours to leave behind.
+    /// </summary>
+    [Fact]
+    public void The_camera_keeps_metering_for_itself()
+    {
+        var html = Page();
+
+        Assert.Contains("exposureMode: 'continuous'", html);
+        Assert.Contains("whiteBalanceMode: 'continuous'", html);
+        Assert.Contains("focusMode: 'continuous'", html);
+        // Night mode biases that adaptation rather than replacing it.
+        Assert.Contains("exposureCompensation", html);
+        Assert.DoesNotContain("exposureMode: 'manual'", html);
+    }
+
+    /// <summary>
+    /// Without imageWidth/imageHeight a still comes back at whatever the device defaults to, which
+    /// is often the preview size — so the full-resolution capture quietly was not one.
+    /// </summary>
+    [Fact]
+    public void A_still_is_asked_for_at_the_sensors_own_size()
+    {
+        var html = Page();
+
+        Assert.Contains("getPhotoCapabilities", html);
+        Assert.Contains("settings.imageWidth = caps.imageWidth.max", html);
+        Assert.Contains("fillLightMode", html);
+    }
+
+    /// <summary>
+    /// With nothing to change, the encoder's own file is the better one. Drawing it to a canvas to
+    /// read it straight back costs a generation of quality and the sensor's resolution for nothing.
+    /// </summary>
+    [Fact]
+    public void An_unaltered_still_is_not_re_encoded()
+    {
+        var html = Page();
+
+        Assert.Contains("if (!needsRedraw()) return still;", html);
+        Assert.Contains("crop !== 1 || facing === 'user'", html);
+    }
+
     /// <summary>A selfie preview is mirrored; the rear camera is not.</summary>
     [Fact]
     public void The_selfie_preview_is_mirrored()
@@ -179,7 +249,10 @@ public class GuestCameraPageTests
         // z-index:2 against their default would have painted the mark over the shutter.
         foreach (var control in new[] { ".top", ".bottom" })
         {
-            var rule = Regex.Match(html, Regex.Escape(control) + @" \{[^}]*\}").Value;
+            // Anchored to the start of a line, or a descendant rule like "body.night .bottom" is
+            // matched instead — which says nothing about how the control itself stacks.
+            var rule = Regex.Match(html, @"(?m)^\s*" + Regex.Escape(control) + @" \{[^}]*\}").Value;
+            Assert.NotEqual(string.Empty, rule);
             Assert.True(rule.Contains("z-index:3"), $"{control} must stack above the focus mark");
         }
     }

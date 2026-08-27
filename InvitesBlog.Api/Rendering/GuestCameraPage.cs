@@ -92,6 +92,11 @@ public static class GuestCameraPage
                border:0; border-radius:999px; background:rgba(0,0,0,.42); color:#fff;
                font:inherit; font-size:.85rem; cursor:pointer; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
         .btn.on { background:var(--accent,#c9a227); color:var(--on-accent,#241d06); }
+        /* Night mode brightens the picture, so the chrome over it steps back to compensate —
+           otherwise the controls end up the brightest thing on a screen someone is using in a
+           dark room, and the eye goes to them instead of the subject. */
+        body.night .top, body.night .bottom { background:none; }
+        body.night .btn:not(.on), body.night .chip:not(.on) { background:rgba(0,0,0,.62); }
         .btn:disabled { opacity:.4; }
         a.btn { text-decoration:none; }
 
@@ -208,6 +213,7 @@ public static class GuestCameraPage
               </div>
               <button class="shoot" id="shoot" type="button" aria-label="Take a photo"></button>
               <div class="side right">
+                <button class="btn" id="night" type="button" hidden aria-pressed="false">Night</button>
                 <button class="btn" id="flip" type="button" hidden>Flip</button>
               </div>
             </div>

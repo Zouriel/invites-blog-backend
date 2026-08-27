@@ -55,6 +55,15 @@
    */
   let crop = 1;
 
+  /**
+   * Night mode. Off by default, because a room that is already lit does not want it: biasing a good
+   * exposure upward only washes it out.
+   */
+  let night = false;
+
+  /** How far to bias exposure, in EV, when it is on. Clamped to whatever the track allows. */
+  const NIGHT_EV = 1.5;
+
   const canvasFilterWorks = (() => {
     try {
       const c = document.createElement('canvas').getContext('2d');
@@ -70,17 +79,28 @@
     facing = next || facing;
 
     // Ask for far more than any sensor gives; the browser clamps to the best it actually has.
-    const constraints = {
-      audio: false,
-      video: {
-        facingMode: { ideal: facing },
-        width: { ideal: 4096 },
-        height: { ideal: 4096 },
-      },
+    //
+    // frameRate floor is deliberately low. A camera in a dark room lengthens its exposure and
+    // drops frames to do it — that IS its low-light behaviour — so demanding a steady 30 would
+    // fight the one adaptation that makes an evening party usable, and buy a dim, noisy preview
+    // in exchange for smooth motion nobody asked for.
+    const video = {
+      facingMode: { ideal: facing },
+      width: { ideal: 4096 },
+      height: { ideal: 4096 },
+      frameRate: { ideal: 30, min: 5 },
     };
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Zoom has to be asked for HERE. A camera permission granted without pan-tilt-zoom never
+      // gains it later, so requesting it at applyConstraints time is too late — which is why the
+      // zoom control could quietly never appear. Devices that refuse the whole request over it
+      // get a second, plainer ask rather than no camera.
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { ...video, zoom: true } });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+      }
     } catch (err) {
       // A device with one camera refuses the facing it does not have. That must not take down a
       // viewfinder that was already working — go back to the camera we had and stay live. Only a
@@ -149,13 +169,72 @@
     }
     video.style.setProperty('--crop', String(crop));
 
-    // Keeping focus without being asked is the behaviour of every phone camera; tapping is for
-    // overriding it, not for making it work at all. Asked for outright rather than after checking
-    // getCapabilities — devices that focus perfectly well do not always advertise focusMode, and a
-    // constraint a track cannot honour is refused harmlessly.
+    await meter();
+  }
+
+  /**
+   * How the camera should meter the scene — focus, exposure and white balance.
+   *
+   * <p>Everything here is asked for outright rather than after consulting getCapabilities: devices
+   * that do these perfectly well do not always advertise them, and a constraint a track cannot
+   * honour is refused harmlessly. Reading capabilities first only adds a way to be wrong.</p>
+   *
+   * <p><b>Continuous, never manual.</b> A fixed exposure is the wrong instrument for a party: the
+   * light changes as people move between a lit table and a dark garden, and a manual setting good
+   * for one is useless for the other. Manual exposure also persists onto whatever the browser points
+   * at that camera next, which is not ours to leave behind. So the camera keeps adapting, and night
+   * mode biases that adaptation instead of replacing it.</p>
+   */
+  async function meter() {
+    if (!track) return;
+
+    const ask = async (constraint) => {
+      try {
+        await track.applyConstraints({ advanced: [constraint] });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    // Tapping overrides focus; this is what makes it hold without being asked.
+    await ask({ focusMode: 'continuous' });
+
+    // Party light is mixed and coloured — candles, a phone screen, whatever the room is lit with —
+    // and a white balance fixed at the first frame turns the rest of the night orange.
+    await ask({ whiteBalanceMode: 'continuous' });
+
+    await ask({ exposureMode: 'continuous' });
+    await applyNightBias();
+  }
+
+  /**
+   * Night mode: bias the camera's own exposure upward rather than taking it over.
+   *
+   * <p>exposureCompensation shifts the target the auto-exposure aims at, in EV, so the camera goes
+   * on adapting to a changing room and simply aims brighter. Clamped to the range the track reports,
+   * because the useful amount differs per sensor and an out-of-range value is refused outright —
+   * taking the rest of the request with it.</p>
+   */
+  async function applyNightBias() {
+    if (!track || !track.getCapabilities) return;
+
+    let caps = {};
     try {
-      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-    } catch { /* it simply keeps whatever it was doing */ }
+      caps = track.getCapabilities() || {};
+    } catch {
+      return;
+    }
+    if (!caps.exposureCompensation) return;
+
+    const { min = 0, max = 0, step } = caps.exposureCompensation;
+    const target = night ? Math.min(max, NIGHT_EV) : 0;
+    const clamped = Math.max(min, Math.min(max, target));
+    const value = step ? Math.round(clamped / step) * step : clamped;
+
+    try {
+      await track.applyConstraints({ advanced: [{ exposureCompensation: value }] });
+    } catch { /* the track keeps whatever it was metering at */ }
   }
 
   /** Show only the controls this device actually has. Most of these are Android-only today. */
@@ -175,6 +254,12 @@
 
     $('torch').hidden = !caps.torch;
     $('flip').hidden = false;
+
+    // Offered wherever the camera will take an exposure bias. Where it will not, night mode has
+    // nothing to act on, and a switch that does nothing is worse than no switch.
+    $('night').hidden = !caps.exposureCompensation;
+    $('night').classList.toggle('on', night);
+    $('night').setAttribute('aria-pressed', String(night));
   }
 
   function stop() {
@@ -224,7 +309,14 @@
 
     if (window.ImageCapture) {
       try {
-        const still = await new ImageCapture(track).takePhoto();
+        const capture = new ImageCapture(track);
+        const still = await capture.takePhoto(await stillSettings(capture));
+
+        // Nothing to change: hand back the encoder's own file. Drawing it to a canvas to read it
+        // straight back out again would decode and re-encode a JPEG for no reason, which costs a
+        // generation of quality and the sensor's full resolution, and buys nothing.
+        if (!needsRedraw()) return still;
+
         source = await createImageBitmap(still);
       } catch {
         source = video;
@@ -263,6 +355,45 @@
     if (!canvasFilterWorks && css !== 'none') grade(ctx, w, h, css);
 
     return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  }
+
+  /** Is there anything to do to the frame? If not, the encoder's own file is the better one. */
+  function needsRedraw() {
+    return crop !== 1 || facing === 'user' || FILTERS[filterIndex].css !== 'none';
+  }
+
+  /**
+   * What to ask a still for: the largest the device will give, and the flash if it is wanted.
+   *
+   * <p>Without imageWidth/imageHeight a photo comes back at whatever the device defaults to, which
+   * is often the preview size rather than the sensor's — so the "full resolution" capture quietly
+   * was not one.</p>
+   *
+   * <p>fillLightMode is the flash proper: it fires for the exposure and stops. The torch is a
+   * different thing — a lamp left on — and it is what lights the framing, so the two are kept in
+   * step rather than fighting. A camera with no flash simply reports none and gets neither.</p>
+   */
+  async function stillSettings(capture) {
+    const settings = {};
+
+    let caps = null;
+    try {
+      caps = await capture.getPhotoCapabilities();
+    } catch {
+      return settings;
+    }
+
+    if (caps.imageWidth && caps.imageHeight) {
+      settings.imageWidth = caps.imageWidth.max;
+      settings.imageHeight = caps.imageHeight.max;
+    }
+
+    const modes = caps.fillLightMode || [];
+    if (torchOn && modes.includes('flash')) settings.fillLightMode = 'flash';
+    else if (night && modes.includes('auto')) settings.fillLightMode = 'auto';
+    else if (modes.includes('off')) settings.fillLightMode = 'off';
+
+    return settings;
   }
 
   /** A per-pixel stand-in for the CSS grades above, for browsers without ctx.filter. */
@@ -569,6 +700,14 @@
       } catch {
         $('torch').hidden = true;
       }
+    });
+
+    $('night').addEventListener('click', async () => {
+      night = !night;
+      $('night').classList.toggle('on', night);
+      $('night').setAttribute('aria-pressed', String(night));
+      document.body.classList.toggle('night', night);
+      await applyNightBias();
     });
 
     $('zoom').addEventListener('input', async (e) => {
