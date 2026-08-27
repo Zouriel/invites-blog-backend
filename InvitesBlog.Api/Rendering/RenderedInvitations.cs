@@ -69,12 +69,24 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         // fallback. This bar is appended inside the invitation, so `var()` resolves against whatever
         // the template actually declared — a pale invitation stops ending in a black slab, and no
         // server-side guess about the palette is needed.
+        // A section with a pill inside it, not a slab across the foot of the page. This is the only
+        // camera a template without its own binding will ever show — most uploaded ones — so it has
+        // to read as part of the invitation rather than as something appended to it. Colours and
+        // type both come from the template's OWN custom properties, so it inherits whatever the
+        // designer chose; the fixed pair is only the floor for a template that declared nothing.
         var bar = $"""
-            <a href="{WebUtility.HtmlEncode(link)}" style="display:block;padding:18px 16px;
-               font:600 15px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-               text-align:center;text-decoration:none;color:var(--ib-accent,#fff);
-               background:var(--ib-bg,#17131a);
-               border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1em;height:1em;vertical-align:-.14em;margin-right:.5em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Capture moments &rarr;</a>
+            <section style="padding:56px 20px calc(48px + env(safe-area-inset-bottom));text-align:center;
+               background:var(--ib-bg,#17131a);color:var(--ib-text,#f4eef6);
+               border-top:1px solid color-mix(in srgb, currentColor 14%, transparent)">
+              <a href="{WebUtility.HtmlEncode(link)}" style="display:inline-flex;align-items:center;
+                 padding:15px 30px;border-radius:999px;text-decoration:none;
+                 font:600 15px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+                 letter-spacing:.02em;color:var(--ib-bg,#17131a);
+                 background:var(--ib-accent,#c9a227)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1.05em;height:1.05em;vertical-align:-.16em;margin-right:.55em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Capture moments</a>
+              <p style="margin:16px 0 0;font:400 12px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+                 letter-spacing:.14em;text-transform:uppercase;
+                 color:color-mix(in srgb, currentColor 62%, transparent)">Everything everyone shoots, in one place</p>
+            </section>
             """;
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
