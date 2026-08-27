@@ -274,6 +274,43 @@ public class InviteRenderServiceTests
         Assert.Null(payload.Data["camera"]?["link"]);
     }
 
+    /// <summary>
+    /// Test invitation 104, exactly as production has it: the real campaign id, an event that was on
+    /// the 11th, a guest who said Going, and the settings file that actually ships. If the exemption
+    /// is wired wrong anywhere between the JSON and the payload, this is where it shows.
+    /// </summary>
+    [Fact]
+    public void The_exempt_test_invitation_gets_a_camera_with_its_event_long_past()
+    {
+        var settingsPath = FindUp("InvitesBlog.Api", "appsettings.json");
+        var config = new ConfigurationBuilder().AddJsonFile(settingsPath).Build();
+
+        var campaign = Campaign("{}");
+        campaign.Id = Guid.Parse("cfb3617e-de5a-4f0c-802f-d7a0ffa5603c");
+        campaign.EventStartAt = new DateTimeOffset(2026, 8, 11, 16, 7, 59, TimeSpan.Zero);
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.Going };
+
+        var payload = new InviteRenderService(new RuleEngine(), config).Build(
+            campaign, TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.Equal(
+            "https://me.invites.blog/r/abc/camera",
+            payload.Data["camera"]?["link"]?.ToString());
+    }
+
+    private static string FindUp(params string[] parts)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(new[] { dir.FullName }.Concat(parts).ToArray());
+            if (File.Exists(candidate)) return candidate;
+            dir = dir.Parent;
+        }
+        throw new FileNotFoundException(string.Join('/', parts) + " not found from " + AppContext.BaseDirectory);
+    }
+
     // --- Theme → CSS custom properties -----------------------------------------------------------
 
     [Fact]
