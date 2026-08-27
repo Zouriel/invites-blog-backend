@@ -7,27 +7,82 @@ namespace InvitesBlog.Tests.Services;
 /// <summary>
 /// When a guest is offered the camera, and what the invitation asks them.
 ///
-/// <para>The camera once also required the day of the event. That is the more careful rule and it
-/// is gone deliberately: it made the feature untestable and left almost every guest without it,
-/// because most never answer an invitation at all. What remains is the single condition.</para>
+/// <para>Two conditions: the answer, and the day. The edges are what matter — an edge that is wrong
+/// is wrong on the one evening the feature exists for. Times are Raniya's: 22:00 in Malé, stored as
+/// 17:00 UTC because the column is normalised and the offset the inviter typed does not survive the
+/// round trip.</para>
 /// </summary>
 public class CameraAndRsvpPromptTests
 {
+    /// <summary>2026-08-28 22:00 Malé.</summary>
+    private static readonly DateTimeOffset Start = new(2026, 8, 28, 17, 0, 0, TimeSpan.Zero);
+
+    private static bool Open(DateTimeOffset now, RsvpStatus rsvp = RsvpStatus.Going, bool ignoreDate = false) =>
+        InviteRenderService.CameraIsOpen(Start, rsvp, now, ignoreDate);
+
     [Fact]
-    public void Offered_to_a_guest_who_said_they_were_coming() =>
-        Assert.True(InviteRenderService.CameraIsOpen(RsvpStatus.Going));
+    public void Open_while_the_party_is_happening() =>
+        Assert.True(Open(Start.AddHours(1)));
 
     /// <summary>
-    /// Everyone else, including the large majority who never replied. That is the cost of this rule
-    /// and it is deliberate — see the note on the method.
+    /// The case a calendar-date comparison gets wrong. Two hours in it is already tomorrow in Malé,
+    /// and the camera would have gone dark at exactly the point people are using it.
+    /// </summary>
+    [Fact]
+    public void Still_open_after_local_midnight()
+    {
+        var twoHoursIn = Start.AddHours(2);
+        var male = TimeSpan.FromHours(5);
+
+        Assert.NotEqual(Start.ToOffset(male).Date, twoHoursIn.ToOffset(male).Date);
+        Assert.True(Open(twoHoursIn));
+    }
+
+    [Fact]
+    public void Shut_the_day_before() =>
+        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 23, 59, 0, TimeSpan.Zero)));
+
+    [Fact]
+    public void Shut_once_the_night_is_over() =>
+        Assert.False(Open(Start.AddHours(13)));
+
+    [Theory]
+    [InlineData(RsvpStatus.NoResponse)]
+    [InlineData(RsvpStatus.Maybe)]
+    [InlineData(RsvpStatus.NotGoing)]
+    [InlineData(RsvpStatus.ViewedOnly)]
+    public void Shut_for_anyone_who_did_not_say_they_were_coming(RsvpStatus rsvp) =>
+        Assert.False(Open(Start.AddHours(1), rsvp));
+
+    [Fact]
+    public void The_edges_are_inclusive()
+    {
+        Assert.True(Open(new DateTimeOffset(2026, 8, 28, 0, 0, 0, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 23, 59, 59, TimeSpan.Zero)));
+        Assert.True(Open(Start.AddHours(12)));
+        Assert.False(Open(Start.AddHours(12).AddSeconds(1)));
+    }
+
+    // ----- the exemption -------------------------------------------------------------------------
+
+    /// <summary>An exempt campaign is free of the day, months either side of it.</summary>
+    [Theory]
+    [InlineData(-90)]
+    [InlineData(90)]
+    public void An_exempt_campaign_ignores_the_day(int daysAway) =>
+        Assert.True(Open(Start.AddDays(daysAway), ignoreDate: true));
+
+    /// <summary>
+    /// It exempts the DATE and nothing else. A test invitation that let anyone shoot would be a
+    /// hole rather than an affordance.
     /// </summary>
     [Theory]
     [InlineData(RsvpStatus.NoResponse)]
     [InlineData(RsvpStatus.Maybe)]
     [InlineData(RsvpStatus.NotGoing)]
     [InlineData(RsvpStatus.ViewedOnly)]
-    public void Withheld_from_everyone_else(RsvpStatus rsvp) =>
-        Assert.False(InviteRenderService.CameraIsOpen(rsvp));
+    public void An_exempt_campaign_still_asks_whether_they_are_coming(RsvpStatus rsvp) =>
+        Assert.False(Open(Start.AddDays(90), rsvp, ignoreDate: true));
 
     // ----- what the RSVP control says -------------------------------------------------------------
 

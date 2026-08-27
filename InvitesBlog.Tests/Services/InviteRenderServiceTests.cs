@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Text.Json.Nodes;
 using InvitesBlog.Application.Rules;
 using InvitesBlog.Domain.Entities;
@@ -15,7 +16,15 @@ namespace InvitesBlog.Tests.Services;
 /// </summary>
 public class InviteRenderServiceTests
 {
-    private static InviteRenderService Sut() => new(new RuleEngine());
+    /// <param name="exempt">A campaign id to free from the camera's event-day window, as the
+    /// Camera:IgnoreDateForCampaigns setting does in production.</param>
+    private static InviteRenderService Sut(Guid? exempt = null) =>
+        new(new RuleEngine(), new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Camera:IgnoreDateForCampaigns"] = exempt?.ToString(),
+            })
+            .Build());
 
     private static Campaign Campaign(string content, string theme = "{}", string? manifest = null) => new()
     {
@@ -216,9 +225,9 @@ public class InviteRenderServiceTests
         Assert.Equal("https://me.invites.blog/r/abc/photos", payload.Data["photos"]?["link"]?.ToString());
     }
 
-    /// <summary>Coming, whenever the event happens to be.</summary>
+    /// <summary>Coming, but not for another week.</summary>
     [Fact]
-    public void The_camera_is_offered_regardless_of_the_date()
+    public void The_camera_has_no_link_before_the_day()
     {
         var campaign = Campaign("{}");
         campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(9);
@@ -228,8 +237,41 @@ public class InviteRenderServiceTests
             campaign, TestData.Template(), Guest("Family"), invite,
             "https://me.invites.blog/r/abc", "Aisha", null, null);
 
-        // The date no longer gates it: coming is the whole condition.
-        Assert.NotNull(payload.Data["camera"]?["link"]);
+        Assert.Null(payload.Data["camera"]?["link"]);
+    }
+
+    /// <summary>
+    /// A campaign named in Camera:IgnoreDateForCampaigns keeps its camera whatever the date, which
+    /// is what makes the feature possible to try outside one evening a year. The answer still
+    /// applies — the exemption lifts the DATE and nothing else.
+    /// </summary>
+    [Fact]
+    public void A_campaign_exempt_from_the_date_keeps_its_camera()
+    {
+        var campaign = Campaign("{}");
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(-40);   // long over
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.Going };
+
+        var payload = Sut(exempt: campaign.Id).Build(
+            campaign, TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.Equal("https://me.invites.blog/r/abc/camera", payload.Data["camera"]?["link"]?.ToString());
+    }
+
+    /// <summary>The exemption is per campaign, not a switch that opens every other one with it.</summary>
+    [Fact]
+    public void Exempting_one_campaign_does_not_exempt_another()
+    {
+        var campaign = Campaign("{}");
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(-40);
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.Going };
+
+        var payload = Sut(exempt: Guid.NewGuid()).Build(
+            campaign, TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.Null(payload.Data["camera"]?["link"]);
     }
 
     // --- Theme → CSS custom properties -----------------------------------------------------------

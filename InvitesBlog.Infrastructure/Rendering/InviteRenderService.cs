@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using InvitesBlog.Domain.Enums;
 using System.Globalization;
 using System.Text.Json;
@@ -14,7 +15,7 @@ namespace InvitesBlog.Infrastructure.Rendering;
 /// rules are resolved here — server-side — and only the resolved content-block list ships, so the
 /// template never evaluates rules. Guest content is data, never markup.
 /// </summary>
-public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
+public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration config) : IInviteRenderer
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
@@ -94,7 +95,9 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             // always present and the LINK is what comes and goes — that is how a template's
             // [data-optional] wrapper knows to hide itself, and how the appended bar tells a closed
             // camera apart from a payload rendered before there was one.
-            ["camera"] = CameraIsOpen(invite.RsvpStatus)
+            ["camera"] = CameraIsOpen(
+                campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow,
+                DateIgnoredFor(campaign.Id))
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
                 : new JsonObject(),
             ["theme"] = theme,
@@ -248,16 +251,41 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
         _ => "Reply now",
     };
 
+    /// <summary>How long after the event begins the camera stays open.</summary>
+    private static readonly TimeSpan CameraClosesAfter = TimeSpan.FromHours(12);
+
     /// <summary>
-    /// Whether this guest is offered the camera. One condition: they said they were coming.
+    /// Whether this guest is offered the camera: they said they were coming, and it is the day.
     ///
-    /// <para>It was briefly also gated on the day of the event, which is the more careful rule —
-    /// nobody shooting an event weeks before it happens — but it made the feature untestable and
-    /// left almost every guest without it, since most never answer at all. The date is gone rather
-    /// than merely widened, so the rule that runs is the rule that reads. Reinstating it is this
-    /// function and nothing else; the window it used is in the history.</para>
+    /// <para><b>Why a window and not a date.</b> A calendar-date comparison expires at midnight, and
+    /// a party that begins at 22:00 is two hours old by then — the camera would go dark at exactly
+    /// the point people are using it. Nor is there a local midnight to compare against: the column
+    /// is normalised to UTC and the offset the inviter typed does not survive the round trip. So it
+    /// opens at the start of the event's day and closes <see cref="CameraClosesAfter"/> after it
+    /// begins, which covers the evening it was meant for including the part after midnight.</para>
+    ///
+    /// <para><b>The exemption</b> exists because the date makes the camera impossible to try outside
+    /// one evening a year. Campaigns listed in <c>Camera:IgnoreDateForCampaigns</c> skip the window
+    /// and keep the answer — a test invitation stays usable, and every real one is still bound by
+    /// the day. Configuration rather than a constant so a campaign can be added or dropped without
+    /// a deployment, and so the list is visible as the testing affordance it is.</para>
     /// </summary>
-    public static bool CameraIsOpen(RsvpStatus rsvp) => rsvp == RsvpStatus.Going;
+    public static bool CameraIsOpen(
+        DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now, bool ignoreDate = false)
+    {
+        if (rsvp != RsvpStatus.Going) return false;
+        if (ignoreDate) return true;
+
+        var opens = new DateTimeOffset(eventStartAt.UtcDateTime.Date, TimeSpan.Zero);
+        var closes = eventStartAt + CameraClosesAfter;
+        return now >= opens && now <= closes;
+    }
+
+    /// <summary>Campaigns exempt from the date, as configured. Ids only; anything else is ignored.</summary>
+    private bool DateIgnoredFor(Guid campaignId) =>
+        (config["Camera:IgnoreDateForCampaigns"] ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(entry => Guid.TryParse(entry, out var id) && id == campaignId);
 
     private static JsonObject ThemeVars(JsonObject theme, TemplateManifest? manifest)
     {
