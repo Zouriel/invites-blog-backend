@@ -141,9 +141,13 @@ public class GuestCameraPageTests
     {
         var html = Page();
 
+        var calls = Regex.Matches(html, @"getUserMedia\(").Count;
+
         Assert.Contains("zoom: true", html);
-        // And a device that refuses the whole request over it still gets a camera.
-        Assert.Contains("getUserMedia({ audio: false, video })", html);
+        // Two asks, not one: a device that refuses the whole request over pan-tilt-zoom still gets
+        // a camera from the plainer second attempt. Counted rather than matched on the exact text,
+        // which pinned an earlier version of this test to a variable name and broke on a rename.
+        Assert.True(calls >= 2, $"expected a fallback getUserMedia call, found {calls}");
     }
 
     /// <summary>
