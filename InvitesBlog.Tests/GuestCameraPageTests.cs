@@ -145,11 +145,13 @@ public class GuestCameraPageTests
     }
 
     /// <summary>
-    /// Tap-to-focus draws its mark only where focus can actually be steered. On a camera doing its
-    /// own continuous focus a reticle would be claiming credit for something the tap had no part in.
+    /// The focus mark is drawn on EVERY tap. It was once gated on getCapabilities() reporting a
+    /// focusMode, which is not a signal worth trusting — devices that focus perfectly well do not
+    /// always advertise it, and the result was a camera that refocused with no sign it had heard
+    /// you. The mark says where you tapped, which is true whatever the camera does next.
     /// </summary>
     [Fact]
-    public void The_focus_mark_exists_and_starts_hidden()
+    public void The_focus_mark_is_drawn_for_every_tap()
     {
         var html = Page();
 
@@ -157,6 +159,29 @@ public class GuestCameraPageTests
         Assert.Contains("pointsOfInterest", html);
         // The mirror inversion: a tap on the left of a selfie preview is the right of the sensor.
         Assert.Contains("x = 1 - x", html);
+        // Nothing may stand between the tap and the mark.
+        Assert.DoesNotContain("canFocus", html);
+        // Four corner brackets, not a plain box.
+        Assert.Contains("<i></i><i></i><i></i><i></i>", html);
+    }
+
+    /// <summary>The mark must never be able to cover the shutter.</summary>
+    [Fact]
+    public void The_focus_mark_sits_below_the_controls()
+    {
+        var html = Page();
+
+        var reticle = Regex.Match(html, @"\.reticle \{[^}]*\}").Value;
+        Assert.Contains("z-index:2", reticle);
+        Assert.Contains("pointer-events:none", reticle);
+
+        // The claim is about ORDER, so it is the controls' own stacking that has to be asserted —
+        // z-index:2 against their default would have painted the mark over the shutter.
+        foreach (var control in new[] { ".top", ".bottom" })
+        {
+            var rule = Regex.Match(html, Regex.Escape(control) + @" \{[^}]*\}").Value;
+            Assert.True(rule.Contains("z-index:3"), $"{control} must stack above the focus mark");
+        }
     }
 
     /// <summary>Front cameras are wide enough that a selfie at arm's length is mostly room.</summary>

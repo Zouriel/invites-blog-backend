@@ -51,19 +51,34 @@ public static class GuestCameraPage
         video { transform: scale(var(--crop, 1)); }
         video.mirror { transform: scaleX(-1) scale(var(--crop, 1)); }
 
-        /* Drawn only where focus can actually be steered — see focusAt(). */
-        .reticle { position:absolute; width:74px; height:74px; margin:-37px 0 0 -37px;
-                   border:2px solid rgba(255,255,255,.92); border-radius:8px; pointer-events:none;
-                   box-shadow:0 0 0 1px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.35); }
+        /* The focus mark. Corner brackets rather than a full square, which is what a phone camera
+           draws and what reads as "focusing here" rather than "something is selected". Sits above
+           the picture but below the controls, so it can never cover the shutter. */
+        .reticle { position:absolute; z-index:2; width:78px; height:78px; margin:-39px 0 0 -39px;
+                   pointer-events:none; }
         .reticle[hidden] { display:none; }
-        .reticle.go { animation: pull 420ms cubic-bezier(.2,.8,.2,1); }
-        @keyframes pull { from { transform: scale(1.45); opacity:.35; } to { transform: scale(1); opacity:1; } }
+        .reticle i { position:absolute; width:20px; height:20px; border:2px solid rgba(255,255,255,.95);
+                     /* A dark edge under the light one, so the brackets hold on a pale subject too. */
+                     filter: drop-shadow(0 0 1px rgba(0,0,0,.55)); }
+        .reticle i:nth-child(1) { top:0; left:0; border-right:0; border-bottom:0; border-radius:3px 0 0 0; }
+        .reticle i:nth-child(2) { top:0; right:0; border-left:0; border-bottom:0; border-radius:0 3px 0 0; }
+        .reticle i:nth-child(3) { bottom:0; right:0; border-left:0; border-top:0; border-radius:0 0 3px 0; }
+        .reticle i:nth-child(4) { bottom:0; left:0; border-right:0; border-top:0; border-radius:0 0 0 3px; }
+
+        /* Snaps in, settles, then dims and holds — the shape of the gesture on a native camera. */
+        .reticle.go { animation: snap 260ms cubic-bezier(.2,.9,.2,1), dim 420ms 520ms forwards; }
+        @keyframes snap { from { transform: scale(1.5); opacity:0; } to { transform: scale(1); opacity:1; } }
+        @keyframes dim  { to { opacity:.55; } }
+        @media (prefers-reduced-motion: reduce) { .reticle.go { animation: none; } }
 
         .flash { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
         .flash.go { animation: pop 220ms ease-out; }
         @keyframes pop { from { opacity:.85; } to { opacity:0; } }
 
-        .top { position:absolute; top:0; left:0; right:0; display:flex; align-items:center;
+        /* Above the focus mark (z-index:2): a 78px reticle placed near the edge of the picture
+           would otherwise be painted over the shutter. It could not be TAPPED through — the mark
+           takes no pointer events — but it would still sit on top of the control. */
+        .top { position:absolute; z-index:3; top:0; left:0; right:0; display:flex; align-items:center;
                justify-content:space-between; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
                background:linear-gradient(rgba(0,0,0,.55), transparent); }
         .title { font-size:.85rem; opacity:.9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -80,7 +95,7 @@ public static class GuestCameraPage
         .btn:disabled { opacity:.4; }
         a.btn { text-decoration:none; }
 
-        .bottom { position:absolute; left:0; right:0; bottom:0;
+        .bottom { position:absolute; z-index:3; left:0; right:0; bottom:0;
                   padding:10px 12px calc(14px + env(safe-area-inset-bottom));
                   background:linear-gradient(transparent, rgba(0,0,0,.6)); }
 
@@ -161,7 +176,7 @@ public static class GuestCameraPage
         <body>
         <div class="stage">
           <video id="cam" playsinline autoplay muted></video>
-          <div class="reticle" id="reticle" hidden></div>
+          <div class="reticle" id="reticle" hidden><i></i><i></i><i></i><i></i></div>
           <div class="flash" id="flashfx"></div>
 
           <div class="top">

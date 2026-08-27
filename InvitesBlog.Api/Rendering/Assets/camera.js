@@ -54,7 +54,6 @@
    * what stops the zoom control and this compounding into each other.
    */
   let crop = 1;
-  let canFocus = false;
 
   const canvasFilterWorks = (() => {
     try {
@@ -151,14 +150,12 @@
     video.style.setProperty('--crop', String(crop));
 
     // Keeping focus without being asked is the behaviour of every phone camera; tapping is for
-    // overriding it, not for making it work at all.
-    canFocus = Array.isArray(caps.focusMode)
-      && (caps.focusMode.includes('single-shot') || caps.focusMode.includes('continuous'));
-    if (canFocus && caps.focusMode.includes('continuous')) {
-      try {
-        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-      } catch { /* it simply keeps whatever it was doing */ }
-    }
+    // overriding it, not for making it work at all. Asked for outright rather than after checking
+    // getCapabilities — devices that focus perfectly well do not always advertise focusMode, and a
+    // constraint a track cannot honour is refused harmlessly.
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+    } catch { /* it simply keeps whatever it was doing */ }
   }
 
   /** Show only the controls this device actually has. Most of these are Android-only today. */
@@ -313,12 +310,15 @@
    * tapped — right often enough to look like it works, and wrong exactly when someone is off
    * centre.</p>
    *
-   * <p>The mark is only drawn where focus can actually be steered. A reticle that lands on a
-   * camera doing continuous focus of its own would be theatre — it would claim credit for
-   * something the tap had no part in.</p>
+   * <p>The mark is drawn on every tap, and the constraint is attempted on every tap. An earlier
+   * version gated both on getCapabilities() reporting a focusMode, which turned out to be the
+   * wrong thing to trust: devices that focus perfectly well do not always advertise it, and the
+   * result was a camera that refocused with no sign it had heard you. The mark says where you
+   * tapped — which is true whatever the camera then does with it — and a device that cannot take
+   * the point simply refuses the constraint.</p>
    */
   async function focusAt(e) {
-    if (!track || !canFocus || document.body.dataset.state !== 'live') return;
+    if (!track || document.body.dataset.state !== 'live') return;
 
     const box = video.getBoundingClientRect();
     const px = e.clientX - box.left;
@@ -347,11 +347,16 @@
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     el.hidden = false;
+    // Restart the animation on a repeat tap in the same place: without the reflow the class is
+    // already there, nothing changes, and a second tap looks like it was ignored.
     el.classList.remove('go');
     void el.offsetWidth;
     el.classList.add('go');
     clearTimeout(markTimer);
-    markTimer = setTimeout(() => { el.hidden = true; }, 900);
+    markTimer = setTimeout(() => {
+      el.hidden = true;
+      el.classList.remove('go');
+    }, 1100);
   }
 
   function flash() {
