@@ -48,10 +48,13 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
     private static string WithPhotoBox(string html, JsonObject data)
     {
         // Prefers the camera: a guest standing at the party has not "captured" anything yet, and the
-        // thing they want is a viewfinder, not a file picker. Falls back to the gallery for a payload
-        // rendered before the camera existed.
-        var link = data["camera"]?["link"]?.ToString() is { Length: > 0 } camera
-            ? camera
+        // thing they want is a viewfinder, not a file picker.
+        //
+        // A camera object with no link means the camera is CLOSED for this guest — they are not
+        // coming, or it is not the night — and no bar belongs here at all. Only a payload with no
+        // camera object predates the camera, and that one still gets the gallery.
+        var link = data["camera"] is JsonObject camera
+            ? camera["link"]?.ToString()
             : data["photos"]?["link"]?.ToString();
         if (string.IsNullOrEmpty(link)) return html;
 

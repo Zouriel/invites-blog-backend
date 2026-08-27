@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -86,8 +87,13 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
             // through instead of bouncing to one that wants a session they don't have.
             ["photos"] = new JsonObject { ["link"] = $"{inviteLink}/photos" },
             // The camera (§5). Separate from photos.link, which is the gallery: a template that binds
-            // the gallery itself keeps doing so, and the appended bar prefers this.
-            ["camera"] = new JsonObject { ["link"] = $"{inviteLink}/camera" },
+            // the gallery itself keeps doing so, and the appended bar prefers this. The object is
+            // always present and the LINK is what comes and goes — that is how a template's
+            // [data-optional] wrapper knows to hide itself, and how the appended bar tells a closed
+            // camera apart from a payload rendered before there was one.
+            ["camera"] = CameraIsOpen(campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow)
+                ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
+                : new JsonObject(),
             ["theme"] = theme,
             // The same overrides keyed by the CSS custom property each one drives, which is what the
             // injector actually sets on the document. Resolved here because the manifest — the only
@@ -218,6 +224,31 @@ public sealed class InviteRenderService(RuleEngine ruleEngine) : IInviteRenderer
     /// over from an earlier version of the template — falls back to the documented naming convention
     /// rather than being silently dropped.
     /// </summary>
+    /// <summary>How long after the event begins the camera stays open.</summary>
+    private static readonly TimeSpan CameraClosesAfter = TimeSpan.FromHours(12);
+
+    /// <summary>
+    /// Whether this guest is offered the camera: they said they were coming, and it is the day.
+    ///
+    /// <para><b>Why a window and not a date.</b> "The event date" compared as a calendar date expires
+    /// at midnight, and a party that begins at 22:00 is two hours old by then — the camera would go
+    /// dark at exactly the point people are using it. Worse, no timezone is stored: Postgres
+    /// normalises the column to UTC and the offset the inviter typed is gone by the time it is read
+    /// back, so there is no local midnight to compare against even if that were the right edge.</para>
+    ///
+    /// <para>So it opens at the start of the event's day and closes
+    /// <see cref="CameraClosesAfter"/> after it begins, which covers the evening it was meant for
+    /// including the part after midnight.</para>
+    /// </summary>
+    public static bool CameraIsOpen(DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now)
+    {
+        if (rsvp != RsvpStatus.Going) return false;
+
+        var opens = new DateTimeOffset(eventStartAt.UtcDateTime.Date, TimeSpan.Zero);
+        var closes = eventStartAt + CameraClosesAfter;
+        return now >= opens && now <= closes;
+    }
+
     private static JsonObject ThemeVars(JsonObject theme, TemplateManifest? manifest)
     {
         var vars = new JsonObject();

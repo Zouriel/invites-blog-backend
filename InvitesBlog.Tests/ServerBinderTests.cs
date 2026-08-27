@@ -89,6 +89,58 @@ public class ServerBinderTests
     private static AngleSharp.Html.Dom.IHtmlDocument Parse(string html) =>
         new HtmlParser().ParseDocument(html);
 
+    /// <summary>
+    /// The camera is offered only to a guest who said they were coming, on the night. The rule lives
+    /// in the payload — the LINK is present or it is not — and every template wraps its capture block
+    /// in [data-optional], so an unresolved href takes the whole block with it.
+    ///
+    /// <para>This is the assertion that matters. The payload tests either side of it check
+    /// intermediate values; only this one says a guest cannot see the button.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("aurora-vows")]
+    [InlineData("a-love-story")]
+    [InlineData("gilded-hour")]
+    public async Task A_closed_camera_takes_the_capture_block_out_of_the_page(string slug)
+    {
+        var open = Payload();
+        open["camera"] = new JsonObject { ["link"] = "/r/abc/camera" };
+        var withCamera = Parse(ServerBinder.Bind(await PackagedHtml(slug), open));
+
+        var button = withCamera.QuerySelector("[data-href='camera.link']");
+        Assert.NotNull(button);
+        Assert.Equal("/r/abc/camera", button!.GetAttribute("href"));
+        Assert.Contains("Capture moments", button.TextContent);
+
+        // Closed: the object stays, the link goes.
+        var shut = Payload();
+        shut["camera"] = new JsonObject();
+        var withoutCamera = Parse(ServerBinder.Bind(await PackagedHtml(slug), shut));
+
+        // GONE or HIDDEN — not merely inert. An unresolved href stays "#" as the author wrote it,
+        // so a control left in the page is one a guest still SEES and presses, and pressing it does
+        // nothing. The first version of this test asked whether the href was usable, which is true
+        // of a dead button as well as an absent one, and it passed with the wrapper's
+        // [data-optional] deleted. The question is whether anything is on screen.
+        var control = withoutCamera.QuerySelector("[data-href='camera.link']");
+        Assert.True(
+            control is null || Hidden(control),
+            $"{slug} still shows a capture control after the camera closed");
+    }
+
+    /// <summary>Walks up looking for the hidden marker the binder applies to empty optionals.</summary>
+    private static bool Hidden(AngleSharp.Dom.IElement el)
+    {
+        for (var node = el; node is not null; node = node.ParentElement)
+        {
+            if (node.HasAttribute("hidden")) return true;
+            var style = node.GetAttribute("style");
+            if (style is not null && style.Contains("display", StringComparison.OrdinalIgnoreCase)
+                && style.Contains("none", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
     [Theory]
     [InlineData("aurora-vows")]
     [InlineData("a-love-story")]

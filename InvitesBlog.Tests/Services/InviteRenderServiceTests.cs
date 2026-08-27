@@ -181,13 +181,54 @@ public class InviteRenderServiceTests
     [Fact]
     public void The_payload_carries_the_camera_and_the_gallery()
     {
-        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.NoResponse };
+        var campaign = Campaign("{}");
+        campaign.EventStartAt = DateTimeOffset.UtcNow;   // tonight
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.Going };
+
         var payload = Sut().Build(
-            Campaign("{}"), TestData.Template(), Guest("Family"), invite,
+            campaign, TestData.Template(), Guest("Family"), invite,
             "https://me.invites.blog/r/abc", "Aisha", null, null);
 
         Assert.Equal("https://me.invites.blog/r/abc/camera", payload.Data["camera"]?["link"]?.ToString());
         Assert.Equal("https://me.invites.blog/r/abc/photos", payload.Data["photos"]?["link"]?.ToString());
+    }
+
+    /// <summary>
+    /// A closed camera keeps its object but loses its link. That distinction carries real weight
+    /// downstream: a template's [data-optional] wrapper hides itself because the href never
+    /// resolved, and the appended bar can tell "closed for this guest" apart from "rendered before
+    /// there was a camera" — which still gets the gallery.
+    /// </summary>
+    [Fact]
+    public void A_guest_who_is_not_coming_gets_the_camera_object_with_no_link()
+    {
+        var campaign = Campaign("{}");
+        campaign.EventStartAt = DateTimeOffset.UtcNow;
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.NotGoing };
+
+        var payload = Sut().Build(
+            campaign, TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.NotNull(payload.Data["camera"]);
+        Assert.Null(payload.Data["camera"]?["link"]);
+        // The gallery is unaffected — not being at the party is not a reason to be shown nothing.
+        Assert.Equal("https://me.invites.blog/r/abc/photos", payload.Data["photos"]?["link"]?.ToString());
+    }
+
+    /// <summary>Coming, but not tonight.</summary>
+    [Fact]
+    public void The_camera_has_no_link_before_the_day()
+    {
+        var campaign = Campaign("{}");
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(9);
+        var invite = new Invite { Id = Guid.NewGuid(), RsvpStatus = RsvpStatus.Going };
+
+        var payload = Sut().Build(
+            campaign, TestData.Template(), Guest("Family"), invite,
+            "https://me.invites.blog/r/abc", "Aisha", null, null);
+
+        Assert.Null(payload.Data["camera"]?["link"]);
     }
 
     // --- Theme → CSS custom properties -----------------------------------------------------------
