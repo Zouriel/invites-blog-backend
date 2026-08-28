@@ -88,6 +88,16 @@ const press = (el, type, id = 1, x = 100, y = 400) => {
 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/*
+ * What the CSS sees, which is not what the dataset says.
+ *
+ * Every rule is written body[data-rec] — attribute PRESENCE — so an attribute blanked to the empty
+ * string still matches and the shutter stays red. Asserting on `dataset.rec` reads that as '' and
+ * passes happily, which is exactly how this shipped: the state was cleared in JavaScript and
+ * nothing changed on screen. Assert on the attribute the stylesheet actually keys on.
+ */
+const recChrome = (t) => (t.doc.body.hasAttribute('data-rec') ? t.doc.body.dataset.rec || '(empty)' : '');
+
 let failures = 0;
 function check(name, got, want) {
   const ok = JSON.stringify(got) === JSON.stringify(want);
@@ -104,7 +114,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   press(shoot, 'pointerdown'); await wait(40); press(shoot, 'pointerup');
   await wait(120);
   check('a tap does not record', t.log, []);
-  check('a tap leaves no recording chrome', t.doc.body.dataset.rec || '', '');
+  check('a tap leaves no recording chrome', recChrome(t), '');
 }
 
 // 2. A hold records, and the release stops it.
@@ -113,7 +123,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   const shoot = t.doc.getElementById('shoot');
   press(shoot, 'pointerdown'); await wait(450);
   check('a hold starts recording', t.log, ['rec:start']);
-  check('the shutter shows it', t.doc.body.dataset.rec, '1');
+  check('the shutter shows it', recChrome(t), '1');
   press(shoot, 'pointerup'); await wait(60);
   check('the release stops it', t.log, ['rec:start', 'rec:stop']);
 }
@@ -127,17 +137,17 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
 
   press(shoot, 'pointerdown'); await wait(450);
   press(shoot, 'pointermove', 1, 100, 300);          // finger arrives at the lock
-  check('locked', t.doc.body.dataset.rec, 'locked');
+  check('locked', recChrome(t), 'locked');
 
   press(shoot, 'pointerup', 1, 100, 300);            // and lets go
   await wait(60);
   check('LETTING GO KEEPS IT RUNNING', t.log, ['rec:start']);
-  check('still shows as locked', t.doc.body.dataset.rec, 'locked');
+  check('still shows as locked', recChrome(t), 'locked');
 
   press(shoot, 'pointerdown'); press(shoot, 'pointerup');   // the next press is the stop
   await wait(60);
   check('the next press stops it', t.log, ['rec:start', 'rec:stop']);
-  check('chrome cleared', t.doc.body.dataset.rec, '');
+  check('chrome cleared', recChrome(t), '');
 }
 
 // 4. A drag that never reaches the lock does not lock.
@@ -148,7 +158,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   lock.getBoundingClientRect = () => ({ left: 90, top: 290, width: 20, height: 20, right: 110, bottom: 310 });
   press(shoot, 'pointerdown'); await wait(450);
   press(shoot, 'pointermove', 1, 100, 380);          // still 80px short
-  check('not locked yet', t.doc.body.dataset.rec, '1');
+  check('not locked yet', recChrome(t), '1');
   press(shoot, 'pointerup', 1, 100, 380); await wait(60);
   check('so the release still stops it', t.log, ['rec:start', 'rec:stop']);
 }
@@ -169,12 +179,12 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   const t = await ready(boot());
   const shoot = t.doc.getElementById('shoot');
   press(shoot, 'pointerdown'); await wait(450);
-  check('recording', t.doc.body.dataset.rec, '1');
+  check('recording', recChrome(t), '1');
 
   t.made[t.made.length - 1].die();
   await wait(400);                                   // the clock is the watchdog
 
-  check('a dead recorder does not leave the shutter red', t.doc.body.dataset.rec || '', '');
+  check('a dead recorder does not leave the shutter red', recChrome(t), '');
   press(shoot, 'pointerup'); await wait(60);
 }
 
@@ -189,7 +199,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   t.w.clearInterval = () => {};                      // and the watchdog never got to run
 
   press(shoot, 'pointerup'); await wait(60);
-  check('a press on a stuck shutter clears it', t.doc.body.dataset.rec || '', '');
+  check('a press on a stuck shutter clears it', recChrome(t), '');
   check('and takes no photograph', t.log.filter((l) => l === 'shot'), []);
 }
 
@@ -202,7 +212,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   press(shoot, 'pointerdown'); await wait(450);
 
   check('it falls back to video alone', t.log.includes('rec:start'), true);
-  check('and says it is recording', t.doc.body.dataset.rec, '1');
+  check('and says it is recording', recChrome(t), '1');
   check('with no audio track on the recorder',
     t.made[t.made.length - 1].tracks.some((x) => x.kind === 'audio'), false);
   press(shoot, 'pointerup'); await wait(60);
@@ -216,7 +226,7 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   const shoot = t.doc.getElementById('shoot');
   press(shoot, 'pointerdown'); await wait(500);
 
-  check('a start that never started shows no recording', t.doc.body.dataset.rec || '', '');
+  check('a start that never started shows no recording', recChrome(t), '');
   press(shoot, 'pointerup'); await wait(60);
   fault = null;
 }
@@ -239,11 +249,11 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   press(shoot, 'pointerup', 1, 100, 300);
   await wait(500);
 
-  check('a clock that cannot draw does not stand the shutter red', t.doc.body.dataset.rec || '', '');
+  check('a clock that cannot draw does not stand the shutter red', recChrome(t), '');
 
   // And the shutter still works afterwards rather than being wedged.
   press(shoot, 'pointerdown'); await wait(40); press(shoot, 'pointerup'); await wait(60);
-  check('the shutter still works after that', t.doc.body.dataset.rec || '', '');
+  check('the shutter still works after that', recChrome(t), '');
 }
 
 // 11. A clock that ticks. Frozen at 0:00 was the symptom; this is the thing it was a symptom of.

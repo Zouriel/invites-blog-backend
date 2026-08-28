@@ -114,8 +114,10 @@ public static class GuestCameraPage
         .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 
         /* The shutter is the one control that must be findable without looking. */
+        /* touch-action:none so the browser cannot claim the drag to the lock as a pan — see the
+           note in camera.js. Set here as well as in script so it holds from the first paint. */
         .shoot { width:74px; height:74px; border-radius:999px; border:4px solid rgba(255,255,255,.9);
-                 background:#fff; cursor:pointer; flex:0 0 auto; }
+                 background:#fff; cursor:pointer; flex:0 0 auto; touch-action:none; }
         .shoot:active { transform:scale(.93); }
         body[data-busy="1"] .shoot { opacity:.6; }
 

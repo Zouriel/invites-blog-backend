@@ -813,9 +813,13 @@
     recTick = 0;
     locked = false;
     lockedByThisPress = false;
-    // This one line is the difference between a shutter that works and one that is stuck red, so it
-    // comes before anything that could fail and is guarded even so.
-    try { document.body.dataset.rec = ''; } catch { /* nothing else can be done about it */ }
+    // REMOVED, not blanked. `dataset.rec = ''` leaves data-rec="" on the element, and every rule
+    // written as body[data-rec] matches on the attribute EXISTING rather than on its value — so
+    // blanking it cleared the state in JavaScript and changed nothing at all on screen. The shutter
+    // stayed red, the clock chip stayed up reading the 0:00 this had just reset it to, and the
+    // filters and the queue stayed dimmed under pointer-events:none. Everything looked stuck
+    // because everything WAS stuck, on an attribute that had supposedly been cleared.
+    try { document.body.removeAttribute('data-rec'); } catch { /* nothing else can be done */ }
 
     try { $('lock').classList.remove('near'); } catch { /* cosmetic */ }
     try { $('lock').style.removeProperty('--reach'); } catch { /* cosmetic */ }
@@ -898,7 +902,7 @@
       clearTimeout(blameTimer);
       blameTimer = setTimeout(() => {
         try {
-          document.body.dataset.failed = '';
+          document.body.removeAttribute('data-failed');
           chip.textContent = '0:00';
         } catch { /* nothing left to say */ }
       }, 6000);
@@ -1216,6 +1220,11 @@
     shutter.addEventListener('pointermove', onShutterMove);
     shutter.addEventListener('pointerup', onShutterUp);
     shutter.addEventListener('pointercancel', onShutterUp);
+    // The browser must not be able to claim the drag. Without this a swipe up from the shutter is
+    // read as a pan, the pointer is taken away mid-gesture, and the pointercancel that follows is
+    // indistinguishable from letting go — so the recording stops on its way to the lock and the
+    // lock can never engage. There is nothing to scroll on this page anyway.
+    shutter.style.touchAction = 'none';
     shutter.addEventListener('click', (e) => e.preventDefault());
     // A shutter driven by pointers is one a keyboard cannot press, and this is the only control on
     // the page that matters. Space and Enter take a photograph; the hold has no keyboard equivalent.
