@@ -401,14 +401,84 @@ public class EventPhotoServiceTests
     }
 
     [Fact]
-    public async Task Something_that_is_not_an_image_is_refused()
+    public async Task Something_that_is_neither_a_photo_nor_a_video_is_refused()
     {
         var (campaign, guest) = OnTheGuestList();
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().AddAsync(campaign.Id, guest.Id, [1, 2, 3], "application/pdf", "cv.pdf"));
 
-        Assert.Equal("not_an_image", ex.ErrorCode);
+        Assert.Equal("not_media", ex.ErrorCode);
+    }
+
+    // ----- clips ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A clip is stored ONCE and pointed at twice. There is no smaller viewing copy to make without
+    /// a transcoder, so writing the same file under a second key would double what an evening's
+    /// videos cost and buy nothing at all.
+    /// </summary>
+    [Fact]
+    public async Task A_clip_is_stored_once_with_its_poster_as_the_tile()
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var clip = await Sut().AddAsync(
+            campaign.Id, guest.Id, [.. Enumerable.Repeat((byte)7, 4096)], "video/mp4", "clip.mp4",
+            Jpeg(1280, 720));
+
+        // Two objects, not three: the clip itself, and the still that stands in for it.
+        await _storage.Received(2).PutAsync(
+            Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        Assert.Equal(clip.Url, clip.OriginalUrl);
+        Assert.NotEqual(clip.Url, clip.ThumbUrl);
+        Assert.Equal("video/mp4", clip.ContentType);
+        // The poster was drawn FROM the clip, so its shape is the clip's shape.
+        Assert.Equal(1280, clip.Width);
+        Assert.Equal(720, clip.Height);
+    }
+
+    /// <summary>
+    /// The one thing the server cannot recover for itself. It has no decoder, so a clip that arrives
+    /// without a still would be a permanently black tile — better to refuse it loudly.
+    /// </summary>
+    [Fact]
+    public async Task A_clip_without_a_poster_is_refused()
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().AddAsync(campaign.Id, guest.Id, [1, 2, 3], "video/mp4", "clip.mp4"));
+
+        Assert.Equal("video_without_poster", ex.ErrorCode);
+    }
+
+    /// <summary>Photographs stay uncapped; the cap exists because a clip is buffered whole in memory.</summary>
+    [Fact]
+    public async Task A_clip_past_the_ceiling_is_refused_where_a_photograph_would_not_be()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var huge = new byte[(256L * 1024 * 1024) + 1];
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().AddAsync(campaign.Id, guest.Id, huge, "video/mp4", "clip.mp4", Jpeg(64, 64)));
+
+        Assert.Equal("video_too_large", ex.ErrorCode);
+    }
+
+    /// <summary>A poster sent alongside a photograph is not a second photograph. It is ignored.</summary>
+    [Fact]
+    public async Task A_poster_offered_with_a_photograph_changes_nothing()
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var photo = await Sut().AddAsync(
+            campaign.Id, guest.Id, Jpeg(), "image/jpeg", "IMG_0042.jpg", Jpeg(64, 64));
+
+        await _storage.Received(3).PutAsync(
+            Arg.Any<string>(), Arg.Any<byte[]>(), "image/jpeg", Arg.Any<CancellationToken>());
+        Assert.NotEqual(photo.Url, photo.OriginalUrl);
+        Assert.Equal("image/jpeg", photo.ContentType);
     }
 
     [Fact]

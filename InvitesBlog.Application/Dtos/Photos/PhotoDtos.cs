@@ -9,8 +9,16 @@ public sealed record EventPhotoDto(
     Guid Id,
     string Url,
     string ThumbUrl,
-    /// <summary>The shot as taken. Nothing renders this — it is what "download" hands over.</summary>
+    /// <summary>
+    /// The shot as taken. Nothing renders this — it is what "download" hands over. For a video it is
+    /// the same object as <c>Url</c>: there is no smaller viewing copy without transcoding.
+    /// </summary>
     string OriginalUrl,
+    /// <summary>
+    /// What this actually is, so a caller can tell a video from a photograph without guessing at the
+    /// file extension. <c>ThumbUrl</c> is a still either way; for a video it is the poster frame.
+    /// </summary>
+    string ContentType,
     int Width,
     int Height,
     string? UploaderName,

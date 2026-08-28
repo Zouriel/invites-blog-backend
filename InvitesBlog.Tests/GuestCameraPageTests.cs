@@ -33,6 +33,50 @@ public class GuestCameraPageTests
         Assert.Contains("indexedDB", html);
     }
 
+    /// <summary>
+    /// Everything the recording gesture reaches for by id. Each of these is looked up in camera.js
+    /// with no guard around it, so a rename here is a TypeError the moment somebody holds the
+    /// shutter — on the one night of the year the page exists for, and only for the guests who tried
+    /// to film something.
+    /// </summary>
+    [Theory]
+    [InlineData("id=\"lock\"")]
+    [InlineData("id=\"rectime\"")]
+    [InlineData("id=\"shoot\"")]
+    [InlineData("id=\"reticle\"")]
+    [InlineData("id=\"queue\"")]
+    public void Every_control_the_client_reaches_for_is_on_the_page(string element)
+    {
+        Assert.Contains(element, Page());
+    }
+
+    /// <summary>
+    /// The lock and the clock are chrome for a recording, so they stay off the page until there is
+    /// one. Driven by data-rec on the body, which is the only thing camera.js sets.
+    /// </summary>
+    [Fact]
+    public void The_recording_chrome_is_hidden_until_something_is_recording()
+    {
+        var html = Page();
+
+        Assert.Contains(".lock { position:absolute", html);
+        Assert.Contains("display:none", html);
+        Assert.Contains("body[data-rec=\"1\"] .lock { display:grid; }", html);
+        Assert.Contains("body[data-rec] .rec { display:flex; }", html);
+        // Locked, the shutter stops being a shutter and becomes a stop button.
+        Assert.Contains("body[data-rec=\"locked\"] .shoot", html);
+    }
+
+    /// <summary>
+    /// A hold is a recording and a tap is a photograph, and the button has to say so — it is the
+    /// only control on the page, and the second gesture is invisible without a label.
+    /// </summary>
+    [Fact]
+    public void The_shutter_says_it_does_both()
+    {
+        Assert.Contains("hold to record a video", Page());
+    }
+
     /// <summary>The script runs only because the nonce matches the one in the response's CSP.</summary>
     [Fact]
     public void The_inline_script_carries_the_nonce()

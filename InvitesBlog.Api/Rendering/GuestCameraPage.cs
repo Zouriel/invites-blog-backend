@@ -144,6 +144,56 @@ public static class GuestCameraPage
         .badge { min-width:22px; height:22px; padding:0 6px; border-radius:999px; background:#fff; color:#111;
                  font-size:.72rem; font-weight:700; display:grid; place-items:center; }
 
+        /* A clip in the strip is a poster frame with a corner marker, because a 46px square cannot
+           show motion and the tile has to say which of the two it is. */
+        .shot[data-kind="video"]::after { content:""; position:absolute; left:3px; top:3px;
+            border-style:solid; border-width:5px 0 5px 8px; border-color:transparent transparent transparent #fff;
+            filter:drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+
+        /* ---- recording ------------------------------------------------------------------------
+           Press the shutter for a photograph, hold it for a clip, and slide up to the lock to leave
+           it running. Everything below is the second and third of those; the first needs no chrome. */
+
+        /* The clock, over the shutter, only while there is something to time. */
+        .rec { position:absolute; z-index:3; left:0; right:0;
+               top:calc(58px + env(safe-area-inset-top)); display:none; justify-content:center; }
+        body[data-rec] .rec { display:flex; }
+        .rec span { display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:999px;
+                    background:rgba(0,0,0,.55); font-size:.85rem; font-variant-numeric:tabular-nums;
+                    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+        .rec i { width:9px; height:9px; border-radius:999px; background:#ff4d4d; animation:blink 1s infinite; }
+        @keyframes blink { 50% { opacity:.25; } }
+
+        /* The lock. Sits directly above the shutter — up is where the thumb can reach without
+           changing grip, and left and right are already spoken for by the other controls. Hidden
+           until there is a recording to lock, so it never reads as a control in its own right. */
+        .lock { position:absolute; z-index:4; left:50%; transform:translateX(-50%);
+                bottom:calc(120px + env(safe-area-inset-bottom));
+                width:46px; height:46px; border-radius:999px; display:none; place-items:center;
+                background:rgba(0,0,0,.5); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+                border:1px solid rgba(255,255,255,.35); pointer-events:none;
+                /* --reach runs 0 at arm's length to 1 at the lock, so the target fills as it is
+                   approached rather than snapping at the moment it engages. */
+                opacity:calc(.55 + .45 * var(--reach, 0));
+                scale:calc(1 + .18 * var(--reach, 0)); }
+        body[data-rec="1"] .lock { display:grid; }
+        .lock.near { border-color:var(--accent,#c9a227); }
+        .lock svg { width:20px; height:20px; fill:none; stroke:#fff; stroke-width:2;
+                    stroke-linecap:round; stroke-linejoin:round; }
+        /* The nudge upward is the whole instruction: it says which way to go without a word of text. */
+        .hint { position:absolute; z-index:3; left:50%; transform:translateX(-50%);
+                bottom:calc(96px + env(safe-area-inset-bottom)); display:none;
+                font-size:.72rem; opacity:.75; white-space:nowrap; pointer-events:none;
+                animation:rise 1.6s ease-in-out infinite; }
+        body[data-rec="1"] .hint { display:block; }
+        @keyframes rise { 50% { transform:translate(-50%,-5px); opacity:1; } }
+
+        /* Recording: the shutter becomes the thing being recorded into. Locked, it becomes a stop
+           button — a square, which is the one shape that has never meant anything else. */
+        body[data-rec] .shoot { background:#ff4d4d; border-color:rgba(255,77,77,.35); }
+        body[data-rec="locked"] .shoot { border-radius:18px; }
+        body[data-rec] .filters, body[data-rec] .queue { opacity:.35; pointer-events:none; }
+
         /* Denied / unsupported. The camera is the whole page, so this replaces it rather than warning. */
         .gate { position:absolute; inset:0; display:none; flex-direction:column; align-items:center;
                 justify-content:center; gap:14px; text-align:center; padding:32px 24px; background:#0d0b0e; }
@@ -203,6 +253,15 @@ public static class GuestCameraPage
             <a class="btn" href="{{E(galleryPath)}}">See the photos</a>
           </div>
 
+          <div class="rec"><span><i></i><b id="rectime">0:00</b></span></div>
+
+          <!-- Slide the held shutter onto this to leave the recording running. Hidden entirely
+               unless a clip is being taken, so it is never one more thing on screen to work out. -->
+          <div class="lock" id="lock" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+          </div>
+          <div class="hint" aria-hidden="true">Slide up to lock</div>
+
           <div class="bottom">
             <div class="queue" id="queue"></div>
             <div class="filters" id="filters"></div>
@@ -211,7 +270,8 @@ public static class GuestCameraPage
                 <button class="btn" id="torch" type="button" hidden>Flash</button>
                 <input type="range" id="zoom" hidden aria-label="Zoom">
               </div>
-              <button class="shoot" id="shoot" type="button" aria-label="Take a photo"></button>
+              <button class="shoot" id="shoot" type="button"
+                      aria-label="Take a photo, or hold to record a video"></button>
               <div class="side right">
                 <button class="btn" id="night" type="button" hidden aria-pressed="false">Night</button>
                 <button class="btn" id="flip" type="button" hidden>Flip</button>

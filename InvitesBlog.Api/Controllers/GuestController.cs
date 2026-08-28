@@ -222,7 +222,7 @@ public sealed class GuestController(
                 using var buffer = new MemoryStream();
                 await stream.CopyToAsync(buffer, ct);
                 await photos.AddAsync(subject.Value.CampaignId, subject.Value.GuestId,
-                    buffer.ToArray(), upload.ContentType, upload.FileName, ct);
+                    buffer.ToArray(), upload.ContentType, upload.FileName, ct: ct);
             }
         }
         catch (AppException e)
@@ -312,15 +312,20 @@ public sealed class GuestController(
     }
 
     /// <summary>
-    /// One captured frame. Answers JSON because the caller is a queue, not a form — the HTML upload
-    /// re-renders the whole box, which is the wrong shape for something uploading in the background
-    /// while its user keeps shooting.
+    /// One captured frame, or one recorded clip. Answers JSON because the caller is a queue, not a
+    /// form — the HTML upload re-renders the whole box, which is the wrong shape for something
+    /// uploading in the background while its user keeps shooting.
     /// </summary>
+    /// <param name="poster">
+    /// A still drawn from the clip, sent alongside a video and absent for a photo. The camera has the
+    /// frame on screen already; the alternative is ffmpeg in this container decoding untrusted media
+    /// next to the guest's session, which is a great deal to add for one thumbnail.
+    /// </param>
     [HttpPost("/r/{renderId}/photos/capture")]
     [DisableRequestSizeLimit]
     [Microsoft.AspNetCore.Mvc.RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<IActionResult> Capture(
-        string renderId, IFormFile? file, CancellationToken ct)
+        string renderId, IFormFile? file, IFormFile? poster, CancellationToken ct)
     {
         var inviteId = Admitted(renderId);
         if (inviteId is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
@@ -331,13 +336,10 @@ public sealed class GuestController(
 
         try
         {
-            await using var stream = file.OpenReadStream();
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, ct);
-
             var photo = await photos.AddAsync(
                 subject.Value.CampaignId, subject.Value.GuestId,
-                buffer.ToArray(), file.ContentType, file.FileName, ct);
+                await ReadAsync(file, ct), file.ContentType, file.FileName,
+                poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null, ct);
 
             return Ok(new { id = photo.Id, thumbUrl = photo.ThumbUrl });
         }
@@ -346,6 +348,14 @@ public sealed class GuestController(
             // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
             return BadRequest(new { error = e.Message });
         }
+    }
+
+    private static async Task<byte[]> ReadAsync(IFormFile file, CancellationToken ct)
+    {
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+        return buffer.ToArray();
     }
 
     /// <summary>
@@ -357,7 +367,10 @@ public sealed class GuestController(
     {
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()";
+        // The microphone is admitted for the same reason the camera is: holding the shutter records a
+        // clip, and a clip of a party with no sound is half of one. It is asked for separately and
+        // late (see camera.js), so refusing it costs the guest the audio and nothing else.
+        Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()";
         Response.Headers["Content-Security-Policy"] =
             $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
             + "img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; "
@@ -382,7 +395,8 @@ public sealed class GuestController(
             $"/r/{renderId}",
             box.EventTitle,
             box.Photos
-                .Select(p => (p.Id, p.ThumbUrl, p.Url, p.OriginalUrl, p.UploaderName, p.CanDelete))
+                .Select(p => (p.Id, p.ThumbUrl, p.Url, p.OriginalUrl, p.UploaderName, p.CanDelete,
+                    p.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)))
                 .ToList(),
             box.CanUpload,
             error,

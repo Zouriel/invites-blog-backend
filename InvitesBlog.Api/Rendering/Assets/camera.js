@@ -64,6 +64,43 @@
   /** How far to bias exposure, in EV, when it is on. Clamped to whatever the track allows. */
   const NIGHT_EV = 1.5;
 
+  // ---- recording -----------------------------------------------------------------------------
+
+  /** How long the shutter must be held before it is a recording rather than a slow tap. */
+  const HOLD_MS = 350;
+
+  /**
+   * The ceiling on one clip. Not a technical limit — it is what keeps a pocketed phone with a
+   * locked shutter from filling the queue with an hour of the inside of a jacket, and it bounds
+   * what the upload is allowed to weigh on a venue's wifi.
+   */
+  const MAX_MS = 60000;
+
+  /** How near the finger must come to the lock, in px, to engage it and to light it up on approach. */
+  const LOCK_HIT = 40;
+  const LOCK_NEAR = 96;
+
+  let recorder = null;
+  let chunks = [];
+  let recFrom = 0;
+  let recTick = 0;
+  let recPoster = null;
+  let locked = false;
+
+  /**
+   * The microphone, or false once it is known there will not be one.
+   *
+   * <p>Asked for in the background as soon as the camera is live, NOT at the moment someone starts
+   * recording. A permission prompt raised mid-gesture is one raised while a finger is holding the
+   * shutter down: answering it loses the hold, and the clip that provoked it is the one that gets
+   * missed. It is a separate request from the camera's on purpose — asking for both at once means a
+   * guest who does not want to be recorded refuses the camera as well.</p>
+   */
+  let mic = null;
+
+  /** Held so the preview's grade can be put back when a recording ends. */
+  let filterBeforeRecording = 'none';
+
   const canvasFilterWorks = (() => {
     try {
       const c = document.createElement('canvas').getContext('2d');
@@ -134,6 +171,11 @@
       await settle();
       controls();
       document.body.dataset.state = 'live';
+
+      // Not awaited: the viewfinder is already usable, and the microphone prompt must not be
+      // something the camera waits behind. By the time anyone has framed a shot and held the
+      // shutter down, this has long since been answered one way or the other.
+      listenIn();
     } catch (err) {
       stop();
       fail(err);
@@ -275,7 +317,17 @@
   }
 
   function stop() {
+    // The recording goes FIRST. The tracks feeding it are about to be pulled out from under it, and
+    // a recorder that loses its source mid-flight keeps nothing — whereas one asked to stop flushes
+    // what it has. This is the path a phone locking its screen takes, so it is the difference
+    // between losing the clip and keeping it.
+    if (recordingNow()) stopRecording();
+
     if (stream) stream.getTracks().forEach((t) => t.stop());
+    // The microphone goes too. An open mic on a phone in someone's pocket is not a thing to leave
+    // running quietly, and the permission is remembered — so coming back costs nothing but the ask.
+    if (mic) mic.stop();
+    mic = null;
     stream = null;
     track = null;
     torchOn = false;
@@ -475,7 +527,7 @@
     x = Math.min(1, Math.max(0, x));
     y = Math.min(1, Math.max(0, y));
 
-    mark(px, py);
+    showReticle(px, py);
 
     try {
       await track.applyConstraints({
@@ -487,7 +539,13 @@
   }
 
   let markTimer = 0;
-  function mark(x, y) {
+  /**
+   * NOT `mark`. There is a mark(id, state) further down for the upload strip, and two function
+   * declarations of the same name in one scope are not two functions — the later one silently
+   * replaces the earlier, so every tap-to-focus was calling the queue's marker with a pair of
+   * pixel coordinates and the reticle never appeared once.
+   */
+  function showReticle(x, y) {
     const el = $('reticle');
     el.style.left = x + 'px';
     el.style.top = y + 'px';
@@ -509,6 +567,281 @@
     f.classList.remove('go');
     void f.offsetWidth;
     f.classList.add('go');
+  }
+
+  // ---- recording ------------------------------------------------------------------------------
+
+  function recordingNow() {
+    return recorder !== null && recorder.state === 'recording';
+  }
+
+  /**
+   * What to record into, or null when this browser cannot record at all.
+   *
+   * <p>mp4 first and emphatically: it is the only container an iPhone will play back, and a clip
+   * that half the party cannot open is not a memory of the party. WebM is the fallback for browsers
+   * with no mp4 encoder. An empty string means "record, but choose for yourself" — better than
+   * refusing on a browser whose isTypeSupported is simply pessimistic.</p>
+   */
+  function container() {
+    if (typeof MediaRecorder === 'undefined') return null;
+    if (!MediaRecorder.isTypeSupported) return '';
+    const wanted = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1.42E01E',
+      'video/mp4',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+    ];
+    for (const type of wanted) {
+      try {
+        if (MediaRecorder.isTypeSupported(type)) return type;
+      } catch { /* keep looking */ }
+    }
+    return '';
+  }
+
+  /** Asked for once, early, and never again — see the note on {@link mic}. */
+  async function listenIn() {
+    if (mic !== null) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      mic = false;
+      return;
+    }
+    try {
+      const heard = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic = heard.getAudioTracks()[0] || false;
+    } catch {
+      // Refused, or there is no microphone. Clips go up silent, which is worth far more than no
+      // clips at all — and nothing asks again.
+      mic = false;
+    }
+  }
+
+  /**
+   * The still that stands in for a clip in a grid.
+   *
+   * <p>Taken here because it is the only place it can be taken: pulling a frame out of an encoded
+   * video needs a decoder the API does not have, and the browser is holding the frame already.
+   * Small on purpose — it is only ever shown as a tile.</p>
+   */
+  async function posterFrame() {
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return null;
+
+    const edge = 1280;
+    const factor = Math.min(1, edge / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * factor));
+    canvas.height = Math.max(1, Math.round(h * factor));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // Ungraded and unmirrored, to match the clip it stands for — see startRecording on why the
+    // preview's grade comes off for the duration.
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+  }
+
+  async function startRecording() {
+    if (!track || recordingNow() || document.body.dataset.state !== 'live') return;
+
+    const type = container();
+    if (type === null) return;   // no MediaRecorder here: the hold simply does nothing
+
+    // Before anything else changes on screen, so the tile matches the clip's first frame.
+    recPoster = await posterFrame();
+    if (!recPoster) return;
+
+    // The finger may have come off during that. If it has, this was a photograph after all and the
+    // release has already taken it.
+    if (holdId === -1) {
+      recPoster = null;
+      return;
+    }
+
+    const tracks = [track];
+    if (mic && mic.readyState === 'live') tracks.push(mic);
+
+    try {
+      recorder = new MediaRecorder(new MediaStream(tracks), type ? { mimeType: type } : undefined);
+    } catch {
+      recorder = null;
+      recPoster = null;
+      return;
+    }
+
+    chunks = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size) chunks.push(e.data);
+    };
+    recorder.onstop = finishRecording;
+
+    try {
+      // A timeslice rather than one blob at the end: the clip is flushed as it goes, so a tab the
+      // phone kills mid-recording loses the last second instead of the whole thing.
+      recorder.start(1000);
+    } catch {
+      recorder = null;
+      recPoster = null;
+      return;
+    }
+
+    recFrom = Date.now();
+    locked = false;
+
+    // A CSS filter grades the PREVIEW; the recorder reads the track behind it and never sees one.
+    // Rather than hand back a clip that does not look like what was on screen, the grade comes off
+    // for the duration — so the viewfinder tells the truth about what is being recorded.
+    filterBeforeRecording = video.style.filter || 'none';
+    video.style.filter = 'none';
+
+    document.body.dataset.rec = '1';
+    if (navigator.vibrate) navigator.vibrate(18);
+    tickClock();
+  }
+
+  function engageLock() {
+    if (!recordingNow() || locked) return;
+    locked = true;
+    document.body.dataset.rec = 'locked';
+    $('lock').classList.remove('near');
+    if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
+  }
+
+  function stopRecording() {
+    if (!recordingNow()) {
+      // Nothing to stop, but the UI may still be showing a recording that failed to start cleanly.
+      if (document.body.dataset.rec) endRecordingUi();
+      return;
+    }
+    try {
+      recorder.stop();
+    } catch {
+      // A recorder that will not stop cleanly still has to release the UI, or the shutter is stuck
+      // recording forever with no way back.
+      recorder = null;
+      endRecordingUi();
+    }
+  }
+
+  /** Everything the recording put on screen, taken back off it. */
+  function endRecordingUi() {
+    clearInterval(recTick);
+    recTick = 0;
+    locked = false;
+    document.body.dataset.rec = '';
+    $('lock').classList.remove('near');
+    $('lock').style.removeProperty('--reach');
+    $('rectime').textContent = '0:00';
+    video.style.filter = filterBeforeRecording;
+  }
+
+  async function finishRecording() {
+    const type = (recorder && recorder.mimeType) || 'video/mp4';
+    const parts = chunks;
+    const poster = recPoster;
+
+    recorder = null;
+    chunks = [];
+    recPoster = null;
+    endRecordingUi();
+
+    if (!parts.length || !poster) return;
+
+    // The codec parameters go: they are true of the file but they are not a content type anyone
+    // downstream wants to match on, and they would end up on the stored object verbatim.
+    const base = type.split(';')[0];
+    const blob = new Blob(parts, { type: base });
+    // A clip of a few kilobytes is a press that was read as a hold. Nobody meant to film that.
+    if (blob.size < 12000) return;
+
+    await enqueue(blob, { poster, ext: base === 'video/webm' ? '.webm' : '.mp4' });
+  }
+
+  function tickClock() {
+    const show = () => {
+      const ms = Date.now() - recFrom;
+      const secs = Math.floor(ms / 1000);
+      $('rectime').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      if (ms >= MAX_MS) stopRecording();
+    };
+    show();
+    clearInterval(recTick);
+    recTick = setInterval(show, 250);
+  }
+
+  /**
+   * The shutter's gesture, all four events of it.
+   *
+   * <p>A tap and a hold are the same press until they are not, so the decision is made by a timer
+   * rather than by which handler ran: held past {@link HOLD_MS} it becomes a recording, released
+   * before it and it was a photograph. The pointer is captured so a finger sliding off the button
+   * on its way to the lock keeps being heard.</p>
+   *
+   * <p>Locking is a separate press from the one that started the clip. Once locked the finger is
+   * gone and the shutter is a stop button, which is why the down handler leaves early for it —
+   * otherwise the press that ends a locked recording would start a second one.</p>
+   */
+  let holdId = -1;
+  let holdTimer = 0;
+
+  function onShutterDown(e) {
+    if (document.body.dataset.state !== 'live') return;
+    e.preventDefault();
+
+    if (locked) return;   // the release stops it; nothing to start
+
+    holdId = e.pointerId;
+    try {
+      shutter.setPointerCapture(e.pointerId);
+    } catch { /* older engines manage without it */ }
+
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(startRecording, HOLD_MS);
+  }
+
+  function onShutterMove(e) {
+    if (e.pointerId !== holdId || !recordingNow() || locked) return;
+
+    // Distance to the lock itself rather than travel from the start, so the target is a place on
+    // the screen the thumb can aim at — which is what the icon appearing there promises.
+    const box = $('lock').getBoundingClientRect();
+    const away = Math.hypot(
+      e.clientX - (box.left + box.width / 2),
+      e.clientY - (box.top + box.height / 2),
+    );
+
+    $('lock').classList.toggle('near', away <= LOCK_NEAR);
+    // 0 at the lock, 1 a long way off — the icon fills as the finger closes on it.
+    $('lock').style.setProperty(
+      '--reach', String(Math.max(0, Math.min(1, 1 - (away - LOCK_HIT) / (LOCK_NEAR - LOCK_HIT)))),
+    );
+    if (away <= LOCK_HIT) engageLock();
+  }
+
+  function onShutterUp(e) {
+    if (e.pointerId !== holdId && holdId !== -1) return;
+    clearTimeout(holdTimer);
+    const held = holdId !== -1;
+    holdId = -1;
+    try {
+      shutter.releasePointerCapture(e.pointerId);
+    } catch { /* it may never have been captured */ }
+
+    // Locked: the finger left long ago, and this press is the stop button.
+    if (locked) {
+      stopRecording();
+      return;
+    }
+    if (recordingNow()) {
+      stopRecording();
+      return;
+    }
+    // The hold never matured into a recording, so the press was a tap — and a tap is a photograph.
+    if (held) shoot();
   }
 
   // ---- the queue -----------------------------------------------------------------------------
@@ -567,8 +900,22 @@
 
   const live = new Map();
 
-  async function enqueue(blob) {
-    const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, blob, tries: 0 };
+  /**
+   * Puts a capture on disk and lets the pump find it.
+   *
+   * <p>A clip arrives with the poster {@link startRecording} drew and the extension its container
+   * earned; a photograph passes neither and gets the defaults. Both are stored whole, because the
+   * poster is the one thing that cannot be reconstructed later — the frame it came from is gone the
+   * moment the recording ends, and the server has no decoder to find another.</p>
+   */
+  async function enqueue(blob, clip) {
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      blob,
+      tries: 0,
+      poster: (clip && clip.poster) || null,
+      ext: (clip && clip.ext) || '.jpg',
+    };
     await put(item);
     tile(item);
     pump();
@@ -578,8 +925,11 @@
     const el = document.createElement('div');
     el.className = 'shot';
     el.dataset.id = item.id;
+    // A clip cannot be shown as itself in a 46px square, so the poster stands in for it and a badge
+    // says which it is. Anything queued before clips existed has no poster and is a photograph.
+    if (item.poster) el.dataset.kind = 'video';
     const img = document.createElement('img');
-    img.src = URL.createObjectURL(item.blob);
+    img.src = URL.createObjectURL(item.poster || item.blob);
     img.alt = '';
     // Revoked on load: a party's worth of object URLs held open is a party's worth of memory.
     img.onload = () => URL.revokeObjectURL(img.src);
@@ -633,7 +983,9 @@
     mark(item.id, 'sending');
 
     const body = new FormData();
-    body.append('file', item.blob, `${item.id}.jpg`);
+    body.append('file', item.blob, `${item.id}${item.ext || '.jpg'}`);
+    // The server refuses a video that arrives without one, so the two travel together or not at all.
+    if (item.poster) body.append('poster', item.poster, `${item.id}_p.jpg`);
 
     try {
       const res = await fetch(cfg.upload, {
@@ -668,7 +1020,9 @@
       }
 
       item.tries = (item.tries || 0) + 1;
-      await put({ id: item.id, blob: item.blob, tries: item.tries });
+      // The whole record, not a rebuilt one: writing back only the file would strip a clip of the
+      // poster it can never be given again, and every retry after that would be refused for it.
+      await put(item);
       mark(item.id, 'retry');
       // Backs off, but never gives up while the tab is open — the photograph is already safe on
       // disk, so the only thing failing is this attempt.
@@ -700,7 +1054,21 @@
     db = await openDb();
     filters();
 
-    shutter.addEventListener('click', shoot);
+    // Pointer events rather than click: a click has already decided the press was a tap, and the
+    // hold is the whole of the video gesture. The synthetic click that follows is swallowed so a
+    // finished recording does not also fire the shutter.
+    shutter.addEventListener('pointerdown', onShutterDown);
+    shutter.addEventListener('pointermove', onShutterMove);
+    shutter.addEventListener('pointerup', onShutterUp);
+    shutter.addEventListener('pointercancel', onShutterUp);
+    shutter.addEventListener('click', (e) => e.preventDefault());
+    // A shutter driven by pointers is one a keyboard cannot press, and this is the only control on
+    // the page that matters. Space and Enter take a photograph; the hold has no keyboard equivalent.
+    shutter.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' && e.key !== 'Enter') return;
+      e.preventDefault();
+      shoot();
+    });
     // On the video itself, so the controls layered over it keep their own taps.
     video.addEventListener('click', focusAt);
     $('flip').addEventListener('click', () => start(facing === 'user' ? 'environment' : 'user'));

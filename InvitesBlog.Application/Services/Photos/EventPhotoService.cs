@@ -22,12 +22,22 @@ public interface IEventPhotoService
     Task<EventPhotoBoxDto> GetAsync(Guid campaignId, Guid? viewerGuestId, CancellationToken ct = default);
 
     /// <summary>
-    /// Adds one photo. <paramref name="guestId"/> is the guest who took it — null when the host adds
-    /// one themselves.
+    /// Adds one photo, or one video. <paramref name="guestId"/> is the guest who took it — null when
+    /// the host adds one themselves.
     /// </summary>
+    /// <param name="poster">
+    /// A still to stand in for a video in the grid, required for a video and ignored for a photo.
+    ///
+    /// <para><b>Why the client sends it.</b> Pulling a frame out of a video server-side means ffmpeg
+    /// in the API image — a large dependency, a process per upload, and a decoder of untrusted media
+    /// running next to the session. The browser that recorded the video already had the frame on
+    /// screen, so it hands one over and the server stays a server. The cost is that a video without
+    /// a poster is refused rather than guessed at, which is the right way round: a grid of black
+    /// rectangles is worse than an upload that failed loudly.</para>
+    /// </param>
     Task<EventPhotoDto> AddAsync(
         Guid campaignId, Guid? guestId, byte[] content, string contentType, string fileName,
-        CancellationToken ct = default);
+        byte[]? poster = null, CancellationToken ct = default);
 
     /// <summary>
     /// Removes a photo. Allowed for the guest who took it (<paramref name="actingGuestId"/>) or for a
@@ -76,6 +86,17 @@ public sealed class EventPhotoService(
     /// </summary>
     private const int ThumbEdge = 400;
 
+    /// <summary>
+    /// The one ceiling in this file, and it is on videos only.
+    ///
+    /// <para>Photographs are deliberately uncapped below — nobody's memory of the night should be
+    /// refused for being large. A video is a different quantity: the upload is buffered into a byte
+    /// array before it reaches here, so an unbounded one is a phone being able to decide how much of
+    /// the API's memory it takes. The camera stops recording well inside this, so the cap is a
+    /// backstop against a caller that is not the camera rather than a limit anyone should meet.</para>
+    /// </summary>
+    private const long MaxVideoBytes = 256L * 1024 * 1024;
+
     public async Task<EventPhotoBoxDto> GetAsync(Guid campaignId, Guid? viewerGuestId, CancellationToken ct = default)
     {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
@@ -96,14 +117,14 @@ public sealed class EventPhotoService(
             live.Count,
             campaign.Status != CampaignStatus.Cancelled,
             live.Select(p => new EventPhotoDto(
-                p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.Width, p.Height, p.UploaderName,
+                p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName,
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
                 p.CreatedAt)).ToList());
     }
 
     public async Task<EventPhotoDto> AddAsync(
         Guid campaignId, Guid? guestId, byte[] content, string contentType, string fileName,
-        CancellationToken ct = default)
+        byte[]? poster = null, CancellationToken ct = default)
     {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
@@ -122,9 +143,20 @@ public sealed class EventPhotoService(
 
         if (content.Length == 0)
             throw new BusinessRuleException("That photo file is empty.", "empty_image");
+
+        var isVideo = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(contentType)
-            || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-            throw new BusinessRuleException("Only photos can be uploaded here.", "not_an_image");
+            || (!isVideo && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)))
+            throw new BusinessRuleException("Only photos and videos can be uploaded here.", "not_media");
+
+        if (isVideo)
+        {
+            if (poster is null || poster.Length == 0)
+                throw new BusinessRuleException(
+                    "That video arrived without a still to show for it.", "video_without_poster");
+            if (content.Length > MaxVideoBytes)
+                throw new BusinessRuleException("That video is too long to upload.", "video_too_large");
+        }
 
         // NO SIZE CAP, deliberately. Size limits belong on the images a TEMPLATE renders, where a
         // huge upload buys nothing a browser can show and costs every guest the download. This is the
@@ -136,18 +168,47 @@ public sealed class EventPhotoService(
         // All three drop EXIF — which matters more here than anywhere else in the product, because
         // these are photographs OF other people's guests and the GPS tag in a camera roll would
         // otherwise publish where someone's wedding was to anyone who saves a picture of it.
-        var original = imageOptimizer.Preserve(content, contentType);
-        var view = imageOptimizer.Optimize(content, contentType, ViewEdge);
-        var thumb = imageOptimizer.Optimize(content, contentType, ThumbEdge);
-
         var ext = Path.GetExtension(fileName);
         if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
 
         var id = Guid.NewGuid();
         var stem = $"campaigns/{campaign.Id:N}/photos/{id:N}";
-        var originalUrl = await storage.PutAsync($"{stem}_o{ext}", original.Content, contentType, ct);
-        var url = await storage.PutAsync($"{stem}{ext}", view.Content, contentType, ct);
-        var thumbUrl = await storage.PutAsync($"{stem}_t{ext}", thumb.Content, contentType, ct);
+
+        string originalUrl, url, thumbUrl;
+        long sizeBytes;
+        int width, height;
+
+        if (isVideo)
+        {
+            // ONE object, pointed at twice. There is no smaller viewing copy to make without
+            // transcoding, and storing the same file under two keys would double what a party's
+            // videos cost for nothing. The tile is the only derived thing a video has.
+            var still = imageOptimizer.Preserve(poster!, PosterType);
+            var tile = imageOptimizer.Optimize(poster!, PosterType, ThumbEdge);
+
+            url = originalUrl = await storage.PutAsync($"{stem}{ext}", content, contentType, ct);
+            thumbUrl = await storage.PutAsync($"{stem}_t.jpg", tile.Content, PosterType, ct);
+
+            sizeBytes = content.Length + tile.Content.Length;
+            // The frame's size IS the video's — it was drawn from it — so this stays the dimensions
+            // of the thing itself rather than of the tile standing in for it.
+            width = still.Width;
+            height = still.Height;
+        }
+        else
+        {
+            var original = imageOptimizer.Preserve(content, contentType);
+            var view = imageOptimizer.Optimize(content, contentType, ViewEdge);
+            var thumb = imageOptimizer.Optimize(content, contentType, ThumbEdge);
+
+            originalUrl = await storage.PutAsync($"{stem}_o{ext}", original.Content, contentType, ct);
+            url = await storage.PutAsync($"{stem}{ext}", view.Content, contentType, ct);
+            thumbUrl = await storage.PutAsync($"{stem}_t{ext}", thumb.Content, contentType, ct);
+
+            sizeBytes = original.Content.Length + view.Content.Length + thumb.Content.Length;
+            width = original.Width;
+            height = original.Height;
+        }
 
         var photo = new EventPhoto
         {
@@ -159,10 +220,10 @@ public sealed class EventPhotoService(
             Url = url,
             ThumbUrl = thumbUrl,
             ContentType = contentType,
-            SizeBytes = original.Content.Length + view.Content.Length + thumb.Content.Length,
+            SizeBytes = sizeBytes,
             // The shot's own dimensions, not the viewing copy's — this is what the photo IS.
-            Width = original.Width,
-            Height = original.Height,
+            Width = width,
+            Height = height,
             CreatedAt = DateTimeOffset.UtcNow
         };
 
@@ -170,8 +231,8 @@ public sealed class EventPhotoService(
         await uow.SaveChangesAsync(ct);
 
         return new EventPhotoDto(
-            photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.Width, photo.Height,
-            photo.UploaderName, true, photo.CreatedAt);
+            photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,
+            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt);
     }
 
     public async Task DeleteAsync(
@@ -324,6 +385,9 @@ public sealed class EventPhotoService(
         return string.IsNullOrWhiteSpace(guest?.Name) ? null : guest.Name;
     }
 
+    /// <summary>What a poster frame is, whatever the video around it turned out to be.</summary>
+    private const string PosterType = "image/jpeg";
+
     private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
     {
         "image/jpeg" => ".jpg",
@@ -332,6 +396,9 @@ public sealed class EventPhotoService(
         "image/webp" => ".webp",
         "image/avif" => ".avif",
         "image/heic" => ".heic",
-        _ => ".img"
+        "video/mp4" => ".mp4",
+        "video/quicktime" => ".mov",
+        "video/webm" => ".webm",
+        _ => contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? ".mp4" : ".img"
     };
 }

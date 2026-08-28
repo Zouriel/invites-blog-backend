@@ -154,7 +154,7 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, ct);
             added.Add(await photos.AddAsync(
-                campaignId, guestId, buffer.ToArray(), upload.ContentType, upload.FileName, ct));
+                campaignId, guestId, buffer.ToArray(), upload.ContentType, upload.FileName, ct: ct));
         }
 
         return Created(added);

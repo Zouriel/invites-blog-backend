@@ -82,6 +82,13 @@ public static class GuestPages
         .tile { position:relative; display:block; aspect-ratio:1; background:var(--card);
                 border-radius:4px; overflow:hidden; }
         .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+        /* A clip is a poster frame until it is opened, and a poster frame is indistinguishable from
+           a photograph without this. The triangle is the only thing on the tile that says otherwise. */
+        .tile[data-kind="video"]::after { content:""; position:absolute; left:50%; top:50%;
+            width:44px; height:44px; margin:-22px 0 0 -22px; border-radius:999px; pointer-events:none;
+            background:rgba(0,0,0,.45) no-repeat center;
+            background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
+            background-size:22px 22px; }
         .who { position:absolute; left:0; right:0; bottom:0; padding:14px 6px 4px; font-size:.7rem;
                color:#fff; background:linear-gradient(transparent, rgba(0,0,0,.6));
                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -221,7 +228,8 @@ public static class GuestPages
     /// </param>
     public static string Photos(
         string action, string backTo, string eventTitle,
-        IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who, bool CanDelete)> photos,
+        IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who,
+            bool CanDelete, bool IsVideo)> photos,
         bool canUpload, string? error, string cameraPath, GuestPalette? palette = null,
         string? nonce = null)
     {
@@ -233,7 +241,7 @@ public static class GuestPages
             : $"""
                <div class="grid">
                  {string.Concat(photos.Select(p => $"""
-                   <div class="tile">
+                   <div class="tile"{(p.IsVideo ? " data-kind=\"video\"" : "")}>
                      <a href="{E(p.Url)}"><img src="{E(p.ThumbUrl)}" alt="" loading="lazy"></a>
                      <a class="dl" href="{E(p.OriginalUrl)}" download title="Save the original">&#8615;</a>
                      {(p.Who is null ? "" : $"<span class=\"who\">{E(p.Who)}</span>")}

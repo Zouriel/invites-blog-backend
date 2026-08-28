@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using InvitesBlog.Api.Rendering;
 using Xunit;
 
@@ -47,9 +48,9 @@ public class GuestPagesPhotoBarTests
     [Fact]
     public void Removing_a_photo_asks_first()
     {
-        var photos = new List<(Guid, string, string, string, string?, bool)>
+        var photos = new List<(Guid, string, string, string, string?, bool, bool)>
         {
-            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true),
+            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true, false),
         };
         var html = GuestPages.Photos(
             "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
@@ -90,9 +91,9 @@ public class GuestPagesPhotoBarTests
     [Fact]
     public void Without_script_the_remove_link_still_leads_to_a_confirmation()
     {
-        var photos = new List<(Guid, string, string, string, string?, bool)>
+        var photos = new List<(Guid, string, string, string, string?, bool, bool)>
         {
-            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true),
+            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true, false),
         };
         var html = GuestPages.Photos(
             "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
@@ -110,5 +111,28 @@ public class GuestPagesPhotoBarTests
 
         Assert.DoesNotContain("/r/abc/camera", html);
         Assert.DoesNotContain("type=\"file\"", html);
+    }
+
+    /// <summary>
+    /// A clip's tile is a still, so without a marker it is indistinguishable from a photograph until
+    /// someone opens it and gets a video.
+    /// </summary>
+    [Fact]
+    public void A_clip_is_marked_in_the_grid_and_a_photograph_is_not()
+    {
+        var photos = new List<(Guid, string, string, string, string?, bool, bool)>
+        {
+            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true, true),
+            (Guid.Parse("22222222-2222-2222-2222-222222222222"), "t2", "u2", "o2", "Ali", true, false),
+        };
+
+        var html = GuestPages.Photos(
+            "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
+            GuestPalette.Fallback);
+
+        // The tile itself, not the CSS rule that styles it — both carry the same attribute text.
+        Assert.Equal(1, Regex.Matches(html, "<div class=\"tile\" data-kind=\"video\">").Count);
+        Assert.Contains("<div class=\"tile\">", html);
+        Assert.Contains(".tile[data-kind=\"video\"]::after", html);
     }
 }
