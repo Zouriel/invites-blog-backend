@@ -6,3 +6,7 @@ artifacts/
 wwwroot/assets/
 appsettings.*.local.json
 .env
+
+# The camera gesture harness pulls jsdom in on demand; it is not part of the .NET build.
+tools/camera-gesture/node_modules/
+tools/camera-gesture/package-lock.json

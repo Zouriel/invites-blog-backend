@@ -1,0 +1,8 @@
+{
+  "name": "camera-gesture-test",
+  "private": true,
+  "type": "module",
+  "description": "Drives the event camera's shutter gesture in jsdom. See gesture.test.mjs.",
+  "scripts": { "test": "node gesture.test.mjs" },
+  "devDependencies": { "jsdom": "^28.0.0" }
+}

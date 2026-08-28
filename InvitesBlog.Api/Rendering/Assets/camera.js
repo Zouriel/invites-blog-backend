@@ -88,6 +88,16 @@
   let locked = false;
 
   /**
+   * Set the moment the lock engages and cleared by the release that follows it.
+   *
+   * <p>Locking and stopping are both "the finger came off the shutter", and without this they are
+   * the same event: the lift that completes the locking gesture would immediately stop the clip it
+   * had just locked, and the whole feature would do nothing. One release is spent here; the next
+   * press is the stop.</p>
+   */
+  let lockedByThisPress = false;
+
+  /**
    * The microphone, or false once it is known there will not be one.
    *
    * <p>Asked for in the background as soon as the camera is live, NOT at the moment someone starts
@@ -706,6 +716,7 @@
   function engageLock() {
     if (!recordingNow() || locked) return;
     locked = true;
+    lockedByThisPress = true;
     document.body.dataset.rec = 'locked';
     $('lock').classList.remove('near');
     if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
@@ -732,6 +743,7 @@
     clearInterval(recTick);
     recTick = 0;
     locked = false;
+    lockedByThisPress = false;
     document.body.dataset.rec = '';
     $('lock').classList.remove('near');
     $('lock').style.removeProperty('--reach');
@@ -831,7 +843,13 @@
       shutter.releasePointerCapture(e.pointerId);
     } catch { /* it may never have been captured */ }
 
-    // Locked: the finger left long ago, and this press is the stop button.
+    // The release that completed the lock. It is spent doing exactly that — the recording carries
+    // on without a finger on it, which is the entire point of locking.
+    if (lockedByThisPress) {
+      lockedByThisPress = false;
+      return;
+    }
+    // Locked, and the finger left long ago: this press is the stop button.
     if (locked) {
       stopRecording();
       return;
