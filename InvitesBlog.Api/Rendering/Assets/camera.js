@@ -755,7 +755,16 @@
 
     document.body.dataset.rec = '1';
     if (navigator.vibrate) navigator.vibrate(18);
-    tickClock();
+
+    // Past this point the shutter is red, so anything that throws has to be caught here: this runs
+    // from a setTimeout inside an async function, where an escaping error becomes an unhandled
+    // rejection nobody sees and the red stays until the page is reloaded.
+    try {
+      tickClock();
+    } catch (err) {
+      blame(err);
+      finishRecording();
+    }
   }
 
   function engageLock() {
@@ -790,17 +799,28 @@
     }
   }
 
-  /** Everything the recording put on screen, taken back off it. */
+  /**
+   * Everything the recording put on screen, taken back off it.
+   *
+   * <p>Ordered by consequence, and each cosmetic step guarded on its own. The first four lines are
+   * what decides whether the shutter is usable again; the rest is tidying. Written as one run of
+   * statements, a single failing DOM write — the clock, say — throws partway through and abandons
+   * the ones after it, which is how a recovery path ends up leaving behind the exact state it was
+   * called to clear.</p>
+   */
   function endRecordingUi() {
     clearInterval(recTick);
     recTick = 0;
     locked = false;
     lockedByThisPress = false;
-    document.body.dataset.rec = '';
-    $('lock').classList.remove('near');
-    $('lock').style.removeProperty('--reach');
-    $('rectime').textContent = '0:00';
-    video.style.filter = filterBeforeRecording;
+    // This one line is the difference between a shutter that works and one that is stuck red, so it
+    // comes before anything that could fail and is guarded even so.
+    try { document.body.dataset.rec = ''; } catch { /* nothing else can be done about it */ }
+
+    try { $('lock').classList.remove('near'); } catch { /* cosmetic */ }
+    try { $('lock').style.removeProperty('--reach'); } catch { /* cosmetic */ }
+    try { $('rectime').textContent = '0:00'; } catch { /* cosmetic */ }
+    try { video.style.filter = filterBeforeRecording; } catch { /* cosmetic */ }
   }
 
   async function finishRecording() {
@@ -827,22 +847,65 @@
 
   function tickClock() {
     const show = () => {
-      // The clock is the watchdog too. If the recorder has died without saying so, this is what
-      // notices — within a quarter second, rather than leaving a red shutter that records nothing
-      // until somebody reloads the page.
-      if (!recordingNow()) {
+      try {
+        // The clock is the watchdog too. If the recorder has died without saying so, this is what
+        // notices — within a quarter second, rather than leaving a red shutter that records
+        // nothing until somebody reloads the page.
+        if (!recordingNow()) {
+          finishRecording();
+          return;
+        }
+        const ms = Date.now() - recFrom;
+        const secs = Math.floor(ms / 1000);
+        $('rectime').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+        if (ms >= MAX_MS) stopRecording();
+      } catch (err) {
+        // Nothing in here is worth a shutter that stays red. A clock that cannot draw itself is a
+        // cosmetic problem; a recording nobody can stop is not.
+        blame(err);
         finishRecording();
-        return;
       }
-      const ms = Date.now() - recFrom;
-      const secs = Math.floor(ms / 1000);
-      $('rectime').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      if (ms >= MAX_MS) stopRecording();
     };
-    show();
+
+    // The interval FIRST, deliberately. Built the other way round — one call, then the interval — a
+    // throw in that first call means the interval is never created at all: the chrome says
+    // recording, the clock is frozen at the 0:00 it was born with, and nothing is left running that
+    // could ever notice or undo it. That is precisely the state this is here to make impossible.
     clearInterval(recTick);
     recTick = setInterval(show, 250);
+    show();
   }
+
+  /**
+   * Puts the reason on screen.
+   *
+   * <p>This runs on other people's phones at a party. There is no console anyone is going to open,
+   * so a failure that says nothing is a failure nobody can report and nobody can fix — the shutter
+   * simply "goes weird". A few seconds of plain text in the chip is the difference between a bug
+   * report and a shrug.</p>
+   */
+  function blame(err) {
+    // Wrapped whole, because the thing this reports on is often the very thing it needs in order to
+    // report: if the clock is what broke, writing the reason INTO the clock throws again — out of
+    // the catch block that called it, past the tidy-up, and the shutter stays red after all. An
+    // error path that can fail is not an error path.
+    try {
+      const why = (err && (err.message || err.name)) || 'unknown';
+      const chip = $('rectime');
+      if (!chip) return;
+      document.body.dataset.failed = '1';
+      chip.textContent = String(why).slice(0, 60);
+      clearTimeout(blameTimer);
+      blameTimer = setTimeout(() => {
+        try {
+          document.body.dataset.failed = '';
+          chip.textContent = '0:00';
+        } catch { /* nothing left to say */ }
+      }, 6000);
+    } catch { /* the reason is lost; the recovery below is what actually matters */ }
+  }
+
+  let blameTimer = 0;
 
   /**
    * The shutter's gesture, all four events of it.
@@ -871,7 +934,14 @@
     } catch { /* older engines manage without it */ }
 
     clearTimeout(holdTimer);
-    holdTimer = setTimeout(startRecording, HOLD_MS);
+    holdTimer = setTimeout(() => {
+      // startRecording is async, so its failures are rejections rather than throws — and a rejection
+      // raised from a timer is one nobody is listening for.
+      startRecording().catch((err) => {
+        blame(err);
+        finishRecording();
+      });
+    }, HOLD_MS);
   }
 
   function onShutterMove(e) {

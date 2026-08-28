@@ -221,5 +221,42 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   fault = null;
 }
 
+// 10. The reported shape exactly: locked, red, and a clock frozen at the 0:00 it was born with.
+//     Whatever throws on a real phone, it must not be able to strand the shutter.
+{
+  const t = await ready(boot());
+  const shoot = t.doc.getElementById('shoot');
+  const lock = t.doc.getElementById('lock');
+  lock.getBoundingClientRect = () => ({ left: 90, top: 290, width: 20, height: 20, right: 110, bottom: 310 });
+
+  // The clock cannot draw itself — the one failure that used to happen BEFORE the interval existed,
+  // so nothing was left running that could ever notice.
+  const clock = t.doc.getElementById('rectime');
+  Object.defineProperty(clock, 'textContent', { set() { throw new Error('no clock'); }, get: () => '0:00' });
+
+  press(shoot, 'pointerdown'); await wait(450);
+  press(shoot, 'pointermove', 1, 100, 300);
+  press(shoot, 'pointerup', 1, 100, 300);
+  await wait(500);
+
+  check('a clock that cannot draw does not stand the shutter red', t.doc.body.dataset.rec || '', '');
+
+  // And the shutter still works afterwards rather than being wedged.
+  press(shoot, 'pointerdown'); await wait(40); press(shoot, 'pointerup'); await wait(60);
+  check('the shutter still works after that', t.doc.body.dataset.rec || '', '');
+}
+
+// 11. A clock that ticks. Frozen at 0:00 was the symptom; this is the thing it was a symptom of.
+{
+  const t = await ready(boot());
+  const shoot = t.doc.getElementById('shoot');
+  press(shoot, 'pointerdown'); await wait(450);
+  const started = t.doc.getElementById('rectime').textContent;
+  await wait(1200);
+  const later = t.doc.getElementById('rectime').textContent;
+  check('the clock actually advances', [started, later], ['0:00', '0:01']);
+  press(shoot, 'pointerup'); await wait(60);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nall good');
 process.exit(failures ? 1 : 0);

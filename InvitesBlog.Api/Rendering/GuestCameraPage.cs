@@ -162,6 +162,10 @@ public static class GuestCameraPage
                     background:rgba(0,0,0,.55); font-size:.85rem; font-variant-numeric:tabular-nums;
                     -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
         .rec i { width:9px; height:9px; border-radius:999px; background:#ff4d4d; animation:blink 1s infinite; }
+        /* A recording that failed says why, in the same place the clock was — see blame() in
+           camera.js. Nobody at a party is going to open a console. */
+        body[data-failed="1"] .rec span { background:#7a1414; }
+        body[data-failed="1"] .rec i { animation:none; background:#ffd0d0; }
         @keyframes blink { 50% { opacity:.25; } }
 
         /* The lock. Sits directly above the shutter — up is where the thumb can reach without
