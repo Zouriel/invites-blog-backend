@@ -338,6 +338,8 @@
     // running quietly, and the permission is remembered — so coming back costs nothing but the ask.
     if (mic) mic.stop();
     mic = null;
+    // The next recording gets new tracks, so what did or did not work with the old ones says nothing.
+    plan = 0;
     stream = null;
     track = null;
     torchOn = false;
@@ -655,6 +657,49 @@
     return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
   }
 
+  /**
+   * Builds a recorder and starts it, or returns null.
+   *
+   * <p>Both halves matter. A MediaRecorder can refuse at construction, refuse at start, or — the
+   * case that actually bit — accept both and then fail, which leaves it inactive with no error
+   * anyone asked to hear. So the state is checked after starting rather than assumed from the
+   * absence of a throw.</p>
+   */
+  function begin(tracks, type) {
+    let made;
+    try {
+      made = new MediaRecorder(new MediaStream(tracks), type ? { mimeType: type } : undefined);
+    } catch {
+      return null;
+    }
+
+    made.ondataavailable = (e) => {
+      if (e.data && e.data.size) chunks.push(e.data);
+    };
+    made.onstop = finishRecording;
+    // A recorder that fails mid-clip fires this and goes inactive WITHOUT firing onstop on every
+    // browser. Unhandled, that is a shutter stuck red forever: the chrome says recording, nothing
+    // is, and every press falls through to taking a photograph instead. Salvage and tidy up.
+    made.onerror = () => {
+      if (recorder === made) finishRecording();
+    };
+
+    try {
+      made.start(1000);
+    } catch {
+      return null;
+    }
+    // Claimed support is not the same as working support — some phones advertise an mp4 encoder
+    // they cannot actually run, and this is where that shows up.
+    return made.state === 'recording' ? made : null;
+  }
+
+  /**
+   * What worked last time, so a phone that cannot do the first combination does not retry it on
+   * every clip. Reset whenever the camera restarts, since the tracks are new.
+   */
+  let plan = 0;
+
   async function startRecording() {
     if (!track || recordingNow() || document.body.dataset.state !== 'live') return;
 
@@ -672,30 +717,30 @@
       return;
     }
 
-    const tracks = [track];
-    if (mic && mic.readyState === 'live') tracks.push(mic);
-
-    try {
-      recorder = new MediaRecorder(new MediaStream(tracks), type ? { mimeType: type } : undefined);
-    } catch {
-      recorder = null;
-      recPoster = null;
-      return;
-    }
+    const sound = mic && mic.readyState === 'live' ? [track, mic] : [track];
+    // Least compromise first. Sound is given up before the clip is, and the container we chose is
+    // given up before the browser's own — a webm nobody at the party can open still beats nothing,
+    // and by then it is the only thing left that works.
+    const attempts = [
+      [sound, type],
+      [sound, ''],
+      [[track], type],
+      [[track], ''],
+    ];
 
     chunks = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size) chunks.push(e.data);
-    };
-    recorder.onstop = finishRecording;
+    for (let i = plan; i < attempts.length; i++) {
+      recorder = begin(attempts[i][0], attempts[i][1]);
+      if (recorder) {
+        plan = i;   // start here next time rather than failing the same way again
+        break;
+      }
+    }
 
-    try {
-      // A timeslice rather than one blob at the end: the clip is flushed as it goes, so a tab the
-      // phone kills mid-recording loses the last second instead of the whole thing.
-      recorder.start(1000);
-    } catch {
-      recorder = null;
+    if (!recorder) {
+      // Nothing on this device will record. Leave no chrome behind saying otherwise.
       recPoster = null;
+      chunks = [];
       return;
     }
 
@@ -723,6 +768,13 @@
   }
 
   function stopRecording() {
+    // The watchdog in tickClock goes off the moment the recorder stops being 'recording', which a
+    // deliberate stop does immediately — before the final chunk and onstop have been delivered. Left
+    // running it would race the stop and file a truncated clip. This is a stop, so it does the
+    // tidying; the clock has nothing left to watch.
+    clearInterval(recTick);
+    recTick = 0;
+
     if (!recordingNow()) {
       // Nothing to stop, but the UI may still be showing a recording that failed to start cleanly.
       if (document.body.dataset.rec) endRecordingUi();
@@ -775,6 +827,13 @@
 
   function tickClock() {
     const show = () => {
+      // The clock is the watchdog too. If the recorder has died without saying so, this is what
+      // notices — within a quarter second, rather than leaving a red shutter that records nothing
+      // until somebody reloads the page.
+      if (!recordingNow()) {
+        finishRecording();
+        return;
+      }
       const ms = Date.now() - recFrom;
       const secs = Math.floor(ms / 1000);
       $('rectime').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
@@ -842,6 +901,14 @@
     try {
       shutter.releasePointerCapture(e.pointerId);
     } catch { /* it may never have been captured */ }
+
+    // The chrome says recording and nothing is. That is a recorder that died quietly, and this
+    // press is someone trying to make it stop — so make it stop, rather than taking a photograph
+    // they did not ask for and leaving the shutter red.
+    if (document.body.dataset.rec && !recordingNow()) {
+      finishRecording();
+      return;
+    }
 
     // The release that completed the lock. It is spent doing exactly that — the recording carries
     // on without a finger on it, which is the entire point of locking.

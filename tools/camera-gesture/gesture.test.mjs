@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs';
 const SRC = new URL('../../InvitesBlog.Api/Rendering/Assets/camera.js', import.meta.url);
 const ids = ['cam','queue','shoot','lock','rectime','reticle','flashfx','pending','filters','torch','night','flip','zoom','why'];
 
+let fault = null;
+
 function boot() {
   const dom = new JSDOM(
     `<!doctype html><body>${ids.map((id) =>
@@ -31,16 +33,37 @@ function boot() {
       ? { getAudioTracks: () => [audio], getTracks: () => [audio] }
       : { getVideoTracks: () => [track], getAudioTracks: () => [], getTracks: () => [track] },
   };
+  /*
+   * `fault` reproduces what a real MediaRecorder does on a phone that claims more than it can do:
+   *   'dies'      - starts, then fails mid-clip and goes inactive WITHOUT firing onstop
+   *   'liesAtStart' - start() throws nothing but leaves the state inactive
+   *   'needsVideoOnly' - refuses any stream carrying an audio track
+   */
+  const made = [];
   class FakeRecorder {
     static isTypeSupported() { return true; }
-    constructor() { this.state = 'inactive'; this.mimeType = 'video/mp4'; }
-    start() { this.state = 'recording'; log.push('rec:start'); }
+    constructor(stream, opts) {
+      this.state = 'inactive';
+      this.mimeType = (opts && opts.mimeType) || 'video/mp4';
+      this.tracks = (stream && stream.t) || [];
+      made.push(this);
+      if (fault === 'needsVideoOnly' && this.tracks.some((t) => t.kind === 'audio')) {
+        throw new Error('cannot record audio here');
+      }
+    }
+    start() {
+      if (fault === 'liesAtStart') { log.push('rec:start-failed'); return; }
+      this.state = 'recording';
+      log.push('rec:start');
+    }
     stop() {
       this.state = 'inactive';
       log.push('rec:stop');
       this.ondataavailable?.({ data: { size: 999999 } });
       this.onstop?.();
     }
+    /** Fails the way that leaves a shutter stuck red: inactive, and onstop never fires. */
+    die() { this.state = 'inactive'; log.push('rec:died'); this.onerror?.(new Error('encoder gone')); }
   }
   w.MediaRecorder = FakeRecorder;
   w.MediaStream = class { constructor(t) { this.t = t; } };
@@ -55,7 +78,7 @@ function boot() {
   w.fetch = async () => ({ ok: true });
 
   w.eval(readFileSync(SRC, 'utf8'));
-  return { w, doc: w.document, log };
+  return { w, doc: w.document, log, made };
 }
 
 const press = (el, type, id = 1, x = 100, y = 400) => {
@@ -139,6 +162,63 @@ const ready = async (t) => { await wait(60); t.doc.body.dataset.state = 'live'; 
   t.doc.dispatchEvent(new t.w.Event('visibilitychange'));
   await wait(60);
   check('hiding the page closes the clip off rather than dropping it', t.log, ['rec:start', 'rec:stop']);
+}
+
+// 6. THE REPORTED BUG. The recorder starts, then dies without firing onstop.
+{
+  const t = await ready(boot());
+  const shoot = t.doc.getElementById('shoot');
+  press(shoot, 'pointerdown'); await wait(450);
+  check('recording', t.doc.body.dataset.rec, '1');
+
+  t.made[t.made.length - 1].die();
+  await wait(400);                                   // the clock is the watchdog
+
+  check('a dead recorder does not leave the shutter red', t.doc.body.dataset.rec || '', '');
+  press(shoot, 'pointerup'); await wait(60);
+}
+
+// 7. And a press while it is stuck must clear it, not quietly take a photograph.
+{
+  const t = await ready(boot());
+  const shoot = t.doc.getElementById('shoot');
+  press(shoot, 'pointerdown'); await wait(450);
+
+  const rec = t.made[t.made.length - 1];
+  rec.state = 'inactive';                            // died with no error and no onstop at all
+  t.w.clearInterval = () => {};                      // and the watchdog never got to run
+
+  press(shoot, 'pointerup'); await wait(60);
+  check('a press on a stuck shutter clears it', t.doc.body.dataset.rec || '', '');
+  check('and takes no photograph', t.log.filter((l) => l === 'shot'), []);
+}
+
+// 8. A phone that refuses audio still records, silently, rather than not at all.
+{
+  fault = 'needsVideoOnly';
+  const t = await ready(boot());
+  await wait(80);                                    // let the microphone be picked up
+  const shoot = t.doc.getElementById('shoot');
+  press(shoot, 'pointerdown'); await wait(450);
+
+  check('it falls back to video alone', t.log.includes('rec:start'), true);
+  check('and says it is recording', t.doc.body.dataset.rec, '1');
+  check('with no audio track on the recorder',
+    t.made[t.made.length - 1].tracks.some((x) => x.kind === 'audio'), false);
+  press(shoot, 'pointerup'); await wait(60);
+  fault = null;
+}
+
+// 9. A start that silently does not start leaves nothing behind.
+{
+  fault = 'liesAtStart';
+  const t = await ready(boot());
+  const shoot = t.doc.getElementById('shoot');
+  press(shoot, 'pointerdown'); await wait(500);
+
+  check('a start that never started shows no recording', t.doc.body.dataset.rec || '', '');
+  press(shoot, 'pointerup'); await wait(60);
+  fault = null;
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall good');
