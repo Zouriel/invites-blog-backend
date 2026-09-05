@@ -515,6 +515,27 @@ public sealed class MediaBucketService(
             MediaBucketPlans.Free(Options));
 
         await buckets.AddAsync(bucket, ct);
+
+        // ADOPT what the campaign already had. Photographs that predate buckets carry no bucket id,
+        // and a bucket that ignored them would under-report its own contents forever: the dashboard
+        // would show a box of eleven while the bucket page showed none, and the quota would be
+        // measured against a fraction of what is actually stored.
+        //
+        // Their bytes count. Every byte here is being stored on somebody's behalf whether it arrived
+        // before or after the row existed, and a usage figure that quietly omits most of a bucket is
+        // worse than no figure. Soft-deleted rows are counted too, for the same reason UsedBytes does
+        // not go down on a delete — the objects behind them outlive the row.
+        var inherited = await photos.Query(tracking: true)
+            .Where(p => p.CampaignId == campaignId && p.BucketId == null)
+            .ToListAsync(ct);
+
+        foreach (var photo in inherited)
+        {
+            photo.BucketId = bucket.Id;
+            photos.Update(photo);
+        }
+        bucket.UsedBytes = inherited.Sum(p => p.SizeBytes);
+
         await uow.SaveChangesAsync(ct);
         return bucket;
     }

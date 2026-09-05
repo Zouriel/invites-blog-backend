@@ -182,6 +182,37 @@ public class MediaBucketServiceTests
         await Assert.ThrowsAsync<ForbiddenException>(() => Sut().GetAsync(bucket.Id));
     }
 
+    /// <summary>
+    /// A campaign's box predates buckets, so its photographs carry no bucket id. The bucket
+    /// provisioned for it has to take them on, or it under-reports its own contents forever — the
+    /// dashboard showing a box of eleven while the bucket page shows none, and a quota measured
+    /// against a fraction of what is really stored.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_a_campaigns_bucket_adopts_the_photos_it_already_had()
+    {
+        var campaignId = Guid.NewGuid();
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "The wedding", EventStartAt = DateTimeOffset.UtcNow });
+        _buckets.FirstOrDefaultAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns((MediaBucket?)null);
+
+        EventPhoto[] already =
+        [
+            new() { Id = Guid.NewGuid(), CampaignId = campaignId, SizeBytes = 400 },
+            // Soft-deleted still counts: the stored objects outlive the row, which is the same reason
+            // UsedBytes never goes down on a delete.
+            new() { Id = Guid.NewGuid(), CampaignId = campaignId, SizeBytes = 600, DeletedAt = DateTimeOffset.UtcNow },
+        ];
+        _photos.Query(Arg.Any<bool>()).Returns(already.AsAsyncQueryable());
+
+        var bucket = await Sut().ForCampaignAsync(campaignId);
+
+        Assert.All(already, p => Assert.Equal(bucket.Id, p.BucketId));
+        Assert.Equal(1000, bucket.UsedBytes);
+    }
+
     // ---------- who may look ----------
 
     /// <summary>
