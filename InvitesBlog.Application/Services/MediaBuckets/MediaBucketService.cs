@@ -89,6 +89,16 @@ public interface IMediaBucketService
     Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
     /// <summary>
+    /// An event's bucket as its host sees it, provisioning one if the event predates buckets.
+    ///
+    /// <para>Separate from <see cref="ForCampaignAsync"/> because that one authorizes nothing — it is
+    /// called from inside the photo service, after that service's own door. This is the door: an
+    /// event's bucket is reachable from its dashboard, so ownership is checked before anything is
+    /// created or returned.</para>
+    /// </summary>
+    Task<MediaBucketDto> ForCampaignOwnerAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
     /// Refuses an upload that would not fit, and is the ONLY place that decides that.
     /// </summary>
     /// <param name="incomingBytes">Everything the upload will write, derivatives included.</param>
@@ -538,6 +548,16 @@ public sealed class MediaBucketService(
 
         await uow.SaveChangesAsync(ct);
         return bucket;
+    }
+
+    public async Task<MediaBucketDto> ForCampaignOwnerAsync(
+        Guid campaignId, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var bucket = await ForCampaignAsync(campaignId, ct);
+        return (await DescribeAsync([bucket], ct))[0];
     }
 
     public async Task EnsureRoomAsync(Guid bucketId, long incomingBytes, CancellationToken ct = default)

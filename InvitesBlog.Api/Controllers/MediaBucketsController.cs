@@ -42,6 +42,19 @@ public sealed class MediaBucketsController(
     /// One bucket. The VIEW door — a member the owner let in gets the bucket itself, because the
     /// alternative is a page that can list photographs but not say whose night they are.
     /// </summary>
+    /// <summary>
+    /// The bucket belonging to an event, created on the spot if that event predates buckets.
+    ///
+    /// <para>This is how a host reaches their own event's bucket at all. The Events list shows only
+    /// standalone buckets — an event already has a tile there, and listing its bucket beside it made
+    /// one evening look like two — so without this route a campaign's size, contribution codes and
+    /// guest list would have been reachable from nowhere.</para>
+    /// </summary>
+    [HttpGet("/api/campaigns/{campaignId:guid}/bucket")]
+    [HasPermission(Permissions.Buckets.Read)]
+    public async Task<IActionResult> ForCampaign(Guid campaignId, CancellationToken ct) =>
+        Success(await buckets.ForCampaignOwnerAsync(campaignId, ct));
+
     [HttpGet("{bucketId:guid}")]
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Get(Guid bucketId, CancellationToken ct) =>
