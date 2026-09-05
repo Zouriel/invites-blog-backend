@@ -599,10 +599,10 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
   exactly one account and everybody who filled one was locked out of what they had filled, while the
   landing page promised "for everyone who was there". A campaign-linked bucket had never shown this
   because it inherits the campaign's guest list.
-- **The list is curated by the owner, and contributing does not join it.** Adding and looking are
-  different rights, and the person who decides who looks at photographs of an occasion is the person
-  whose occasion it was. Membership is matched on an identifier the account has PROVED, never one it
-  typed.
+- **The campaign is the unit, and its guest list is who may look.** A campaign owns a guest list and
+  may have an invitation, a bucket, or both; that one list serves both. A separate viewer list existed
+  briefly and was removed — two lists answering one question is how somebody adds a person to one and
+  wonders why nothing changed. Matched on an identifier the account has PROVED, never one it typed.
 - **The two code kinds now differ in more than credit.** An anonymous code takes a name and believes
   it. A verified code admits only contacts already on the list, checked *before* the send (the same
   shape as the campaign link's guest-list gate, so an address that could never get in is not mailed a

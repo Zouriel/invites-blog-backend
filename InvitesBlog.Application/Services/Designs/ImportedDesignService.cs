@@ -105,7 +105,15 @@ public sealed class ImportedDesignService(
         var created = await campaignService.CreateAsync(
             new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
 
-        var design = await ImportAsync(created.CampaignId, content, fileName, ct);
+        // Straight to the core, NOT through ImportAsync. That checks ownership, and an anonymous
+        // visitor owns nothing yet: the possession token making this campaign theirs is minted by the
+        // call above and handed back in this very response, so it is not on the request being served.
+        // Checking here would refuse everybody who is not already signed in — which is most of the
+        // people this page exists for, since it is deliberately unguarded.
+        var campaign = await campaigns.GetByIdAsync(created.CampaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+
+        var design = await ImportCoreAsync(campaign, content, fileName, ct);
         return (created, design);
     }
 
@@ -118,6 +126,16 @@ public sealed class ImportedDesignService(
         if (!await ownership.OwnsAsync(campaignId, ct))
             throw new ForbiddenException("That event isn't yours.");
 
+        return await ImportCoreAsync(campaign, content, fileName, ct);
+    }
+
+    /// <summary>
+    /// The import itself, with no door on it. Both callers have already established that this is
+    /// their campaign — one by checking, the other by having just created it.
+    /// </summary>
+    private async Task<ImportedDesignResult> ImportCoreAsync(
+        Campaign campaign, byte[] content, string fileName, CancellationToken ct)
+    {
         if (content.Length == 0)
             throw new BusinessRuleException("That file is empty.", "design_empty");
 

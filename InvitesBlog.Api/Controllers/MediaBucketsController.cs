@@ -55,6 +55,15 @@ public sealed class MediaBucketsController(
     public async Task<IActionResult> ForCampaign(Guid campaignId, CancellationToken ct) =>
         Success(await buckets.ForCampaignOwnerAsync(campaignId, ct));
 
+    /// <summary>
+    /// Gives this event a bucket. Reading the dashboard deliberately does not — see
+    /// <see cref="IMediaBucketService.ForCampaignOwnerAsync"/> — so this is the host saying yes.
+    /// </summary>
+    [HttpPost("/api/campaigns/{campaignId:guid}/bucket")]
+    [HasPermission(Permissions.Buckets.Manage)]
+    public async Task<IActionResult> CreateForCampaign(Guid campaignId, CancellationToken ct) =>
+        Created(await buckets.CreateForCampaignAsync(campaignId, ct));
+
     [HttpGet("{bucketId:guid}")]
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Get(Guid bucketId, CancellationToken ct) =>
@@ -136,38 +145,6 @@ public sealed class MediaBucketsController(
     {
         await photos.DeleteFromBucketAsync(bucketId, photoId, ct);
         return SuccessMessage("Removed.");
-    }
-
-    // ---------- who may look ----------
-
-    /// <summary>
-    /// The bucket's list. Owner only — it is a list of other people's contact details.
-    ///
-    /// <para>A bucket attached to a campaign already has a list, its guest list, and does not need
-    /// this one. A standalone bucket has nothing else: without it exactly one account could ever see
-    /// what a whole room filled.</para>
-    /// </summary>
-    [HttpGet("{bucketId:guid}/members")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> Members(Guid bucketId, CancellationToken ct) =>
-        Success(await buckets.MembersAsync(bucketId, ct));
-
-    /// <summary>
-    /// Lets one contact in. They see it once they sign in and prove that email or phone — being on
-    /// the list is not itself a way in, only the right to be recognised when they arrive.
-    /// </summary>
-    [HttpPost("{bucketId:guid}/members")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> AddMember(
-        Guid bucketId, [FromBody] AddMediaBucketMemberRequest req, CancellationToken ct) =>
-        Created(await buckets.AddMemberAsync(bucketId, req, ct));
-
-    [HttpDelete("{bucketId:guid}/members/{memberId:guid}")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> RemoveMember(Guid bucketId, Guid memberId, CancellationToken ct)
-    {
-        await buckets.RemoveMemberAsync(bucketId, memberId, ct);
-        return SuccessMessage("They can no longer see this bucket.");
     }
 
     // ---------- contribution codes ----------

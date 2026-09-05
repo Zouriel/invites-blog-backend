@@ -28,7 +28,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
     public DbSet<MediaBucket> MediaBuckets => Set<MediaBucket>();
     public DbSet<MediaBucketQr> MediaBucketQrs => Set<MediaBucketQr>();
-    public DbSet<MediaBucketMember> MediaBucketMembers => Set<MediaBucketMember>();
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
@@ -248,19 +247,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // to be an index lookup rather than a scan of every code ever printed.
             e.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("idx_media_bucket_qr_token");
             e.HasIndex(x => new { x.BucketId, x.CreatedAt });
-        });
-
-        b.Entity<MediaBucketMember>(e =>
-        {
-            e.ToTable("media_bucket_members");
-            e.HasKey(x => x.Id);
-            // The read that runs on every view: is this contact on this bucket's list. Unique, so
-            // adding the same person twice cannot produce two rows to revoke separately.
-            e.HasIndex(x => new { x.BucketId, x.Contact })
-                .IsUnique()
-                .HasDatabaseName("idx_media_bucket_member");
-            // The other direction: every bucket a signed-in account may look at.
-            e.HasIndex(x => x.Contact);
         });
 
         b.Entity<SuppressionEntry>(e =>

@@ -41,25 +41,16 @@ public interface IMediaBucketService
     /// <summary>Whether this caller may MANAGE it — the narrower right, and what moderation needs.</summary>
     Task<bool> OwnsAsync(Guid bucketId, CancellationToken ct = default);
 
-    /// <summary>The list, for the owner managing it.</summary>
-    Task<IReadOnlyList<MediaBucketMemberDto>> MembersAsync(Guid bucketId, CancellationToken ct = default);
-
-    /// <summary>Lets one contact in. Idempotent — adding somebody twice is not an error.</summary>
-    Task<MediaBucketMemberDto> AddMemberAsync(
-        Guid bucketId, AddMediaBucketMemberRequest req, CancellationToken ct = default);
-
-    Task RemoveMemberAsync(Guid bucketId, Guid memberId, CancellationToken ct = default);
-
     /// <summary>
-    /// The member row for a contact somebody has just PROVED, or null if they are not on the list.
+    /// The guest row for a contact somebody has just PROVED on this bucket's event, or null if they
+    /// are not on its guest list.
     ///
-    /// <para>This is what a verified contribution code checks. The owner decides who may put things
-    /// into their bucket by name and contact, and the name a photograph is credited to comes from
-    /// this row rather than from anything the contributor typed — on a code that demands proof, a
-    /// self-declared name would be the one unproved thing left in the flow.</para>
+    /// <para>This is what a verified contribution code checks. Who may take part in an event is its
+    /// guest list and nothing else — the credit on those photographs is then the name the host filed
+    /// them under, because on a door that exists to demand proof a self-declared name would be the
+    /// one unproved value left in the flow.</para>
     /// </summary>
-    Task<MediaBucketMemberDto?> MemberForContactAsync(
-        Guid bucketId, string contact, CancellationToken ct = default);
+    Task<Guest?> GuestForContactAsync(Guid bucketId, string contact, CancellationToken ct = default);
 
     Task<MediaBucketDto> GetAsync(Guid bucketId, CancellationToken ct = default);
 
@@ -89,14 +80,19 @@ public interface IMediaBucketService
     Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
     /// <summary>
-    /// An event's bucket as its host sees it, provisioning one if the event predates buckets.
+    /// An event's bucket as its host sees it, or <c>null</c> when the event has none.
     ///
-    /// <para>Separate from <see cref="ForCampaignAsync"/> because that one authorizes nothing — it is
-    /// called from inside the photo service, after that service's own door. This is the door: an
-    /// event's bucket is reachable from its dashboard, so ownership is checked before anything is
-    /// created or returned.</para>
+    /// <para><b>Deliberately does not create one.</b> Reading a dashboard is not asking for a bucket,
+    /// and a read that quietly provisioned would mean every event ever opened acquires one whether
+    /// its host wants it or not — and would make "add a media bucket" impossible to offer, because
+    /// there would never be an event without one. Creating is <see cref="CreateForCampaignAsync"/>,
+    /// and an upload still provisions through <see cref="ForCampaignAsync"/> so nothing that worked
+    /// before needs anybody to press anything.</para>
     /// </summary>
-    Task<MediaBucketDto> ForCampaignOwnerAsync(Guid campaignId, CancellationToken ct = default);
+    Task<MediaBucketDto?> ForCampaignOwnerAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>Gives an event a bucket, on purpose. Adopts whatever it already had.</summary>
+    Task<MediaBucketDto> CreateForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
     /// <summary>
     /// Refuses an upload that would not fit, and is the ONLY place that decides that.
@@ -167,10 +163,10 @@ public sealed record MediaBucketQrAdmission(
 public sealed class MediaBucketService(
     IRepository<MediaBucket> buckets,
     IRepository<MediaBucketQr> qrs,
-    IRepository<MediaBucketMember> members,
     IRepository<AppUser> users,
     IRepository<EventPhoto> photos,
     ICampaignRepository campaigns,
+    IGuestRepository guestRepository,
     ICampaignOwnershipService ownership,
     ICurrentUser currentUser,
     IStorageService storage,
@@ -235,17 +231,39 @@ public sealed class MediaBucketService(
         if (bucket is null) return false;
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return true;
-        if (bucket.CampaignId is { } campaignId && await ownership.OwnsAsync(campaignId, ct))
-            return true;
+        if (bucket.CampaignId is not { } campaignId) return false;
+        if (await ownership.OwnsAsync(campaignId, ct)) return true;
 
-        foreach (var contact in await MyContactsAsync(ct))
-        {
-            if (await members.AnyAsync(m => m.BucketId == bucketId && m.Contact == contact, ct))
-                return true;
-        }
+        // The event's guest list IS who may look. One list, not two — an event that has both an
+        // invitation and a bucket shares the same people between them, and a second list beside it
+        // would be configuration that decides nothing.
+        var proved = await MyContactsAsync(ct);
+        if (proved.Count == 0) return false;
 
-        return false;
+        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        return guests.Any(g => Matches(g, proved));
     }
+
+    public async Task<Guest?> GuestForContactAsync(
+        Guid bucketId, string contact, CancellationToken ct = default)
+    {
+        var bucket = await buckets.GetByIdAsync(bucketId, ct);
+        if (bucket?.CampaignId is not { } campaignId) return null;
+
+        var (normalized, _) = NormalizeContact(contact);
+        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        return guests.FirstOrDefault(g => Matches(g, [normalized]));
+    }
+
+    /// <summary>
+    /// Whether a guest row is one of the identifiers this caller has proved. Compared in the form
+    /// each side is stored in — an email lowercased, a phone as E.164 — because the guest list is
+    /// typed by a host and the proof comes from an account or a one-time code.
+    /// </summary>
+    private static bool Matches(Guest guest, IReadOnlyList<string> proved) =>
+        (!string.IsNullOrWhiteSpace(guest.Email)
+         && proved.Contains(guest.Email.Trim().ToLowerInvariant()))
+        || (!string.IsNullOrWhiteSpace(guest.PhoneE164) && proved.Contains(guest.PhoneE164.Trim()));
 
     public async Task<bool> OwnsAsync(Guid bucketId, CancellationToken ct = default)
     {
@@ -258,81 +276,6 @@ public sealed class MediaBucketService(
         {
             return false;
         }
-    }
-
-    public async Task<IReadOnlyList<MediaBucketMemberDto>> MembersAsync(
-        Guid bucketId, CancellationToken ct = default)
-    {
-        await OwnedAsync(bucketId, ct);
-
-        var rows = await members.Query()
-            .Where(m => m.BucketId == bucketId)
-            .OrderBy(m => m.CreatedAt)
-            .ToListAsync(ct);
-
-        return rows.Select(m => new MediaBucketMemberDto(
-            m.Id, m.Contact, m.ContactType, m.Name, m.CreatedAt)).ToList();
-    }
-
-    public async Task<MediaBucketMemberDto> AddMemberAsync(
-        Guid bucketId, AddMediaBucketMemberRequest req, CancellationToken ct = default)
-    {
-        await OwnedAsync(bucketId, ct);
-
-        var (contact, kind) = NormalizeContact(req.Contact);
-        var name = string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim();
-
-        // Adding somebody who is already on the list is what happens when an owner works down a
-        // sheet of names twice. It is not an error, and it must not make a second row to revoke.
-        var existing = await members.FirstOrDefaultAsync(
-            m => m.BucketId == bucketId && m.Contact == contact, ct);
-        if (existing is not null)
-            return new MediaBucketMemberDto(
-                existing.Id, existing.Contact, existing.ContactType, existing.Name, existing.CreatedAt);
-
-        var member = new MediaBucketMember
-        {
-            Id = Guid.NewGuid(),
-            BucketId = bucketId,
-            Contact = contact,
-            ContactType = kind,
-            Name = name,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-
-        await members.AddAsync(member, ct);
-        await uow.SaveChangesAsync(ct);
-
-        return new MediaBucketMemberDto(
-            member.Id, member.Contact, member.ContactType, member.Name, member.CreatedAt);
-    }
-
-    public async Task<MediaBucketMemberDto?> MemberForContactAsync(
-        Guid bucketId, string contact, CancellationToken ct = default)
-    {
-        // Normalised the same way it was stored, or an address that differs only in case would be a
-        // stranger to a list it is plainly on.
-        var (normalized, _) = NormalizeContact(contact);
-
-        var member = await members.FirstOrDefaultAsync(
-            m => m.BucketId == bucketId && m.Contact == normalized, ct);
-
-        return member is null
-            ? null
-            : new MediaBucketMemberDto(
-                member.Id, member.Contact, member.ContactType, member.Name, member.CreatedAt);
-    }
-
-    public async Task RemoveMemberAsync(Guid bucketId, Guid memberId, CancellationToken ct = default)
-    {
-        await OwnedAsync(bucketId, ct);
-
-        var member = await members.Query(tracking: true)
-            .FirstOrDefaultAsync(m => m.Id == memberId && m.BucketId == bucketId, ct);
-        if (member is null) return;   // removing twice is not an error
-
-        members.Remove(member);
-        await uow.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -550,7 +493,17 @@ public sealed class MediaBucketService(
         return bucket;
     }
 
-    public async Task<MediaBucketDto> ForCampaignOwnerAsync(
+    public async Task<MediaBucketDto?> ForCampaignOwnerAsync(
+        Guid campaignId, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var bucket = await buckets.FirstOrDefaultAsync(b => b.CampaignId == campaignId, ct);
+        return bucket is null ? null : (await DescribeAsync([bucket], ct))[0];
+    }
+
+    public async Task<MediaBucketDto> CreateForCampaignAsync(
         Guid campaignId, CancellationToken ct = default)
     {
         if (!await ownership.OwnsAsync(campaignId, ct))

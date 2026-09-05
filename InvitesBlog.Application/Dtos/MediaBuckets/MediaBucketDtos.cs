@@ -78,10 +78,3 @@ public sealed record MediaBucketQrDto(
 
 /// <summary>Generating a code: who it is for, and whether they have to say who they are.</summary>
 public sealed record CreateMediaBucketQrRequest(string? Label, bool AllowAnonymous);
-
-/// <summary>Somebody the owner has let in to look. Only ever shown to the owner.</summary>
-public sealed record MediaBucketMemberDto(
-    Guid Id, string Contact, string ContactType, string? Name, DateTimeOffset CreatedAt);
-
-/// <summary>Letting one contact in — an email or a phone they will prove with a one-time code.</summary>
-public sealed record AddMediaBucketMemberRequest(string Contact, string? Name);

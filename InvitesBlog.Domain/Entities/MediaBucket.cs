@@ -171,38 +171,3 @@ public sealed class MediaBucketQr
     public DateTimeOffset? LastUsedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
-
-/// <summary>
-/// Somebody the owner has let into a bucket.
-///
-/// <para><b>Why a bucket needs its own list at all.</b> A bucket attached to a campaign gets one for
-/// free — the campaign's guest list, which already says who was invited and is already matched to
-/// accounts by verified contact. A STANDALONE bucket has no campaign and therefore had nobody at all:
-/// exactly one account could see it, and the people who filled it could never look at what they had
-/// filled. A trip or a reunion is not a private drive; it is the same "everyone who was there" the
-/// event case promises.</para>
-///
-/// <para><b>Contributing does not put anyone here.</b> Adding and looking are different rights, and
-/// the person who decides who looks at photographs of an occasion is the person whose occasion it
-/// was. A printed code is handed to a room; membership is granted one contact at a time.</para>
-/// </summary>
-public sealed class MediaBucketMember
-{
-    public Guid Id { get; set; }
-    public Guid BucketId { get; set; }
-
-    /// <summary>
-    /// The identifier they will prove: a lowercased email or an E.164 phone. Stored in the clear
-    /// rather than hashed, unlike a suppression entry — the owner has to be able to read their own
-    /// list back to manage it, and this is a list they typed.
-    /// </summary>
-    public string Contact { get; set; } = default!;
-
-    /// <summary>"email" or "phone", so a match is never attempted across kinds.</summary>
-    public string ContactType { get; set; } = default!;
-
-    /// <summary>What the owner called them, for their own list. Never shown to other members.</summary>
-    public string? Name { get; set; }
-
-    public DateTimeOffset CreatedAt { get; set; }
-}

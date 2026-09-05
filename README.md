@@ -52,18 +52,17 @@ in a follow-up email want opposite answers:
 
 - **Anonymous** — no sign-in at all. It asks for a name, believes it, and credits the photographs to
   it. Right for a room where everyone present was invited by the person holding the party.
-- **Verified** — a one-time code to an email or phone, and only contacts the owner has put on the
-  bucket's list get in. The credit is then the owner's name for that person, not one the contributor
-  typed.
+- **Verified** — a one-time code to an email or phone, and only contacts on the event's **guest
+  list** get in. The credit is then the host's name for that person, not one the contributor typed.
 
 A code can be turned off, since a printed card cannot be recalled — and the last one made stays in
 the dashboard to reprint, as an image, because the token behind it is stored hashed and can never be
 read back.
 
-**Who can look is a different question from who can add.** A bucket's contents are visible to its
-owner and to the list the owner added, and to nobody else; contributing is never a way in. A bucket
-attached to a campaign inherits that campaign's guest list. A standalone one has its own — without it
-exactly one account could ever see what a whole room filled.
+**Who can look is a different question from who can add.** A campaign is the unit: it owns a guest
+list, and may have an invitation, a media bucket, or both. That one list is who can see either of
+them. Contributing is never a way in — anyone at the party can add through a printed code, and only
+the people who were invited can look.
 
 **Templates.** Three sources: first-party templates in this repo, community templates submitted by
 designers and reviewed before publication, and bespoke commissions arranged through an inquiry.

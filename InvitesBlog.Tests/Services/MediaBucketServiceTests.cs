@@ -26,8 +26,7 @@ public class MediaBucketServiceTests
 {
     private readonly IRepository<MediaBucket> _buckets = Substitute.For<IRepository<MediaBucket>>();
     private readonly IRepository<MediaBucketQr> _qrs = Substitute.For<IRepository<MediaBucketQr>>();
-    private readonly IRepository<MediaBucketMember> _members =
-        Substitute.For<IRepository<MediaBucketMember>>();
+    private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
@@ -48,11 +47,12 @@ public class MediaBucketServiceTests
             .Returns(c => $"/assets/{c.ArgAt<string>(0)}");
         _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
         _qrs.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketQr>().AsAsyncQueryable());
-        _members.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketMember>().AsAsyncQueryable());
+        _guests.ListByCampaignAsync(Arg.Any<Guid>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<Guest>());
     }
 
     private MediaBucketService Sut() => new(
-        _buckets, _qrs, _members, _users, _photos, _campaigns,
+        _buckets, _qrs, _users, _photos, _campaigns, _guests,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
         Options.Create(new MediaBucketOptions()), _uow);
@@ -216,50 +216,45 @@ public class MediaBucketServiceTests
     // ---------- who may look ----------
 
     /// <summary>
-    /// The gap this list closed: before it, a standalone bucket was visible to exactly one account,
-    /// so everybody who filled one was locked out of what they had filled.
+    /// The gap this closed: before a bucket had any notion of who may see it, a standalone one was
+    /// visible to exactly one account and everybody who filled it was locked out of what they filled.
+    /// The answer is the event's guest list — one list, shared with the invitation.
     /// </summary>
     [Fact]
-    public async Task A_bucket_is_not_visible_to_somebody_who_is_not_on_its_list()
+    public async Task A_bucket_is_not_visible_to_somebody_who_is_not_on_the_guest_list()
     {
-        var bucket = Mine();
-        bucket.OwnerUserId = Guid.NewGuid();
-        Stored(bucket);
+        var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "stranger@example.com" });
+        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
 
         Assert.False(await Sut().MayViewAsync(bucket.Id));
         await Assert.ThrowsAsync<ForbiddenException>(() => Sut().ViewAsync(bucket.Id));
     }
 
     [Fact]
-    public async Task A_bucket_is_visible_to_a_contact_the_owner_added()
+    public async Task A_bucket_is_visible_to_a_guest_of_its_event()
     {
-        var bucket = Mine();
-        bucket.OwnerUserId = Guid.NewGuid();
-        Stored(bucket);
+        var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "guest@example.com" });
-        OnTheList(bucket.Id, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
 
         Assert.True(await Sut().MayViewAsync(bucket.Id));
     }
 
     /// <summary>An address differing only in case is plainly the same person to whoever typed it.</summary>
     [Fact]
-    public async Task Membership_ignores_the_case_of_an_email()
+    public async Task The_guest_list_ignores_the_case_of_an_email()
     {
-        var bucket = Mine();
-        bucket.OwnerUserId = Guid.NewGuid();
-        Stored(bucket);
+        var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "Guest@Example.com" });
-        OnTheList(bucket.Id, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
 
         Assert.True(await Sut().MayViewAsync(bucket.Id));
     }
 
-    /// <summary>The owner always sees their own, list or no list.</summary>
     [Fact]
     public async Task The_owner_sees_their_own_bucket()
     {
@@ -270,91 +265,33 @@ public class MediaBucketServiceTests
     }
 
     /// <summary>
-    /// Membership is matched on an identifier the account has PROVED. A member row is a promise about
-    /// a contact, never a way in for whoever claims it.
+    /// Matched on an identifier the account has PROVED. A guest row is a promise about a contact,
+    /// never a way in for whoever claims it.
     /// </summary>
     [Fact]
-    public async Task An_account_with_no_verified_contact_matches_nobodys_list()
+    public async Task An_account_with_no_verified_contact_matches_no_guest_list()
     {
-        var bucket = Mine();
-        bucket.OwnerUserId = Guid.NewGuid();
-        Stored(bucket);
+        var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>()).Returns(new AppUser { Id = _me });
-        OnTheList(bucket.Id, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
 
         Assert.False(await Sut().MayViewAsync(bucket.Id));
     }
 
-    /// <summary>
-    /// A phone typed the way an owner types one has to match the E.164 the account proved, or phone
-    /// membership fails silently for everybody who uses it — the member row simply never matches.
-    /// </summary>
-    [Fact]
-    public async Task A_phone_member_is_stored_in_the_form_an_account_proves()
+    /// <summary>A bucket somebody else owns, on an event with nobody on its list.</summary>
+    private MediaBucket Attached()
     {
         var bucket = Mine();
+        bucket.OwnerUserId = Guid.NewGuid();
+        bucket.CampaignId = Guid.NewGuid();
         Stored(bucket);
-
-        MediaBucketMember? saved = null;
-        await _members.AddAsync(Arg.Do<MediaBucketMember>(m => saved = m), Arg.Any<CancellationToken>());
-
-        await Sut().AddMemberAsync(bucket.Id, new AddMediaBucketMemberRequest("781 9157", "Rani"));
-
-        Assert.NotNull(saved);
-        Assert.Equal("phone", saved!.ContactType);
-        // Malé's country code, from the same default region every other phone in the product uses.
-        Assert.Equal("+9607819157", saved.Contact);
+        return bucket;
     }
 
-    [Fact]
-    public async Task A_contact_that_is_neither_an_email_nor_a_phone_is_refused()
+    private void OnTheGuestList(Guid campaignId, string email)
     {
-        var bucket = Mine();
-        Stored(bucket);
-
-        await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().AddMemberAsync(bucket.Id, new AddMediaBucketMemberRequest("not a contact", null)));
-    }
-
-    /// <summary>Adding the same person twice is what happens working down a list; it is not an error.</summary>
-    [Fact]
-    public async Task Adding_the_same_contact_twice_does_not_make_two_rows()
-    {
-        var bucket = Mine();
-        Stored(bucket);
-        var existing = OnTheList(bucket.Id, "guest@example.com", name: "Amira");
-
-        var again = await Sut().AddMemberAsync(
-            bucket.Id, new AddMediaBucketMemberRequest("GUEST@example.com", "Amira"));
-
-        Assert.Equal(existing.Id, again.Id);
-        await _members.DidNotReceive().AddAsync(Arg.Any<MediaBucketMember>(), Arg.Any<CancellationToken>());
-    }
-
-    /// <summary>Puts one contact on the bucket's list, and returns the row.</summary>
-    private MediaBucketMember OnTheList(Guid bucketId, string contact, string? name = null)
-    {
-        var member = new MediaBucketMember
-        {
-            Id = Guid.NewGuid(),
-            BucketId = bucketId,
-            Contact = contact,
-            ContactType = "email",
-            Name = name,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-        _members.Query(Arg.Any<bool>()).Returns(new[] { member }.AsAsyncQueryable());
-        _members.AnyAsync(
-                Arg.Is<System.Linq.Expressions.Expression<Func<MediaBucketMember, bool>>>(
-                    e => e.Compile()(member)),
-                Arg.Any<CancellationToken>())
-            .Returns(true);
-        _members.FirstOrDefaultAsync(
-                Arg.Is<System.Linq.Expressions.Expression<Func<MediaBucketMember, bool>>>(
-                    e => e.Compile()(member)),
-                Arg.Any<CancellationToken>())
-            .Returns(member);
-        return member;
+        _guests.ListByCampaignAsync(campaignId, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { new Guest { Id = Guid.NewGuid(), CampaignId = campaignId, Email = email } });
     }
 
     // ---------- codes ----------

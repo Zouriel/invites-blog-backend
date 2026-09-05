@@ -30,8 +30,8 @@ namespace InvitesBlog.Api.Controllers;
 /// rather than per bucket — the cards on the tables and the link in the follow-up email are the same
 /// bucket and want opposite answers.</para>
 ///
-/// <para><b>Neither door reads.</b> A bucket's photographs are visible to its owner and to the list
-/// the owner added, and to nobody else — contributing is not a way in. See
+/// <para><b>Neither door reads.</b> A bucket's photographs are visible to its owner and to the
+/// event's guest list, and to nobody else — contributing is not a way in. See
 /// <c>IMediaBucketService.MayViewAsync</c>.</para>
 /// </summary>
 [ApiController]
@@ -95,9 +95,9 @@ public sealed class BucketContributionController(
         if (string.IsNullOrWhiteSpace(contact))
             return BadRequest(ApiResponse<object?>.Fail("Enter an email or a phone number."));
 
-        if (await buckets.MemberForContactAsync(admission.BucketId, contact, ct) is null)
+        if (await buckets.GuestForContactAsync(admission.BucketId, contact, ct) is null)
             return BadRequest(ApiResponse<object?>.Fail(
-                "That contact isn't on this bucket's list. Ask whoever set it up to add you."));
+                "That contact isn't on the guest list. Ask whoever's hosting to add you."));
 
         return Success(await otp.RequestAsync(req, ct: ct));
     }
@@ -122,15 +122,14 @@ public sealed class BucketContributionController(
         // Proving a contact is not the same as being allowed in. The code is checked again here and
         // not only before the send, because the challenge is issued against a contact the caller
         // typed and this is the first moment we know which contact they actually hold.
-        var member = await buckets.MemberForContactAsync(admission.BucketId, verified.Contact, ct);
-        if (member is null)
-            return Unauthorized(ApiResponse<object?>.Fail(
-                "That contact isn't on this bucket's list."));
+        var guest = await buckets.GuestForContactAsync(admission.BucketId, verified.Contact, ct);
+        if (guest is null)
+            return Unauthorized(ApiResponse<object?>.Fail("That contact isn't on the guest list."));
 
-        // THE OWNER'S NAME FOR THEM, not one they typed. On a code that exists precisely to demand
-        // proof, a self-declared display name would leave the one thing shown on every photograph as
-        // the only unproved value in the flow — and two guests could credit themselves identically.
-        var name = string.IsNullOrWhiteSpace(member.Name) ? verified.Contact : member.Name!;
+        // THE HOST'S NAME FOR THEM, off the guest list, not one they typed. On a code that exists
+        // precisely to demand proof, a self-declared display name would leave the one thing shown on
+        // every photograph as the only unproved value in the flow.
+        var name = string.IsNullOrWhiteSpace(guest.Name) ? verified.Contact : guest.Name;
 
         return Success(new
         {
@@ -198,13 +197,12 @@ public sealed class BucketContributionController(
         if (holder.QrId != admission.QrId)
             return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
 
-        // A ticket earned by verifying is only good for as long as that contact is still on the list.
-        // Without this, being removed took effect only once the ticket expired — and revoking someone
-        // means nothing if it does not take effect until tomorrow.
+        // A ticket earned by verifying is only good for as long as that contact is still on the
+        // guest list. Without this, being taken off took effect only once the ticket expired — and
+        // removing somebody means nothing if it does not take effect until tomorrow.
         if (holder.VerifiedContact is { } proved
-            && await buckets.MemberForContactAsync(admission.BucketId, proved, ct) is null)
-            return Unauthorized(ApiResponse<object?>.Fail(
-                "That contact isn't on this bucket's list."));
+            && await buckets.GuestForContactAsync(admission.BucketId, proved, ct) is null)
+            return Unauthorized(ApiResponse<object?>.Fail("That contact isn't on the guest list."));
 
         if (!admission.CanUpload)
             return BadRequest(ApiResponse<object?>.Fail(
