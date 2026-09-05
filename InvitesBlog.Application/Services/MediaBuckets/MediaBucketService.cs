@@ -371,7 +371,12 @@ public sealed class MediaBucketService(
                 .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
             if (bare is not null)
             {
-                bare.EventStartAt = night;
+                // Normalised to UTC before it is stored. A browser sends whatever offset it is in,
+                // and Npgsql refuses anything but UTC for `timestamp with time zone` — so a date
+                // picked in Malé fails on write rather than being converted. The window that reads
+                // it back reconstructs Malé's day from UTC anyway (see EventDayWindow), so nothing
+                // downstream wants the original offset.
+                bare.EventStartAt = night.ToUniversalTime();
                 campaigns.Update(bare);
                 await uow.SaveChangesAsync(ct);
             }
@@ -490,7 +495,25 @@ public sealed class MediaBucketService(
             throw new ForbiddenException("That event isn't yours.");
 
         var bucket = await buckets.FirstOrDefaultAsync(b => b.CampaignId == campaignId, ct);
-        return bucket is null ? null : (await DescribeAsync([bucket], ct))[0];
+
+        // A campaign that ALREADY HOLDS MEDIA has a bucket in every sense the host cares about —
+        // only the row is missing, because those photographs predate buckets existing. Offering to
+        // "add a media bucket" to an event whose photographs are on the screen underneath the offer
+        // is nonsense, so the row is created to catch up with what is already true. Provisioning
+        // adopts them, so it opens showing its real contents and its real usage.
+        //
+        // An event with nothing in it still gets no bucket and no row: that one is a real choice,
+        // and it is the case the offer exists for.
+        if (bucket is null)
+        {
+            var hasMedia = await photos.AnyAsync(
+                p => p.CampaignId == campaignId && p.DeletedAt == null, ct);
+            if (!hasMedia) return null;
+
+            bucket = await ForCampaignAsync(campaignId, ct);
+        }
+
+        return (await DescribeAsync([bucket], ct))[0];
     }
 
     public async Task<MediaBucketDto> CreateForCampaignAsync(
@@ -667,7 +690,7 @@ public sealed class MediaBucketService(
             Id = Guid.NewGuid(),
             OwnerUserId = ownerId,
             CampaignId = campaignId,
-            EventDate = eventDate,
+            EventDate = eventDate.ToUniversalTime(),
             Tier = plan.Tier,
             CapacityBytes = plan.CapacityBytes,
             UsedBytes = 0,

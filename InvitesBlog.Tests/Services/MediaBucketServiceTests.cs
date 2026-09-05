@@ -213,6 +213,57 @@ public class MediaBucketServiceTests
         Assert.Equal(1000, bucket.UsedBytes);
     }
 
+    // ---------- an event's own bucket ----------
+
+    /// <summary>
+    /// Reading a dashboard is not asking for a bucket — an event with nothing in it is OFFERED one
+    /// rather than given one, which is the whole reason the read does not provision.
+    /// </summary>
+    [Fact]
+    public async Task An_empty_event_is_offered_a_bucket_rather_than_given_one()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        _buckets.FirstOrDefaultAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns((MediaBucket?)null);
+        _photos.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<EventPhoto, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(false);
+
+        Assert.Null(await Sut().ForCampaignOwnerAsync(campaignId));
+        await _buckets.DidNotReceive().AddAsync(Arg.Any<MediaBucket>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// But an event that already HOLDS media has a bucket in every sense its host cares about — the
+    /// row just predates the feature. Offering to add one while its photographs are on the screen
+    /// underneath the offer is nonsense, so the row catches up instead.
+    /// </summary>
+    [Fact]
+    public async Task An_event_that_already_has_photographs_is_not_asked_to_add_a_bucket()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "Test invitation", EventStartAt = DateTimeOffset.UtcNow });
+        _buckets.FirstOrDefaultAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns((MediaBucket?)null);
+        _photos.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<EventPhoto, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(true);
+        _photos.Query(Arg.Any<bool>()).Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
+        // DescribeAsync reads the campaign for the title and cover a bucket no longer holds.
+        _campaigns.Query(Arg.Any<bool>()).Returns(
+            new[] { new Campaign { Id = campaignId, Title = "Test invitation" } }.AsAsyncQueryable());
+
+        var described = await Sut().ForCampaignOwnerAsync(campaignId);
+
+        Assert.NotNull(described);
+        await _buckets.Received().AddAsync(Arg.Any<MediaBucket>(), Arg.Any<CancellationToken>());
+    }
+
     // ---------- who may look ----------
 
     /// <summary>
