@@ -27,7 +27,47 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         var bytes = await storage.GetAsync(key, ct);
         if (bytes is null || bytes.Length == 0) return null;
 
-        return WithPhotoBox(ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data), data);
+        var html = ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data);
+        return WithPhotoBox(WithRsvp(html, data), data);
+    }
+
+    /// <summary>
+    /// Gives an invitation a way to REPLY even when its markup has none of its own.
+    ///
+    /// <para>The same floor as the photo box below, and it exists for a sharper reason: a design a
+    /// customer brought themselves has no <c>[data-href="rsvp.link"]</c> and never will — it is a
+    /// picture. Without this, importing your own artwork would silently cost your guests the ability
+    /// to answer, which is most of what the platform is for.</para>
+    ///
+    /// <para>Absent for a guest who has already said they are coming — <c>rsvp.link</c> is null in
+    /// that case, exactly as it is for a template's own button — so nobody is asked twice.</para>
+    /// </summary>
+    private static string WithRsvp(string html, JsonObject data)
+    {
+        var link = data["rsvp"]?["link"]?.ToString();
+        if (string.IsNullOrEmpty(link)) return html;
+
+        // A template that placed the binding itself keeps its own styling and this never fires.
+        if (html.Contains("data-href=\"rsvp.link\"", StringComparison.Ordinal)) return html;
+
+        var label = data["rsvp"]?["label"]?.ToString() is { Length: > 0 } l ? l : "Reply now";
+
+        // Same stacking claim as the photo bar: templates build scenery out of full-screen fixed
+        // layers, and an unpositioned block paints underneath every one of them.
+        var bar = $"""
+            <section style="position:relative;z-index:2147483000;
+               padding:56px 20px 8px;text-align:center;
+               background:var(--ib-bg,#17131a);color:var(--ib-text,#f4eef6)">
+              <a href="{WebUtility.HtmlEncode(link)}" style="display:inline-flex;align-items:center;
+                 padding:15px 30px;border-radius:999px;text-decoration:none;
+                 font:600 15px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+                 letter-spacing:.02em;color:var(--ib-bg,#17131a);
+                 background:var(--ib-accent,#c9a227)">{WebUtility.HtmlEncode(label)}</a>
+            </section>
+            """;
+
+        var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return close < 0 ? html + bar : html[..close] + bar + html[close..];
     }
 
     /// <summary>

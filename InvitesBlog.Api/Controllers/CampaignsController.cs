@@ -1,6 +1,7 @@
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Application.Services.Campaigns;
+using InvitesBlog.Application.Services.Designs;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +14,8 @@ namespace InvitesBlog.Api.Controllers;
 /// delegates to <see cref="ICampaignService"/>; ownership + token validation live in the service.
 /// </summary>
 [Route("api/campaigns")]
-public sealed class CampaignsController(ICampaignService campaigns) : BaseApiController
+public sealed class CampaignsController(
+    ICampaignService campaigns, IImportedDesignService designs) : BaseApiController
 {
     // Creation is open to anonymous callers: a brand-new visitor spins up a draft and receives a
     // possession token that grants Inviter rights thereafter. The Public role does NOT hold
@@ -191,5 +193,55 @@ public sealed class CampaignsController(ICampaignService campaigns) : BaseApiCon
         return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
             ? header["Bearer ".Length..].Trim()
             : null;
+    }
+
+    /// <summary>
+    /// Starts a campaign from a design the customer brought, instead of from the gallery. Anonymous
+    /// for the same reason ordinary creation is: a brand-new visitor gets a draft and a possession
+    /// token, and only then owns anything.
+    /// </summary>
+    [HttpPost("bring-your-own")]
+    [AllowAnonymous]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
+    public async Task<IActionResult> BringYourOwn(
+        [FromForm] string title, IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail("Choose a file to upload."));
+
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+
+        var (campaign, design) = await designs.CreateAsync(title, buffer.ToArray(), file.FileName, ct);
+        return Created(new { campaign, design });
+    }
+
+    /// <summary>
+    /// Bring your own design: replaces this campaign's artwork with something the customer made
+    /// elsewhere.
+    ///
+    /// <para>Owner only, and the service re-checks that — a campaign id in a URL proves nothing. The
+    /// size ceilings that matter are on what an upload EXPANDS to rather than what it arrives as, so
+    /// they live in <c>ImportedDesignPackage</c> where the extracting happens; the framework limits
+    /// are lifted here only so a legitimate 40 MB design is not refused by the transport before the
+    /// real rules get a look at it.</para>
+    /// </summary>
+    [HttpPost("{campaignId:guid}/design")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
+    public async Task<IActionResult> ImportDesign(
+        Guid campaignId, IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail("Choose a file to upload."));
+
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+
+        return Success(await designs.ImportAsync(campaignId, buffer.ToArray(), file.FileName, ct));
     }
 }

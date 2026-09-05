@@ -57,6 +57,17 @@ public static class TemplateVisibility
 {
     public const string Public = "Public";
     public const string Dedicated = "Dedicated";
+
+    /// <summary>
+    /// A design the customer brought themselves. One row per campaign, holding that campaign's
+    /// uploaded package.
+    ///
+    /// <para><b>Why a visibility rather than a flag.</b> Every gallery read already asks for
+    /// <see cref="Public"/>, or <see cref="Dedicated"/> once used — so a third value is invisible to
+    /// all of them without a single query being touched. "Never showcased" is then a property of the
+    /// data rather than a rule each new listing has to remember.</para>
+    /// </summary>
+    public const string Imported = "Imported";
 }
 
 /// <summary>
