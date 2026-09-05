@@ -2,6 +2,7 @@ using System.IO.Compression;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Photos;
+using InvitesBlog.Application.Events;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.MediaBuckets;
@@ -139,15 +140,28 @@ public sealed class EventPhotoService(
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync(ct);
 
+        // The same three questions StoreAsync asks, asked in the same order — cancelled, then the
+        // night. This used to report only the cancellation, so an event six months past still offered
+        // "Add media", and pressing it produced the refusal the box should have shown instead.
+        var closed =
+            campaign.Status == CampaignStatus.Cancelled
+                ? "This event has been cancelled. Everything already added is still here."
+                : EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow)
+                    ? null
+                    : DateTimeOffset.UtcNow < campaign.EventStartAt
+                        ? "This one isn't open yet — it opens on the day."
+                        : "This one has closed. Everything already added is still here.";
+
         return new EventPhotoBoxDto(
             campaign.Id,
             campaign.Title,
             live.Count,
-            campaign.Status != CampaignStatus.Cancelled,
+            closed is null,
             live.Select(p => new EventPhotoDto(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName,
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
-                p.CreatedAt)).ToList());
+                p.CreatedAt)).ToList(),
+            closed);
     }
 
     public async Task<EventPhotoDto> AddAsync(
@@ -193,9 +207,9 @@ public sealed class EventPhotoService(
             bucket.CampaignId ?? Guid.Empty,
             bucket.Title,
             live.Count,
-            // Full or out of term, the owner can still look at what is already in it. Only adding
-            // stops.
-            !bucket.Expired && bucket.UsedBytes < bucket.CapacityBytes,
+            // Full, out of term, or off its night: the owner can still look at what is already in it.
+            // Only adding stops. The night was missing here — the same gap the campaign box had.
+            bucket.IsOpen && !bucket.Expired && bucket.UsedBytes < bucket.CapacityBytes,
             live.Select(p => new EventPhotoDto(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height,
                 p.UploaderName,
@@ -203,7 +217,18 @@ public sealed class EventPhotoService(
                 // and nothing else — these are photographs of an occasion that is not theirs to
                 // curate, and the moderation right belongs to whoever the occasion belonged to.
                 mine,
-                p.CreatedAt)).ToList());
+                p.CreatedAt)).ToList(),
+            // Same sentence the writer would have given, and in the order that matters: "this closed
+            // a week ago" is more useful than "this is full" when both are true.
+            !bucket.IsOpen
+                ? DateTimeOffset.UtcNow < bucket.EventDate
+                    ? "This one isn't open yet — it opens on the day."
+                    : "This one has closed. Everything already added is still here."
+                : bucket.Expired
+                    ? "This bucket's term has ended. Everything in it is still here."
+                    : bucket.UsedBytes >= bucket.CapacityBytes
+                        ? "This bucket is full. Choose a bigger size to keep adding."
+                        : null);
     }
 
     public async Task DeleteFromBucketAsync(

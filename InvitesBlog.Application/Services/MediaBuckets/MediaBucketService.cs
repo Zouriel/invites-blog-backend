@@ -542,12 +542,18 @@ public sealed class MediaBucketService(
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
                      ?? throw new NotFoundException("That media bucket no longer exists.");
 
-        if (EventDayWindow.IsOpen(bucket.EventDate, DateTimeOffset.UtcNow)) return;
+        // Through the EVENT, the same way the DTO reads it — see Night(). The copy on the bucket is
+        // only reached when there is somehow no event behind it.
+        var night = bucket.CampaignId is { } id
+            ? (await campaigns.GetByIdAsync(id, ct))?.EventStartAt ?? bucket.EventDate
+            : bucket.EventDate;
+
+        if (EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow)) return;
 
         // Which side of it they are on, because "closed" means two completely different things to
         // somebody standing at the party a day early and somebody looking a week later.
         throw new BusinessRuleException(
-            DateTimeOffset.UtcNow < bucket.EventDate
+            DateTimeOffset.UtcNow < night
                 ? "This one isn't open yet — it opens on the day."
                 : "This one has closed. Everything already added is still here.",
             "bucket_closed");
@@ -744,7 +750,7 @@ public sealed class MediaBucketService(
             ? []
             : await campaigns.Query()
                 .Where(c => campaignIds.Contains(c.Id))
-                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson))
+                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
         var now = DateTimeOffset.UtcNow;
@@ -762,8 +768,8 @@ public sealed class MediaBucketService(
             counts.GetValueOrDefault(b.Id),
             b.CampaignId,
             Title(b, events),
-            b.EventDate,
-            EventDayWindow.IsOpen(b.EventDate, now),
+            Night(b, events),
+            EventDayWindow.IsOpen(Night(b, events), now),
             b.TermEndAt,
             b.TermEndAt is { } end && end <= now,
             b.CreatedAt)).ToList();
@@ -776,8 +782,23 @@ public sealed class MediaBucketService(
     /// <see cref="CreateQrAsync"/>. Every later read has the image and not the link, which is
     /// sufficient: the picture is the thing a host reprints, and it still scans.
     /// </summary>
-    /// <summary>How an event presents itself: the two things a bucket used to duplicate.</summary>
-    private sealed record EventFace(Guid Id, string Title, string? CustomContentJson);
+    /// <summary>How an event presents itself: the things a bucket used to duplicate.</summary>
+    private sealed record EventFace(
+        Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt);
+
+    /// <summary>
+    /// The night, read from the EVENT rather than from the copy taken when the bucket was made.
+    ///
+    /// <para>The copy was written once and never updated, so a host who moved their date left the
+    /// bucket open on the old night and shut on the new one — the invitation and the bucket
+    /// disagreeing about which evening they belong to, which is the thing the copy existed to
+    /// prevent. Reading through means there is one answer and it cannot drift.</para>
+    /// </summary>
+    private static DateTimeOffset Night(
+        MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>
+        bucket.CampaignId is { } id && events.TryGetValue(id, out var face)
+            ? face.EventStartAt
+            : bucket.EventDate;
 
     /// <summary>
     /// The event's name. A bucket has none of its own; where there is somehow no campaign behind one

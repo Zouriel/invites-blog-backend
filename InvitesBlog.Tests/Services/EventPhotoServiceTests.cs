@@ -338,6 +338,67 @@ public class EventPhotoServiceTests
         Assert.Equal(campaign.Id, box.CampaignId);
     }
 
+    // ----- whether the box says it is open ------------------------------------------------------
+
+    /// <summary>
+    /// The box reported only cancellation, so an event six months past still offered "Add media" —
+    /// and pressing it produced the refusal <see cref="StoreAsync"/> was always going to give. The
+    /// reader has to answer the same question the writer does, or the button is a lie.
+    /// </summary>
+    [Fact]
+    public async Task An_event_that_is_over_offers_nothing_to_add_and_says_why()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(-30);
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.False(box.CanUpload);
+        Assert.Contains("closed", box.ClosedNote);
+    }
+
+    /// <summary>
+    /// The other side of the window. "Closed" means two completely different things to somebody
+    /// standing at the party a day early and somebody looking a week later.
+    /// </summary>
+    [Fact]
+    public async Task An_event_still_to_come_says_it_opens_on_the_day()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(30);
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.False(box.CanUpload);
+        Assert.Contains("opens on the day", box.ClosedNote);
+    }
+
+    [Fact]
+    public async Task On_the_night_the_box_is_open_and_says_nothing()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddHours(-1);
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.True(box.CanUpload);
+        Assert.Null(box.ClosedNote);
+    }
+
+    /// <summary>A cancelled event is a read-only archive whatever the calendar says.</summary>
+    [Fact]
+    public async Task A_cancelled_event_is_closed_even_on_its_own_night()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        campaign.EventStartAt = DateTimeOffset.UtcNow.AddHours(-1);
+        campaign.Status = CampaignStatus.Cancelled;
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.False(box.CanUpload);
+        Assert.Contains("cancelled", box.ClosedNote);
+    }
+
     // ----- adding -------------------------------------------------------------------------------
 
     [Fact]

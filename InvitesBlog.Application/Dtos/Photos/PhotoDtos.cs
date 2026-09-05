@@ -30,6 +30,16 @@ public sealed record EventPhotoBoxDto(
     Guid CampaignId,
     string EventTitle,
     int Count,
-    /// <summary>Whether THIS caller may add to the box — false once the campaign is cancelled.</summary>
+    /// <summary>
+    /// Whether THIS caller may add to the box right now. It answers the same question the writer
+    /// asks — the night, the quota, the cancellation — so a control that is offered is one that
+    /// will work.
+    /// </summary>
     bool CanUpload,
-    IReadOnlyList<EventPhotoDto> Photos);
+    IReadOnlyList<EventPhotoDto> Photos,
+    /// <summary>
+    /// Why adding is off, in the words the writer would have used. Null while it is on. Without it a
+    /// button simply disappears, and "the button is gone" is not an answer to "why can't I add the
+    /// photos from last night".
+    /// </summary>
+    string? ClosedNote = null);
