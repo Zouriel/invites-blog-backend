@@ -35,6 +35,21 @@ public sealed class ContributorTickets(IConfiguration config)
     /// <summary>The form field an upload carries it in.</summary>
     public const string FieldName = "ticket";
 
+    /// <summary>
+    /// The cookie the same ticket rides in when the camera is doing the uploading.
+    ///
+    /// <para>The camera is a server-rendered page, not part of the app, so it holds nothing in
+    /// memory that a component could have handed it — and the two other ways to carry a secret
+    /// there are both worse: a query string writes it into browser history and every referrer, and
+    /// web storage hands it to any script on the origin. HttpOnly means the page uses it without
+    /// ever being able to read it, which is exactly the guest render cookie's argument.</para>
+    ///
+    /// <para>Written without an expiry on purpose. The ticket's own twelve hours still cap it, and a
+    /// phone passed around at a party should stop being a way into a stranger's bucket when its
+    /// browser closes rather than tomorrow lunchtime.</para>
+    /// </summary>
+    public const string CookieName = "ib_contributor";
+
     private byte[] Key => Encoding.UTF8.GetBytes(
         config["Jwt:SigningKey"] ?? "change-this-in-production-please-use-a-long-random-value");
 

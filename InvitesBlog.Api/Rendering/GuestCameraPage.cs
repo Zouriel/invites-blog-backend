@@ -220,10 +220,35 @@ public static class GuestCameraPage
         """;
 
     /// <param name="uploadPath">Where a captured frame is POSTed. One photo per request.</param>
-    /// <param name="galleryPath">Everything the event has collected so far.</param>
     /// <param name="nonce">Per-response value tying the inline script to this document's CSP.</param>
+    /// <summary>
+    /// The extra form fields every upload carries, as a JSON object for the page's own config. Values
+    /// are JSON-encoded rather than HTML-escaped: this lands inside a script element, where the
+    /// escaping that makes an attribute safe means nothing and the encoding that makes a string
+    /// literal safe is everything.
+    /// </summary>
+    private static string Fields(IReadOnlyDictionary<string, string>? fields) =>
+        fields is null || fields.Count == 0
+            ? "{}"
+            : System.Text.Json.JsonSerializer.Serialize(fields);
+
+    /// <param name="backPath">Where the top-left button and the failure gate both lead.</param>
+    /// <param name="backLabel">
+    /// What that button says. A guest goes back to the box they can read; somebody who scanned a
+    /// printed code cannot read anything, so for them it is the page they came from and not "Gallery".
+    /// </param>
+    /// <param name="gateNote">
+    /// What to offer when the camera will not start at all. The two paths have genuinely different
+    /// consolations — a guest can go and look at the night, a contributor can only add.
+    /// </param>
+    /// <param name="gateAction">The label on the gate's one button.</param>
     public static string Render(
-        string uploadPath, string galleryPath, string eventTitle, GuestPalette palette, string nonce) => $$"""
+        string uploadPath, string backPath, string eventTitle, GuestPalette palette, string nonce,
+        string backLabel = "Gallery",
+        string gateNote = "You can still see everything the night has collected — and add photos "
+                          + "straight from this phone's library there instead.",
+        string gateAction = "See the photos",
+        IReadOnlyDictionary<string, string>? fields = null) => $$"""
         <!doctype html>
         <html lang="en"><head>
         <meta charset="utf-8">
@@ -241,7 +266,7 @@ public static class GuestCameraPage
           <div class="flash" id="flashfx"></div>
 
           <div class="top">
-            <a class="btn" href="{{E(galleryPath)}}">Gallery</a>
+            <a class="btn" href="{{E(backPath)}}">{{E(backLabel)}}</a>
             <span class="title">{{E(eventTitle)}}</span>
             <span class="badge" id="pending" hidden></span>
           </div>
@@ -254,9 +279,8 @@ public static class GuestCameraPage
           <div class="gate">
             <h1 style="margin:0;font:600 1.3rem/1.3 Georgia,serif;">The camera isn't available</h1>
             <p id="why"></p>
-            <p>You can still see everything the night has collected — and add photos straight from
-               this phone's library there instead.</p>
-            <a class="btn" href="{{E(galleryPath)}}">See the photos</a>
+            <p>{{E(gateNote)}}</p>
+            <a class="btn" href="{{E(backPath)}}">{{E(gateAction)}}</a>
           </div>
 
           <div class="rec"><span><i></i><b id="rectime">0:00</b></span></div>
@@ -287,7 +311,7 @@ public static class GuestCameraPage
         </div>
 
         <script nonce="{{nonce}}">
-        window.__ibCamera = { upload: "{{E(uploadPath)}}" };
+        window.__ibCamera = { upload: "{{E(uploadPath)}}", fields: {{Fields(fields)}} };
         {{Script}}
         </script>
         </body></html>

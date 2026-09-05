@@ -47,11 +47,15 @@ public static class DependencyInjection
         services.AddSingleton<MediaBuckets.ContributorTickets>();
         services.AddScoped<Rendering.RenderedInvitations>();
 
+        // Two named origins, never a wildcard — which is also what makes AllowCredentials safe to
+        // grant. It is needed by the contributor's admission cookie: in production the app and the
+        // API share an origin and CORS never enters into it, but a browser pointed at the dev server
+        // is talking cross-origin and drops a Set-Cookie it was not told to expect.
         services.AddCors(o => o.AddDefaultPolicy(p => p
             .WithOrigins(
                 config["Urls:InviterBase"] ?? "http://localhost:4200",
                 config["Urls:InviteeBase"] ?? "http://localhost:4201")
-            .AllowAnyHeader().AllowAnyMethod()));
+            .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
         services.AddRateLimiter(options =>
         {

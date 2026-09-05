@@ -360,4 +360,64 @@ public class GuestCameraPageTests
         Assert.Contains("caps.zoom", html);
         Assert.Contains("crop = FRONT_ZOOM", html);
     }
+
+    /// <summary>
+    /// The same page serves two paths now, and they authorize differently: an invited guest by a
+    /// cookie, somebody who scanned a printed code by a ticket. The ticket rides in the page's own
+    /// config so every upload carries it — a URL would put it in browser history, and web storage
+    /// would hand it to any script on the origin.
+    /// </summary>
+    [Fact]
+    public void Extra_upload_fields_reach_the_page()
+    {
+        var html = GuestCameraPage.Render(
+            "/api/q/tok/media", "/q/tok", "Hana and Ibrahim", GuestPalette.Fallback, "n0nc3",
+            fields: new Dictionary<string, string> { ["ticket"] = "abc.123" });
+
+        Assert.Contains("""fields: {"ticket":"abc.123"}""", html);
+    }
+
+    /// <summary>
+    /// The config is written into a script element, where HTML escaping means nothing and JSON
+    /// encoding is everything: a value containing a closing script tag would otherwise end the
+    /// element and turn the rest of the page into markup.
+    /// </summary>
+    [Fact]
+    public void A_field_cannot_close_the_script_it_sits_in()
+    {
+        var html = GuestCameraPage.Render(
+            "/api/q/tok/media", "/q/tok", "x", GuestPalette.Fallback, "n0nc3",
+            fields: new Dictionary<string, string> { ["ticket"] = "</script><script>alert(1)</script>" });
+
+        Assert.DoesNotContain("</script><script>alert(1)", html);
+    }
+
+    /// <summary>
+    /// A contributor cannot read the bucket, so the guest's consolations — "see the photos", a
+    /// "Gallery" button — describe a door that does not exist for them.
+    /// </summary>
+    [Fact]
+    public void The_way_back_is_whatever_the_caller_says_it_is()
+    {
+        var html = GuestCameraPage.Render(
+            "/api/q/tok/media", "/q/tok", "x", GuestPalette.Fallback, "n0nc3",
+            backLabel: "Back", gateNote: "You can still add photos straight from this phone's library.",
+            gateAction: "Add from your library");
+
+        Assert.Contains(">Back<", html);
+        Assert.Contains("Add from your library", html);
+        Assert.DoesNotContain("See the photos", html);
+        Assert.DoesNotContain(">Gallery<", html);
+    }
+
+    /// <summary>The guest wording is still the default, so nothing on that path moved.</summary>
+    [Fact]
+    public void A_guest_still_gets_the_gallery()
+    {
+        var html = Page();
+
+        Assert.Contains(">Gallery<", html);
+        Assert.Contains("See the photos", html);
+        Assert.Contains("fields: {}", html);
+    }
 }

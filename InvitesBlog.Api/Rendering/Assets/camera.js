@@ -1145,6 +1145,10 @@
     body.append('file', item.blob, `${item.id}${item.ext || '.jpg'}`);
     // The server refuses a video that arrives without one, so the two travel together or not at all.
     if (item.poster) body.append('poster', item.poster, `${item.id}_p.jpg`);
+    // Whatever the page has to say on every upload. A guest is authorized by a cookie and needs
+    // none; somebody who scanned a printed code carries a ticket, and it rides here rather than in
+    // the URL of a page their browser will remember.
+    for (const [k, v] of Object.entries(cfg.fields || {})) body.append(k, v);
 
     try {
       const res = await fetch(cfg.upload, {

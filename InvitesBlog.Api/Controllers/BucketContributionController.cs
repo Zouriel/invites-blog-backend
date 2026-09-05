@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using InvitesBlog.Api.Authorization;
+using InvitesBlog.Api.Rendering;
 using InvitesBlog.Api.MediaBuckets;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Otp;
@@ -131,11 +133,8 @@ public sealed class BucketContributionController(
         // every photograph as the only unproved value in the flow.
         var name = string.IsNullOrWhiteSpace(guest.Name) ? verified.Contact : guest.Name;
 
-        return Success(new
-        {
-            ticket = tickets.Issue(admission.QrId, name, verified.Contact, DateTimeOffset.UtcNow),
-            displayName = name,
-        });
+        return Admitted(
+            tickets.Issue(admission.QrId, name, verified.Contact, DateTimeOffset.UtcNow), name);
     }
 
     /// <summary>
@@ -159,11 +158,9 @@ public sealed class BucketContributionController(
         if (name.Length == 0)
             return BadRequest(ApiResponse<object?>.Fail("Tell us what to call you."));
 
-        return Success(new
-        {
-            ticket = tickets.Issue(admission.QrId, Truncate(name), verifiedContact: null, DateTimeOffset.UtcNow),
-            displayName = Truncate(name),
-        });
+        return Admitted(
+            tickets.Issue(admission.QrId, Truncate(name), verifiedContact: null, DateTimeOffset.UtcNow),
+            Truncate(name));
     }
 
     /// <summary>
@@ -188,7 +185,11 @@ public sealed class BucketContributionController(
         var admission = await buckets.AdmitAsync(token, ct);
         if (admission is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
 
-        var holder = tickets.Read(ticket, DateTimeOffset.UtcNow);
+        // The form field is how the app's own picker sends it; the cookie is how the camera page does,
+        // because a server-rendered page was handed nothing to put in a field. Same ticket, same
+        // checks below either way.
+        var holder = tickets.Read(ticket, DateTimeOffset.UtcNow)
+                     ?? tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
         if (holder is null)
             return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
 
@@ -229,6 +230,118 @@ public sealed class BucketContributionController(
         // Deliberately thin. A contributor is told their photo landed and nothing else about the
         // bucket — not what is in it, not who else has added to it.
         return Created(new { id = added.Id, thumbUrl = added.ThumbUrl });
+    }
+
+    /// <summary>
+    /// Whether this browser is still admitted to this code, and under what name.
+    ///
+    /// <para>What makes coming back from the camera free. The page holds its ticket in memory and
+    /// nowhere else, so a full-page navigation loses it — and asking somebody at a party to type
+    /// their name again because they pressed Back is the kind of small insult that stops them
+    /// bothering.</para>
+    /// </summary>
+    [HttpGet("{token}/session")]
+    public async Task<IActionResult> Session(string token, CancellationToken ct)
+    {
+        var admission = await buckets.AdmitAsync(token, ct);
+        if (admission is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
+
+        var holder = tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
+        if (holder is null || holder.QrId != admission.QrId)
+            return Success(new { admitted = false, ticket = (string?)null, displayName = (string?)null });
+
+        // A ticket earned by verifying is only good while that contact is still on the guest list —
+        // the same rule the upload applies, applied before offering to skip the door.
+        if (holder.VerifiedContact is { } proved
+            && await buckets.GuestForContactAsync(admission.BucketId, proved, ct) is null)
+            return Success(new { admitted = false, ticket = (string?)null, displayName = (string?)null });
+
+        return Success(new
+        {
+            admitted = true,
+            ticket = Request.Cookies[ContributorTickets.CookieName],
+            displayName = holder.DisplayName,
+        });
+    }
+
+    /// <summary>
+    /// The viewfinder, for somebody who scanned a printed code.
+    ///
+    /// <para>The same page a guest gets — one camera in this product, not two — and for the same
+    /// reason: a contributor standing at a party has not "captured" anything yet, and a file picker
+    /// asks them to go and find something instead of pointing a phone at the room.</para>
+    ///
+    /// <para><b>Why it hangs off /api.</b> This is HTML rather than JSON, which does not belong under
+    /// an API prefix. It is here anyway because the reverse proxy sends <c>/api/*</c> to this service
+    /// and everything else on this host to the single-page app — and <c>/q/{token}</c> itself IS a
+    /// page of that app. Serving this from a new top-level path would mean a route change on a proxy
+    /// shared with other projects, to gain a tidier URL nobody ever types.</para>
+    /// </summary>
+    [HttpGet("{token}/camera")]
+    public async Task<IActionResult> Camera(string token, CancellationToken ct)
+    {
+        var admission = await buckets.AdmitAsync(token, ct);
+        if (admission is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
+
+        // Admitted, and admitted to THIS code — a ticket earned on one bucket must not open the
+        // camera on another whose token somebody could read off a table.
+        var holder = tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
+        if (holder is null || holder.QrId != admission.QrId)
+            return Redirect($"/q/{Uri.EscapeDataString(token)}");
+
+        if (!admission.CanUpload)
+            return Redirect($"/q/{Uri.EscapeDataString(token)}");
+
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        var back = $"/q/{Uri.EscapeDataString(token)}";
+        var ticket = Request.Cookies[ContributorTickets.CookieName]!;
+
+        var html = GuestCameraPage.Render(
+            $"/api/q/{Uri.EscapeDataString(token)}/media",
+            back,
+            admission.BucketTitle,
+            // A bucket carries no theme of its own — it is the event that has a look, and a
+            // contributor is not shown the event.
+            GuestPalette.Fallback,
+            nonce,
+            backLabel: "Back",
+            gateNote: "You can still add photos straight from this phone's library.",
+            gateAction: "Add from your library",
+            // The upload carries the ticket in the field it always has. The cookie got it this far,
+            // but the writer's own door is the form field and there is no reason for the camera to
+            // knock on a different one.
+            fields: new Dictionary<string, string> { [ContributorTickets.FieldName] = ticket });
+
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        // The microphone rides along with the camera: holding the shutter records a clip, and a clip
+        // of a party with no sound is half of one.
+        Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()";
+        Response.Headers["Content-Security-Policy"] =
+            $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+            + "img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; "
+            + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+        return Content(html, "text/html; charset=utf-8");
+    }
+
+    /// <summary>
+    /// Hands the ticket back twice: in the body for the app's picker, and in an HttpOnly cookie for
+    /// the camera page, which holds nothing the app could have given it. See
+    /// <see cref="ContributorTickets.CookieName"/>.
+    /// </summary>
+    private IActionResult Admitted(string ticket, string displayName)
+    {
+        Response.Cookies.Append(ContributorTickets.CookieName, ticket, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Lax,
+            Path = "/",
+            // No Domain: host-only, so it never travels to a sibling host.
+            // No Expires: it dies with the browser session, and the ticket's own twelve hours cap it.
+        });
+
+        return Success(new { ticket, displayName });
     }
 
     private static async Task<byte[]> ReadAsync(IFormFile file, CancellationToken ct)
