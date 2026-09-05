@@ -126,6 +126,9 @@ public sealed class EventPhotoService(
     /// </summary>
     private const long MaxVideoBytes = 256L * 1024 * 1024;
 
+    /// <summary>One stored derivative: where it went, what it weighed, and how big it was.</summary>
+    private sealed record Derivative(string Url, long Bytes, int Width, int Height);
+
     public async Task<EventPhotoBoxDto> GetAsync(Guid campaignId, Guid? viewerGuestId, CancellationToken ct = default)
     {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
@@ -332,36 +335,63 @@ public sealed class EventPhotoService(
         long sizeBytes;
         int width, height;
 
+        // Every derivative is independent of every other one, so they are made and written TOGETHER
+        // rather than one after another.
+        //
+        // The wall time here is almost entirely the round trip to object storage, not the picture
+        // work: the same 12-megapixel photograph takes about 0.8s against storage on the same machine
+        // and about 8s against R2, and doing three PUTs in a row is three of those round trips spent
+        // for nothing. That whole time a contributor is standing at a party holding the phone it is
+        // uploading from, which is the worst place in this product to be slow.
+        async Task<Derivative> Write(Func<OptimizedImage> make, string key, string type)
+        {
+            // Off the request thread: decoding and re-encoding a 12MP JPEG is real CPU, and holding
+            // it here would serialise the three anyway.
+            var image = await Task.Run(make, ct);
+            var stored = await storage.PutAsync(key, image.Content, type, ct);
+            return new Derivative(stored, image.Content.Length, image.Width, image.Height);
+        }
+
         if (isVideo)
         {
             // ONE object, pointed at twice. There is no smaller viewing copy to make without
             // transcoding, and storing the same file under two keys would double what a party's
             // videos cost for nothing. The tile is the only derived thing a video has.
-            var still = imageOptimizer.Preserve(poster!, PosterType);
-            var tile = imageOptimizer.Optimize(poster!, PosterType, ThumbEdge);
+            var clip = storage.PutAsync($"{stem}{ext}", content, contentType, ct);
+            var tile = Write(() => imageOptimizer.Optimize(poster!, PosterType, ThumbEdge),
+                $"{stem}_t.jpg", PosterType);
+            // Never uploaded — it is read only for the dimensions the clip itself was shot at.
+            var still = Task.Run(() => imageOptimizer.Preserve(poster!, PosterType), ct);
 
-            url = originalUrl = await storage.PutAsync($"{stem}{ext}", content, contentType, ct);
-            thumbUrl = await storage.PutAsync($"{stem}_t.jpg", tile.Content, PosterType, ct);
+            await Task.WhenAll(clip, tile, still);
 
-            sizeBytes = content.Length + tile.Content.Length;
+            url = originalUrl = clip.Result;
+            thumbUrl = tile.Result.Url;
+
+            sizeBytes = content.Length + tile.Result.Bytes;
             // The frame's size IS the video's — it was drawn from it — so this stays the dimensions
             // of the thing itself rather than of the tile standing in for it.
-            width = still.Width;
-            height = still.Height;
+            width = still.Result.Width;
+            height = still.Result.Height;
         }
         else
         {
-            var original = imageOptimizer.Preserve(content, contentType);
-            var view = imageOptimizer.Optimize(content, contentType, ViewEdge);
-            var thumb = imageOptimizer.Optimize(content, contentType, ThumbEdge);
+            var original = Write(() => imageOptimizer.Preserve(content, contentType),
+                $"{stem}_o{ext}", contentType);
+            var view = Write(() => imageOptimizer.Optimize(content, contentType, ViewEdge),
+                $"{stem}{ext}", contentType);
+            var thumb = Write(() => imageOptimizer.Optimize(content, contentType, ThumbEdge),
+                $"{stem}_t{ext}", contentType);
 
-            originalUrl = await storage.PutAsync($"{stem}_o{ext}", original.Content, contentType, ct);
-            url = await storage.PutAsync($"{stem}{ext}", view.Content, contentType, ct);
-            thumbUrl = await storage.PutAsync($"{stem}_t{ext}", thumb.Content, contentType, ct);
+            await Task.WhenAll(original, view, thumb);
 
-            sizeBytes = original.Content.Length + view.Content.Length + thumb.Content.Length;
-            width = original.Width;
-            height = original.Height;
+            originalUrl = original.Result.Url;
+            url = view.Result.Url;
+            thumbUrl = thumb.Result.Url;
+
+            sizeBytes = original.Result.Bytes + view.Result.Bytes + thumb.Result.Bytes;
+            width = original.Result.Width;
+            height = original.Result.Height;
         }
 
         var photo = new EventPhoto
