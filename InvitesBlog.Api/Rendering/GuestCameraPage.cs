@@ -216,6 +216,8 @@ public static class GuestCameraPage
                 border-top-color:#fff; animation:spin .9s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }
         .gate p { margin:0; color:#b9adbf; max-width:34ch; }
+        .whydetail { font:500 .72rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; opacity:.55;
+                     letter-spacing:.04em; }
         @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
         """;
 
@@ -279,6 +281,7 @@ public static class GuestCameraPage
           <div class="gate">
             <h1 style="margin:0;font:600 1.3rem/1.3 Georgia,serif;">The camera isn't available</h1>
             <p id="why"></p>
+            <p class="whydetail" id="whydetail"></p>
             <p>{{E(gateNote)}}</p>
             <a class="btn" href="{{E(backPath)}}">{{E(gateAction)}}</a>
           </div>

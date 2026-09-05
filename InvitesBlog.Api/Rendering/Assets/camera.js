@@ -356,6 +356,14 @@
           ? 'Another app is using the camera. Close it and reload this page.'
           : 'The camera could not be opened on this browser.';
     $('why').textContent = why;
+
+    // The browser's own name for what went wrong, said quietly underneath. Every one of these
+    // failures looks identical to the person holding the phone — "the camera isn't available" — and
+    // they have completely different causes: a permission they can change, a device that has no
+    // camera, another app holding it. Without this, the only way to tell them apart is to be
+    // standing next to the phone.
+    const detail = $('whydetail');
+    if (detail) detail.textContent = (err && (err.name || err.message)) || 'unknown';
   }
 
   // ---- capture -------------------------------------------------------------------------------
