@@ -356,9 +356,67 @@ public class GuestCameraPageTests
         var html = Page();
 
         Assert.Contains("FRONT_ZOOM", html);
-        // Sensor zoom where the track has it, a crop only where it does not — never both.
+        // Whichever way the device can deliver it — sensor zoom where the track has it, a crop where
+        // it does not. That choice lives in applyResidual now rather than being spelled out here.
+        Assert.Contains("zoom = FRONT_ZOOM", html);
         Assert.Contains("caps.zoom", html);
-        Assert.Contains("crop = FRONT_ZOOM", html);
+    }
+
+    // ---------- zoom ----------
+
+    /// <summary>
+    /// The slider is gone. It was bound to the `zoom` constraint, which WebKit does not implement —
+    /// so on every iPhone it was a control that never appeared, on a page whose whole audience is
+    /// holding a phone.
+    /// </summary>
+    [Fact]
+    public void There_is_no_zoom_slider_left()
+    {
+        var html = Page();
+
+        Assert.DoesNotContain("type=\"range\"", html);
+        Assert.DoesNotContain("id=\"zoom\"", html);
+    }
+
+    /// <summary>
+    /// Two fingers, and the page's own pinch kept out of the way — without `touch-action:none` on
+    /// the viewfinder the browser zooms the document on exactly the gesture this is made of.
+    /// </summary>
+    [Fact]
+    public void Pinching_is_the_zoom_and_the_page_does_not_steal_it()
+    {
+        var html = Page();
+
+        Assert.Contains("function pinch()", html);
+        Assert.Contains("pointerdown", html);
+        Assert.Matches(@"\.stage \{[^}]*touch-action:\s*none", html);
+    }
+
+    /// <summary>
+    /// A lens is a different camera, so it is opened by id — and exactly, because "ideal" on a
+    /// deviceId means "or anything else", and anything else is the wrong lens.
+    /// </summary>
+    [Fact]
+    public void A_lens_is_chosen_by_an_exact_device_id()
+    {
+        var html = Page();
+
+        Assert.Contains("deviceId: { exact: deviceId }", html);
+        Assert.Contains("enumerateDevices", html);
+    }
+
+    /// <summary>
+    /// The auto-switching virtual cameras iOS also lists are skipped: they change lens on a zoom
+    /// factor set through a constraint WebKit does not implement, so on the web they are the wide
+    /// lens with extra steps — and listing one would put a button on the bar that does nothing.
+    /// </summary>
+    [Fact]
+    public void The_virtual_multi_camera_devices_are_not_offered_as_lenses()
+    {
+        var html = Page();
+
+        Assert.Contains("label.includes('dual')", html);
+        Assert.Contains("label.includes('triple')", html);
     }
 
     /// <summary>

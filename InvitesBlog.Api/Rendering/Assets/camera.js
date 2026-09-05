@@ -48,12 +48,63 @@
    */
   const FRONT_ZOOM = 1.25;
 
+  /** Whether the selfie framing has already been applied once, so a re-open does not re-impose it. */
+  let frontZoomed = false;
+
+  /** True while two fingers are down, so the tap that ends a pinch does not also refocus. */
+  let pinching = false;
+
   /**
    * Set only when the track cannot zoom itself. Sensor zoom is real detail; this is a crop, so it
-   * is the fallback rather than the method — and exactly one of the two is ever in play, which is
-   * what stops the zoom control and this compounding into each other.
+   * is the fallback rather than the method — and exactly one of the two is ever in play WITHIN a
+   * lens, which is what stops them compounding into each other.
    */
   let crop = 1;
+
+  // ---- zoom ----------------------------------------------------------------------------------
+  //
+  // Zoom here means one number: how far in, relative to the phone's MAIN back lens. 1 is that lens,
+  // 0.5 is the ultra-wide beside it, 2 is the telephoto. It is deliberately the number printed on
+  // every phone camera app, because it is the number the person pinching already understands.
+  //
+  // Three mechanisms deliver it, in descending order of how good the picture is:
+  //
+  //   1. A DIFFERENT LENS. Real optics, full sensor resolution, and the reason a modern phone takes
+  //      a good wide shot and a good distant one. Reachable on the web only where the browser
+  //      enumerates the back cameras separately — iOS has since 16.3; most Androids expose one
+  //      logical back camera and nothing else, because Camera2 hides the physical sub-cameras of a
+  //      logical group by default and Chrome does not ask for them.
+  //   2. SENSOR ZOOM, the `zoom` constraint. Real detail within one lens. Chromium only: WebKit
+  //      still does not implement it, which is why the old slider was invisible on every iPhone —
+  //      it was bound to a capability iOS does not have.
+  //   3. A CROP of the frame. Every device, no new detail. The floor rather than the method.
+  //
+  // They compose: a lens gets us to the nearest optical step, and whatever is left over is covered
+  // by (2) if the track has it and (3) if it does not.
+
+  /** How far in the user has asked to be, as a multiple of the main back lens. */
+  let zoom = 1;
+
+  /** The back lens currently open, as an entry of {@link lenses}, or null when we have no choice. */
+  let lens = null;
+
+  /**
+   * The back cameras this device will actually hand over, ascending by how wide they are.
+   *
+   * <p>Empty until the first camera has started, because labels are blank until a permission is
+   * granted and the label is the only thing that says which lens a device is. There is no standard
+   * field for focal length, field of view, or "this is the ultra-wide" — the working group has been
+   * asked and the answer is still no — so this is a heuristic, and it is written to degrade into
+   * "one camera, no lens switching" rather than to guess wrong.</p>
+   */
+  let lenses = [];
+
+  /**
+   * The most we will crop before refusing to go further. Beyond this it stops being zoom and starts
+   * being a smaller photograph of the same pixels — the point where a phone's own camera app also
+   * stops, for the same reason.
+   */
+  const MAX_DIGITAL = 4;
 
   /**
    * Night mode. Off by default, because a room that is already lit does not want it: biasing a good
@@ -120,7 +171,14 @@
     }
   })();
 
-  async function start(next) {
+  /**
+   * Opens a camera.
+   *
+   * @param next which way it faces, or nothing to keep the current one.
+   * @param deviceId a specific camera to open — how a lens is chosen. Exact, because "ideal" on a
+   *        deviceId means "or anything else", and anything else is the wrong lens.
+   */
+  async function start(next, deviceId) {
     const previous = facing;
     stop();
     facing = next || facing;
@@ -135,12 +193,21 @@
     // shadowing it here left `video.srcObject = stream` quietly setting a property on a plain
     // object and `video.classList` throwing on undefined — with the throw landing between the
     // preview starting and the state being set, so the page sat on its loading spinner forever.
-    const wanted = {
-      facingMode: { ideal: facing },
-      width: { ideal: 4096 },
-      height: { ideal: 4096 },
-      frameRate: { ideal: 30, min: 5 },
-    };
+    const wanted = deviceId
+      // A named camera and a facingMode are two answers to the same question, and a device that
+      // reads both can refuse the pair. The id is the more specific of the two, so it goes alone.
+      ? {
+          deviceId: { exact: deviceId },
+          width: { ideal: 4096 },
+          height: { ideal: 4096 },
+          frameRate: { ideal: 30, min: 5 },
+        }
+      : {
+          facingMode: { ideal: facing },
+          width: { ideal: 4096 },
+          height: { ideal: 4096 },
+          frameRate: { ideal: 30, min: 5 },
+        };
 
     try {
       // Zoom has to be asked for HERE. A camera permission granted without pan-tilt-zoom never
@@ -179,6 +246,9 @@
 
       await maxOut();
       await settle();
+      // Only now: labels are blank until a camera permission has actually been granted, so asking
+      // before this point returns a list of anonymous devices and no way to tell them apart.
+      await discoverLenses();
       controls();
       document.body.dataset.state = 'live';
 
@@ -209,6 +279,144 @@
   }
 
   /**
+   * Works out which back cameras this phone has and what each one is FOR.
+   *
+   * <p>There is no field on a media device that says "ultra-wide" — no focal length, no field of
+   * view, nothing. The label is the only signal, and it is a display string: localised, worded
+   * differently by every platform, and attached to ids that change between sessions. So this reads
+   * the label for the two words that matter, takes the plain back camera as 1×, and where it
+   * recognises nothing it produces a list of one and the whole feature quietly becomes "pinch
+   * crops", which is what every device got before.</p>
+   *
+   * <p>The virtual multi-camera devices iOS also offers — the ones that switch lenses by themselves
+   * — are deliberately skipped. They switch on a zoom factor set through a constraint WebKit does
+   * not implement, so on the web they are the wide lens with extra steps.</p>
+   */
+  async function discoverLenses() {
+    if (lenses.length || !navigator.mediaDevices.enumerateDevices) return;
+
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      return;
+    }
+
+    const cams = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);
+    const found = [];
+
+    for (const d of cams) {
+      const label = (d.label || '').toLowerCase();
+      // Front cameras and the auto-switching virtual devices are not lenses we can drive.
+      if (!label) continue;
+      if (label.includes('front') || label.includes('user') || label.includes('face')) continue;
+      if (label.includes('dual') || label.includes('triple')) continue;
+      if (!(label.includes('back') || label.includes('rear') || label.includes('environment'))) continue;
+
+      const factor = label.includes('ultra') ? 0.5 : label.includes('tele') ? 2 : 1;
+      found.push({ deviceId: d.deviceId, factor, label: d.label });
+    }
+
+    // One recognised camera is the same as none: there is nothing to switch BETWEEN, and a bar with
+    // a single button on it is a control that cannot do anything.
+    if (found.length < 2) return;
+
+    // Ascending, and only one of each step — a phone with two telephotos would otherwise put two
+    // buttons marked 2 next to each other.
+    found.sort((a, b) => a.factor - b.factor);
+    const seen = new Set();
+    lenses = found.filter((l) => !seen.has(l.factor) && seen.add(l.factor));
+
+    // Whichever of them we are actually looking through right now.
+    const open = track && track.getSettings ? track.getSettings().deviceId : null;
+    lens = lenses.find((l) => l.deviceId === open) || lenses.find((l) => l.factor === 1) || lenses[0];
+    zoom = lens ? lens.factor : 1;
+  }
+
+  /** The widest and closest this device can go, counting lenses, sensor zoom and cropping. */
+  function zoomRange() {
+    const widest = lenses.length ? lenses[0].factor : 1;
+    const longest = lenses.length ? lenses[lenses.length - 1].factor : 1;
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    const sensor = caps.zoom && caps.zoom.max > caps.zoom.min ? caps.zoom.max / (caps.zoom.min || 1) : 1;
+    return { min: widest, max: longest * Math.max(sensor, MAX_DIGITAL) };
+  }
+
+  /** Which lens a given factor belongs on: the longest one that does not overshoot it. */
+  function lensFor(z) {
+    if (!lenses.length) return null;
+    let best = lenses[0];
+    for (const l of lenses) if (l.factor <= z + 1e-6) best = l;
+    return best;
+  }
+
+  /**
+   * Goes to a zoom factor, by whatever means this device has.
+   *
+   * <p>The lens comes first because it is the only one of the three that adds real detail, and the
+   * remainder is then taken within it — sensor zoom where the track has it, a crop where it does
+   * not, never both.</p>
+   */
+  async function applyZoom(z, { switchLens = true } = {}) {
+    const range = zoomRange();
+    zoom = Math.max(range.min, Math.min(range.max, z));
+
+    // Mid-pinch the lens is normally pinned — switching is a camera teardown, and doing it every
+    // time a finger crossed a step would stutter the preview. The exception is a lens that cannot
+    // represent what was asked for at all: cropped past its ceiling, or asked to go wider than it
+    // is. Then the number on screen and the picture behind it have already parted company, and the
+    // stutter is the cheaper of the two.
+    //
+    // The lenses overlap — the wide covers 1× to 4×, the 2× telephoto covers 2× to 8× — so this is
+    // its own hysteresis: coming back down from 8× stays on the telephoto until 2×, and going up
+    // from 1× stays on the wide until 4×. Nothing oscillates at a boundary.
+    const want = switchLens ? lensFor(zoom) : outgrown() ? lensFor(zoom) : lens;
+    if (want && lens && want.deviceId !== lens.deviceId) {
+      lens = want;
+      // A full restart, because a lens IS a different camera. The zoom the user asked for survives
+      // it: start() finishes by calling settle(), which lands the remainder on the new lens.
+      await start(facing, want.deviceId);
+      return;
+    }
+
+    await applyResidual();
+    paintZoom();
+  }
+
+  /** Whether the open lens can no longer honestly show the zoom being asked of it. */
+  function outgrown() {
+    if (!lens) return false;
+    const residual = zoom / lens.factor;
+    return residual > MAX_DIGITAL + 1e-6 || residual < 1 - 1e-6;
+  }
+
+  /** The part of the zoom the current lens has to cover on its own. */
+  async function applyResidual() {
+    const base = lens ? lens.factor : 1;
+    const residual = Math.max(1, zoom / base);
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+
+    crop = 1;
+    if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+      const min = caps.zoom.min || 1;
+      const target = Math.min(caps.zoom.max, min * residual);
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: target }] });
+        // Whatever the sensor could not reach is cropped on top. This is the one place the two are
+        // allowed to meet, and only because the sensor has run out rather than because we asked
+        // for both.
+        crop = Math.max(1, Math.min(MAX_DIGITAL, (min * residual) / target));
+      } catch {
+        crop = Math.min(MAX_DIGITAL, residual);
+      }
+    } else {
+      crop = Math.min(MAX_DIGITAL, residual);
+    }
+
+    video.style.setProperty('--crop', String(crop));
+  }
+
+  /**
    * Opening state: how far in, and how the camera should hold focus.
    *
    * Sensor zoom is preferred wherever the track offers it — it is real detail rather than a bigger
@@ -216,24 +424,29 @@
    * none, the same amount is taken as a crop instead, so a selfie frames the same on any phone.
    */
   async function settle() {
-    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
-    crop = 1;
-
     if (facing === 'user') {
-      if (caps.zoom && caps.zoom.max > caps.zoom.min) {
-        const target = Math.min(caps.zoom.max, (caps.zoom.min || 1) * FRONT_ZOOM);
-        try {
-          await track.applyConstraints({ advanced: [{ zoom: target }] });
-        } catch {
-          crop = FRONT_ZOOM;
-        }
-      } else {
-        crop = FRONT_ZOOM;
+      // The front camera has one lens and no bar. It opens a little in and stays wherever the
+      // pinch leaves it, so the selfie framing is not re-imposed on every focus change.
+      lens = null;
+      if (!frontZoomed) {
+        zoom = FRONT_ZOOM;
+        frontZoomed = true;
       }
+    } else {
+      frontZoomed = false;
+      // Back again: the zoom is measured from the main lens, and whichever one is open decides what
+      // the remainder is. Not switchLens — we are already on the camera we were handed.
+      if (lenses.length) lens = lenses.find((l) => l.deviceId === openDeviceId()) || lens;
     }
-    video.style.setProperty('--crop', String(crop));
 
+    await applyResidual();
+    paintZoom();
     await meter();
+  }
+
+  /** The id of the camera actually open, which is how we know which lens we ended up on. */
+  function openDeviceId() {
+    return track && track.getSettings ? track.getSettings().deviceId : null;
   }
 
   /**
@@ -301,20 +514,64 @@
     } catch { /* the track keeps whatever it was metering at */ }
   }
 
+  /**
+   * Draws the zoom bar: one button per lens, and the number on whichever is in use.
+   *
+   * <p>The shape every phone camera app uses, because it is the shape of the thing: the lenses are
+   * discrete and the zoom between them is continuous, so the buttons are the steps and the pinch is
+   * everything in between. The active one shows what you are actually at — "1.8×", not "1" — which
+   * is the only feedback a pinch has.</p>
+   */
+  function paintZoom() {
+    const bar = $('zoombar');
+    if (!bar) return;
+
+    // Nothing to show on a device with one lens and no way to zoom it at all.
+    const range = zoomRange();
+    if (facing === 'user' || (lenses.length < 2 && range.max <= 1.01)) {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+
+    const steps = lenses.length ? lenses : [{ factor: 1 }];
+    if (bar.childElementCount !== steps.length) {
+      bar.textContent = '';
+      for (const step of steps) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.factor = String(step.factor);
+        b.addEventListener('click', () => applyZoom(step.factor));
+        bar.appendChild(b);
+      }
+    }
+
+    // The lens actually OPEN, not the one this zoom factor belongs to. Mid-pinch they differ — the
+    // wide lens holds on up to 4x before handing over — and lighting up the telephoto while the
+    // wide one is what you are looking through says the wrong thing about the picture.
+    const on = lens || steps[0];
+    [...bar.children].forEach((b, i) => {
+      const f = Number(b.dataset.factor);
+      const active = steps[i] === on || (!lenses.length && i === 0);
+      b.classList.toggle('on', active);
+      b.setAttribute('aria-pressed', String(active));
+      // The active step reads out the real figure; the others stay as their own labels, so the bar
+      // does not reflow every frame of a pinch.
+      b.textContent = active ? `${trim(zoom)}\u00d7` : trim(f);
+      b.setAttribute('aria-label', `Zoom to ${trim(f)} times`);
+    });
+  }
+
+  /** 0.5, 1, 1.8, 2 — never 1.0 or 1.80, which read as precision that is not there. */
+  function trim(n) {
+    return String(Math.round(n * 10) / 10);
+  }
+
   /** Show only the controls this device actually has. Most of these are Android-only today. */
   function controls() {
     const caps = track && track.getCapabilities ? track.getCapabilities() : {};
 
-    const zoom = $('zoom');
-    if (caps.zoom && caps.zoom.max > caps.zoom.min) {
-      zoom.min = caps.zoom.min;
-      zoom.max = caps.zoom.max;
-      zoom.step = caps.zoom.step || 0.1;
-      zoom.value = track.getSettings().zoom || caps.zoom.min;
-      zoom.hidden = false;
-    } else {
-      zoom.hidden = true;
-    }
+    paintZoom();
 
     $('torch').hidden = !caps.torch;
     $('flip').hidden = false;
@@ -534,8 +791,79 @@
    * tapped — which is true whatever the camera then does with it — and a device that cannot take
    * the point simply refuses the constraint.</p>
    */
+  /**
+   * Two fingers on the viewfinder, the way every camera on a phone works.
+   *
+   * <p>Tracked from the distance between the two pointers at the moment the second one lands, so the
+   * zoom follows the fingers rather than accumulating drift — spread to twice the starting gap and
+   * you are at twice the starting zoom, wherever the fingers began.</p>
+   *
+   * <p>The lens only changes when the fingers come off. Switching mid-gesture means tearing down a
+   * camera and opening another one, which takes long enough to be felt, and doing it while somebody
+   * is still moving their fingers would make the preview stutter every time they crossed a step. So
+   * the pinch moves continuously within the lens it started on, and the step it landed on is taken
+   * at the end.</p>
+   */
+  function pinch() {
+    const stage = document.querySelector('.stage');
+    if (!stage) return;
+
+    const points = new Map();
+    let from = 0;
+    let zoomFrom = 1;
+
+    const gap = () => {
+      const [a, b] = [...points.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+
+    stage.addEventListener('pointerdown', (e) => {
+      // Never the shutter or the buttons — those have their own gestures, and hold-to-record must
+      // not become a pinch because a second finger brushed the screen.
+      if (e.target.closest('.bottom, .top, .lock')) return;
+      points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (points.size === 2) {
+        from = gap();
+        zoomFrom = zoom;
+        pinching = true;
+      }
+    });
+
+    stage.addEventListener('pointermove', (e) => {
+      if (!points.has(e.pointerId)) return;
+      points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (points.size !== 2 || !from) return;
+      e.preventDefault();
+      // Within the current lens only: no restart while fingers are down.
+      applyZoom(zoomFrom * (gap() / from), { switchLens: false });
+    }, { passive: false });
+
+    const lift = (e) => {
+      points.delete(e.pointerId);
+      if (points.size >= 2 || !from) return;
+      from = 0;
+      // Now the expensive part, once: if the gesture ended on a different lens's territory, move to
+      // it. The residual lands on the new lens through settle().
+      if (pinching) applyZoom(zoom);
+      // Cleared on the next frame so the click this lift also produces does not focus the camera on
+      // wherever the second finger happened to be.
+      requestAnimationFrame(() => { pinching = false; });
+    };
+
+    stage.addEventListener('pointerup', lift);
+    stage.addEventListener('pointercancel', lift);
+
+    // A trackpad or a mouse wheel, for anyone testing this on a laptop.
+    stage.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      applyZoom(zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08));
+    }, { passive: false });
+  }
+
   async function focusAt(e) {
     if (!track || document.body.dataset.state !== 'live') return;
+    if (pinching) return;
 
     const box = video.getBoundingClientRect();
     const px = e.clientX - box.left;
@@ -543,6 +871,14 @@
 
     let x = px / box.width;
     let y = py / box.height;
+    // Undo the crop. What is on screen is the middle of the frame blown up, so a tap two thirds of
+    // the way across a 3x crop is not two thirds of the way across the SENSOR — and a focus point
+    // handed to the camera in the wrong coordinates focuses on the wrong thing, further out the
+    // more you have zoomed in.
+    if (crop !== 1) {
+      x = 0.5 + (x - 0.5) / crop;
+      y = 0.5 + (y - 0.5) / crop;
+    }
     if (facing === 'user') x = 1 - x;
     x = Math.min(1, Math.max(0, x));
     y = Math.min(1, Math.max(0, y));
@@ -1247,6 +1583,7 @@
     });
     // On the video itself, so the controls layered over it keep their own taps.
     video.addEventListener('click', focusAt);
+    pinch();
     $('flip').addEventListener('click', () => start(facing === 'user' ? 'environment' : 'user'));
 
     $('torch').addEventListener('click', async () => {
@@ -1268,14 +1605,6 @@
       await applyNightBias();
     });
 
-    $('zoom').addEventListener('input', async (e) => {
-      if (!track) return;
-      try {
-        await track.applyConstraints({ advanced: [{ zoom: Number(e.target.value) }] });
-      } catch {
-        /* ignored: the slider is only shown when the track claimed to support this */
-      }
-    });
 
     // Anything left from a previous visit is already on disk. Show it and keep trying.
     for (const item of await all()) tile(item);

@@ -48,6 +48,9 @@ public static class GuestCameraPage
         video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
         /* --crop is the fallback zoom, used only where the track cannot zoom itself. Composed with
            the mirror rather than replacing it, so a selfie stays both mirrored and framed in. */
+        /* The browser's own pinch must not eat the camera's: without this the page zooms instead of
+           the lens, on exactly the gesture this control is made of. */
+        .stage { touch-action: none; }
         video { transform: scale(var(--crop, 1)); }
         video.mirror { transform: scaleX(-1) scale(var(--crop, 1)); }
 
@@ -83,10 +86,8 @@ public static class GuestCameraPage
                background:linear-gradient(rgba(0,0,0,.55), transparent); }
         .title { font-size:.85rem; opacity:.9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-        /* flex:0 0 auto matters: this button shares a row with the zoom slider, and a range input
-           has an intrinsic minimum width it will not go below. Left to shrink, the BUTTON gave way
-           instead — squeezed under its own label, which then overflowed its centred area and read
-           as text sitting off to one side. */
+        /* flex:0 0 auto so a long label never squeezes the button under itself, which read as text
+           sitting off to one side of its own control. */
         .btn { display:grid; place-items:center; flex:0 0 auto; white-space:nowrap;
                min-width:44px; height:44px; padding:0 12px;
                border:0; border-radius:999px; background:rgba(0,0,0,.42); color:#fff;
@@ -124,8 +125,6 @@ public static class GuestCameraPage
         .side { flex:1 1 0; display:flex; align-items:center; gap:8px; }
         .side.right { justify-content:flex-end; }
 
-        /* min-width:0 lets it give up the space instead, which is what should yield here. */
-        input[type=range] { width:100%; min-width:0; max-width:130px; accent-color:#fff; }
 
         /* Shot strip: proof that what you took is going somewhere. */
         .queue { display:flex; gap:6px; overflow-x:auto; padding:0 2px 10px; scrollbar-width:none; }
@@ -215,6 +214,15 @@ public static class GuestCameraPage
         .spin { width:26px; height:26px; border-radius:999px; border:2px solid rgba(255,255,255,.25);
                 border-top-color:#fff; animation:spin .9s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }
+        /* Round, dark, thumb-reachable, sitting just above the shutter — where a hand already is. */
+        .zoombar { display:flex; gap:.4rem; justify-content:center; align-items:center;
+                   margin:0 0 .7rem; }
+        .zoombar button { min-width:2.1rem; height:2.1rem; padding:0 .55rem; border:0; border-radius:999px;
+                          background:rgba(0,0,0,.45); color:#f4eef6; font:600 .78rem/1 inherit;
+                          -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+                          cursor:pointer; touch-action:manipulation; }
+        .zoombar button.on { background:rgba(255,255,255,.92); color:#14100c; }
+
         .gate p { margin:0; color:#b9adbf; max-width:34ch; }
         .whydetail { font:500 .72rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; opacity:.55;
                      letter-spacing:.04em; }
@@ -298,10 +306,13 @@ public static class GuestCameraPage
           <div class="bottom">
             <div class="queue" id="queue"></div>
             <div class="filters" id="filters"></div>
+            <!-- The lenses, and the number you are actually at. Pinching moves between them; this
+                 is the shape every phone camera app uses, because the lenses are discrete and the
+                 zoom between them is not. -->
+            <div class="zoombar" id="zoombar" role="group" aria-label="Zoom" hidden></div>
             <div class="row">
               <div class="side">
                 <button class="btn" id="torch" type="button" hidden>Flash</button>
-                <input type="range" id="zoom" hidden aria-label="Zoom">
               </div>
               <button class="shoot" id="shoot" type="button"
                       aria-label="Take a photo, or hold to record a video"></button>
