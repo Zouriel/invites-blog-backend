@@ -27,6 +27,7 @@ public class MediaBucketServiceTests
     private readonly IRepository<MediaBucket> _buckets = Substitute.For<IRepository<MediaBucket>>();
     private readonly IRepository<MediaBucketQr> _qrs = Substitute.For<IRepository<MediaBucketQr>>();
     private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
+    private readonly ICampaignService _campaignService = Substitute.For<ICampaignService>();
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
@@ -52,7 +53,7 @@ public class MediaBucketServiceTests
     }
 
     private MediaBucketService Sut() => new(
-        _buckets, _qrs, _users, _photos, _campaigns, _guests,
+        _buckets, _qrs, _users, _photos, _campaigns, _guests, _campaignService,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
         Options.Create(new MediaBucketOptions()), _uow);
@@ -61,7 +62,6 @@ public class MediaBucketServiceTests
     {
         Id = Guid.NewGuid(),
         OwnerUserId = _me,
-        Title = "The wedding weekend",
         Tier = MediaBucketTier.Gb10,
         CapacityBytes = capacityGb * MediaBucketPlans.BytesPerGb,
         UsedBytes = used,

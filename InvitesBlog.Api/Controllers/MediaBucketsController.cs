@@ -75,12 +75,6 @@ public sealed class MediaBucketsController(
         [FromBody] CreateMediaBucketRequest req, CancellationToken ct) =>
         Created(await buckets.CreateAsync(req, ct));
 
-    [HttpPatch("{bucketId:guid}")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> Update(
-        Guid bucketId, [FromBody] UpdateMediaBucketRequest req, CancellationToken ct) =>
-        Success(await buckets.UpdateAsync(bucketId, req, ct));
-
     /// <summary>
     /// Moves the bucket onto a size. <b>There is no payment behind this yet</b> — it grants the space
     /// outright. When checkout arrives it calls this, after it is paid, rather than replacing it.

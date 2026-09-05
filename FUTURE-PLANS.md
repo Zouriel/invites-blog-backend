@@ -599,6 +599,11 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
   exactly one account and everybody who filled one was locked out of what they had filled, while the
   landing page promised "for everyone who was there". A campaign-linked bucket had never shown this
   because it inherits the campaign's guest list.
+- **A bucket owns a size and a term, and nothing else.** No name, no cover, no viewer list — the
+  campaign holds all three and shares them with its invitation. Each was a column on the bucket at
+  some point during the day and each was removed for the same reason: a second answer to a question
+  the event already answers, which drifts the moment somebody renames one of them. What the bucket
+  reports is read from its campaign.
 - **The campaign is the unit, and its guest list is who may look.** A campaign owns a guest list and
   may have an invitation, a bucket, or both; that one list serves both. A separate viewer list existed
   briefly and was removed — two lists answering one question is how somebody adds a person to one and

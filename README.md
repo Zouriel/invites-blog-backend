@@ -34,8 +34,8 @@ Adding is deliberately wider than looking — anyone at the party can contribute
 who comes to one is on a list, while the grid itself is for the people who were invited. The host
 moderates.
 
-A bucket has its own name, its own cover, its own size and its own **date**, and it does **not** need
-an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
+A bucket owns a **size** and a **term** and nothing else: its name, its cover, its date and its guest
+list are the event's, shared with the invitation. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. Sizes are 10, 20, 30 and 50 GB on a six-month term; every event still gets a free
 one, so nothing that worked before costs anything now.
 

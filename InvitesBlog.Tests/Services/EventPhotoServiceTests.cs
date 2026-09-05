@@ -32,7 +32,6 @@ public class EventPhotoServiceTests
             {
                 Id = Guid.NewGuid(),
                 CampaignId = ci.Arg<Guid>(),
-                Title = "Test bucket",
                 CapacityBytes = long.MaxValue,
             });
     }

@@ -6,18 +6,15 @@ namespace InvitesBlog.Domain.Entities;
 /// A media bucket — the place a night's photographs and clips are kept, and a product in its own
 /// right.
 ///
-/// <para><b>Why this is not a column on <see cref="Campaign"/>.</b> It began as one: every campaign
-/// implicitly owned a photo box, unbounded and free. That shape cannot be sold. A thing you sell
-/// needs a name of its own, a face of its own, a size someone chose, and a term that runs out — and
-/// it needs to be able to exist for someone who is not running an event here at all. A reunion, a
-/// trip, a season of somebody's football club: those are buckets with no invitation attached, and
-/// the moment the box is its own row they are all just a bucket with a null
-/// <see cref="CampaignId"/>.</para>
+/// <para><b>Why this is a row and not a column on <see cref="Campaign"/>.</b> It began as a column:
+/// every campaign implicitly owned a photo box, unbounded and free. That shape cannot be sold. What
+/// is sold is a SIZE and a TERM, and those are what this row holds.</para>
 ///
-/// <para><b>Every campaign still gets one.</b> Attaching a bucket is what keeps the event photo box
-/// working exactly as it did — the campaign's box IS its bucket. One is provisioned on demand for
-/// any campaign that never had a row, on the free tier, so nothing that was working stops working
-/// and nobody is billed for what they already had.</para>
+/// <para><b>It holds nothing else.</b> No name, no cover, and no list of who may see it — the
+/// campaign owns all three, and a bucket carrying its own copies would be a second answer to
+/// questions that already have one. A campaign may have an invitation, a bucket, or both; whichever
+/// it has, the title, the cover and the guest list are the campaign's and are shared between
+/// them.</para>
 /// </summary>
 public sealed class MediaBucket
 {
@@ -36,19 +33,6 @@ public sealed class MediaBucket
     /// </summary>
     public Guid? CampaignId { get; set; }
 
-    /// <summary>
-    /// What it is called. Defaulted from the campaign's title when one is provisioned for an event,
-    /// but its own field from then on: "Amira &amp; Yusuf" is the wedding, and the bucket people are
-    /// still adding to a month later may as well be called "The wedding weekend".
-    /// </summary>
-    public string Title { get; set; } = default!;
-
-    /// <summary>
-    /// The face of it in a grid. Chosen by the owner rather than taken from the newest upload —
-    /// a cover that changes every time somebody adds a photo is not a cover, it is a thumbnail, and
-    /// the tile stops being recognisable as the same bucket from one visit to the next.
-    /// </summary>
-    public string? CoverUrl { get; set; }
 
     /// <summary>
     /// The night this bucket is for.

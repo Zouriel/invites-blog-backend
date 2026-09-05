@@ -4,6 +4,7 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Campaigns;
+using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Campaigns;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Pricing;
@@ -411,6 +412,38 @@ public sealed class CampaignService(
         campaign.Title = req.Title.Trim();
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task<CreateCampaignResponse> CreateBareAsync(
+        string title, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new BusinessRuleException("Give your event a name.", "title_required");
+
+        // A placeholder to pin. Marked Imported, which every gallery read already fails to match, so
+        // it is invisible everywhere a template would otherwise be listed.
+        var placeholder = new Template
+        {
+            Id = Guid.NewGuid(),
+            Name = title.Trim(),
+            Slug = $"bare-{Guid.NewGuid():N}",
+            Description = "A campaign with no invitation.",
+            Category = "Imported",
+            Version = "1.0.0",
+            PackageUrl = string.Empty,
+            PreviewImageUrl = string.Empty,
+            ManifestJson = """{"fields":[],"images":[],"blocks":[],"theme":{}}""",
+            SceneJson = "{}",
+            Visibility = TemplateVisibility.Imported,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        await templates.AddAsync(placeholder, ct);
+        await uow.SaveChangesAsync(ct);
+
+        return await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
     }
 
     public async Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default)

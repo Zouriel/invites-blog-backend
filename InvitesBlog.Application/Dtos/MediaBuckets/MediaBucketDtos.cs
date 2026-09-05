@@ -19,7 +19,9 @@ public sealed record MediaBucketPlanDto(
 /// </summary>
 public sealed record MediaBucketDto(
     Guid Id,
+    /// <summary>The event's name. A bucket has none of its own.</summary>
     string Title,
+    /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
     string Tier,
     int Gb,
@@ -39,9 +41,6 @@ public sealed record MediaBucketDto(
     /// <summary>Whether the paid term has run out. Always false on the free tier, which has no term.</summary>
     bool Expired,
     DateTimeOffset CreatedAt);
-
-/// <summary>What the owner may change about a bucket.</summary>
-public sealed record UpdateMediaBucketRequest(string? Title, string? CoverUrl);
 
 /// <summary>
 /// Creating a bucket. <c>EventDate</c> is the night it is for and is required for a standalone one;

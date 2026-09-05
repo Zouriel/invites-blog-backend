@@ -22,6 +22,16 @@ public interface ICampaignService
     Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default);
 
     /// <summary>
+    /// A campaign with no invitation behind it — one that exists for a media bucket, or for a design
+    /// the customer brought themselves.
+    ///
+    /// <para>Ordinary creation pins a template, and neither of those has one to pin. A placeholder is
+    /// made here rather than by each caller so that campaign creation — tokens, ownership, slug,
+    /// status — stays in one place and cannot drift between the two ways in.</para>
+    /// </summary>
+    Task<CreateCampaignResponse> CreateBareAsync(string title, CancellationToken ct = default);
+
+    /// <summary>
     /// Renames the campaign — the name the host files it under, not the title inside the invitation.
     /// </summary>
     Task RenameAsync(Guid id, RenameCampaignRequest req, CancellationToken ct = default);
