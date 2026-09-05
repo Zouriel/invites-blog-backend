@@ -26,6 +26,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateAsset> TemplateAssets => Set<TemplateAsset>();
     public DbSet<CampaignAsset> CampaignAssets => Set<CampaignAsset>();
     public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
+    public DbSet<MediaBucket> MediaBuckets => Set<MediaBucket>();
+    public DbSet<MediaBucketQr> MediaBucketQrs => Set<MediaBucketQr>();
+    public DbSet<MediaBucketMember> MediaBucketMembers => Set<MediaBucketMember>();
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
@@ -216,6 +219,48 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // matches the query exactly rather than one that merely narrows it.
             e.HasIndex(x => new { x.CampaignId, x.DeletedAt, x.CreatedAt });
             e.HasIndex(x => x.GuestId);
+            // A standalone bucket has no campaign to read by, and the bucket list counts live items
+            // per bucket — both are this index rather than the campaign one.
+            e.HasIndex(x => new { x.BucketId, x.DeletedAt, x.CreatedAt });
+        });
+
+        b.Entity<MediaBucket>(e =>
+        {
+            e.ToTable("media_buckets");
+            e.HasKey(x => x.Id);
+            // The two ways a bucket is ever looked up: everything an account owns, and the one
+            // belonging to a given event.
+            e.HasIndex(x => x.OwnerUserId);
+            // Unique, because "the campaign's bucket" has to mean exactly one thing. Provisioning
+            // races on a first upload otherwise leave a campaign with two boxes and its media split
+            // between them, which is not recoverable by looking at it.
+            e.HasIndex(x => x.CampaignId)
+                .IsUnique()
+                .HasFilter("campaign_id IS NOT NULL")
+                .HasDatabaseName("idx_media_buckets_campaign");
+        });
+
+        b.Entity<MediaBucketQr>(e =>
+        {
+            e.ToTable("media_bucket_qrs");
+            e.HasKey(x => x.Id);
+            // A scan resolves a token hash to a code on every single hit — this is the read that has
+            // to be an index lookup rather than a scan of every code ever printed.
+            e.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("idx_media_bucket_qr_token");
+            e.HasIndex(x => new { x.BucketId, x.CreatedAt });
+        });
+
+        b.Entity<MediaBucketMember>(e =>
+        {
+            e.ToTable("media_bucket_members");
+            e.HasKey(x => x.Id);
+            // The read that runs on every view: is this contact on this bucket's list. Unique, so
+            // adding the same person twice cannot produce two rows to revoke separately.
+            e.HasIndex(x => new { x.BucketId, x.Contact })
+                .IsUnique()
+                .HasDatabaseName("idx_media_bucket_member");
+            // The other direction: every bucket a signed-in account may look at.
+            e.HasIndex(x => x.Contact);
         });
 
         b.Entity<SuppressionEntry>(e =>

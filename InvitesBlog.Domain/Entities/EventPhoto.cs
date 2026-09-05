@@ -18,7 +18,27 @@ namespace InvitesBlog.Domain.Entities;
 public sealed class EventPhoto
 {
     public Guid Id { get; set; }
-    public Guid CampaignId { get; set; }
+
+    /// <summary>
+    /// The event this was shot at, when there was one.
+    ///
+    /// <para>Null for a photograph in a STANDALONE bucket — one somebody bought for a trip or a
+    /// reunion, with no invitation behind it. That is a real case rather than a defect, and the
+    /// honest model for it is an absent campaign rather than an empty guid standing in for one: every
+    /// query here compares against a campaign that exists, and null correctly matches none of
+    /// them.</para>
+    /// </summary>
+    public Guid? CampaignId { get; set; }
+
+    /// <summary>
+    /// The <see cref="MediaBucket"/> this belongs to — what is charged for the space it takes, and
+    /// what a QR contributor is adding to.
+    ///
+    /// <para>Nullable only for rows written before buckets existed. Everything new has one, and a
+    /// campaign's bucket is provisioned on demand, so the null case is history rather than a state
+    /// anything creates.</para>
+    /// </summary>
+    public Guid? BucketId { get; set; }
 
     /// <summary>
     /// The guest who took it, when a guest did. Null for a photo the host added themselves — the host

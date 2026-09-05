@@ -4,6 +4,7 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Photos;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Campaigns;
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -40,6 +41,32 @@ public interface IEventPhotoService
         byte[]? poster = null, CancellationToken ct = default);
 
     /// <summary>
+    /// A BUCKET's contents, for its owner.
+    ///
+    /// <para>Separate from <see cref="GetAsync"/> because a standalone bucket has no campaign to be
+    /// read by, and its owner would otherwise have bought a product they cannot open. Authorized by
+    /// owning the bucket rather than by owning an event — for a bucket attached to a campaign those
+    /// are the same person, and for one that is not there is no event to ask about.</para>
+    /// </summary>
+    Task<EventPhotoBoxDto> GetBucketAsync(Guid bucketId, CancellationToken ct = default);
+
+    /// <summary>Removes an item from a bucket. The bucket's owner only — a contributor cannot.</summary>
+    Task DeleteFromBucketAsync(Guid bucketId, Guid photoId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds one item on behalf of somebody who scanned a bucket's QR code.
+    ///
+    /// <para><b>Authorizes nothing.</b> The caller has already turned a printed token into this
+    /// bucket id; a contributor has no account, no guest row and no session to check against. What
+    /// this door does NOT do is as important as what it does — it never reads the bucket back to
+    /// them, and the name it credits is a label, not an identity.</para>
+    /// </summary>
+    /// <param name="uploaderName">What to credit it to. Never trusted as proof of who anyone is.</param>
+    Task<EventPhotoDto> AddToBucketAsync(
+        Guid bucketId, Guid? campaignId, string? uploaderName, byte[] content, string contentType,
+        string fileName, byte[]? poster = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Removes a photo. Allowed for the guest who took it (<paramref name="actingGuestId"/>) or for a
     /// host holding <see cref="Permissions.Photos.Moderate"/> over the campaign.
     /// </summary>
@@ -72,6 +99,7 @@ public sealed class EventPhotoService(
     ICurrentUser currentUser,
     IStorageService storage,
     IImageOptimizer imageOptimizer,
+    IMediaBucketService bucketService,
     IUnitOfWork uow) : IEventPhotoService
 {
     /// <summary>
@@ -141,6 +169,85 @@ public sealed class EventPhotoService(
         if (campaign.Status == CampaignStatus.Cancelled)
             throw new BusinessRuleException("This event has been cancelled.", "campaign_cancelled");
 
+        var bucket = await bucketService.ForCampaignAsync(campaign.Id, ct);
+        var credit = guestId is null ? null : await GuestNameAsync(guestId.Value, ct);
+
+        return await StoreAsync(
+            bucket.Id, campaign.Id, guestId, credit, content, contentType, fileName, poster, ct);
+    }
+
+    public async Task<EventPhotoBoxDto> GetBucketAsync(Guid bucketId, CancellationToken ct = default)
+    {
+        // The VIEW door, not the ownership one: a bucket's contents are what its members are for, and
+        // gating them on ownership is what left everybody who filled a standalone bucket locked out
+        // of it. Managing it — renaming, resizing, handing out codes — still needs ownership.
+        var bucket = await bucketService.ViewAsync(bucketId, ct);
+        var mine = await bucketService.OwnsAsync(bucketId, ct);
+
+        var live = await photos.Query()
+            .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync(ct);
+
+        return new EventPhotoBoxDto(
+            bucket.CampaignId ?? Guid.Empty,
+            bucket.Title,
+            live.Count,
+            // Full or out of term, the owner can still look at what is already in it. Only adding
+            // stops.
+            !bucket.Expired && bucket.UsedBytes < bucket.CapacityBytes,
+            live.Select(p => new EventPhotoDto(
+                p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height,
+                p.UploaderName,
+                // The owner may remove anything in their own bucket. A member may look and download
+                // and nothing else — these are photographs of an occasion that is not theirs to
+                // curate, and the moderation right belongs to whoever the occasion belonged to.
+                mine,
+                p.CreatedAt)).ToList());
+    }
+
+    public async Task DeleteFromBucketAsync(
+        Guid bucketId, Guid photoId, CancellationToken ct = default)
+    {
+        await bucketService.GetAsync(bucketId, ct);   // ownership, or it throws
+
+        var photo = await photos.Query(tracking: true)
+            .FirstOrDefaultAsync(p => p.Id == photoId && p.BucketId == bucketId, ct)
+            ?? throw new NotFoundException("That photo is no longer here.");
+
+        if (photo.DeletedAt is not null) return;   // deleting twice is not an error
+
+        photo.DeletedAt = DateTimeOffset.UtcNow;
+        photos.Update(photo);
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task<EventPhotoDto> AddToBucketAsync(
+        Guid bucketId, Guid? campaignId, string? uploaderName, byte[] content, string contentType,
+        string fileName, byte[]? poster = null, CancellationToken ct = default)
+    {
+        // NO DOOR HERE, on purpose. The only caller is the QR contribution endpoint, and by the time
+        // it gets here it has already resolved a printed token to this exact bucket and checked the
+        // code has not been revoked. Re-deriving that from a contributor would mean inventing an
+        // identity for somebody who deliberately has none.
+        return await StoreAsync(
+            bucketId, campaignId, guestId: null, uploaderName, content, contentType, fileName,
+            poster, ct);
+    }
+
+    /// <summary>
+    /// Everything an upload does once it is known to be allowed: validate the media, make the
+    /// derivatives, write the objects, and record the row and what it cost.
+    ///
+    /// <para>Shared by both doors deliberately. The rules about what a photo box will accept — the
+    /// video's poster, the format, the absent size cap, the EXIF that always goes — are properties of
+    /// the box, not of who happened to be adding, and having them in one place is what stops the two
+    /// callers drifting into accepting different things.</para>
+    /// </summary>
+    private async Task<EventPhotoDto> StoreAsync(
+        Guid bucketId, Guid? campaignId, Guid? guestId, string? uploaderName, byte[] content,
+        string contentType, string fileName, byte[]? poster, CancellationToken ct)
+    {
         if (content.Length == 0)
             throw new BusinessRuleException("That photo file is empty.", "empty_image");
 
@@ -158,11 +265,31 @@ public sealed class EventPhotoService(
                 throw new BusinessRuleException("That video is too long to upload.", "video_too_large");
         }
 
-        // NO SIZE CAP, deliberately. Size limits belong on the images a TEMPLATE renders, where a
-        // huge upload buys nothing a browser can show and costs every guest the download. This is the
-        // opposite case: it is somebody's own photograph of the night, and there is no version of
-        // "your memory of the party was too big" that is the right answer. What that costs is storage,
-        // which is what R2 (§1) is for.
+        // Whether it is the night at all. Before the quota, because "this closed a week ago" is the
+        // more useful answer than "this is full" when both are true.
+        //
+        // THIS APPLIES TO THE HOST TOO, and that is deliberate rather than an oversight to tidy up.
+        // It is a change from how the photo box behaved before buckets, where the host could add from
+        // their dashboard at any time. A bucket is an occasion: it is open on its night and then it is
+        // a record of one, and an owner who could keep adding to it indefinitely would make the date
+        // a suggestion. If this ever looks like a bug, it was asked for — check before "fixing" it.
+        await bucketService.EnsureOpenAsync(bucketId, ct);
+
+        // Whether it will fit, checked BEFORE a single object is written: the alternative is
+        // discovering a bucket is full after uploading 200 MB into it, which costs the storage anyway
+        // and leaves a half-written row to unpick.
+        //
+        // The estimate is the raw upload — exact for a video, which is stored as it arrived, and
+        // close for a photograph, whose three derivatives together land near the original. It only
+        // has to be honest enough to refuse an upload that clearly does not fit; the real figure is
+        // counted below from what was actually stored.
+        await bucketService.EnsureRoomAsync(bucketId, content.Length, ct);
+
+        // NO SIZE CAP on a photograph, deliberately. Size limits belong on the images a TEMPLATE
+        // renders, where a huge upload buys nothing a browser can show and costs every guest the
+        // download. This is the opposite case: it is somebody's own photograph of the night, and
+        // there is no version of "your memory of the party was too big" that is the right answer.
+        // What that costs is storage, which is what R2 (§1) and the bucket's quota are for.
         //
         // Three objects, three jobs: the shot as taken, a screen-sized copy to open, and a grid tile.
         // All three drop EXIF — which matters more here than anywhere else in the product, because
@@ -172,7 +299,9 @@ public sealed class EventPhotoService(
         if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
 
         var id = Guid.NewGuid();
-        var stem = $"campaigns/{campaign.Id:N}/photos/{id:N}";
+        // Keyed by BUCKET, not by campaign: a standalone bucket has no campaign to key by, and the
+        // bucket is what owns the bytes and is charged for them either way.
+        var stem = $"buckets/{bucketId:N}/media/{id:N}";
 
         string originalUrl, url, thumbUrl;
         long sizeBytes;
@@ -213,9 +342,10 @@ public sealed class EventPhotoService(
         var photo = new EventPhoto
         {
             Id = id,
-            CampaignId = campaign.Id,
+            CampaignId = campaignId,
+            BucketId = bucketId,
             GuestId = guestId,
-            UploaderName = guestId is null ? null : await GuestNameAsync(guestId.Value, ct),
+            UploaderName = uploaderName,
             OriginalUrl = originalUrl,
             Url = url,
             ThumbUrl = thumbUrl,
@@ -229,6 +359,9 @@ public sealed class EventPhotoService(
 
         await photos.AddAsync(photo, ct);
         await uow.SaveChangesAsync(ct);
+
+        // What was actually written, not what was estimated above.
+        await bucketService.CountUsageAsync(bucketId, photo.SizeBytes, ct);
 
         return new EventPhotoDto(
             photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,

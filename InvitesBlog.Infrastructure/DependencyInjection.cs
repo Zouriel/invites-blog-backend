@@ -103,6 +103,15 @@ public static class DependencyInjection
         // than *Service, so Scrutor's convention scan doesn't pick it up — registered explicitly.
         services.AddSingleton<IImageOptimizer, Images.ImageSharpOptimizer>();
 
+        // Drawing a QR is pure computation over a string — no state, no connection, nothing to scope.
+        services.AddSingleton<IQrCodeRenderer, QrCodes.QrCoderRenderer>();
+
+        // What a media bucket costs and how big it is. Bound rather than hardcoded so a price can
+        // change without a deploy; MediaBucketOptions carries the shipped defaults, so an absent
+        // section is a working price list rather than a free product.
+        services.Configure<Application.MediaBuckets.MediaBucketOptions>(
+            config.GetSection(Application.MediaBuckets.MediaBucketOptions.Section));
+
         // OTP senders (email + sms), resolved by channel. Only channels in Otp:Channels are enabled.
         // SMS goes through MsgOwl once Sms:MsgOwl:ApiKey is set; without a key we fall back to the
         // console sender so local development still shows the code instead of failing.

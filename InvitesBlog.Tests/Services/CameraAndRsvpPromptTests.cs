@@ -61,7 +61,16 @@ public class CameraAndRsvpPromptTests
 
     [Fact]
     public void Shut_once_the_night_is_over() =>
-        Assert.False(Open(Start.AddHours(13)));
+        Assert.False(Open(Start.AddHours(25)));
+
+    /// <summary>
+    /// The morning after is still the same night. Somebody adding the photographs they took on the
+    /// way home, or over breakfast, is not late — which is why the window runs a full day rather than
+    /// half of one.
+    /// </summary>
+    [Fact]
+    public void Still_open_the_morning_after() =>
+        Assert.True(Open(Start.AddHours(13)));
 
     [Theory]
     [InlineData(RsvpStatus.NoResponse)]
@@ -77,8 +86,8 @@ public class CameraAndRsvpPromptTests
         // Midnight in Malé, and the second before it.
         Assert.True(Open(new DateTimeOffset(2026, 8, 27, 19, 0, 0, TimeSpan.Zero)));
         Assert.False(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 59, TimeSpan.Zero)));
-        Assert.True(Open(Start.AddHours(12)));
-        Assert.False(Open(Start.AddHours(12).AddSeconds(1)));
+        Assert.True(Open(Start.AddHours(24)));
+        Assert.False(Open(Start.AddHours(24).AddSeconds(1)));
     }
 
     // ----- the exemption -------------------------------------------------------------------------

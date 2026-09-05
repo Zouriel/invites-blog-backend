@@ -414,9 +414,11 @@ public sealed class InviteService(
             .ToDictionaryAsync(t => t.Id, t => t.PreviewImageUrl, ct);
 
         // One grouped count for the page, not one query per invitation.
+        // Standalone-bucket photographs have no campaign and belong to no invitation's count, so
+        // they are excluded before grouping — see the same shape in AccountService.
         var photoCounts = await photos.Query()
-            .Where(p => campaignIds.Contains(p.CampaignId) && p.DeletedAt == null)
-            .GroupBy(p => p.CampaignId)
+            .Where(p => p.CampaignId != null && campaignIds.Contains(p.CampaignId.Value) && p.DeletedAt == null)
+            .GroupBy(p => p.CampaignId!.Value)
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 

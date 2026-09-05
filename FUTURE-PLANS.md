@@ -8,10 +8,15 @@ model, then the render app, then invites.lens. The topology and auth work come b
 on purpose: §2 decides which hosts exist and what runs on them, and §3 shrinks what a leaked session is
 worth — which is the render app's whole reason for existing.
 
-**Status (2026-08-26).** §4 is **live for the personal link**: `me.invites.blog/i/{token}` and
+**Status (2026-09-05).** §4 is **live for the personal link**: `me.invites.blog/i/{token}` and
 `/r/{renderId}` are served by the API, and a guest now gets a server-rendered invitation with no
-iframe. Everything else on that host still goes to the Angular app. §1, §2's app dissolution, §3
-and §5 are not started.
+iframe. Everything else on that host still goes to the Angular app. §2's app dissolution and §3 are
+not started.
+
+§5 is **largely built, and has changed shape on the way**: the photo box shipped as a web feature
+with an in-browser camera, and has since become a **media bucket** — a product sold by the gigabyte
+rather than a property of a campaign. See the section itself. **This file is the authority on the
+roadmap; a copy of it in the local umbrella working tree may be ahead or behind — trust this one.**
 
 ---
 
@@ -478,7 +483,13 @@ in a top-level document.
 
 ---
 
-## 5. invites.lens — the event photo box
+## 5. invites.lens — the media bucket — *largely shipped, as a product*
+
+> **Renamed.** What this section called "the event photo box" is now a **media bucket**: photos and
+> video, a name and cover of its own, a size somebody bought, and no requirement that an event exist
+> behind it. The original sketch is kept below because its reasoning still holds — what changed is
+> that the box turned out to be sellable, and a thing you sell cannot be an implicit property of
+> something else.
 
 **The idea.** A mobile app guests use *at* the event to take photos. Everything they shoot collects into
 that campaign's photo box, for the host and guests to look through or download afterwards. The
@@ -512,3 +523,123 @@ a campaign, its guests, and its assets.
 
 **Done when:** a guest can shoot from the app, the host sees it in the campaign, and everyone can
 download the set.
+
+### What shipped (2026-08-26) — the box, without the app
+
+The web half, on all three guest surfaces. No native app; the camera is the browser's.
+
+- **`event_photos`**, a table of its own rather than a slot on `campaign_assets`. A campaign asset is
+  content the HOST chose and there are a handful; a box is guest-generated, unbounded, has to know who
+  took each shot, and must never be picked up by a slot lookup and rendered into somebody's invitation.
+- **No size limit, and the original is kept** — three objects per upload: the shot as taken, a 2048px
+  copy to open, and a 400px grid tile. A box is the one screen that renders hundreds of images at once,
+  on a phone, at an event; serving the viewing copy into a 120px tile is what makes it crawl.
+- **EXIF is stripped.** These are photographs of other people's guests, and a GPS tag would publish
+  where somebody's wedding was to anyone who downloads a picture of it.
+- **An in-browser camera** on the guest path — front/rear, colour grades baked in at capture, tap to
+  focus, exposure bias, hold-to-record video — with an IndexedDB upload queue so a shutter press never
+  waits for the network.
+- **A cancelled event's box is a read-only archive.** What was shot stays; nothing new arrives.
+
+### What shipped (2026-09-05) — the bucket as a product
+
+- **`media_buckets`**, a row of its own rather than an implicit property of a campaign. A thing you
+  sell needs a name, a face, a size somebody chose and a term that runs out — and it has to be able to
+  belong to someone not running an event here at all. `CampaignId` is nullable, and a null one is an
+  ordinary bucket rather than a broken one. Every campaign still gets one free, provisioned on demand,
+  so nothing that worked before costs anything now.
+- **`EventPhoto.CampaignId` is nullable too**, for the same reason. An empty guid standing in for "no
+  event" would be a value every campaign query had to know to skip; null already matches none of them.
+- **Capacity is frozen at purchase.** `CapacityBytes` is copied from the tier rather than read live,
+  exactly as `Campaign.DesignerFee` is: repricing or renaming a tier must not silently resize a bucket
+  already sold. Shrinking below what is stored is refused outright — there is no honest way to choose
+  which of somebody's photographs to stop keeping.
+- **Prices are configuration** (`MediaBuckets:Prices`), shipped defaults in code so a missing section
+  is a working price list rather than a free product. 10/20/30/50 GB, six-month term.
+- **The quota is checked before a byte is written**, and `UsedBytes` is maintained rather than summed —
+  a bucket is thousands of rows and the check runs on every single upload. It does NOT go down on a
+  soft delete: the stored objects outlive the row, so crediting the space back would sell room that is
+  still occupied.
+- **QR codes are rows, and the rendered PNG is stored with them.** The token is kept only as a SHA-256
+  hash, so the scannable URL cannot be reconstructed — which is exactly why the image is stored at
+  creation. The dashboard can always show the last code without the database ever holding a working
+  one, and a stolen backup yields pictures rather than credentials. Codes revoke individually, because
+  a printed card cannot be recalled, only refused.
+- **Anonymity is decided per code, not per bucket.** The cards on the reception tables and the link in
+  a follow-up email are the same bucket and want opposite answers.
+- **A contributor is not a user.** They hold a signed ticket (`ContributorTickets` — the same HMAC
+  shape as the render ticket, under its own context string) naming the code that admitted them and
+  what to credit, and it authorizes adding and nothing else. They cannot read the bucket, see who else
+  contributed, or remove anything. One verification covers the evening; nobody types twenty codes for
+  twenty photographs.
+- **Video uploads from the picker**, not only from the camera. The gap was never storage — video had
+  worked since the camera shipped — it was that the picker's `accept` was `image/*` and
+  `PhotosController` had no `poster` field, so a picked clip was refused twice over. The browser draws
+  the still exactly as the camera page already did, because pulling a frame out of an encoded clip
+  needs a decoder the API does not have.
+
+- **A bucket is an occasion, not a drive.** It has an `EventDate` and only ACCEPTS anything inside
+  `EventDayWindow` — from the start of that day in Malé until 24 hours after the event begins. That
+  window is now shared with the camera on the invitation rather than duplicated: answered separately
+  they drift, and what that looks like is a camera offered on an invitation leading to a bucket that
+  refuses every photo taken with it. Looking is never gated.
+- **Every control that adds is hidden outside the window, not disabled.** Somebody at a party would
+  otherwise pick twenty photographs before finding out none of them were going anywhere. The server
+  refuses independently, so the hidden UI is a courtesy rather than the enforcement.
+- **`EventDayWindow.IsOpen` treats a date it cannot represent as closed** rather than throwing. A
+  bucket row whose date was never set reads as year 1, and shifting that into +05:00 underflows — a
+  500 from "is it the night" would take the page down instead of saying no.
+- **Buckets are listed among the events, not in a tab of their own.** A bucket has a date and a night,
+  so it belongs in the same list as the things that have those; a tab beside it made somebody look in
+  two places for one evening. A bucket attached to a campaign is deliberately not listed separately —
+  that night already has a tile.
+
+- **Who may LOOK is a separate question from who may add, and the gap was real.** Until
+  `media_bucket_members`, the only read door was ownership — so a standalone bucket was visible to
+  exactly one account and everybody who filled one was locked out of what they had filled, while the
+  landing page promised "for everyone who was there". A campaign-linked bucket had never shown this
+  because it inherits the campaign's guest list.
+- **The list is curated by the owner, and contributing does not join it.** Adding and looking are
+  different rights, and the person who decides who looks at photographs of an occasion is the person
+  whose occasion it was. Membership is matched on an identifier the account has PROVED, never one it
+  typed.
+- **The two code kinds now differ in more than credit.** An anonymous code takes a name and believes
+  it. A verified code admits only contacts already on the list, checked *before* the send (the same
+  shape as the campaign link's guest-list gate, so an address that could never get in is not mailed a
+  code that would not work) and again after verification — the challenge is raised against a contact
+  the caller typed, and verification is the first moment we know which contact they actually hold.
+  The credit is then the owner's name for them: on a door that exists to demand proof, a
+  self-declared name would leave the one value shown on every photograph as the only unproved thing
+  in the flow.
+- **Wide write, narrow read — and the asymmetry IS the design.** Anyone who turns up can contribute
+  with nothing but a name, because not everyone who comes to a party is on a list: plus-ones, family,
+  somebody's photographer. Only the people the host invited can look. Contributing therefore proves
+  nothing and grants nothing, and an anonymous contributor having no way back in is the point rather
+  than a gap — it was briefly written down here as one, which was wrong. The photographs of an
+  evening are seen by the people who were asked to it, and taken by whoever was standing there.
+- **The night's window binds the OWNER as well.** A change from how the box behaved before buckets,
+  where a host could add from their dashboard whenever. Deliberate: a bucket is an occasion, open on
+  its night and a record of one afterwards, and an owner who could keep adding indefinitely would make
+  the date a suggestion. Expect this to be reported as a bug at some point; it is not.
+- **A member may look and download, never moderate.** `CanDelete` is false for them — these are
+  photographs of an occasion that is not theirs to curate.
+
+### Still to settle
+
+- **Nothing sweeps an expired bucket.** `TermEndAt` is recorded, shown, and blocks new uploads, but
+  what expiry should eventually MEAN for the photographs already inside is unanswered — and it is
+  somebody's memories on the other side of that decision. Same open question as retention, now with a
+  billing date attached to it.
+- **Billing is not wired up.** Choosing a size grants it and starts the term. When checkout arrives it
+  goes in front of `ChooseTierAsync` rather than replacing it.
+- **No bucket-scoped archive.** "Download everything" is campaign-scoped, so a standalone bucket cannot
+  offer it; the control is hidden there rather than shown broken.
+- **The quota estimate is the raw upload size** — exact for a clip, close for a photograph — so a
+  bucket can end up slightly past capacity by the derivatives of the last accepted file.
+- **`OwnerUserId` can be empty** for a bucket provisioned under a possession-token session, and is
+  never backfilled when that campaign is later claimed by an account.
+- **Consent** — guests photographing other guests — is still unaddressed, and a printed code that
+  admits strangers anonymously makes it a slightly bigger question than it was.
+- **Uploads are still buffered whole in memory.** `IStorageService` takes a `byte[]`, so with a 256 MB
+  video ceiling the practical limit is the server's RAM and whatever the proxy allows. Streaming
+  straight to storage is the fix, and it means changing `IStorageService`.

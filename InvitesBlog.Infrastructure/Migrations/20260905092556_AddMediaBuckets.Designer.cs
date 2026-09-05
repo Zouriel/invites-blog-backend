@@ -3,6 +3,7 @@ using System;
 using InvitesBlog.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260905092556_AddMediaBuckets")]
+    partial class AddMediaBuckets
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -868,10 +871,6 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTimeOffset>("EventDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("event_date");
-
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_user_id");
@@ -911,46 +910,6 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasIndex("OwnerUserId");
 
                     b.ToTable("media_buckets", (string)null);
-                });
-
-            modelBuilder.Entity("InvitesBlog.Domain.Entities.MediaBucketMember", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("BucketId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("bucket_id");
-
-                    b.Property<string>("Contact")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("contact");
-
-                    b.Property<string>("ContactType")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("contact_type");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Name")
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Contact");
-
-                    b.HasIndex("BucketId", "Contact")
-                        .IsUnique()
-                        .HasDatabaseName("idx_media_bucket_member");
-
-                    b.ToTable("media_bucket_members", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.MediaBucketQr", b =>

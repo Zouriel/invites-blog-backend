@@ -110,3 +110,28 @@ public interface IPaymentProvider
     PaymentWebhookResult HandleWebhook(string rawBody, string? signatureHeader);
     Task<RefundResult> RefundAsync(RefundRequest request, CancellationToken ct);
 }
+
+// ----- QR codes (media bucket contribution) -----
+
+/// <summary>
+/// Draws a QR code. A port rather than a call into a library, for the same reason storage is one:
+/// the thing being drawn is a URL, and the application layer should not have to know which encoder
+/// is on the other side of that.
+/// </summary>
+public interface IQrCodeRenderer
+{
+    /// <summary>
+    /// The code for <paramref name="content"/> as a PNG.
+    ///
+    /// <para>PNG rather than SVG because of what happens to it: a QR for a party gets dropped into a
+    /// table card in whatever someone already has open, printed, and photographed off a phone screen
+    /// by a hundred people. A raster at print resolution survives that chain; an SVG is better on
+    /// paper and worse everywhere else it will actually be pasted.</para>
+    /// </summary>
+    /// <param name="pixelsPerModule">
+    /// How many pixels each square of the code gets. Drives the final size, and is why this is
+    /// generous by default — a code scanned across a table needs the modules to survive both a
+    /// printer and a camera.
+    /// </param>
+    byte[] Png(string content, int pixelsPerModule = 12);
+}

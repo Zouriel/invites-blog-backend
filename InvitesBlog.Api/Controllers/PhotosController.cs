@@ -45,8 +45,9 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<IActionResult> AddAsHost(
-        Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, CancellationToken ct) =>
-        await AddAsync(campaignId, guestId: null, files, file, ct);
+        Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, IFormFile? poster,
+        CancellationToken ct) =>
+        await AddAsync(campaignId, guestId: null, files, file, poster, ct);
 
     [HttpDelete("/api/campaigns/{campaignId:guid}/photos/{photoId:guid}")]
     [HasPermission(Permissions.Photos.Read)]
@@ -76,8 +77,9 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<IActionResult> AddAsGuest(
-        Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, CancellationToken ct) =>
-        await AddAsync(campaignId, await GuestAsync(campaignId, ct), files, file, ct);
+        Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, IFormFile? poster,
+        CancellationToken ct) =>
+        await AddAsync(campaignId, await GuestAsync(campaignId, ct), files, file, poster, ct);
 
     [HttpDelete("/api/me/invitations/{campaignId:guid}/photos/{photoId:guid}")]
     [HasPermission(Permissions.Photos.Read)]
@@ -135,9 +137,21 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     /// <summary>
     /// A phone's photo picker sends several at once, so the multi-file field is the normal case here
     /// — unlike the builder's slot upload, where one is.
+    ///
+    /// <para><b>A clip arrives with its own still.</b> Pulling a frame out of an encoded video needs a
+    /// decoder the API does not have, so the browser — which is holding the frame already — draws it
+    /// and sends it as <paramref name="poster"/>. That is the same contract the camera page uses, and
+    /// it is why <see cref="IEventPhotoService.AddAsync"/> refuses a video without one.</para>
     /// </summary>
+    /// <param name="poster">
+    /// The still standing in for a single clip. It belongs to ONE video — it was drawn from that
+    /// video and nothing else — so a request carrying one carries a single file, which is how both
+    /// the camera and the picker send a clip. The ambiguous case is refused rather than silently
+    /// stamping one frame onto every item in a batch.
+    /// </param>
     private async Task<IActionResult> AddAsync(
-        Guid campaignId, Guid? guestId, IFormFileCollection? files, IFormFile? file, CancellationToken ct)
+        Guid campaignId, Guid? guestId, IFormFileCollection? files, IFormFile? file, IFormFile? poster,
+        CancellationToken ct)
     {
         var uploads = (files is { Count: > 0 } ? files.AsEnumerable() : [])
             .Concat(file is not null ? [file] : Array.Empty<IFormFile>())
@@ -147,16 +161,25 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         if (uploads.Count == 0)
             return BadRequest(Application.Common.ApiResponse<object?>.Fail("Pick at least one photo."));
 
+        var still = poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null;
+        if (still is not null && uploads.Count > 1)
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail(
+                "Send a clip and the still that stands for it on their own."));
+
         var added = new List<Application.Dtos.Photos.EventPhotoDto>();
         foreach (var upload in uploads)
-        {
-            await using var stream = upload.OpenReadStream();
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, ct);
             added.Add(await photos.AddAsync(
-                campaignId, guestId, buffer.ToArray(), upload.ContentType, upload.FileName, ct: ct));
-        }
+                campaignId, guestId, await ReadAsync(upload, ct), upload.ContentType, upload.FileName,
+                still, ct));
 
         return Created(added);
+    }
+
+    private static async Task<byte[]> ReadAsync(IFormFile file, CancellationToken ct)
+    {
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+        return buffer.ToArray();
     }
 }

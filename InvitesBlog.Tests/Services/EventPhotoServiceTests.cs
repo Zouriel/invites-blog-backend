@@ -2,6 +2,7 @@ using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Campaigns;
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Application.Services.Photos;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
@@ -22,6 +23,20 @@ namespace InvitesBlog.Tests.Services;
 /// </summary>
 public class EventPhotoServiceTests
 {
+    public EventPhotoServiceTests()
+    {
+        // Every upload resolves a bucket first. A roomy one, so a full-bucket refusal never stands in
+        // for the authorization answer a test was actually asking about.
+        _buckets.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new MediaBucket
+            {
+                Id = Guid.NewGuid(),
+                CampaignId = ci.Arg<Guid>(),
+                Title = "Test bucket",
+                CapacityBytes = long.MaxValue,
+            });
+    }
+
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IGuestRepository _guests = Substitute.For<IGuestRepository>();
@@ -30,6 +45,13 @@ public class EventPhotoServiceTests
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
     private readonly IStorageService _storage = Substitute.For<IStorageService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+
+    /// <summary>
+    /// Substituted rather than real: these tests are about the box's doors, and a bucket that always
+    /// has room keeps the quota out of the way of that. The bucket's own rules are
+    /// <see cref="MediaBucketServiceTests"/>' subject.
+    /// </summary>
+    private readonly IMediaBucketService _buckets = Substitute.For<IMediaBucketService>();
 
     // The real optimizer: producing the two derivatives IS what upload does, so a stub would stop
     // these noticing if it started handing back empty or unresized bytes.
@@ -40,7 +62,7 @@ public class EventPhotoServiceTests
     private EventPhotoService Sut() => new(
         _photos, _campaigns, _guests,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
-        _currentUser, _storage, _optimizer, _uow);
+        _currentUser, _storage, _optimizer, _buckets, _uow);
 
     /// <summary>
     /// A photo-like image — noise, so the two derivatives can't both compress away to nothing and make

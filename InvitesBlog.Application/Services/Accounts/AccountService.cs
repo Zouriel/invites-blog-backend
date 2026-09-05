@@ -393,9 +393,12 @@ public sealed class AccountService(
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
+        // `CampaignId` is nullable now — a photograph can live in a standalone bucket with no event
+        // behind it. Those are not any campaign's count, so they are filtered out before grouping
+        // rather than grouped under a null key that nothing would ever look up.
         var photoCounts = await photos.Query()
-            .Where(p => mineIds.Contains(p.CampaignId) && p.DeletedAt == null)
-            .GroupBy(p => p.CampaignId)
+            .Where(p => p.CampaignId != null && mineIds.Contains(p.CampaignId.Value) && p.DeletedAt == null)
+            .GroupBy(p => p.CampaignId!.Value)
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 

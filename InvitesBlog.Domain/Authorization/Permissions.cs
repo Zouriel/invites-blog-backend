@@ -68,6 +68,22 @@ public static class Permissions
         public const string Moderate = "photos.moderate";
     }
 
+    /// <summary>
+    /// Media buckets (§5). <see cref="Buckets.Manage"/> is the OWNER's right — rename, re-cover,
+    /// resize, and hand out or revoke a contribution code. Like every other permission here it says
+    /// "may do this KIND of thing", never "may do it to THIS bucket": which bucket is decided by
+    /// ownership, checked separately on every call.
+    ///
+    /// <para>There is deliberately no "contribute" permission. Somebody who scanned a printed code
+    /// holds no role and has no session — the token IS their authorization, and it authorizes one
+    /// action on one bucket. A permission would imply an identity they do not have.</para>
+    /// </summary>
+    public static class Buckets
+    {
+        public const string Read = "buckets.read";
+        public const string Manage = "buckets.manage";
+    }
+
     public static class Otp
     {
         public const string Request = "otp.request";
@@ -119,6 +135,8 @@ public static class Permissions
         (Photos.Read, "photos", "See an event's photo box"),
         (Photos.Upload, "photos", "Add a photo to an event"),
         (Photos.Moderate, "photos", "Remove any photo from an event"),
+        (Buckets.Read, "buckets", "See your media buckets"),
+        (Buckets.Manage, "buckets", "Create, resize and share a media bucket"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),
@@ -152,7 +170,7 @@ public static class Roles
         {
             Permissions.Templates.Read, Permissions.Designer.Manage,
             Permissions.Dashboard.Read, Permissions.Campaigns.Read, Permissions.Inbox.Read,
-            Permissions.Photos.Read,
+            Permissions.Photos.Read, Permissions.Buckets.Read,
         },
 
         // A signed-in customer is the same person as an Inviter — the difference is only which key
@@ -172,6 +190,7 @@ public static class Roles
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write,
             Permissions.Guests.Resend, Permissions.Payments.Read,
             Permissions.Photos.Read, Permissions.Photos.Upload, Permissions.Photos.Moderate,
+            Permissions.Buckets.Read, Permissions.Buckets.Manage,
         },
 
         [Inviter] = new[]
@@ -182,6 +201,7 @@ public static class Roles
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write, Permissions.Guests.Resend,
             Permissions.Payments.Read, Permissions.Dashboard.Read,
             Permissions.Photos.Read, Permissions.Photos.Upload, Permissions.Photos.Moderate,
+            Permissions.Buckets.Read, Permissions.Buckets.Manage,
         },
 
         [Invitee] = new[]

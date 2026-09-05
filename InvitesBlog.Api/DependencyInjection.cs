@@ -41,6 +41,10 @@ public static class DependencyInjection
 
         // The server-rendered guest path (/i, /r, rsvp).
         services.AddSingleton<Rendering.RenderTickets>();
+
+        // Same shape and the same key as the render ticket, under its own context string: what
+        // somebody who scanned a bucket's QR carries while they are adding to it.
+        services.AddSingleton<MediaBuckets.ContributorTickets>();
         services.AddScoped<Rendering.RenderedInvitations>();
 
         services.AddCors(o => o.AddDefaultPolicy(p => p

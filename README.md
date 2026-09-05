@@ -5,8 +5,8 @@ The API for **invites.blog** — animated digital invitations, and what happens 
 A host picks or commissions a template, builds an invitation, and sends every guest their own
 link. Each guest opens a **server-rendered, personalized** invitation — their name, their role,
 the blocks that apply to them — and replies without creating anything. On the night, they open a
-**camera inside that same invitation**, and everything anyone shoots collects in one place for
-everyone who was there.
+**camera inside that same invitation**, and everything anyone shoots collects in one place — open to
+add to, and visible to the people who were invited.
 
 This repo is the ASP.NET Core / .NET 10 backend: REST API, domain and business logic, EF Core
 persistence, the template compiler, the server-rendered guest path, and the worker.
@@ -25,10 +25,45 @@ RSVPs land live on the host's dashboard. A guest who would rather use an account
 email code, Google or Microsoft, and find every invitation ever sent to their address — including
 ones sent before they signed up.
 
-**The event photo box.** Guests open a camera from their invitation — front and rear, colour grades,
-tap to focus, an exposure bias for a dark room — and every shot queues to a store that survives a
-locked phone or a dead connection. Nothing is capped: the shot as taken is kept, alongside a
-screen-sized copy and a grid tile. Everyone at the event sees the grid; the host moderates it.
+**Media buckets.** The place a night's photographs and clips end up — and a product of its own, sold
+by the gigabyte. Guests open a camera from their invitation — front and rear, colour grades, tap to
+focus, an exposure bias for a dark room — and every shot queues to a store that survives a locked
+phone or a dead connection. Photos and **video** both, from the camera or straight off a camera roll.
+Nothing is capped per file: the shot as taken is kept, alongside a screen-sized copy and a grid tile.
+Adding is deliberately wider than looking — anyone at the party can contribute, because not everyone
+who comes to one is on a list, while the grid itself is for the people who were invited. The host
+moderates.
+
+A bucket has its own name, its own cover, its own size and its own **date**, and it does **not** need
+an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
+no event attached. Sizes are 10, 20, 30 and 50 GB on a six-month term; every event still gets a free
+one, so nothing that worked before costs anything now.
+
+A bucket is an occasion rather than a drive, so it only **takes** anything on its night: open from
+the start of that day in Malé until 24 hours after the event begins. That is the same window that
+decides whether a guest is offered the camera on their invitation — one definition, in
+`EventDayWindow`, because answered separately they drift and what that looks like is a camera leading
+to a bucket that refuses every photo taken with it. Looking is never gated; the point of the thing is
+what you have afterwards.
+
+**Contribution codes.** A bucket's owner generates a **QR code**, prints it, and puts it on the
+tables. Two kinds, chosen per code rather than per bucket, because the card on the table and the link
+in a follow-up email want opposite answers:
+
+- **Anonymous** — no sign-in at all. It asks for a name, believes it, and credits the photographs to
+  it. Right for a room where everyone present was invited by the person holding the party.
+- **Verified** — a one-time code to an email or phone, and only contacts the owner has put on the
+  bucket's list get in. The credit is then the owner's name for that person, not one the contributor
+  typed.
+
+A code can be turned off, since a printed card cannot be recalled — and the last one made stays in
+the dashboard to reprint, as an image, because the token behind it is stored hashed and can never be
+read back.
+
+**Who can look is a different question from who can add.** A bucket's contents are visible to its
+owner and to the list the owner added, and to nobody else; contributing is never a way in. A bucket
+attached to a campaign inherits that campaign's guest list. A standalone one has its own — without it
+exactly one account could ever see what a whole room filled.
 
 **Templates.** Three sources: first-party templates in this repo, community templates submitted by
 designers and reviewed before publication, and bespoke commissions arranged through an inquiry.
@@ -135,10 +170,22 @@ dotnet test          # 138 tests
   top-level document under `sandbox; default-src 'none'`. No iframe, and the authority is an
   HttpOnly cookie rather than the URL, because a template may ship its own JavaScript and a
   document can read its own address.
-- **The event photo box and camera** — an in-browser camera on the guest path: front/rear, colour
+- **The media bucket and camera** — an in-browser camera on the guest path: front/rear, colour
   grades baked in at capture, tap to focus, an exposure bias for a dark room, and an upload queue
   in IndexedDB so a shutter press never waits for the network. Originals are kept uncapped, with a
-  2048px viewing copy and a 400px tile derived from each.
+  2048px viewing copy and a 400px tile derived from each. **Video** is stored as uploaded with a
+  poster frame drawn in the browser — pulling a frame out of an encoded clip needs a decoder the API
+  does not have, and the browser is holding one already.
+- **Media buckets as a product** — `MediaBucket` owns the storage: a title, a cover, a size chosen
+  from 10/20/30/50 GB on a six-month term, and a quota enforced before a single object is written. A
+  bucket may be attached to a campaign or stand entirely alone. Tier prices live in configuration
+  (`MediaBuckets:Prices`), and `CapacityBytes` is frozen onto the bucket at purchase so repricing a
+  tier can never resize one already sold.
+- **QR contribution codes** — `MediaBucketQr`: a printed code that authorizes adding to one bucket
+  and nothing else. The token is stored as a SHA-256 hash and the rendered PNG alongside it, so the
+  dashboard can always show the code without the database ever holding a working one. Each code
+  records whether it admits anonymously, counts its own scans and uploads, and can be revoked
+  independently of the others.
 - **Cloudflare R2** for assets behind a custom domain, with cache headers set per key so template
   packages revalidate while campaign images stay immutable.
 
@@ -146,6 +193,9 @@ dotnet test          # 138 tests
 
 Worth knowing before reading the pricing code:
 
+- **Media buckets are not billed.** Choosing a size grants it outright and starts the six-month
+  term; nothing is charged. The price list is real and comes from configuration, and when checkout
+  arrives it slots in front of `ChooseTierAsync` rather than replacing it.
 - **Payments are not live.** `PricingCalculator` is complete and tested — $5 minimum, 50 invites
   included, $1 per block beyond, a per-use designer fee — but the only registered `IPaymentProvider`
   is `FakePaymentProvider`. No real money has moved through this.
