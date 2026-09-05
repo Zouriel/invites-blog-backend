@@ -86,7 +86,13 @@ public sealed record RegisterDesignerRequest(string Email, string Password, stri
 public sealed record MyCampaignDto(
     Guid Id, string Title, string Slug, string Status, string EventType,
     DateTimeOffset EventStartAt, int GuestCount, string? TemplateName, DateTimeOffset CreatedAt,
-    string? PreviewImageUrl = null, int PhotoCount = 0);
+    string? PreviewImageUrl = null, int PhotoCount = 0,
+    /// <summary>
+    /// True for an event with a media bucket and no invitation. A campaign may be an invitation, a
+    /// bucket, or both, and the list has to be able to say which — otherwise a bucket somebody
+    /// bought for a trip is indistinguishable from an invitation they never finished.
+    /// </summary>
+    bool MediaOnly = false);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(

@@ -416,7 +416,11 @@ public sealed class AccountService(
                 // the template's demo content, so leading with it put a stranger's name on somebody's
                 // event — it identifies the design, never the occasion.
                 InvitesBlog.Application.Campaigns.CampaignCover.Read(c.CustomContentJson) ?? template?.PreviewImageUrl,
-                photoCounts.GetValueOrDefault(c.Id)));
+                photoCounts.GetValueOrDefault(c.Id),
+                // No pinned package means no invitation to render: the campaign exists for its media
+                // bucket. A design the customer brought themselves DOES have one, so this separates
+                // "bucket only" from "invitation" without needing to know which kind of invitation.
+                MediaOnly: string.IsNullOrWhiteSpace(c.TemplatePackageUrl)));
         }
         return result;
     }
