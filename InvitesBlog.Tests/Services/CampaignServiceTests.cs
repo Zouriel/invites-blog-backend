@@ -604,4 +604,106 @@ public class CampaignServiceTests
         Assert.Equal(0, res.Emailed);
         await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
     }
+
+    // ---------- starting an event before it has anything ----------
+
+    /// <summary>
+    /// The night goes on in the SAME call that makes the event.
+    ///
+    /// <para>It used to be a second call to <c>SetEventDateAsync</c>, which checks ownership — and a
+    /// signed-out visitor owns nothing at that moment, because the possession token that makes the
+    /// campaign theirs is minted by the create and handed back in the response still being built. So
+    /// every anonymous start, which is most of them on a deliberately unguarded page, came back 403
+    /// with an event created and dateless behind it.</para>
+    /// </summary>
+    [Fact]
+    public async Task Starting_an_event_signed_out_still_records_the_night()
+    {
+        // The placeholder this makes is read straight back by ordinary creation, so the fake
+        // repository has to remember what it was handed.
+        Template? placeholder = null;
+        _templates.When(t => t.AddAsync(Arg.Any<Template>(), Arg.Any<CancellationToken>()))
+            .Do(c => placeholder = c.Arg<Template>());
+        _templates.GetActiveByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(_ => placeholder);
+
+        Campaign? saved = null;
+        _campaigns.When(c => c.AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>()))
+            .Do(c => saved = c.Arg<Campaign>());
+        // Whatever was added is what a later read finds — the service re-reads its own campaign to
+        // stamp the date on it.
+        _campaigns.Query(Arg.Any<bool>()).Returns(_ =>
+            (saved is null ? Array.Empty<Campaign>() : [saved]).AsAsyncQueryable());
+
+        // Nobody: no account, and no campaign on the request. Exactly what the create page sends.
+        _currentUser.UserId.Returns((Guid?)null);
+        _currentUser.CampaignId.Returns((Guid?)null);
+
+        var night = new DateTimeOffset(2026, 11, 14, 19, 0, 0, TimeSpan.FromHours(5));
+        var created = await Sut().CreateBareAsync("Amira & Yusuf", night);
+
+        Assert.False(string.IsNullOrEmpty(created.AccessToken));
+        Assert.NotNull(saved);
+        Assert.Equal(night.ToUniversalTime(), saved!.EventStartAt);
+        // Npgsql accepts none but UTC for `timestamp with time zone`, so a Malé offset must not survive.
+        Assert.Equal(TimeSpan.Zero, saved.EventStartAt.Offset);
+    }
+
+    // ---------- gaining an invitation after the fact ----------
+
+    /// <summary>
+    /// An event may be an invitation, a media bucket, or both. Until this existed the choice was
+    /// made once, by whichever door somebody came through, and could never be revisited — so a
+    /// bucket bought for a trip could never become an invitation and "or both" was untrue for
+    /// anybody who had not picked both at the start.
+    /// </summary>
+    [Fact]
+    public async Task An_event_with_no_invitation_can_be_given_one()
+    {
+        var campaign = new Campaign { Id = Guid.NewGuid(), TemplatePackageUrl = string.Empty };
+        _currentUser.CampaignId.Returns(campaign.Id);
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { campaign }.AsAsyncQueryable());
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+
+        var template = new Template
+        {
+            Id = Guid.NewGuid(),
+            Version = "1.0.0",
+            PackageUrl = "/assets/templates/gilded-hour@1.0.0/",
+            ManifestJson = """{"fields":[]}""",
+            Visibility = TemplateVisibility.Public,
+            IsActive = true,
+        };
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+        _templates.GetByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        await Sut().AttachTemplateAsync(campaign.Id, template.Id);
+
+        Assert.Equal(template.Id, campaign.TemplateId);
+        // Frozen exactly as ordinary creation freezes it, so an event that gains its invitation later
+        // is pinned the same way as one that started with it.
+        Assert.Equal(template.PackageUrl, campaign.TemplatePackageUrl);
+        Assert.Equal(template.Version, campaign.TemplateVersion);
+    }
+
+    /// <summary>
+    /// Refused for an event that already renders something. Pinning exists so that what was sent
+    /// stays what was sent — re-pointing a campaign whose invitations are in inboxes would re-render
+    /// every one of them.
+    /// </summary>
+    [Fact]
+    public async Task An_event_that_already_has_an_invitation_cannot_be_re_pointed()
+    {
+        var campaign = new Campaign
+        {
+            Id = Guid.NewGuid(),
+            TemplatePackageUrl = "/assets/templates/aurora-vows@1.0.0/",
+        };
+        _currentUser.CampaignId.Returns(campaign.Id);
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { campaign }.AsAsyncQueryable());
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().AttachTemplateAsync(campaign.Id, Guid.NewGuid()));
+        Assert.Equal("campaign_has_invitation", e.ErrorCode);
+    }
 }

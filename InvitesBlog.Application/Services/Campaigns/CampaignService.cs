@@ -414,8 +414,65 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
+    public async Task SetEventDateAsync(
+        Guid campaignId, DateTimeOffset when, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var campaign = await campaigns.Query(tracking: true)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+            ?? throw new NotFoundException("That event no longer exists.");
+
+        campaign.EventStartAt = when.ToUniversalTime();
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task<CampaignSummaryDto> AttachTemplateAsync(
+        Guid campaignId, Guid templateId, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var campaign = await campaigns.Query(tracking: true)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+            ?? throw new NotFoundException("That event no longer exists.");
+
+        // An event that already renders something is not ours to re-point. Pinning exists so that
+        // what was sent stays what was sent; swapping the design under a campaign whose invitations
+        // are already in inboxes would re-render every one of them.
+        if (!string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl))
+            throw new BusinessRuleException(
+                "This event already has an invitation.", "campaign_has_invitation");
+
+        var template = await templates.GetActiveByIdAsync(templateId, ct)
+                       ?? throw new TemplateNotAvailableException();
+
+        if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
+            throw new TemplateNotAvailableException();
+
+        // Frozen exactly as ordinary creation freezes it — the version's structure, the package it
+        // serves, and the designer's fee — so an event that gains its invitation later is pinned the
+        // same way as one that started with it.
+        campaign.TemplateId = template.Id;
+        campaign.TemplateVersion = template.Version;
+        campaign.TemplateManifestJson =
+            string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson;
+        campaign.TemplatePackageUrl = template.PackageUrl;
+        campaign.DesignerFee = template.UsagePrice ?? 0m;
+        campaign.DesignerFeeName = template.UsagePrice > 0m ? template.DesignerName : null;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+
+        return await GetSummaryAsync(campaignId, ct);
+    }
+
     public async Task<CreateCampaignResponse> CreateBareAsync(
-        string title, CancellationToken ct = default)
+        string title, DateTimeOffset? eventDate = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
@@ -443,7 +500,24 @@ public sealed class CampaignService(
         await templates.AddAsync(placeholder, ct);
         await uow.SaveChangesAsync(ct);
 
-        return await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
+        var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
+
+        // Written straight through, NOT via SetEventDateAsync — see the interface note: that one
+        // checks ownership, and the token making this campaign theirs is in the response being built.
+        if (eventDate is { } when)
+        {
+            var campaign = await campaigns.Query(tracking: true)
+                .FirstOrDefaultAsync(c => c.Id == created.CampaignId, ct);
+            if (campaign is not null)
+            {
+                campaign.EventStartAt = when.ToUniversalTime();
+                campaign.UpdatedAt = DateTimeOffset.UtcNow;
+                campaigns.Update(campaign);
+                await uow.SaveChangesAsync(ct);
+            }
+        }
+
+        return created;
     }
 
     public async Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default)
@@ -687,7 +761,8 @@ public sealed class CampaignService(
                 campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity,
                 campaign.RolesJson,
                 InvitesBlog.Application.Campaigns.CampaignCover.Read(campaign.CustomContentJson),
-                (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl),
+                (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl,
+                !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)),
             report, guestRows, questions);
     }
 

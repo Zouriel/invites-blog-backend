@@ -196,6 +196,32 @@ public sealed class CampaignsController(
     }
 
     /// <summary>
+    /// Starts an event with nothing attached — no invitation and no media bucket. What it has is
+    /// chosen next, and either can be added later; this is the one door that does not decide for
+    /// somebody which of the two they wanted before they have seen the choice.
+    ///
+    /// <para>Anonymous for the same reason ordinary creation is: a visitor gets a draft and a
+    /// possession token, and only then owns anything.</para>
+    /// </summary>
+    [HttpPost("bare")]
+    [AllowAnonymous]
+    public async Task<IActionResult> CreateBare(
+        [FromBody] CreateBareCampaignRequest req, CancellationToken ct)
+    {
+        return Created(await campaigns.CreateBareAsync(req.Title, req.EventDate, ct));
+    }
+
+    /// <summary>
+    /// Gives an event that has no invitation one. What makes "an invitation, a bucket, or both" true
+    /// after the fact rather than only at the moment somebody chose a door.
+    /// </summary>
+    [HttpPut("{campaignId:guid}/template")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> AttachTemplate(
+        Guid campaignId, [FromBody] AttachTemplateRequest req, CancellationToken ct) =>
+        Success(await campaigns.AttachTemplateAsync(campaignId, req.TemplateId, ct));
+
+    /// <summary>
     /// Starts a campaign from a design the customer brought, instead of from the gallery. Anonymous
     /// for the same reason ordinary creation is: a brand-new visitor gets a draft and a possession
     /// token, and only then owns anything.
@@ -245,3 +271,9 @@ public sealed class CampaignsController(
         return Success(await designs.ImportAsync(campaignId, buffer.ToArray(), file.FileName, ct));
     }
 }
+
+/// <summary>Which design to pin onto an event that has none.</summary>
+public sealed record AttachTemplateRequest(Guid TemplateId);
+
+/// <summary>Starting an event: what it is called and the night it is for.</summary>
+public sealed record CreateBareCampaignRequest(string Title, DateTimeOffset? EventDate);

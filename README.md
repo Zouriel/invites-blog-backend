@@ -64,6 +64,15 @@ list, and may have an invitation, a media bucket, or both. That one list is who 
 them. Contributing is never a way in — anyone at the party can add through a printed code, and only
 the people who were invited can look.
 
+**One way in.** Everything starts as an event: a name and a night, `POST /api/campaigns/bare`.
+What it *has* is chosen after that and is never final — `PUT /api/campaigns/{id}/template` pins a
+gallery design onto an event that has none, `POST /api/campaigns/{id}/design` does the same with one
+the customer brought, and `POST /api/campaigns/{id}/bucket` gives it somewhere for the photographs.
+Both attach endpoints refuse an event that already renders something, because pinning exists so that
+what was sent stays what was sent. Creating is deliberately anonymous, so the date rides in on the
+create rather than a second call: the possession token that makes the event theirs is minted by that
+very request and cannot be presented on it.
+
 **Templates.** Three sources: first-party templates in this repo, community templates submitted by
 designers and reviewed before publication, and bespoke commissions arranged through an inquiry.
 Designers set a per-use fee; commissioned templates can be reserved to one customer.
@@ -175,11 +184,12 @@ dotnet test          # 138 tests
   2048px viewing copy and a 400px tile derived from each. **Video** is stored as uploaded with a
   poster frame drawn in the browser — pulling a frame out of an encoded clip needs a decoder the API
   does not have, and the browser is holding one already.
-- **Media buckets as a product** — `MediaBucket` owns the storage: a title, a cover, a size chosen
-  from 10/20/30/50 GB on a six-month term, and a quota enforced before a single object is written. A
-  bucket may be attached to a campaign or stand entirely alone. Tier prices live in configuration
-  (`MediaBuckets:Prices`), and `CapacityBytes` is frozen onto the bucket at purchase so repricing a
-  tier can never resize one already sold.
+- **Media buckets as a product** — `MediaBucket` owns the storage and only the storage: a size
+  chosen from 10/20/30/50 GB on a six-month term, and a quota enforced before a single object is
+  written. Its name, cover, date and guest list are the campaign's, because every bucket has one —
+  a bucket bought on its own is a campaign with no invitation, not a loose object. Tier prices live
+  in configuration (`MediaBuckets:Prices`), and `CapacityBytes` is frozen onto the bucket at purchase
+  so repricing a tier can never resize one already sold.
 - **QR contribution codes** — `MediaBucketQr`: a printed code that authorizes adding to one bucket
   and nothing else. The token is stored as a SHA-256 hash and the rendered PNG alongside it, so the
   dashboard can always show the code without the database ever holding a working one. Each code

@@ -63,7 +63,13 @@ public sealed record DashboardCampaignDto(
     /// What the tile falls back to without a cover — the TEMPLATE's marketing poster, rendered from
     /// its demo content. Shown in the picker so the host can see why it is worth replacing.
     /// </summary>
-    string? TemplatePreviewImageUrl = null);
+    string? TemplatePreviewImageUrl = null,
+    /// <summary>
+    /// Whether this event has an invitation at all. An event may be a bucket on its own — somebody
+    /// who only wanted the photographs — and the dashboard has to know, or it offers guest tables and
+    /// a "send" for something that has nothing to send.
+    /// </summary>
+    bool HasInvitation = true);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

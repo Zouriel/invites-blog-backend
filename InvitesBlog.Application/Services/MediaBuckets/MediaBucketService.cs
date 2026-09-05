@@ -363,23 +363,11 @@ public sealed class MediaBucketService(
             if (req.EventDate is not { } night)
                 throw new BusinessRuleException("When is it for?", "bucket_date_required");
 
-            var created = await campaignService.CreateBareAsync(req.Title.Trim(), ct);
+            // The date the caller gave is the EVENT's, so the event is where it goes — and it goes
+            // in as part of creating it, because a second call to set it would check ownership that
+            // the caller cannot yet prove. Normalising to UTC happens there too.
+            var created = await campaignService.CreateBareAsync(req.Title.Trim(), night, ct);
             campaignId = created.CampaignId;
-
-            // The date the caller gave is the event's, so it goes on the event.
-            var bare = await campaigns.Query(tracking: true)
-                .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
-            if (bare is not null)
-            {
-                // Normalised to UTC before it is stored. A browser sends whatever offset it is in,
-                // and Npgsql refuses anything but UTC for `timestamp with time zone` — so a date
-                // picked in Malé fails on write rather than being converted. The window that reads
-                // it back reconstructs Malé's day from UTC anyway (see EventDayWindow), so nothing
-                // downstream wants the original offset.
-                bare.EventStartAt = night.ToUniversalTime();
-                campaigns.Update(bare);
-                await uow.SaveChangesAsync(ct);
-            }
         }
 
         // Always the campaign's date, so the invitation and the bucket can never disagree about
