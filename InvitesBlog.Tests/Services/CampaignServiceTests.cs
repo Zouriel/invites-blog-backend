@@ -220,6 +220,27 @@ public class CampaignServiceTests
         Assert.NotNull(c.InviterId);
     }
 
+    /// <summary>
+    /// The resume link is a recovery path for somebody building without an account. A signed-in host
+    /// has the event in their own list, so the mail told them to "resume" what they were in the
+    /// middle of finishing — and arrived again every time they touched the host-details step.
+    /// </summary>
+    [Fact]
+    public async Task UpdateInviter_sends_no_resume_link_to_somebody_with_an_account()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _currentUser.UserId.Returns(Guid.NewGuid());
+        _inviters.GetByEmailAsync("host@test.com", Arg.Any<CancellationToken>()).Returns((Inviter?)null);
+        var req = new UpdateInviterRequest("Host", "+9607777777", "host@test.com", null, null, null, "MV");
+
+        await Sut().UpdateInviterAsync(c.Id, req, "access-tok");
+
+        // The host details still land — only the mail is withheld.
+        Assert.NotNull(c.InviterId);
+        await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task UpdateInviter_existing_inviter_updated()
     {

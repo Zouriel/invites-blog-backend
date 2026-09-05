@@ -443,12 +443,20 @@ public sealed class MediaBucketService(
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
 
-        // Provisioned for whoever the campaign belongs to. That can legitimately be nobody with an
-        // account — a campaign booked with a possession link and never claimed — and an empty owner
-        // is correct there rather than an error: the bucket belongs to the event, and it will be
-        // picked up by the account that eventually claims it.
-        var bucket = NewBucket(currentUser.UserId ?? Guid.Empty, campaignId, campaign.EventStartAt,
-            MediaBucketPlans.Free(Options));
+        // Provisioned for whoever the CAMPAIGN belongs to, not for whoever happens to be calling.
+        //
+        // The two are usually the same person but not always the same claim: campaign-scoped requests
+        // carry the possession token in preference to the session (the browser sends whichever it
+        // holds for that campaign, and the possession token wins), and that token proves ownership of
+        // one campaign while saying nothing about which ACCOUNT is behind it. Reading the caller's id
+        // there gave an ownerless bucket to a host who was signed in the whole time — invisible in
+        // their own list of buckets, and reachable only through the event.
+        //
+        // It can still legitimately be nobody: a campaign booked with a possession link and never
+        // claimed has no account behind it, and an empty owner is correct there rather than an error.
+        var bucket = NewBucket(
+            campaign.CreatedByUserId ?? currentUser.UserId ?? Guid.Empty,
+            campaignId, campaign.EventStartAt, MediaBucketPlans.Free(Options));
 
         await buckets.AddAsync(bucket, ct);
 

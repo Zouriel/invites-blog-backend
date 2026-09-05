@@ -247,6 +247,13 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
 
         // Resume-your-invite magic link carries the caller's own access token (recovery path, §4.6.2 #4).
+        //
+        // Only for somebody with no account. The link exists so a visitor building without one can
+        // get back to a draft that lives nowhere else — but a signed-in host already has the event in
+        // their own list, so the mail told them to "resume" something they were in the middle of
+        // finishing, and arrived again every time they touched the host-details step.
+        if (currentUser.UserId is not null) return;
+
         var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
         var resumeLink = $"{inviterBase}/create/{campaign.Id}/editor?resume={accessToken}";
         await email.SendAsync(new Application.Abstractions.EmailMessage(
