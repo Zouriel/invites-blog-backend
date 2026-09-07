@@ -32,6 +32,17 @@ public sealed class AdminController(IAdminService admin) : BaseApiController
     public async Task<IActionResult> Suppression([FromQuery] SuppressionFilter filter, CancellationToken ct) =>
         Paged(await admin.ListSuppressionAsync(filter, ct));
 
+    /// <summary>
+    /// Grant or revoke one role on one account — the only write here.
+    ///
+    /// <para>PUT rather than POST because it states what should be true afterwards: sending the same
+    /// request twice leaves the same result, so a toggle that double-fires cannot half-apply.</para>
+    /// </summary>
+    [HttpPut("users/{id:guid}/roles")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> SetRole(Guid id, [FromBody] SetUserRoleRequest req, CancellationToken ct) =>
+        Success(await admin.SetUserRoleAsync(id, req, ct));
+
     [HttpGet("audit")]
     [HasPermission(Permissions.Admin.ReadAudit)]
     public async Task<IActionResult> Audit([FromQuery] AuditLogFilter filter, CancellationToken ct) =>

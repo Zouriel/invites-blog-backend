@@ -19,6 +19,11 @@ public sealed record SuppressionEntryDto(
 public sealed record AuditLogDto(
     Guid Id, string Action, string? Actor, Guid? CampaignId, string DataJson, DateTimeOffset CreatedAt);
 
+/// <summary>Granting or taking away one role from one account.</summary>
+/// <param name="Role">The role's NAME, which is what the seeder and every check use.</param>
+/// <param name="Granted">True to give it, false to take it away.</param>
+public sealed record SetUserRoleRequest(string Role, bool Granted);
+
 /// <summary>Admin login credentials.</summary>
 public sealed record AdminLoginRequest(string Email, string Password);
 

@@ -186,6 +186,17 @@ public static class Roles
     /// </summary>
     public const string Subscriber = "Subscriber";
 
+    /// <summary>
+    /// The roles an admin may grant or take away by hand.
+    ///
+    /// <para><b>Not simply "all of them".</b> <see cref="Inviter"/>, <see cref="Invitee"/> and
+    /// <see cref="Public"/> are not memberships anybody holds — they describe how a caller ARRIVED
+    /// (a possession token, a one-time code, nothing at all) and are attached to a request rather
+    /// than to an account. Granting one to a user would put a row in the table that no sign-in ever
+    /// reads, which looks like it worked and does nothing.</para>
+    /// </summary>
+    public static IReadOnlyList<string> Grantable { get; } = [Admin, Designer, Customer, Subscriber];
+
     public static IReadOnlyDictionary<string, string[]> Definitions { get; } = new Dictionary<string, string[]>
     {
         [Admin] = Permissions.All.Select(p => p.Name).ToArray(), // all permissions
