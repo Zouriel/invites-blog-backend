@@ -53,6 +53,7 @@ public class MediaBucketServiceTests
         // several, so it goes through Query rather than a predicate. Tests holding a bucket override
         // this through Stored().
         _buckets.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucket>().AsAsyncQueryable());
+        _members.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketMember>().AsAsyncQueryable());
         _guests.ListByCampaignAsync(Arg.Any<Guid>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<Guest>());
         // Every bucket now has a campaign, so DescribeAsync reaches for one on every describe rather
@@ -60,8 +61,10 @@ public class MediaBucketServiceTests
         _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
     }
 
+    private readonly IRepository<MediaBucketMember> _members = Substitute.For<IRepository<MediaBucketMember>>();
+
     private MediaBucketService Sut() => new(
-        _buckets, _qrs, _users, _photos, _campaigns, _guests, _campaignService,
+        _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
         Options.Create(new MediaBucketOptions()), _uow);
@@ -80,6 +83,18 @@ public class MediaBucketServiceTests
         EventDate = DateTimeOffset.UtcNow,
         CreatedAt = DateTimeOffset.UtcNow,
     };
+
+    /// <summary>
+    /// Somebody else's bucket. MayViewAsync opens for the owner before it ever consults the guest
+    /// list, so a test about who may LOOK has to start from a bucket that is not the caller's or it
+    /// passes for the wrong reason.
+    /// </summary>
+    private MediaBucket Theirs()
+    {
+        var bucket = Mine();
+        bucket.OwnerUserId = Guid.NewGuid();
+        return bucket;
+    }
 
     private void Stored(MediaBucket bucket)
     {
@@ -505,6 +520,7 @@ public class MediaBucketServiceTests
     public async Task The_window_for_an_event_with_no_bucket_is_the_ordinary_night()
     {
         _buckets.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucket>().AsAsyncQueryable());
+        _members.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketMember>().AsAsyncQueryable());
 
         Assert.Equal(1, await Sut().WindowForCampaignAsync(Guid.NewGuid()));
     }
@@ -625,5 +641,104 @@ public class MediaBucketServiceTests
     public void A_new_bucket_is_the_nights_bucket_until_it_is_named()
     {
         Assert.Equal("Night's bucket", new MediaBucket().Name);
+    }
+
+    // ---------- who may look into which bucket ----------
+
+    /// <summary>
+    /// The rule everything else rests on. Every bucket that predates the members table has no rows
+    /// at all, and reading absence as exclusion would darken all of them at once.
+    /// </summary>
+    [Fact]
+    public async Task An_unrestricted_bucket_is_open_to_the_whole_guest_list()
+    {
+        var bucket = Theirs();
+        bucket.IsRestricted = false;
+        Stored(bucket);
+        _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _me, Email = "guest@example.com" });
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
+
+        Assert.True(await Sut().MayViewAsync(bucket.Id));
+    }
+
+    /// <summary>Restricted means named guests only — being on the event is no longer enough.</summary>
+    [Fact]
+    public async Task A_restricted_bucket_shuts_out_a_guest_with_no_row()
+    {
+        var bucket = Theirs();
+        bucket.IsRestricted = true;
+        Stored(bucket);
+        _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _me, Email = "guest@example.com" });
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
+        _members.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucketMember, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(false);
+
+        Assert.False(await Sut().MayViewAsync(bucket.Id));
+    }
+
+    [Fact]
+    public async Task A_restricted_bucket_lets_in_a_guest_who_was_named()
+    {
+        var bucket = Theirs();
+        bucket.IsRestricted = true;
+        Stored(bucket);
+        _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _me, Email = "guest@example.com" });
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
+        _members.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucketMember, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(true);
+
+        Assert.True(await Sut().MayViewAsync(bucket.Id));
+    }
+
+    /// <summary>
+    /// Somebody who is not on the event at all is refused whatever the bucket's regime — the member
+    /// rows narrow the guest list, they never replace it.
+    /// </summary>
+    [Fact]
+    public async Task A_stranger_is_refused_even_with_a_row()
+    {
+        var bucket = Theirs();
+        bucket.IsRestricted = true;
+        Stored(bucket);
+        _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _me, Email = "stranger@example.com" });
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
+        _members.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucketMember, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(true);
+
+        Assert.False(await Sut().MayViewAsync(bucket.Id));
+    }
+
+    /// <summary>
+    /// Two buckets on one event cannot both be "Night's bucket" — the panel for editing a guest
+    /// would offer two identical switches, which is the confusion the name exists to remove.
+    /// </summary>
+    [Fact]
+    public async Task A_second_bucket_is_not_also_called_the_nights_bucket()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+        _buckets.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _buckets.CountAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(1);
+
+        MediaBucket? saved = null;
+        await _buckets.AddAsync(Arg.Do<MediaBucket>(b => saved = b), Arg.Any<CancellationToken>());
+
+        await Sut().CreateAsync(new CreateMediaBucketRequest("A wedding", null, campaignId, null));
+
+        Assert.Equal("Night's bucket 2", saved!.Name);
     }
 }

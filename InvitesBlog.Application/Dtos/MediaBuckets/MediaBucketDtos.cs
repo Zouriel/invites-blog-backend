@@ -67,6 +67,27 @@ public sealed record CreateMediaBucketRequest(
     /// <summary>What to call the bucket itself. Blank is the default name.</summary>
     string? Name = null);
 
+/// <summary>
+/// One of an event's buckets, as it appears in the panel for editing a guest — with whether that
+/// guest may look into it.
+/// </summary>
+public sealed record GuestBucketAccessDto(
+    Guid BucketId,
+    string Name,
+    DateTimeOffset EventDate,
+    /// <summary>Whether this is the event's default bucket, which the invitation's camera posts to.</summary>
+    bool IsDefault,
+    /// <summary>Whether the guest may look into it.</summary>
+    bool Granted,
+    /// <summary>
+    /// Whether the bucket is limited to named guests at all. False means the whole guest list can
+    /// see it and <see cref="Granted"/> is true for everyone.
+    /// </summary>
+    bool IsRestricted);
+
+/// <summary>Letting one guest into one bucket, or shutting them out of it.</summary>
+public sealed record SetGuestBucketAccessRequest(Guid BucketId, bool Granted);
+
 /// <summary>Renaming a bucket. Blank falls back to the default rather than leaving a gap.</summary>
 public sealed record RenameMediaBucketRequest(string Name);
 

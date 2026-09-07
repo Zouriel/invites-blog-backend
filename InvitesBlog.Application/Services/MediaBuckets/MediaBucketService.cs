@@ -97,6 +97,18 @@ public interface IMediaBucketService
     Task<MediaBucketDto> RenameAsync(
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
 
+    /// <summary>Every bucket on an event, with whether one guest may look into each.</summary>
+    Task<IReadOnlyList<GuestBucketAccessDto>> BucketsForGuestAsync(
+        Guid campaignId, Guid guestId, CancellationToken ct = default);
+
+    /// <summary>Lets one guest into one bucket, or shuts them out of it.</summary>
+    Task<IReadOnlyList<GuestBucketAccessDto>> SetGuestBucketAccessAsync(
+        Guid campaignId, Guid guestId, SetGuestBucketAccessRequest req, CancellationToken ct = default);
+
+    /// <summary>The buckets on an event that the CALLER may look into. Their own view, not the owner's.</summary>
+    Task<IReadOnlyList<MediaBucketDto>> VisibleForCampaignAsync(
+        Guid campaignId, CancellationToken ct = default);
+
     /// <summary>
     /// An event's bucket as its host sees it, or <c>null</c> when the event has none.
     ///
@@ -185,6 +197,7 @@ public sealed class MediaBucketService(
     IRepository<EventPhoto> photos,
     ICampaignRepository campaigns,
     IGuestRepository guestRepository,
+    IRepository<MediaBucketMember> members,
     ICampaignService campaignService,
     ICampaignOwnershipService ownership,
     ICurrentUser currentUser,
@@ -253,14 +266,15 @@ public sealed class MediaBucketService(
         var campaignId = bucket.CampaignId;
         if (await ownership.OwnsAsync(campaignId, ct)) return true;
 
-        // The event's guest list IS who may look. One list, not two — an event that has both an
-        // invitation and a bucket shares the same people between them, and a second list beside it
-        // would be configuration that decides nothing.
-        var proved = await MyContactsAsync(ct);
-        if (proved.Count == 0) return false;
+        // The event's guest list is who may look — drawn FROM, never copied. A bucket that has not
+        // been restricted is open to all of it, which is what every bucket predating members is.
+        var guest = await GuestOnThisEventAsync(campaignId, ct);
+        if (guest is null) return false;
+        if (!bucket.IsRestricted) return true;
 
-        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
-        return guests.Any(g => Matches(g, proved));
+        // Restricted: named guests only, and being on the event is no longer enough.
+        return await members.AnyAsync(
+            m => m.BucketId == bucket.Id && m.GuestId == guest.Id, ct);
     }
 
     public async Task<Guest?> GuestForContactAsync(
@@ -418,10 +432,22 @@ public sealed class MediaBucketService(
         var eventDate = isFirst ? campaignDate : req.EventDate ?? campaignDate;
 
         var bucket = NewBucket(userId, eventId, eventDate, plan, windowDays);
+
         var chosenName = req.Name?.Trim();
         if (!string.IsNullOrWhiteSpace(chosenName)
             && currentUser.HasPermission(Permissions.Buckets.Multiple))
+        {
             bucket.Name = chosenName.Length > 80 ? chosenName[..80] : chosenName;
+        }
+        else if (!isFirst)
+        {
+            // A second bucket cannot ALSO be "Night's bucket". Two rows with one name is the exact
+            // confusion the name was added to remove — the panel for editing a guest would offer two
+            // identical switches. Numbered from how many the event already has, and the owner
+            // renames it to something that means something the moment they care.
+            var already = await buckets.CountAsync(b => b.CampaignId == eventId, ct);
+            bucket.Name = $"{MediaBucket.DefaultName} {already + 1}";
+        }
         await buckets.AddAsync(bucket, ct);
         await uow.SaveChangesAsync(ct);
 
@@ -495,6 +521,138 @@ public sealed class MediaBucketService(
     /// Ordered by id as well as by date, so two rows written in the same instant still resolve the
     /// same way on every read rather than by whatever the database felt like returning.</para>
     /// </summary>
+
+    // ---------- who may look into which bucket ----------
+
+    public async Task<IReadOnlyList<GuestBucketAccessDto>> BucketsForGuestAsync(
+        Guid campaignId, Guid guestId, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var rows = await buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return [];
+
+        var admitted = await members.Query()
+            .Where(m => m.CampaignId == campaignId && m.GuestId == guestId)
+            .Select(m => m.BucketId)
+            .ToListAsync(ct);
+
+        var first = rows[0].Id;
+        return rows.Select(b => new GuestBucketAccessDto(
+            b.Id,
+            b.Name,
+            b.EventDate,
+            b.Id == first,
+            // An unrestricted bucket is open to the whole list, so everyone is granted whether or
+            // not a row exists. See MediaBucket.IsRestricted for why absence cannot mean "nobody".
+            !b.IsRestricted || admitted.Contains(b.Id),
+            b.IsRestricted)).ToList();
+    }
+
+    /// <summary>
+    /// Lets one guest into one bucket, or shuts them out.
+    ///
+    /// <para><b>The first exclusion is what closes a bucket.</b> Up to that point it is open to the
+    /// whole guest list and holds no rows at all; shutting one person out therefore has to write a
+    /// row for everybody ELSE in the same breath, or the single removal would read as "only this
+    /// person is excluded" while the empty table said "everyone is welcome". After that the list is
+    /// exact, and a guest added to the event later is NOT admitted by accident — a control over who
+    /// sees photographs of an evening should fail closed.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<GuestBucketAccessDto>> SetGuestBucketAccessAsync(
+        Guid campaignId, Guid guestId, SetGuestBucketAccessRequest req, CancellationToken ct = default)
+    {
+        if (!await ownership.OwnsAsync(campaignId, ct))
+            throw new ForbiddenException("That event isn't yours.");
+
+        var bucket = await buckets.Query(tracking: true)
+            .FirstOrDefaultAsync(b => b.Id == req.BucketId && b.CampaignId == campaignId, ct)
+            ?? throw new NotFoundException("That bucket isn't on this event.");
+
+        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: true, ct);
+        if (guests.All(g => g.Id != guestId))
+            throw new NotFoundException("That guest isn't on this event.");
+
+        var existing = await members.Query(tracking: true)
+            .Where(m => m.BucketId == bucket.Id)
+            .ToListAsync(ct);
+
+        if (!req.Granted && !bucket.IsRestricted)
+        {
+            // Closing it for the first time: everyone else keeps what they already had.
+            bucket.IsRestricted = true;
+            bucket.UpdatedAt = DateTimeOffset.UtcNow;
+            buckets.Update(bucket);
+
+            var now = DateTimeOffset.UtcNow;
+            foreach (var g in guests.Where(g => g.Id != guestId))
+                await members.AddAsync(new MediaBucketMember
+                {
+                    BucketId = bucket.Id,
+                    GuestId = g.Id,
+                    CampaignId = campaignId,
+                    AddedAt = now,
+                }, ct);
+        }
+        else if (req.Granted)
+        {
+            if (existing.All(m => m.GuestId != guestId))
+                await members.AddAsync(new MediaBucketMember
+                {
+                    BucketId = bucket.Id,
+                    GuestId = guestId,
+                    CampaignId = campaignId,
+                    AddedAt = DateTimeOffset.UtcNow,
+                }, ct);
+        }
+        else
+        {
+            if (existing.FirstOrDefault(m => m.GuestId == guestId) is { } row) members.Remove(row);
+        }
+
+        await uow.SaveChangesAsync(ct);
+        return await BucketsForGuestAsync(campaignId, guestId, ct);
+    }
+
+    public async Task<IReadOnlyList<MediaBucketDto>> VisibleForCampaignAsync(
+        Guid campaignId, CancellationToken ct = default)
+    {
+        var rows = await buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return [];
+
+        // The owner sees all of them; that is the same door as MayViewAsync's first two checks.
+        if ((currentUser.UserId is { } me && rows[0].OwnerUserId == me)
+            || await ownership.OwnsAsync(campaignId, ct))
+            return await DescribeAsync(rows, ct);
+
+        var guest = await GuestOnThisEventAsync(campaignId, ct);
+        if (guest is null) return [];
+
+        var admitted = await members.Query()
+            .Where(m => m.CampaignId == campaignId && m.GuestId == guest.Id)
+            .Select(m => m.BucketId)
+            .ToListAsync(ct);
+
+        var mine = rows.Where(b => !b.IsRestricted || admitted.Contains(b.Id)).ToList();
+        return mine.Count == 0 ? [] : await DescribeAsync(mine, ct);
+    }
+
+    /// <summary>The caller's guest row on this event, matched on an identifier they have PROVED.</summary>
+    private async Task<Guest?> GuestOnThisEventAsync(Guid campaignId, CancellationToken ct)
+    {
+        var proved = await MyContactsAsync(ct);
+        if (proved.Count == 0) return null;
+        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
+        return guests.FirstOrDefault(g => Matches(g, proved));
+    }
+
     public async Task<MediaBucketDto> RenameAsync(
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default)
     {
