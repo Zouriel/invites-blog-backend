@@ -62,6 +62,13 @@ public sealed record ClaimResponse(bool Claimed);
 public sealed record InviteRenderData(string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus);
 
 /// <summary>Bridges the Infrastructure invite renderer into the Application service.</summary>
+/// <param name="bucketWindowDays">
+/// How many days the event's default media bucket collects for. Passed IN rather than looked up by
+/// the renderer, because the renderer is synchronous and the number lives behind a query — and
+/// because it must be the same number the bucket itself enforces. A camera offered on an invitation
+/// that leads to a bucket refusing every photograph taken with it is precisely what one shared
+/// window exists to prevent.
+/// </param>
 public delegate InviteRenderData InviteRenderer(
     Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink,
-    string? inviterName, string? inviterPhone, string? inviterEmail);
+    string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays);

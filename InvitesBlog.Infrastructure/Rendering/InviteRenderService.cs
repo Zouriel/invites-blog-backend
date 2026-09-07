@@ -20,7 +20,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    public InviteRenderPayload Build(Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink, string? inviterName, string? inviterPhone, string? inviterEmail)
+    public InviteRenderPayload Build(Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink, string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays = 1)
     {
         var content = ParseObject(campaign.CustomContentJson);
         var venue = content["venue"] as JsonObject ?? new JsonObject();
@@ -98,7 +98,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             // camera apart from a payload rendered before there was one.
             ["camera"] = CameraIsOpen(
                 campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow,
-                DateIgnoredFor(campaign.Id))
+                DateIgnoredFor(campaign.Id), bucketWindowDays)
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
                 : new JsonObject(),
             ["theme"] = theme,
@@ -267,11 +267,12 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
     /// a deployment, and so the list is visible as the testing affordance it is.</para>
     /// </summary>
     public static bool CameraIsOpen(
-        DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now, bool ignoreDate = false)
+        DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now, bool ignoreDate = false,
+        int windowDays = 1)
     {
         if (rsvp != RsvpStatus.Going) return false;
         if (ignoreDate) return true;
-        return EventDayWindow.IsOpen(eventStartAt, now);
+        return EventDayWindow.IsOpen(eventStartAt, now, windowDays);
     }
 
     /// <summary>Campaigns exempt from the date, as configured. Ids only; anything else is ignored.</summary>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Invites;
 using InvitesBlog.Application.Dtos.Otp;
@@ -33,6 +34,7 @@ public sealed class InviteService(
     IRepository<InviteTrustedIp> trustedIps,
     IRepository<EventPhoto> photos,
     IOtpService otp,
+    IMediaBucketService bucketService,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IConfiguration config,
@@ -80,7 +82,8 @@ public sealed class InviteService(
         var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
         var link = $"{inviteeBase}/i/{token}";
         var payload = render(campaign, template, guest, invite, link,
-            inviter?.Name, inviter?.PhoneE164, inviter?.Email);
+            inviter?.Name, inviter?.PhoneE164, inviter?.Email,
+            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
 
         return new InviteViewResponse(payload.PackageUrl, payload.Data, false, payload.CampaignStatus,
             RsvpQuestions.Parse(campaign.RsvpQuestionsJson), invite.Id);
@@ -108,7 +111,8 @@ public sealed class InviteService(
             ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
 
         var payload = render(campaign, template, guest, invite, inviteLink,
-            inviter?.Name, inviter?.PhoneE164, inviter?.Email);
+            inviter?.Name, inviter?.PhoneE164, inviter?.Email,
+            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
 
         return new InviteRenderData(
             payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString());
@@ -343,7 +347,9 @@ public sealed class InviteService(
         // appeared to open. Addressing the invite by ID gives it a route that exists.
         var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
         var link = $"{inviteeBase}/invites/{invite.Id}";
-        var payload = render(campaign, template, guest, invite, link, inviter?.Name, inviter?.PhoneE164, inviter?.Email);
+        var payload = render(campaign, template, guest, invite, link, inviter?.Name,
+            inviter?.PhoneE164, inviter?.Email,
+            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
         await uow.SaveChangesAsync(ct);
 
         return new MyInviteResponse(payload.PackageUrl, payload.Data, payload.CampaignStatus,

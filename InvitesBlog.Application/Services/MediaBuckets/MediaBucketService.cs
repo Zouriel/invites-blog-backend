@@ -8,6 +8,7 @@ using InvitesBlog.Application.MediaBuckets;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Application.Services.Campaigns;
+using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -76,6 +77,25 @@ public interface IMediaBucketService
     /// for what they already had.</para>
     /// </summary>
     Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// How many days this event's default bucket collects for — 1 when it has no bucket yet.
+    ///
+    /// <para>Separate from <see cref="ForCampaignAsync"/> because the callers are READS: whether to
+    /// offer a guest the camera, and whether the box says it is closed. Asking the provisioning path
+    /// would create a bucket as a side effect of drawing a page, for every event anybody looked at.</para>
+    /// </summary>
+    Task<int> WindowForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Renames a bucket.
+    ///
+    /// <para>Gated on the same right as keeping more than one, because that is the only situation
+    /// the name exists for: somebody with a single bucket has nothing to tell it apart FROM, and the
+    /// default already reads correctly on their dashboard.</para>
+    /// </summary>
+    Task<MediaBucketDto> RenameAsync(
+        Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
 
     /// <summary>
     /// An event's bucket as its host sees it, or <c>null</c> when the event has none.
@@ -346,9 +366,15 @@ public sealed class MediaBucketService(
         {
             if (!await ownership.OwnsAsync(existing, ct))
                 throw new ForbiddenException("That event isn't yours.");
-            if (await buckets.AnyAsync(b => b.CampaignId == existing, ct))
+            // A second bucket on one event is what a subscription buys: the ceremony and the
+            // after-party, each with its own night and its own audience. Everyone else keeps the one
+            // free bucket every event has always had.
+            if (await buckets.AnyAsync(b => b.CampaignId == existing, ct)
+                && !currentUser.HasPermission(Permissions.Buckets.Multiple))
                 throw new BusinessRuleException(
-                    "That event already has a media bucket.", "bucket_exists_for_campaign");
+                    "That event already has a media bucket. Keeping more than one on the same event "
+                    + "is part of a subscription.",
+                    "bucket_exists_for_campaign");
         }
 
         var plan = ParseTier(req.Tier) is { } tier
@@ -374,12 +400,28 @@ public sealed class MediaBucketService(
         // Settled either way by here: given by the caller, or the bare campaign just made for it.
         var eventId = campaignId.Value;
 
-        // Always the campaign's date, so the invitation and the bucket can never disagree about
-        // which night they belong to.
-        var eventDate = (await campaigns.GetByIdAsync(eventId, ct))?.EventStartAt
-                        ?? throw new NotFoundException("That event no longer exists.");
+        // Collecting for longer than the one night is the other half of a subscription. Asked for
+        // here and FROZEN onto the row, so revoking the subscription later cannot shut a bucket
+        // somebody has already printed codes for — see MediaBucket.UploadWindowDays.
+        var windowDays = WindowFor(req.WindowDays);
 
-        var bucket = NewBucket(userId, eventId, eventDate, plan);
+        var campaignDate = (await campaigns.GetByIdAsync(eventId, ct))?.EventStartAt
+                           ?? throw new NotFoundException("That event no longer exists.");
+
+        // The event's DEFAULT bucket always takes the event's own date, so the invitation and the
+        // bucket its camera posts to can never disagree about which night they belong to. A SECOND
+        // bucket may carry its own, because that is what a second one is FOR — an evening that is
+        // really two, a ceremony and an after-party that do not share a date. Without this they are
+        // also indistinguishable in a list, since a bucket takes its title from the event and two on
+        // one event therefore read identically.
+        var isFirst = !await buckets.AnyAsync(b => b.CampaignId == eventId, ct);
+        var eventDate = isFirst ? campaignDate : req.EventDate ?? campaignDate;
+
+        var bucket = NewBucket(userId, eventId, eventDate, plan, windowDays);
+        var chosenName = req.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(chosenName)
+            && currentUser.HasPermission(Permissions.Buckets.Multiple))
+            bucket.Name = chosenName.Length > 80 ? chosenName[..80] : chosenName;
         await buckets.AddAsync(bucket, ct);
         await uow.SaveChangesAsync(ct);
 
@@ -439,9 +481,58 @@ public sealed class MediaBucketService(
             .ToList();
     }
 
+    /// <summary>
+    /// The event's DEFAULT bucket, provisioning one if it has none.
+    ///
+    /// <para>It used to be "the" bucket, guaranteed by a unique index. A subscriber may now keep
+    /// several on one event, so every caller that used to mean the only one — the camera on the
+    /// invitation, an upload from the dashboard, the adoption of photographs older than buckets —
+    /// has to mean a PARTICULAR one, and this is it.</para>
+    ///
+    /// <para>The oldest wins, which is the one provisioned free when the event was made. Chosen over
+    /// a flag on the row because there is nothing to keep in step and nothing to repair: no second
+    /// bucket can ever be created before the first, so the answer cannot change when one is added.
+    /// Ordered by id as well as by date, so two rows written in the same instant still resolve the
+    /// same way on every read rather than by whatever the database felt like returning.</para>
+    /// </summary>
+    public async Task<MediaBucketDto> RenameAsync(
+        Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default)
+    {
+        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+
+        if (!currentUser.HasPermission(Permissions.Buckets.Multiple))
+            throw new BusinessRuleException(
+                "Renaming a bucket is part of a subscription.", "rename_needs_subscription");
+
+        // Blank is the default rather than an error: somebody clearing the box means "put it back",
+        // and an empty name would render as a gap where the bucket's title should be.
+        var name = req.Name?.Trim();
+        bucket.Name = string.IsNullOrWhiteSpace(name)
+            ? MediaBucket.DefaultName
+            : name.Length > 80 ? name[..80] : name;
+        bucket.UpdatedAt = DateTimeOffset.UtcNow;
+
+        buckets.Update(bucket);
+        await uow.SaveChangesAsync(ct);
+        return (await DescribeAsync([bucket], ct))[0];
+    }
+
+    public async Task<int> WindowForCampaignAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var days = await buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .Select(b => (int?)b.UploadWindowDays)
+            .FirstOrDefaultAsync(ct);
+        return days ?? 1;
+    }
+
     public async Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
-        var existing = await buckets.FirstOrDefaultAsync(b => b.CampaignId == campaignId, ct);
+        var existing = await buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .FirstOrDefaultAsync(ct);
         if (existing is not null) return existing;
 
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
@@ -684,8 +775,23 @@ public sealed class MediaBucketService(
 
     // ---------- shared ----------
 
+    /// <summary>
+    /// How many days a bucket being created may collect for.
+    ///
+    /// <para>One unless the caller holds the permission, and never past the ceiling whatever they
+    /// ask for: what this number really governs is how long a QR code printed onto a table card goes
+    /// on working, so it is clamped here as well as in <c>EventDayWindow</c>.</para>
+    /// </summary>
+    private int WindowFor(int? asked)
+    {
+        if (asked is not { } days || days <= 1) return 1;
+        if (!currentUser.HasPermission(Permissions.Buckets.ExtendedWindow)) return 1;
+        return Math.Min(days, EventDayWindow.MaxWindowDays);
+    }
+
     private MediaBucket NewBucket(
-        Guid ownerId, Guid campaignId, DateTimeOffset eventDate, MediaBucketPlan plan)
+        Guid ownerId, Guid campaignId, DateTimeOffset eventDate, MediaBucketPlan plan,
+        int windowDays = 1)
     {
         var now = DateTimeOffset.UtcNow;
         return new MediaBucket
@@ -696,6 +802,7 @@ public sealed class MediaBucketService(
             EventDate = eventDate.ToUniversalTime(),
             Tier = plan.Tier,
             CapacityBytes = plan.CapacityBytes,
+            UploadWindowDays = windowDays,
             UsedBytes = 0,
             TermStartAt = plan.IsFree ? null : now,
             TermEndAt = plan.IsFree ? null : now.AddMonths(plan.TermMonths),
@@ -752,9 +859,21 @@ public sealed class MediaBucketService(
                 .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
+        // Which bucket each event posts to by default — the oldest, matching ForCampaignAsync. Read
+        // per event rather than per row, and across ALL of an event's buckets rather than only the
+        // ones on this page: a page showing the second bucket alone must not call it the default.
+        var defaults = (await buckets.Query()
+                .Where(b => campaignIds.Contains(b.CampaignId))
+                .Select(b => new { b.Id, b.CampaignId, b.CreatedAt })
+                .ToListAsync(ct))
+            .GroupBy(b => b.CampaignId)
+            .Select(g => g.OrderBy(b => b.CreatedAt).ThenBy(b => b.Id).First().Id)
+            .ToHashSet();
+
         var now = DateTimeOffset.UtcNow;
         return rows.Select(b => new MediaBucketDto(
             b.Id,
+            b.Name,
             Title(b, events),
             Cover(b, events),
             b.Tier.ToString(),
@@ -769,6 +888,8 @@ public sealed class MediaBucketService(
             Title(b, events),
             Night(b, events),
             EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays),
+            b.UploadWindowDays,
+            defaults.Contains(b.Id),
             b.TermEndAt,
             b.TermEndAt is { } end && end <= now,
             b.CreatedAt)).ToList();

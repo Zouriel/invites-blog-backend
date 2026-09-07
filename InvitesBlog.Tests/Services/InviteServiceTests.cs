@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Invites;
 using InvitesBlog.Application.Dtos.Otp;
@@ -59,6 +60,7 @@ public class InviteServiceTests
     }
 
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
+    private readonly IMediaBucketService _bucketService = Substitute.For<IMediaBucketService>();
 
     private InviteService Sut()
     {
@@ -68,10 +70,10 @@ public class InviteServiceTests
         _templates.Query().Returns(Array.Empty<Template>().AsAsyncQueryable());
         return new(
             _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks,
-            _trustedIps, _photos, _otp, _uow, _currentUser, _config, _rsvpValidator);
+            _trustedIps, _photos, _otp, _bucketService, _uow, _currentUser, _config, _rsvpValidator);
     }
 
-    private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e) =>
+    private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e, windowDays) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());
 
     // ----- GetByToken -----

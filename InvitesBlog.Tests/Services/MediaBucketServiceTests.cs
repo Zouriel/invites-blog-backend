@@ -7,6 +7,7 @@ using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.MediaBuckets;
+using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Configuration;
@@ -48,6 +49,10 @@ public class MediaBucketServiceTests
             .Returns(c => $"/assets/{c.ArgAt<string>(0)}");
         _photos.Query().Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
         _qrs.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketQr>().AsAsyncQueryable());
+        // ForCampaignAsync orders to find the event's DEFAULT bucket now that an event may have
+        // several, so it goes through Query rather than a predicate. Tests holding a bucket override
+        // this through Stored().
+        _buckets.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucket>().AsAsyncQueryable());
         _guests.ListByCampaignAsync(Arg.Any<Guid>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<Guest>());
         // Every bucket now has a campaign, so DescribeAsync reaches for one on every describe rather
@@ -439,5 +444,186 @@ public class MediaBucketServiceTests
         Assert.NotEqual(made.Url, saved!.TokenHash);
         Assert.DoesNotContain(saved.TokenHash, made.Url!);
         Assert.False(string.IsNullOrWhiteSpace(saved.ImageUrl));
+    }
+
+    // ---------- several buckets on one event, and the longer window ----------
+
+    /// <summary>
+    /// The free bucket every event has always had is still one per event for everybody else. The
+    /// refusal names the subscription rather than just saying no.
+    /// </summary>
+    [Fact]
+    public async Task A_second_bucket_on_one_event_is_refused_without_the_permission()
+    {
+        var campaignId = Guid.NewGuid();
+        // Ownership is proved by the possession token in this test; what is under test is the
+        // SECOND bucket, not who the event belongs to.
+        _currentUser.CampaignId.Returns(campaignId);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(false);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+        _inviters.FirstOrDefaultAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<Inviter, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns((Inviter?)null);
+        _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
+            .Returns(new AppUser { Id = _me, Email = "host@example.test" });
+        _buckets.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().CreateAsync(
+            new CreateMediaBucketRequest("The after-party", null, campaignId, null)));
+        Assert.Equal("bucket_exists_for_campaign", ex.ErrorCode);
+    }
+
+    /// <summary>
+    /// The oldest bucket is the event's default — the free one made with the event. It has to stay
+    /// the answer after a second is added, which is the whole reason it is chosen by age.
+    /// </summary>
+    [Fact]
+    public async Task The_events_default_bucket_is_the_oldest_one()
+    {
+        var campaignId = Guid.NewGuid();
+        var first = Mine();
+        first.CampaignId = campaignId;
+        first.CreatedAt = DateTimeOffset.UtcNow.AddDays(-3);
+        var second = Mine();
+        second.CampaignId = campaignId;
+        second.CreatedAt = DateTimeOffset.UtcNow;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { second, first }.AsAsyncQueryable());
+
+        var found = await Sut().ForCampaignAsync(campaignId);
+
+        Assert.Equal(first.Id, found.Id);
+    }
+
+    /// <summary>
+    /// The number the invitation's camera and the box's "closed" message both read. One when the
+    /// event has no bucket at all, rather than zero — which would report every event as shut.
+    /// </summary>
+    [Fact]
+    public async Task The_window_for_an_event_with_no_bucket_is_the_ordinary_night()
+    {
+        _buckets.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucket>().AsAsyncQueryable());
+
+        Assert.Equal(1, await Sut().WindowForCampaignAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task The_window_for_an_event_is_read_from_its_default_bucket()
+    {
+        var campaignId = Guid.NewGuid();
+        var first = Mine();
+        first.CampaignId = campaignId;
+        first.CreatedAt = DateTimeOffset.UtcNow.AddDays(-3);
+        first.UploadWindowDays = 5;
+        var second = Mine();
+        second.CampaignId = campaignId;
+        second.CreatedAt = DateTimeOffset.UtcNow;
+        second.UploadWindowDays = 1;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { second, first }.AsAsyncQueryable());
+
+        Assert.Equal(5, await Sut().WindowForCampaignAsync(campaignId));
+    }
+
+    /// <summary>
+    /// The default bucket takes the EVENT's night, whatever is posted, so the invitation's camera
+    /// and the bucket it posts to cannot disagree.
+    /// </summary>
+    [Fact]
+    public async Task The_first_bucket_on_an_event_takes_the_events_own_night()
+    {
+        var campaignId = Guid.NewGuid();
+        var night = new DateTimeOffset(2026, 10, 1, 15, 0, 0, TimeSpan.Zero);
+        _currentUser.CampaignId.Returns(campaignId);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
+        _buckets.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        MediaBucket? saved = null;
+        await _buckets.AddAsync(Arg.Do<MediaBucket>(b => saved = b), Arg.Any<CancellationToken>());
+
+        await Sut().CreateAsync(new CreateMediaBucketRequest(
+            "Ignored", null, campaignId, night.AddDays(4)));
+
+        Assert.Equal(night, saved!.EventDate);
+    }
+
+    /// <summary>
+    /// A SECOND bucket may carry its own — that is what a second one is for, and without it two
+    /// buckets on one event are indistinguishable, since both read their title from the event.
+    /// </summary>
+    [Fact]
+    public async Task A_second_bucket_may_be_for_a_different_night()
+    {
+        var campaignId = Guid.NewGuid();
+        var night = new DateTimeOffset(2026, 10, 1, 15, 0, 0, TimeSpan.Zero);
+        var afterParty = night.AddDays(1);
+        _currentUser.CampaignId.Returns(campaignId);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
+        _buckets.AnyAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        MediaBucket? saved = null;
+        await _buckets.AddAsync(Arg.Do<MediaBucket>(b => saved = b), Arg.Any<CancellationToken>());
+
+        await Sut().CreateAsync(new CreateMediaBucketRequest(
+            "The after-party", null, campaignId, afterParty));
+
+        Assert.Equal(afterParty, saved!.EventDate);
+    }
+
+    // ---------- the bucket's own name ----------
+
+    [Fact]
+    public async Task Renaming_needs_the_same_right_as_keeping_several()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(false);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("The ceremony")));
+        Assert.Equal("rename_needs_subscription", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_subscriber_may_rename_a_bucket()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+
+        var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("  The ceremony  "));
+
+        Assert.Equal("The ceremony", result.Name);
+    }
+
+    /// <summary>
+    /// Clearing the box means "put it back", not "leave a gap where the title goes".
+    /// </summary>
+    [Fact]
+    public async Task A_blank_name_falls_back_to_the_default()
+    {
+        var bucket = Mine();
+        bucket.Name = "The ceremony";
+        Stored(bucket);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+
+        var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("   "));
+
+        Assert.Equal(MediaBucket.DefaultName, result.Name);
+    }
+
+    /// <summary>Every bucket that predates names reads as what it always was.</summary>
+    [Fact]
+    public void A_new_bucket_is_the_nights_bucket_until_it_is_named()
+    {
+        Assert.Equal("Night's bucket", new MediaBucket().Name);
     }
 }

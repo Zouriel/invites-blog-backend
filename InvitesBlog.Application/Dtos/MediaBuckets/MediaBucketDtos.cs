@@ -19,7 +19,12 @@ public sealed record MediaBucketPlanDto(
 /// </summary>
 public sealed record MediaBucketDto(
     Guid Id,
-    /// <summary>The event's name. A bucket has none of its own.</summary>
+    /// <summary>
+    /// What the OWNER calls this bucket — "The ceremony", "The after-party". Its own, because two
+    /// buckets on one event would otherwise read identically.
+    /// </summary>
+    string Name,
+    /// <summary>The event's name, shown WITH the bucket's rather than instead of it.</summary>
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
@@ -37,6 +42,12 @@ public sealed record MediaBucketDto(
     DateTimeOffset EventDate,
     /// <summary>Whether anything may be added right now — see EventDayWindow.</summary>
     bool IsOpen,
+    /// <summary>How many days it collects for. 1 is the ordinary night.</summary>
+    int WindowDays,
+    /// <summary>
+    /// Whether this is the event's first bucket — the free one the camera and the dashboard post to.
+    /// </summary>
+    bool IsDefault,
     DateTimeOffset? TermEndAt,
     /// <summary>Whether the paid term has run out. Always false on the free tier, which has no term.</summary>
     bool Expired,
@@ -46,8 +57,18 @@ public sealed record MediaBucketDto(
 /// Creating a bucket. <c>EventDate</c> is the night it is for and is required for a standalone one;
 /// a bucket attached to a campaign takes that campaign's date and ignores whatever is posted here.
 /// </summary>
+/// <param name="WindowDays">
+/// How many days it collects for, counted from when the event begins. Null or 1 is the ordinary
+/// night; more is a subscriber's right and is capped at <c>EventDayWindow.MaxWindowDays</c>. Frozen
+/// onto the bucket, so losing the subscription cannot close one already made.
+/// </param>
 public sealed record CreateMediaBucketRequest(
-    string Title, string? Tier, Guid? CampaignId, DateTimeOffset? EventDate);
+    string Title, string? Tier, Guid? CampaignId, DateTimeOffset? EventDate, int? WindowDays = null,
+    /// <summary>What to call the bucket itself. Blank is the default name.</summary>
+    string? Name = null);
+
+/// <summary>Renaming a bucket. Blank falls back to the default rather than leaving a gap.</summary>
+public sealed record RenameMediaBucketRequest(string Name);
 
 /// <summary>Moving a bucket onto a different size.</summary>
 public sealed record ChooseMediaBucketTierRequest(string Tier);

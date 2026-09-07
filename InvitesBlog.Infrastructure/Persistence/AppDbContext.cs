@@ -236,6 +236,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // The two ways a bucket is ever looked up: everything an account owns, and everything
             // belonging to a given event.
             e.HasIndex(x => x.OwnerUserId);
+            e.Property(x => x.Name).HasMaxLength(80);
             // No longer unique. It was, because "the campaign's bucket" had to mean exactly one
             // thing and a provisioning race on a first upload would otherwise split an event's media
             // across two boxes. A subscriber may now keep several on one event — the ceremony and

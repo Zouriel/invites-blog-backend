@@ -94,9 +94,11 @@ public sealed class InvitesController(
     // Bridges the Infrastructure renderer into the Application service without a layer dependency.
     private InviteRenderData Render(
         Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink,
-        string? inviterName, string? inviterPhone, string? inviterEmail)
+        string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays)
     {
-        var p = renderer.Build(campaign, template, guest, invite, inviteLink, inviterName, inviterPhone, inviterEmail);
+        var p = renderer.Build(
+            campaign, template, guest, invite, inviteLink, inviterName, inviterPhone, inviterEmail,
+            bucketWindowDays);
         return new InviteRenderData(p.PackageUrl, p.Data, p.RequiresOtp, p.CampaignStatus);
     }
 

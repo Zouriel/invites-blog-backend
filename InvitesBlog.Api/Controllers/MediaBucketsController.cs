@@ -79,6 +79,18 @@ public sealed class MediaBucketsController(
     /// Moves the bucket onto a size. <b>There is no payment behind this yet</b> — it grants the space
     /// outright. When checkout arrives it calls this, after it is paid, rather than replacing it.
     /// </summary>
+    /// <summary>
+    /// Renames a bucket — its own name, not the event's.
+    ///
+    /// <para>PUT because it states the name it should have afterwards, and refused for anyone
+    /// without the right to keep more than one: that is the only situation a name is needed in.</para>
+    /// </summary>
+    [HttpPut("{bucketId:guid}/name")]
+    [HasPermission(Permissions.Buckets.Manage)]
+    public async Task<IActionResult> Rename(
+        Guid bucketId, [FromBody] RenameMediaBucketRequest req, CancellationToken ct) =>
+        Success(await buckets.RenameAsync(bucketId, req, ct));
+
     [HttpPost("{bucketId:guid}/tier")]
     [HasPermission(Permissions.Buckets.Manage)]
     public async Task<IActionResult> ChooseTier(

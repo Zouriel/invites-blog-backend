@@ -92,6 +92,28 @@ public sealed class MediaBucket
     /// </summary>
     public bool IsRestricted { get; set; }
 
+    /// <summary>
+    /// What the owner calls this bucket.
+    ///
+    /// <para><b>A bucket used to hold no name at all</b>, and that was right while an event could
+    /// have only one: the campaign already answered "what is this", and a second copy of the answer
+    /// would drift the moment somebody renamed one of them. Several buckets on one event breaks
+    /// that. Both read their title from the same campaign, so both render identically — two rows
+    /// saying "A wedding", and no way to tell the ceremony from the after-party.</para>
+    ///
+    /// <para>So the name is the bucket's own, and the event's title stays the event's: a bucket is
+    /// shown as its name WITH the event behind it, never instead of it. Renaming is gated on the
+    /// same right as keeping more than one, because somebody with a single bucket has nothing to
+    /// tell apart and the default already reads correctly.</para>
+    /// </summary>
+    public string Name { get; set; } = DefaultName;
+
+    /// <summary>
+    /// What a bucket is called before anybody names it — including every bucket that existed before
+    /// buckets had names.
+    /// </summary>
+    public const string DefaultName = "Night's bucket";
+
     public MediaBucketTier Tier { get; set; } = MediaBucketTier.Free;
 
     /// <summary>
