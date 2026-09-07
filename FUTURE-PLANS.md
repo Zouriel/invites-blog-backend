@@ -629,7 +629,69 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
 - **A member may look and download, never moderate.** `CanDelete` is false for them — these are
   photographs of an occasion that is not theirs to curate.
 
+### What shipped (2026-09-07) — several buckets an event, and who may look into each
+
+- **A bucket may no longer be assumed to be the only one.** The unique index on `campaign_id` is
+  gone; a SUBSCRIBER may keep several on one event — a ceremony and an after-party. Every caller that
+  used to mean "the campaign's bucket" now means the DEFAULT one, which is the OLDEST: the free one
+  provisioned with the event. Chosen by age rather than by a flag because nothing has to be kept in
+  step and nothing can be repaired wrong — no second bucket can be created before the first, so the
+  answer cannot change when one is added.
+- **`campaign_id` is NOT NULL at last.** Nothing had been able to write a null since a bucket bought
+  on its own started getting a bare campaign, and nine call sites still carried a branch for it. EF
+  scaffolded an empty-guid default — the exact sentinel this schema rejects for `EventPhoto` — so the
+  migration drops the default and REPAIRS orphans into the bare campaign the app would have made.
+  Production held none; a development database held one with two photographs and three printed codes.
+- **`media_bucket_members` is a PIVOT on the guest list, not a copy of it.** It holds a `guest_id`
+  and nothing about the person. The earlier table keyed on the contact itself and was deleted for the
+  right reason; this one draws the audience FROM the list, so removing a guest removes their access
+  by cascade. `campaign_id` is denormalised onto it so both foreign keys can be composite, which
+  makes admitting a guest of one event to another event's bucket unrepresentable rather than an
+  application check somebody has to remember.
+- **Empty means everyone; `is_restricted` is what closes a bucket.** Absence cannot mean "nobody"
+  without darkening every bucket that predates the table, and cannot quietly mean "everyone" without
+  a per-guest UI showing ticks for rows that do not exist. Shutting the FIRST person out flips the
+  flag and writes rows for everybody else in the same breath. After that the list is exact and a
+  guest added later is not admitted by accident — a control over who sees photographs of an evening
+  fails closed.
+- **Managed from the GUEST, never from the bucket.** The panel for editing a person is where "what
+  may this person see" is asked. A list hanging off each bucket would mean opening every one in turn
+  to find somebody.
+- **`upload_window_days` is frozen at creation, like capacity**, and capped at five. Reading it live
+  would let dropping somebody from the subscriber list retroactively shut buckets they had already
+  printed QR cards for. `EventDayWindow` takes it as an argument and the invitation's camera reads the
+  same number — threaded through the render delegate, because the renderer is synchronous and this
+  is precisely the drift that one shared window exists to prevent.
+- **A bucket has a NAME, reversing the decision above it.** It held none because the campaign already
+  answered "what is this" — right while an event could have one bucket, wrong the moment it can have
+  several, since both read their title from the same campaign and render identically. The name is the
+  bucket's own and the event's title stays the event's, shown together. `Night's bucket` by default,
+  numbered for the second, renameable by anyone who may keep more than one.
+- **A second bucket may carry its own night.** The default always takes the event's, so the invitation
+  and the bucket its camera posts to cannot disagree; the extra ones are what an evening that is
+  really two is for.
+- **Subscription is a ROLE an admin grants by hand**, holding only the two permissions it adds, so it
+  can be given and taken away without touching somebody's ordinary account. `AdminController` was
+  entirely read-only before this and had no way to grant anything at all. The write refuses four
+  things, all about not being able to lock everyone out from a settings page: a role nobody can hold,
+  demoting yourself, demoting the last admin, and a missing account.
+- **`RbacSeeder` GRANTS the admin role rather than skipping.** It used to return the moment the
+  configured address already existed, so pointing `Admin:Email` at a real person's account did
+  nothing — silently, which is the worst way for an authorization change to fail.
+- **Subscriber-only controls are shown to everybody and refused with a reason.** Not hidden, not
+  disabled. A control that vanishes reads as a bug and a disabled one never says what it is for.
+
 ### Still to settle
+
+- **Billing still is not wired up**, so the subscriber list is literally a list. When checkout
+  arrives it changes what SETS the role and nothing that reads it — everything asks `isSubscriber`
+  or the two permissions rather than about roles directly.
+- **Nothing distinguishes a bucket's photographs by which bucket a QR code fed.** Codes are per
+  bucket already, so this works; it is only untested at the scale of several codes on several
+  buckets for one night.
+- **Storage is still the whole risk, and this multiplies it.** R2 is still not done, nothing sweeps
+  an expired bucket, retention is unanswered, and uploads are still buffered whole in memory. Several
+  buckets an event makes all four bigger, and none of them got smaller today.
 
 - **Nothing sweeps an expired bucket.** `TermEndAt` is recorded, shown, and blocks new uploads, but
   what expiry should eventually MEAN for the photographs already inside is unanswered — and it is
