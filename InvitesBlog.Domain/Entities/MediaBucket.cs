@@ -28,10 +28,20 @@ public sealed class MediaBucket
     public Guid OwnerUserId { get; set; }
 
     /// <summary>
-    /// The event this bucket collects for, when there is one. Null is an ordinary bucket, not a
-    /// broken one — see the class remarks.
+    /// The event this bucket collects for. Always set.
+    ///
+    /// <para><b>It used to be nullable</b>, back when a bucket bought on its own was a loose object.
+    /// It is not one: <c>CreateAsync</c> makes a bare campaign for a bucket with no event behind it,
+    /// because the campaign is what holds the title, the cover and the guest list — the three things
+    /// a bucket deliberately has none of. The column stayed nullable long after nothing could write
+    /// a null into it, and every read had to carry a branch for a case that could not happen.</para>
+    ///
+    /// <para>Required now, which is also what lets <see cref="MediaBucketMember"/> point a composite
+    /// foreign key at <c>(campaign_id, id)</c>. Note what it is NOT: an empty guid never stands in
+    /// for "no event" here. That was rejected when <c>EventPhoto</c> faced the same question — a
+    /// sentinel is a value every campaign query has to know to skip.</para>
     /// </summary>
-    public Guid? CampaignId { get; set; }
+    public Guid CampaignId { get; set; }
 
 
     /// <summary>
@@ -47,6 +57,40 @@ public sealed class MediaBucket
     /// the point of the thing is what you have afterwards.</para>
     /// </summary>
     public DateTimeOffset EventDate { get; set; }
+
+    /// <summary>
+    /// How many days from the start of the event's day this bucket accepts anything.
+    ///
+    /// <para><b>Frozen at creation, exactly like <see cref="CapacityBytes"/>.</b> Whether somebody
+    /// may collect for longer than one night is a subscriber's right, and reading that live would
+    /// mean that dropping a person from the subscriber list retroactively slams shut buckets they
+    /// already made — and printed QR cards for. What someone was given when they made it is what it
+    /// keeps.</para>
+    ///
+    /// <para>One is the ordinary night: open from the start of the event's day in Malé until 24
+    /// hours after it begins. It is fed to <c>EventDayWindow</c> rather than compared against
+    /// anywhere, so the camera on the invitation and the bucket itself cannot disagree about whether
+    /// it is still open.</para>
+    /// </summary>
+    public int UploadWindowDays { get; set; } = 1;
+
+    /// <summary>
+    /// Whether only named guests may look, rather than the whole guest list.
+    ///
+    /// <para><b>Why a flag as well as the member rows.</b> "No rows" cannot mean "nobody": every
+    /// bucket that existed before <see cref="MediaBucketMember"/> did has none, and reading absence
+    /// as exclusion would darken all of them at once. Nor can absence quietly mean "everyone"
+    /// forever, because then a UI offering per-guest checkboxes has to show every box ticked while
+    /// the table behind it is empty, and the first box someone unticks silently writes a row for
+    /// every OTHER guest.</para>
+    ///
+    /// <para>So the flag says which regime a bucket is under and the rows say who. False — the
+    /// default, and every bucket that already exists — means the event's guest list, and the rows
+    /// are not consulted. The first exclusion flips it true and materialises the rest, after which
+    /// the list is exact: a guest added to the event LATER is not admitted by accident. A control
+    /// over who sees photographs of an evening should fail closed.</para>
+    /// </summary>
+    public bool IsRestricted { get; set; }
 
     public MediaBucketTier Tier { get; set; } = MediaBucketTier.Free;
 

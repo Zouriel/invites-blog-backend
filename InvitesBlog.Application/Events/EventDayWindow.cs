@@ -21,6 +21,15 @@ public static class EventDayWindow
     public static readonly TimeSpan ClosesAfter = TimeSpan.FromHours(24);
 
     /// <summary>
+    /// The most days a bucket may stay open for, however generous the plan behind it gets.
+    ///
+    /// <para>A ceiling on this side rather than only in the pricing, because what this number really
+    /// controls is how long a printed QR code on a table keeps working. A typo in configuration
+    /// should not turn an evening's bucket into a standing invitation.</para>
+    /// </summary>
+    public const int MaxWindowDays = 5;
+
+    /// <summary>
     /// Malé's offset, and the only local day this platform has. Hard-coded rather than looked up
     /// because the Maldives has never observed daylight saving — +05:00 holds every day of the year
     /// — and because a zone database id is spelled differently on Windows and Linux, which is a way
@@ -44,18 +53,28 @@ public static class EventDayWindow
     /// the day yet when their own calendar says it is. <see cref="Male"/> is what everyone here means
     /// by the date.</para>
     /// </summary>
-    public static bool IsOpen(DateTimeOffset eventStartAt, DateTimeOffset now)
+    /// <param name="windowDays">
+    /// How many days it stays open, counted from the moment the event begins. One is the ordinary
+    /// night and the default, so every existing caller keeps the behaviour it had. A subscriber's
+    /// bucket may carry more — clamped to <see cref="MaxWindowDays"/>, and to at least one, because
+    /// a zero or a negative stored by accident would close a bucket that should be open rather than
+    /// fail visibly.
+    /// </param>
+    public static bool IsOpen(DateTimeOffset eventStartAt, DateTimeOffset now, int windowDays = 1)
     {
         // A date near either end of the representable range cannot be shifted into Malé's offset —
         // `DateTimeOffset`'s constructor throws rather than saturating. That is reachable with real
         // data: a bucket row whose date was never set reads as year 1, and a 500 from "is it the
         // night" is a far worse answer than "no". Anything we cannot reason about is closed.
-        var limit = ClosesAfter + Male;
+        var days = Math.Clamp(windowDays, 1, MaxWindowDays);
+        var stays = ClosesAfter * days;
+
+        var limit = stays + Male;
         if (eventStartAt < DateTimeOffset.MinValue + limit || eventStartAt > DateTimeOffset.MaxValue - limit)
             return false;
 
         var opens = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
-        var closes = eventStartAt + ClosesAfter;
+        var closes = eventStartAt + stays;
         return now >= opens && now <= closes;
     }
 }

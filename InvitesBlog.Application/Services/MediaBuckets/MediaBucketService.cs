@@ -230,7 +230,7 @@ public sealed class MediaBucketService(
         if (bucket is null) return false;
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return true;
-        if (bucket.CampaignId is not { } campaignId) return false;
+        var campaignId = bucket.CampaignId;
         if (await ownership.OwnsAsync(campaignId, ct)) return true;
 
         // The event's guest list IS who may look. One list, not two — an event that has both an
@@ -247,7 +247,8 @@ public sealed class MediaBucketService(
         Guid bucketId, string contact, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct);
-        if (bucket?.CampaignId is not { } campaignId) return null;
+        if (bucket is null) return null;
+        var campaignId = bucket.CampaignId;
 
         var (normalized, _) = NormalizeContact(contact);
         var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
@@ -370,12 +371,15 @@ public sealed class MediaBucketService(
             campaignId = created.CampaignId;
         }
 
+        // Settled either way by here: given by the caller, or the bare campaign just made for it.
+        var eventId = campaignId.Value;
+
         // Always the campaign's date, so the invitation and the bucket can never disagree about
         // which night they belong to.
-        var eventDate = (await campaigns.GetByIdAsync(campaignId.Value, ct))?.EventStartAt
+        var eventDate = (await campaigns.GetByIdAsync(eventId, ct))?.EventStartAt
                         ?? throw new NotFoundException("That event no longer exists.");
 
-        var bucket = NewBucket(userId, campaignId, eventDate, plan);
+        var bucket = NewBucket(userId, eventId, eventDate, plan);
         await buckets.AddAsync(bucket, ct);
         await uow.SaveChangesAsync(ct);
 
@@ -544,11 +548,10 @@ public sealed class MediaBucketService(
 
         // Through the EVENT, the same way the DTO reads it — see Night(). The copy on the bucket is
         // only reached when there is somehow no event behind it.
-        var night = bucket.CampaignId is { } id
-            ? (await campaigns.GetByIdAsync(id, ct))?.EventStartAt ?? bucket.EventDate
-            : bucket.EventDate;
+        var night = (await campaigns.GetByIdAsync(bucket.CampaignId, ct))?.EventStartAt
+                    ?? bucket.EventDate;
 
-        if (EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow)) return;
+        if (EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays)) return;
 
         // Which side of it they are on, because "closed" means two completely different things to
         // somebody standing at the party a day early and somebody looking a week later.
@@ -654,13 +657,11 @@ public sealed class MediaBucketService(
         // A full or closed bucket still ADMITS — the page has to open in order to say why nothing can
         // be added. Refusing at the door would show a scanner a dead link and tell them nothing.
         var room = bucket.UsedBytes < bucket.CapacityBytes;
-        var open = EventDayWindow.IsOpen(bucket.EventDate, DateTimeOffset.UtcNow);
+        var open = EventDayWindow.IsOpen(bucket.EventDate, DateTimeOffset.UtcNow, bucket.UploadWindowDays);
 
         // The name a scanner is shown is the EVENT's — the bucket has none of its own. This is what
         // somebody standing at a party reads to know they are adding to the right night.
-        var title = bucket.CampaignId is { } cid
-            ? (await campaigns.GetByIdAsync(cid, ct))?.Title ?? "Media bucket"
-            : "Media bucket";
+        var title = (await campaigns.GetByIdAsync(bucket.CampaignId, ct))?.Title ?? "Media bucket";
 
         return new MediaBucketQrAdmission(
             code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, bucket.EventDate);
@@ -684,7 +685,7 @@ public sealed class MediaBucketService(
     // ---------- shared ----------
 
     private MediaBucket NewBucket(
-        Guid ownerId, Guid? campaignId, DateTimeOffset eventDate, MediaBucketPlan plan)
+        Guid ownerId, Guid campaignId, DateTimeOffset eventDate, MediaBucketPlan plan)
     {
         var now = DateTimeOffset.UtcNow;
         return new MediaBucket
@@ -717,8 +718,7 @@ public sealed class MediaBucketService(
         if (bucket is null) throw new NotFoundException("That media bucket no longer exists.");
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return bucket;
-        if (bucket.CampaignId is { } campaignId && await ownership.OwnsAsync(campaignId, ct))
-            return bucket;
+        if (await ownership.OwnsAsync(bucket.CampaignId, ct)) return bucket;
 
         throw new ForbiddenException("That media bucket isn't yours.");
     }
@@ -744,8 +744,7 @@ public sealed class MediaBucketService(
         // The title and the cover are the CAMPAIGN's. A bucket holds neither — it would be a second
         // answer to a question the event already answers, and the two would drift the moment somebody
         // renamed one of them.
-        var campaignIds = rows.Where(b => b.CampaignId is not null)
-            .Select(b => b.CampaignId!.Value).Distinct().ToList();
+        var campaignIds = rows.Select(b => b.CampaignId).Distinct().ToList();
         var events = campaignIds.Count == 0
             ? []
             : await campaigns.Query()
@@ -769,7 +768,7 @@ public sealed class MediaBucketService(
             b.CampaignId,
             Title(b, events),
             Night(b, events),
-            EventDayWindow.IsOpen(Night(b, events), now),
+            EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays),
             b.TermEndAt,
             b.TermEndAt is { } end && end <= now,
             b.CreatedAt)).ToList();
@@ -796,21 +795,18 @@ public sealed class MediaBucketService(
     /// </summary>
     private static DateTimeOffset Night(
         MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>
-        bucket.CampaignId is { } id && events.TryGetValue(id, out var face)
-            ? face.EventStartAt
-            : bucket.EventDate;
+        events.TryGetValue(bucket.CampaignId, out var face) ? face.EventStartAt : bucket.EventDate;
 
     /// <summary>
-    /// The event's name. A bucket has none of its own; where there is somehow no campaign behind one
-    /// — only possible for a row predating the rule — it falls back to something sayable rather than
-    /// to an empty string in the middle of somebody's list.
+    /// The event's name. A bucket has none of its own; a campaign that could not be loaded falls
+    /// back to something sayable rather than to an empty string in the middle of somebody's list.
     /// </summary>
     private static string Title(MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>
-        bucket.CampaignId is { } id && events.TryGetValue(id, out var face) ? face.Title : "Media bucket";
+        events.TryGetValue(bucket.CampaignId, out var face) ? face.Title : "Media bucket";
 
     /// <summary>The event's cover, read from where the host's own choice is kept.</summary>
     private static string? Cover(MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>
-        bucket.CampaignId is { } id && events.TryGetValue(id, out var face)
+        events.TryGetValue(bucket.CampaignId, out var face)
             ? CampaignCover.Read(face.CustomContentJson)
             : null;
 

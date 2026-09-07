@@ -50,6 +50,9 @@ public class MediaBucketServiceTests
         _qrs.Query(Arg.Any<bool>()).Returns(Array.Empty<MediaBucketQr>().AsAsyncQueryable());
         _guests.ListByCampaignAsync(Arg.Any<Guid>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<Guest>());
+        // Every bucket now has a campaign, so DescribeAsync reaches for one on every describe rather
+        // than short-circuiting on a null. Tests that care about the title override this.
+        _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
     }
 
     private MediaBucketService Sut() => new(
@@ -62,6 +65,8 @@ public class MediaBucketServiceTests
     {
         Id = Guid.NewGuid(),
         OwnerUserId = _me,
+        // Every bucket belongs to an event; there is no such thing as a loose one.
+        CampaignId = Guid.NewGuid(),
         Tier = MediaBucketTier.Gb10,
         CapacityBytes = capacityGb * MediaBucketPlans.BytesPerGb,
         UsedBytes = used,
@@ -277,7 +282,7 @@ public class MediaBucketServiceTests
         var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "stranger@example.com" });
-        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
 
         Assert.False(await Sut().MayViewAsync(bucket.Id));
         await Assert.ThrowsAsync<ForbiddenException>(() => Sut().ViewAsync(bucket.Id));
@@ -289,7 +294,7 @@ public class MediaBucketServiceTests
         var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "guest@example.com" });
-        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
 
         Assert.True(await Sut().MayViewAsync(bucket.Id));
     }
@@ -301,7 +306,7 @@ public class MediaBucketServiceTests
         var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "Guest@Example.com" });
-        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
 
         Assert.True(await Sut().MayViewAsync(bucket.Id));
     }
@@ -324,7 +329,7 @@ public class MediaBucketServiceTests
     {
         var bucket = Attached();
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>()).Returns(new AppUser { Id = _me });
-        OnTheGuestList(bucket.CampaignId!.Value, "guest@example.com");
+        OnTheGuestList(bucket.CampaignId, "guest@example.com");
 
         Assert.False(await Sut().MayViewAsync(bucket.Id));
     }

@@ -83,24 +83,49 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Makes sure the configured address holds the Admin role — creating the account if there isn't
+    /// one, and GRANTING the role if there is.
+    ///
+    /// <para><b>The grant half is the point.</b> This used to return the moment the address already
+    /// existed, so pointing <c>Admin:Email</c> at a real person's account did nothing at all: they
+    /// had signed up as an ordinary customer long before anyone thought to name them here, the
+    /// account existed, and the seeder skipped straight past it. Silently — which is the worst way
+    /// for an authorization change to fail.</para>
+    ///
+    /// <para>Written as ensure-rather-than-create so it is safe on every startup and cannot lock
+    /// anybody out: an admin who loses the role gets it back on the next deploy.</para>
+    /// </summary>
     private async Task SeedAdminAsync(CancellationToken ct)
     {
         var email = (config["Admin:Email"] ?? "admin@invites.blog").ToLowerInvariant();
-        if (await db.Users.AnyAsync(u => u.Email == email, ct)) return;
-
         var adminRole = await db.Roles.FirstAsync(r => r.Name == Roles.Admin, ct);
-        var password = config["Admin:Password"] ?? "ChangeMe!123";
-        var user = new AppUser
+
+        var user = await db.Users
+            .Include(u => u.UserRoles)
+            .FirstOrDefaultAsync(u => u.Email == email, ct);
+
+        if (user is null)
         {
-            Id = Guid.NewGuid(),
-            Email = email,
-            DisplayName = "Administrator",
-            PasswordHash = PasswordHasher.Hash(password),
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UserRoles = { new UserRole { RoleId = adminRole.Id } }
-        };
-        db.Users.Add(user);
-        logger.LogInformation("Seeded admin account {Email}.", email);
+            var password = config["Admin:Password"] ?? "ChangeMe!123";
+            user = new AppUser
+            {
+                Id = Guid.NewGuid(),
+                Email = email,
+                DisplayName = "Administrator",
+                PasswordHash = PasswordHasher.Hash(password),
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UserRoles = { new UserRole { RoleId = adminRole.Id } }
+            };
+            db.Users.Add(user);
+            logger.LogInformation("Seeded admin account {Email}.", email);
+            return;
+        }
+
+        if (user.UserRoles.Any(ur => ur.RoleId == adminRole.Id)) return;
+
+        db.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = adminRole.Id });
+        logger.LogInformation("Granted the Admin role to the existing account {Email}.", email);
     }
 }

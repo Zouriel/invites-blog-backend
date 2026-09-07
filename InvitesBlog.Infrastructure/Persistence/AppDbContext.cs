@@ -28,6 +28,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
     public DbSet<MediaBucket> MediaBuckets => Set<MediaBucket>();
     public DbSet<MediaBucketQr> MediaBucketQrs => Set<MediaBucketQr>();
+    public DbSet<MediaBucketMember> MediaBucketMembers => Set<MediaBucketMember>();
     public DbSet<SuppressionEntry> SuppressionList => Set<SuppressionEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
@@ -134,6 +135,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_guests_campaign_id");
             e.HasIndex(x => x.PhoneE164).HasDatabaseName("idx_guests_phone_e164");
             e.HasIndex(x => x.Email).HasDatabaseName("idx_guests_email");
+            // Not for lookups: the principal key MediaBucketMember points at, so a bucket can only
+            // ever admit a guest of its OWN event.
+            e.HasIndex(x => new { x.CampaignId, x.Id })
+                .IsUnique()
+                .HasDatabaseName("idx_guests_campaign_id_id");
             e.Property(x => x.MetadataJson).HasColumnType("jsonb");
         });
 
@@ -227,16 +233,49 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.ToTable("media_buckets");
             e.HasKey(x => x.Id);
-            // The two ways a bucket is ever looked up: everything an account owns, and the one
+            // The two ways a bucket is ever looked up: everything an account owns, and everything
             // belonging to a given event.
             e.HasIndex(x => x.OwnerUserId);
-            // Unique, because "the campaign's bucket" has to mean exactly one thing. Provisioning
-            // races on a first upload otherwise leave a campaign with two boxes and its media split
-            // between them, which is not recoverable by looking at it.
-            e.HasIndex(x => x.CampaignId)
+            // No longer unique. It was, because "the campaign's bucket" had to mean exactly one
+            // thing and a provisioning race on a first upload would otherwise split an event's media
+            // across two boxes. A subscriber may now keep several on one event — the ceremony and
+            // the after-party — so what a race must not do is create a second FREE one, and that is
+            // now settled in the service by asking for the DEFAULT bucket rather than by the schema.
+            e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_media_buckets_campaign");
+            // Not for lookups: this is the principal key MediaBucketMember's composite foreign key
+            // points at, which is what makes "a guest of another event" unrepresentable.
+            e.HasIndex(x => new { x.CampaignId, x.Id })
                 .IsUnique()
-                .HasFilter("campaign_id IS NOT NULL")
-                .HasDatabaseName("idx_media_buckets_campaign");
+                .HasDatabaseName("idx_media_buckets_campaign_id");
+        });
+
+        b.Entity<MediaBucketMember>(e =>
+        {
+            e.ToTable("media_bucket_members");
+            // The pair IS the row — a guest is either admitted to a bucket or not, and there is
+            // nothing to say twice.
+            e.HasKey(x => new { x.BucketId, x.GuestId });
+            // Read one way in the guest's editor ("which buckets may this person see") and the other
+            // when a bucket asks who is on it. Both are covered: the key serves the second, this the first.
+            e.HasIndex(x => x.GuestId);
+            e.HasIndex(x => new { x.CampaignId, x.BucketId });
+
+            // Composite, and pointed at the unique indexes above rather than at the primary keys.
+            // Admitting a guest of one event to another event's bucket is then not a rule somebody
+            // has to remember — the row cannot be written. Both cascade: taking a guest off the
+            // list, or deleting a bucket, takes the admission with it, which is the entire reason
+            // this is a pivot and not a copy of the guest list.
+            e.HasOne<MediaBucket>()
+                .WithMany()
+                .HasForeignKey(x => new { x.CampaignId, x.BucketId })
+                .HasPrincipalKey(x => new { x.CampaignId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne<Guest>()
+                .WithMany()
+                .HasForeignKey(x => new { x.CampaignId, x.GuestId })
+                .HasPrincipalKey(x => new { x.CampaignId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<MediaBucketQr>(e =>
