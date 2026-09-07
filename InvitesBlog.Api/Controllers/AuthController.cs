@@ -74,6 +74,21 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     public async Task<IActionResult> SignUp([FromBody] SignUpRequest request, CancellationToken ct) =>
         Success(await accounts.SignUpAsync(request, ct));
 
+    /// <summary>
+    /// A fresh token for the account already signed in, carrying whatever roles it holds NOW.
+    ///
+    /// <para>Called when the app starts. Permissions live in the token's claims, so a role granted
+    /// by an admin reaches nobody until one is re-issued — without this, being made an admin did
+    /// nothing until that person next signed out and back in, and no screen said why.</para>
+    ///
+    /// <para>Gated the same way its siblings are: it proves nothing about the caller beyond a token
+    /// that is already valid, and mints one for the same account with the same lifetime rules.</para>
+    /// </summary>
+    [HttpPost("me/refresh")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> Refresh(CancellationToken ct) =>
+        Success(await accounts.RefreshAsync(ct));
+
     [HttpGet("me")]
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));

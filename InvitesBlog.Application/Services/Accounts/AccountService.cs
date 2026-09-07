@@ -245,6 +245,9 @@ public sealed class AccountService(
     /// the new role wouldn't take effect until the session expired.
     /// </para>
     /// </summary>
+    public async Task<AuthResultDto> RefreshAsync(CancellationToken ct = default) =>
+        await IssueAsync(await CurrentAsync(ct), ct);
+
     public async Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default)
     {
         var me = await CurrentAsync(ct);

@@ -51,6 +51,20 @@ public interface IAccountService
     /// <summary>Adds the Designer role to the signed-in account and re-issues its token.</summary>
     Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Re-issues the signed-in account's token so a role granted since sign-in takes effect.
+    ///
+    /// <para><b>Why this has to exist.</b> Permissions are CLAIMS inside the token, so a role an
+    /// admin grants reaches nobody until a new one is minted. Before this, being made an admin — or
+    /// a subscriber — did nothing at all until that person happened to sign out and back in, and
+    /// nothing on either screen said so. Refreshing only the cached account would be worse than
+    /// nothing: the navigation would appear and every call behind it would be refused.</para>
+    ///
+    /// <para>Same shape as <see cref="BecomeDesignerAsync"/>, which already re-issues after changing
+    /// a role — this is that, for a change made by somebody else.</para>
+    /// </summary>
+    Task<AuthResultDto> RefreshAsync(CancellationToken ct = default);
+
     /// <summary>Sends a code to a second identifier the signed-in account wants to add.</summary>
     Task<CodeSentResponse> RequestLinkCodeAsync(RequestCodeRequest request, CancellationToken ct = default);
 
