@@ -22,6 +22,7 @@ namespace InvitesBlog.Api.Rendering;
 public sealed class RenderTickets(IConfiguration config)
 {
     private const string RenderIdContext = "render-id:";
+    private const string OpenRenderIdContext = "open-render-id:";
     private const string TicketContext = "render-ticket:";
     private const string HandoffContext = "render-handoff:";
 
@@ -58,6 +59,27 @@ public sealed class RenderTickets(IConfiguration config)
     }
 
     /// <summary>
+    /// The same, for an invitation opened by its OPEN LINK — derived from the CAMPAIGN, because
+    /// there is no invite behind that door and never will be.
+    /// </summary>
+    /// <remarks>
+    /// A separate HMAC context, and that is the whole safety argument for reusing one ticket cookie
+    /// to hold both kinds of id. Ids of both kinds are Guids and sit in the same list, so without
+    /// separated contexts a campaign a browser was admitted to could be presented as an invite id —
+    /// and vice versa. With them, an id admitted as a campaign can only ever resolve to an open
+    /// render id, and one admitted as an invite only to a personal one.
+    ///
+    /// <para>Revocation still bites through a live cookie: the ticket only says "this browser may
+    /// ask", and <c>InviteService.RenderOpenAsync</c> re-reads the campaign's code on every render
+    /// and returns null once it is gone.</para>
+    /// </remarks>
+    public string OpenRenderId(Guid campaignId)
+    {
+        var mac = HMACSHA256.HashData(Key, Encoding.UTF8.GetBytes(OpenRenderIdContext + campaignId.ToString("N")));
+        return Base64Url(mac.AsSpan(0, 16).ToArray());
+    }
+
+    /// <summary>
     /// Mints the cookie admitting this browser to <paramref name="inviteIds"/>. Order matters: the
     /// most recently admitted comes first and survives longest.
     /// </summary>
@@ -71,7 +93,11 @@ public sealed class RenderTickets(IConfiguration config)
         return $"{body}.{Base64Url(Sign(TicketContext, body))}";
     }
 
-    /// <summary>Adds an invitation to whatever this browser was already admitted to.</summary>
+    /// <summary>
+    /// Adds an invitation to whatever this browser was already admitted to. Takes an invite id or —
+    /// for the open link — a campaign id; which one it turns out to be is decided by the context the
+    /// render id was derived under, not by anything stored here.
+    /// </summary>
     public string Admit(string? existingTicket, Guid inviteId, DateTimeOffset now) =>
         IssueTicket(new[] { inviteId }.Concat(ReadTicket(existingTicket, now)), now);
 

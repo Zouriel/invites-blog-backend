@@ -380,15 +380,25 @@ public sealed class MediaBucketService(
         {
             if (!await ownership.OwnsAsync(existing, ct))
                 throw new ForbiddenException("That event isn't yours.");
+            var already = await buckets.CountAsync(b => b.CampaignId == existing, ct);
+
             // A second bucket on one event is what a subscription buys: the ceremony and the
             // after-party, each with its own night and its own audience. Everyone else keeps the one
             // free bucket every event has always had.
-            if (await buckets.AnyAsync(b => b.CampaignId == existing, ct)
-                && !currentUser.HasPermission(Permissions.Buckets.Multiple))
+            if (already > 0 && !currentUser.HasPermission(Permissions.Buckets.Multiple))
                 throw new BusinessRuleException(
                     "That event already has a media bucket. Keeping more than one on the same event "
                     + "is part of a subscription.",
                     "bucket_exists_for_campaign");
+
+            // And a ceiling above that, which a subscription does NOT lift — see
+            // MediaBucket.MaxPerCampaign. Checked after the subscription gate so somebody who cannot
+            // have a second one is told that rather than being quoted a limit they are nowhere near.
+            if (already >= MediaBucket.MaxPerCampaign)
+                throw new BusinessRuleException(
+                    $"An event can hold {MediaBucket.MaxPerCampaign} media buckets at most. Remove "
+                    + "one, or give the extra night an event of its own.",
+                    "bucket_limit_reached");
         }
 
         var plan = ParseTier(req.Tier) is { } tier

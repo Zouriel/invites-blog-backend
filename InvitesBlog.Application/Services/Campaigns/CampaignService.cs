@@ -284,10 +284,23 @@ public sealed class CampaignService(
     {
         var campaign = await LoadOwnedAsync(id, ct);
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: false, ct);
-        if (guestList.Count == 0) throw new CampaignHasNoGuestsException();
+
+        // A guest list is no longer the only way to have somebody to send to. An event with an open
+        // link has an audience — everyone the host pastes it to — so the empty list that used to be
+        // the definition of "not ready" is now a legitimate finished state. Neither is still an
+        // error: an invitation with no guests and no link reaches nobody at all.
+        if (guestList.Count == 0 && campaign.OpenLinkCode is null)
+            throw new CampaignHasNoGuestsException();
 
         var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
-        var shareLink = $"{inviteeBase}/e/{id}";
+
+        // The open link WINS as the thing we hand back, because it is the one the host is actually
+        // going to share. /e/{id} still exists behind it for a campaign that has a guest list, but
+        // it asks whoever follows it to prove they are on that list — offering it to somebody who
+        // deliberately turned the guest list off would be handing them a door nobody can open.
+        var shareLink = campaign.OpenLinkCode is { } code
+            ? OpenLinkUrl(code)
+            : $"{inviteeBase}/e/{id}";
         var (channels, messageTemplate) = DeliverySettings(campaign.DeliverySettingsJson);
 
         campaign.Status = CampaignStatus.Dispatched;
@@ -647,7 +660,9 @@ public sealed class CampaignService(
             template is null ? null : new CampaignSummaryTemplateDto(
                 template.Name, template.Slug, SnapshotPackageUrl(campaign, template),
                 SnapshotManifest(campaign, template), template.PreviewImageUrl),
-            price);
+            price,
+            template?.Visibility == TemplateVisibility.Imported,
+            campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null);
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -769,7 +784,9 @@ public sealed class CampaignService(
                 campaign.RolesJson,
                 InvitesBlog.Application.Campaigns.CampaignCover.Read(campaign.CustomContentJson),
                 (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl,
-                !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)),
+                !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl),
+                campaign.OpenLinkCode is { } dashOpenCode ? OpenLinkUrl(dashOpenCode) : null,
+                await IsImportedAsync(campaign, ct)),
             report, guestRows, questions);
     }
 
@@ -873,6 +890,60 @@ public sealed class CampaignService(
     /// Loads the campaign and enforces that the caller's possession token maps to THIS campaign
     /// (§4.6.2 / §11.2). Returns a tracked entity so mutations flush on the shared unit of work.
     /// </summary>
+    // ---------- the open link ----------
+
+    public async Task<OpenLinkResponse> EnableOpenLinkAsync(Guid id, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+
+        // Refused rather than trusted to the page that offers it. A gallery template's whole value
+        // is that every guest reads their own name and their own role; an anonymous viewer can be
+        // given neither, so an open link there would quietly serve everybody the fallback copy the
+        // author wrote for missing data and look like a broken invitation rather than a choice.
+        if (!await IsImportedAsync(campaign, ct))
+            throw new BusinessRuleException(
+                "A link anyone can open is for a design you brought yourself. Invitations made from "
+                + "a template are personal to each guest, so they need a guest list.",
+                "open_link_needs_imported_design");
+
+        // A NEW code every time, never the existing one — see ICampaignService. Re-ticking the box
+        // is the only control anybody has for "retire the address I over-shared".
+        campaign.OpenLinkCode = TokenService.GenerateShortCode();
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+
+        return new OpenLinkResponse(OpenLinkUrl(campaign.OpenLinkCode));
+    }
+
+    public async Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+        if (campaign.OpenLinkCode is null) return;   // already off; saying so twice is not an error
+
+        campaign.OpenLinkCode = null;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+    }
+
+    private string OpenLinkUrl(string code) =>
+        $"{(config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/')}/o/{code}";
+
+    /// <summary>
+    /// Whether this event's design was brought by the customer rather than taken from the gallery.
+    ///
+    /// <para>Asked of the TEMPLATE's visibility, never of its slug. <c>ImportedDesignService</c>
+    /// names imported rows <c>imported-{id:N}</c>, but that is its own private convention for
+    /// finding the row again — reading it here would make a rename over there silently turn this
+    /// feature off.</para>
+    /// </summary>
+    private async Task<bool> IsImportedAsync(Campaign campaign, CancellationToken ct)
+    {
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        return template?.Visibility == TemplateVisibility.Imported;
+    }
+
     private async Task<Campaign> LoadOwnedAsync(Guid id, CancellationToken ct)
     {
         if (!await ownership.OwnsAsync(id, ct)) throw new CampaignAccessDeniedException();

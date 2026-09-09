@@ -24,6 +24,16 @@ public interface ICampaignRepository : IRepository<Campaign>
     /// a cross-campaign collision is negligible.
     /// </summary>
     Task<Campaign?> GetByDashboardTokenHashAsync(string tokenHash, CancellationToken ct = default);
+
+    /// <summary>
+    /// The campaign an open link's short code opens, or null.
+    ///
+    /// <para>Never matches a null code. An event with no open link has <c>OpenLinkCode</c> null, and
+    /// SQL's null semantics already make <c>= @code</c> false for those — but the guard is written
+    /// explicitly anyway, because an empty string arriving from a route would otherwise be one
+    /// mis-step away from opening every event that never turned the feature on.</para>
+    /// </summary>
+    Task<Campaign?> GetByOpenLinkCodeAsync(string code, CancellationToken ct = default);
 }
 
 public interface IInviterRepository : IRepository<Inviter>

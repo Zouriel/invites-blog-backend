@@ -114,6 +114,21 @@ public sealed class MediaBucket
     /// </summary>
     public const string DefaultName = "Night's bucket";
 
+    /// <summary>
+    /// The most buckets one event may hold.
+    ///
+    /// <para>A cap rather than an upsell. A second bucket exists for an evening that is really two —
+    /// a ceremony and an after-party — and a third covers the morning after; past that an "event"
+    /// has stopped being one night and the guest list, the cover and the title it shares stop
+    /// describing what is in them. It is also what stops a subscription being read as unlimited
+    /// storage bought one free bucket at a time.</para>
+    ///
+    /// <para>Enforced in <c>MediaBucketService.CreateAsync</c>, which is the only path that can add
+    /// a second one to an event. The dashboard says so before it is reached, but the server is what
+    /// decides.</para>
+    /// </summary>
+    public const int MaxPerCampaign = 3;
+
     public MediaBucketTier Tier { get; set; } = MediaBucketTier.Free;
 
     /// <summary>

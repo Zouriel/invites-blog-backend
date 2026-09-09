@@ -9,6 +9,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Rendering;
 using InvitesBlog.TemplateCompiler;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 
 namespace InvitesBlog.Api.Controllers;
@@ -55,6 +56,28 @@ public sealed class GuestController(
             InviteViewResponse view => Admit(view.InviteId),
             _ => Html(GuestPages.Unavailable(), StatusCodes.Status500InternalServerError)
         };
+    }
+
+    /// <summary>
+    /// The OPEN LINK — one short address anybody may follow, for a customer who brought their own
+    /// artwork and wants to paste a link into a group chat.
+    ///
+    /// <para>No token to verify against a guest, no IP trust, no OTP: possession of the code is the
+    /// whole of it, which is the point. What that buys is deliberately less than a personal link
+    /// buys — no RSVP and no media bucket, see <see cref="IInviteService.RenderOpenAsync"/>.</para>
+    ///
+    /// <para>A bad code and a revoked one answer identically, and with the same page a bad personal
+    /// token gets. Whether a code was ever real is exactly what somebody guessing at them is asking,
+    /// and a distinct "this link was turned off" would answer it.</para>
+    /// </summary>
+    [HttpGet("/o/{code}")]
+    [EnableRateLimiting("openlink")]
+    public async Task<IActionResult> OpenLink(string code, CancellationToken ct)
+    {
+        var campaignId = await invites.CampaignForOpenLinkAsync(code, ct);
+        return campaignId is null
+            ? Html(GuestPages.NotFound(), StatusCodes.Status404NotFound)
+            : AdmitOpen(campaignId.Value);
     }
 
     /// <summary>Sends the reauth code. No contact is taken from the caller — see the service.</summary>
@@ -111,12 +134,24 @@ public sealed class GuestController(
     {
         // The cookie says which invitation; the URL must agree, or one admitted guest could read
         // another's invitation just by editing the address bar.
+        //
+        // Two kinds of admission land here. A personal link admits an INVITE; the open link admits a
+        // CAMPAIGN. Personal is tried first because it is the overwhelmingly common one and because
+        // it is the narrower right — an id that answers to both derivations does not exist, but
+        // ordering it this way means a future bug could only ever downgrade a viewer, never promote
+        // one.
         var inviteId = Admitted(renderId);
-        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
+        if (inviteId is null && openCampaignId is null)
+            return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
 
         // The invitation's own links point back at the path the guest arrived by, so its RSVP button
         // stays inside the server-rendered flow instead of bouncing to a page that wants a session.
-        var payload = await invites.RenderAuthorizedAsync(inviteId.Value, PublicUrl($"/r/{renderId}"), Render, ct);
+        // RenderOpenAsync re-reads the campaign's code every time, so revoking the link shuts an
+        // already-admitted browser out on its next reload rather than when its cookie expires.
+        var payload = inviteId is not null
+            ? await invites.RenderAuthorizedAsync(inviteId.Value, PublicUrl($"/r/{renderId}"), Render, ct)
+            : await invites.RenderOpenAsync(openCampaignId!.Value, PublicUrl($"/r/{renderId}"), Render, ct);
         if (payload is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
 
         var html = await rendered.BuildAsync(payload.PackageUrl, payload.Data, ct);
@@ -494,6 +529,27 @@ public sealed class GuestController(
     }
 
     /// <summary>
+    /// The same, for the open link: the cookie carries the CAMPAIGN, and the render id is derived
+    /// under the open context so it can never be read back as an invite.
+    /// </summary>
+    private IActionResult AdmitOpen(Guid campaignId)
+    {
+        Response.Cookies.Append(
+            RenderTickets.CookieName,
+            tickets.Admit(Request.Cookies[RenderTickets.CookieName], campaignId, DateTimeOffset.UtcNow),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = "/",
+                Expires = DateTimeOffset.UtcNow.Add(RenderTickets.TicketLifetime),
+            });
+
+        return Redirect($"/r/{tickets.OpenRenderId(campaignId)}");
+    }
+
+    /// <summary>
     /// The invitation this request is admitted to, if any of the ones in its cookie matches this
     /// render id. A browser may hold several at once.
     /// </summary>
@@ -501,6 +557,18 @@ public sealed class GuestController(
     {
         foreach (var id in tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow))
             if (string.Equals(tickets.RenderId(id), renderId, StringComparison.Ordinal)) return id;
+        return null;
+    }
+
+    /// <summary>
+    /// The campaign this request is admitted to by an OPEN LINK, if any. Same cookie, different
+    /// derivation — see <see cref="RenderTickets.OpenRenderId"/> for why one list can safely hold
+    /// both kinds of id.
+    /// </summary>
+    private Guid? AdmittedOpen(string renderId)
+    {
+        foreach (var id in tickets.ReadTicket(Request.Cookies[RenderTickets.CookieName], DateTimeOffset.UtcNow))
+            if (string.Equals(tickets.OpenRenderId(id), renderId, StringComparison.Ordinal)) return id;
         return null;
     }
 

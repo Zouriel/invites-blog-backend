@@ -69,6 +69,24 @@ public sealed class CampaignsController(
         return SuccessMessage("Delivery settings updated.");
     }
 
+    /// <summary>
+    /// Turns this event's open link on and hands back the address. Minting a NEW code each time is
+    /// deliberate — see <see cref="ICampaignService.EnableOpenLinkAsync"/>.
+    /// </summary>
+    [HttpPut("{id:guid}/open-link")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> EnableOpenLink(Guid id, CancellationToken ct) =>
+        Success(await campaigns.EnableOpenLinkAsync(id, ct));
+
+    /// <summary>Turns it off. The link stops resolving immediately, cookies included.</summary>
+    [HttpDelete("{id:guid}/open-link")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> DisableOpenLink(Guid id, CancellationToken ct)
+    {
+        await campaigns.DisableOpenLinkAsync(id, ct);
+        return SuccessMessage("That link no longer works.");
+    }
+
     // Finalize (no payment): mark ready, return the shareable /e/{id} link, email it to guests if chosen.
     [HttpPost("{id:guid}/finalize")]
     [HasPermission(Permissions.Campaigns.Write)]

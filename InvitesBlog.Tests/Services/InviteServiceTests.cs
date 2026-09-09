@@ -76,6 +76,88 @@ public class InviteServiceTests
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e, windowDays) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());
 
+    /// <summary>
+    /// A renderer shaped like the real one for the three keys the open link has to strip. The stub
+    /// above returns a bare object, which would pass the anonymity tests for the wrong reason —
+    /// there would be nothing there to remove.
+    /// </summary>
+    private static readonly InviteRenderer FullRenderer = (c, t, g, i, link, n, p, e, windowDays) =>
+        new InviteRenderData(
+            t.PackageUrl,
+            new JsonObject
+            {
+                ["guest"] = new JsonObject { ["name"] = g.Name },
+                ["rsvp"] = new JsonObject { ["link"] = $"{link}/rsvp", ["label"] = "Reply now" },
+                ["photos"] = new JsonObject { ["link"] = $"{link}/photos" },
+                ["camera"] = new JsonObject { ["link"] = $"{link}/camera" },
+            },
+            false,
+            c.Status.ToString());
+
+    // ----- the open link -----
+
+    [Fact]
+    public async Task Open_link_render_returns_null_for_a_campaign_without_one()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = null;
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+
+        Assert.Null(await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", FullRenderer));
+    }
+
+    /// <summary>
+    /// The whole promise of the open link: no reply, no gallery, no camera. RSVP in particular is
+    /// removed by nulling the link rather than by any template change — RenderedInvitations only
+    /// appends its bar when that value is set.
+    /// </summary>
+    [Fact]
+    public async Task Open_link_render_strips_rsvp_photos_and_camera()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, PackageUrl = "/assets/p/" });
+
+        var payload = await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", FullRenderer);
+
+        Assert.NotNull(payload);
+        Assert.Null(payload!.Data["rsvp"]!["link"]);
+        Assert.Null(payload.Data["photos"]!["link"]);
+        Assert.Empty((JsonObject)payload.Data["camera"]!);
+    }
+
+    /// <summary>
+    /// Nothing is written. A placeholder Guest row would put a fictional person on the guest list —
+    /// and because MediaBucketService treats that list as permission to view an unrestricted
+    /// bucket, it would hand every anonymous viewer the host's photographs.
+    /// </summary>
+    [Fact]
+    public async Task Open_link_render_persists_no_guest_or_invite()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, PackageUrl = "/assets/p/" });
+
+        await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", FullRenderer);
+
+        await _guests.DidNotReceive().AddAsync(Arg.Any<Guest>(), Arg.Any<CancellationToken>());
+        await _invites.DidNotReceive().AddAsync(Arg.Any<Invite>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Open_link_lookup_answers_null_for_an_unknown_code()
+    {
+        _campaigns.GetByOpenLinkCodeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((Campaign?)null);
+
+        Assert.Null(await Sut().CampaignForOpenLinkAsync("nope"));
+    }
+
     // ----- GetByToken -----
 
     [Fact]

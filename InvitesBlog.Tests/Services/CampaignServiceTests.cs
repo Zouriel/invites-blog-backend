@@ -585,6 +585,77 @@ public class CampaignServiceTests
         await Assert.ThrowsAsync<CampaignHasNoGuestsException>(() => Sut().FinalizeAsync(c.Id));
     }
 
+    // ----- The open link -----
+
+    /// <summary>
+    /// An event with an open link has an audience — everyone the host pastes it to — so the empty
+    /// guest list that used to mean "not ready" is a finished state for one.
+    /// </summary>
+    [Fact]
+    public async Task Finalize_with_no_guests_succeeds_when_there_is_an_open_link()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        Own(c);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(Array.Empty<Guest>());
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        // The OPEN link is handed back, not /e/{id}: that one asks whoever follows it to prove they
+        // are on a guest list this event deliberately does not have.
+        Assert.Equal("https://me.example.com/o/Xk7mQ2p9Lz", res.ShareLink);
+        Assert.Equal(0, res.GuestCount);
+    }
+
+    [Fact]
+    public async Task Enabling_the_open_link_is_refused_for_a_gallery_template()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Public });
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnableOpenLinkAsync(c.Id));
+        Assert.Equal("open_link_needs_imported_design", ex.ErrorCode);
+        Assert.Null(c.OpenLinkCode);
+    }
+
+    /// <summary>
+    /// Re-enabling mints a DIFFERENT code. Re-ticking the box is the only way anybody has to retire
+    /// an address they over-shared, and handing back the old one would make that impossible.
+    /// </summary>
+    [Fact]
+    public async Task Enabling_the_open_link_twice_mints_a_new_code_each_time()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Imported });
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var first = await Sut().EnableOpenLinkAsync(c.Id);
+        var firstCode = c.OpenLinkCode;
+        var second = await Sut().EnableOpenLinkAsync(c.Id);
+
+        Assert.NotNull(firstCode);
+        Assert.NotEqual(firstCode, c.OpenLinkCode);
+        Assert.NotEqual(first.Url, second.Url);
+        Assert.StartsWith("https://me.example.com/o/", second.Url);
+    }
+
+    [Fact]
+    public async Task Disabling_the_open_link_drops_the_code()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        Own(c);
+
+        await Sut().DisableOpenLinkAsync(c.Id);
+
+        Assert.Null(c.OpenLinkCode);
+    }
+
     [Fact]
     public async Task Finalize_email_channel_emails_each_guest_a_per_guest_tokenized_link()
     {

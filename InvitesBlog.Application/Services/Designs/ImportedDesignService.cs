@@ -53,7 +53,7 @@ public interface IImportedDesignService
 }
 
 /// <param name="PreviewUrl">What to show the customer back, so they can see we got the right file.</param>
-/// <param name="Kind">"image" or "bundle" — what they actually gave us.</param>
+/// <param name="Kind">"image" or "video" — what they actually gave us.</param>
 public sealed record ImportedDesignResult(Guid TemplateId, string PackageUrl, string? PreviewUrl, string Kind);
 
 /// <inheritdoc cref="IImportedDesignService"/>
@@ -143,42 +143,29 @@ public sealed class ImportedDesignService(
         // design can never be served for an event it does not belong to.
         var stem = $"campaigns/{campaign.Id:N}/design";
 
-        string documentHtml;
-        string? previewUrl;
-        string kind;
-
-        if (ImportedDesignPackage.IsZip(fileName))
-        {
-            var unpacked = ImportedDesignPackage.Unpack(content);
-
-            // Assets first: the document's references cannot be rewritten until the URLs exist.
-            var urls = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var asset in unpacked.Assets)
-            {
-                urls[asset.Path] = await storage.PutAsync(
-                    $"{stem}/{asset.Path}", asset.Content, ContentTypeFor(asset.Path), ct);
-            }
-
-            documentHtml = ImportedDesignPackage.Rewrite(
-                System.Text.Encoding.UTF8.GetString(unpacked.Document.Content), urls);
-
-            previewUrl = urls.Values.FirstOrDefault();
-            kind = "bundle";
-        }
-        else if (ImportedDesignPackage.IsStandaloneMedia(fileName))
-        {
-            var ext = Path.GetExtension(fileName).ToLowerInvariant();
-            previewUrl = await storage.PutAsync(
-                $"{stem}/design{ext}", content, ContentTypeFor(fileName), ct);
-
-            documentHtml = Wrap(previewUrl, campaign.Title, IsVideo(ext));
-            kind = "image";
-        }
-        else
-        {
+        // ONE PICTURE OR ONE CLIP. Zip bundles are not accepted, on purpose: a zip is an HTML
+        // document plus its assets, and the thing that would make one worth taking — binding the
+        // customer's own layout so the words inside it become fields — is the Figma integration that
+        // has not been built. Until then a bundle would be stored, wrapped and served as an opaque
+        // page nobody can edit: the image path with none of its advantages and all of the risk of
+        // unreviewed markup. ImportedDesignPackage keeps Unpack/Rewrite and its tests, because that
+        // is where the Figma work starts and it costs nothing sitting there until it does.
+        if (!ImportedDesignPackage.IsStandaloneMedia(fileName))
             throw new BusinessRuleException(
-                "Upload an image, a video, or a zip of your design.", "design_unsupported");
-        }
+                "Upload an image or a video of your design.", "design_unsupported");
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        var video = IsVideo(ext);
+
+        var previewUrl = await storage.PutAsync(
+            $"{stem}/design{ext}", content, ContentTypeFor(fileName), ct);
+
+        var documentHtml = Wrap(previewUrl, campaign.Title, video);
+
+        // What they actually gave us, which is now the only axis left. It was "image" for both a
+        // still and a clip while "bundle" was the other case; with bundles gone that lumping tells
+        // the caller nothing, and the upload page wants to know whether to draw a <video>.
+        var kind = video ? "video" : "image";
 
         // The document goes somewhere the proxy does not serve. Everything above this line is
         // browser-facing and inert; this one file is markup we did not write.

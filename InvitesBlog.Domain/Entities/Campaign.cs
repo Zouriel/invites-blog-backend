@@ -45,6 +45,36 @@ public sealed class Campaign
     public Guid? CreatedByUserId { get; set; }
     public string AccessTokenHash { get; set; } = default!;   // §4.6.2 possession token
     public string? DashboardTokenHash { get; set; }           // §4.6.2 post-payment dashboard link
+
+    /// <summary>
+    /// The short code behind this event's OPEN LINK, or null when it has none.
+    ///
+    /// <para>The open link is one address anybody may follow — no guest list, no OTP, no account —
+    /// for a customer who brought their own artwork and wants to paste a link into a group chat.
+    /// It is not the same thing as the shared link at <c>/e/{id}</c>, which looks similar and is
+    /// gated: that one asks whoever follows it to prove an email or phone that is ON the guest
+    /// list.</para>
+    ///
+    /// <para><b>Stored in the clear, unlike every other token on this entity.</b> Those are secrets
+    /// — a possession token, a dashboard link, an invite token — and are kept as SHA-256 precisely
+    /// so a database read cannot reveal them. This one is the opposite kind of thing: its entire
+    /// purpose is to be posted in a group chat. Hashing it would buy nothing an attacker does not
+    /// already get by being in that chat, and would cost the host the thing they actually need —
+    /// asking us for their own link again tomorrow. A hash cannot be read back, so "show me my link"
+    /// would have to mint a new one, silently breaking the link they had already shared.</para>
+    ///
+    /// <para><b>Null IS the off switch.</b> There is deliberately no separate boolean beside it: a
+    /// flag and a token are two facts that can disagree, and the disagreement that matters here is
+    /// "switched off but the old link still opens". Revoking sets this to null and the link stops
+    /// resolving; ticking the box again mints a NEW code, so a link already shared cannot be
+    /// resurrected by someone changing their mind twice.</para>
+    ///
+    /// <para>What it does NOT grant: the media bucket. Whoever opens it is on no guest list, so
+    /// <c>MediaBucketService.MayViewAsync</c> refuses them — which is only true because the open
+    /// link renders with a synthetic guest and writes no Guest row. See
+    /// <c>InviteService.RenderOpenAsync</c>.</para>
+    /// </summary>
+    public string? OpenLinkCode { get; set; }
     public string Title { get; set; } = default!;
     public string Slug { get; set; } = default!;
     public CampaignStatus Status { get; set; }

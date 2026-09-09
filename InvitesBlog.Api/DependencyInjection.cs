@@ -63,6 +63,12 @@ public static class DependencyInjection
             options.AddPolicy("otp", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10) }));
+            // The open link is the one lookup an anonymous caller can aim at freely, and the code
+            // behind it is short by design. 59 bits is far past guessable, but a limiter is what
+            // turns "not worth trying" into "not possible to try at scale".
+            options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
             options.AddPolicy("resend", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(60) }));

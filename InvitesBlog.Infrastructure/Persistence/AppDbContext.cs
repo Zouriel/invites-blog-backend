@@ -115,6 +115,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.Status).HasDatabaseName("idx_campaigns_status");
             e.HasIndex(x => x.AccessTokenHash).IsUnique().HasDatabaseName("idx_campaigns_access_token_hash");
             e.HasIndex(x => x.DashboardTokenHash).HasDatabaseName("idx_campaigns_dashboard_token_hash");
+            // Every open link resolves through this index, and the lookup runs before anything is
+            // authorised — so it is the one query an attacker can aim at freely. Indexed, rate
+            // limited at the route, and UNIQUE: two events answering to one code would mean the
+            // wrong invitation opening, and at 59 bits a collision is a bug rather than bad luck.
+            e.HasIndex(x => x.OpenLinkCode).IsUnique().HasDatabaseName("idx_campaigns_open_link_code");
             e.Property(x => x.CustomContentJson).HasColumnType("jsonb");
             e.Property(x => x.ThemeOverridesJson).HasColumnType("jsonb");
             e.Property(x => x.DeliverySettingsJson).HasColumnType("jsonb");

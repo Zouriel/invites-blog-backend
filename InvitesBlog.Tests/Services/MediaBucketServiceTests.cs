@@ -482,13 +482,59 @@ public class MediaBucketServiceTests
             .Returns((Inviter?)null);
         _users.GetByIdAsync(_me, Arg.Any<CancellationToken>())
             .Returns(new AppUser { Id = _me, Email = "host@example.test" });
-        _buckets.AnyAsync(
+        _buckets.CountAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
-            .Returns(true);
+            .Returns(1);
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().CreateAsync(
             new CreateMediaBucketRequest("The after-party", null, campaignId, null)));
         Assert.Equal("bucket_exists_for_campaign", ex.ErrorCode);
+    }
+
+    /// <summary>
+    /// The ceiling a subscription does NOT lift. Three buckets is a ceremony, an after-party and the
+    /// morning after; past that the guest list, cover and title the event shares with them have
+    /// stopped describing one night. Without this a subscription reads as unlimited storage bought
+    /// one free bucket at a time.
+    /// </summary>
+    [Fact]
+    public async Task An_event_may_not_hold_more_than_three_buckets()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        // A subscriber: the cap is what refuses this, not the permission.
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+        _buckets.CountAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(MediaBucket.MaxPerCampaign);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().CreateAsync(
+            new CreateMediaBucketRequest("A fourth", null, campaignId, null)));
+        Assert.Equal("bucket_limit_reached", ex.ErrorCode);
+    }
+
+    /// <summary>The one below it still goes through — the cap is a ceiling, not an off switch.</summary>
+    [Fact]
+    public async Task A_third_bucket_is_still_allowed()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+        _buckets.CountAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(MediaBucket.MaxPerCampaign - 1);
+
+        MediaBucket? saved = null;
+        await _buckets.AddAsync(Arg.Do<MediaBucket>(b => saved = b), Arg.Any<CancellationToken>());
+
+        await Sut().CreateAsync(new CreateMediaBucketRequest("A third", null, campaignId, null));
+
+        Assert.NotNull(saved);
+        Assert.Equal(campaignId, saved!.CampaignId);
     }
 
     /// <summary>

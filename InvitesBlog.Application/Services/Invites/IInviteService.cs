@@ -62,6 +62,22 @@ public interface IInviteService
         Guid inviteId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
 
     /// <summary>
+    /// The invitation as somebody who followed the OPEN LINK sees it: no guest, no RSVP, no gallery.
+    /// Null when the event has no open link, which is also how a revoked one stops working.
+    ///
+    /// <para>Writes nothing — see the implementation for why a placeholder guest row would quietly
+    /// give every anonymous viewer the host's media bucket.</para>
+    /// </summary>
+    Task<InviteRenderData?> RenderOpenAsync(
+        Guid campaignId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
+
+    /// <summary>
+    /// The event an open link's short code opens, or null for a code that is wrong, revoked, or was
+    /// never real. One answer for all three on purpose — see the route.
+    /// </summary>
+    Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default);
+
+    /// <summary>
     /// Records an RSVP for an invite the caller has ALREADY been authorized to answer for — the
     /// cookie-carried counterpart of <see cref="RsvpAsync"/>. Like
     /// <see cref="RenderAuthorizedAsync"/> it performs no access check of its own.

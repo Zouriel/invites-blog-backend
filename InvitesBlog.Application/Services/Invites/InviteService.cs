@@ -118,6 +118,83 @@ public sealed class InviteService(
             payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString());
     }
 
+    /// <summary>
+    /// The same invitation, rendered for somebody who followed the OPEN LINK — no guest list, no
+    /// account, nobody in particular.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Nothing is written.</b> The guest and the invite handed to the renderer are made
+    /// here and thrown away. The tempting alternative — one placeholder Guest row per campaign, so
+    /// the whole existing path works untouched — was rejected for a reason worth keeping written
+    /// down: <c>MediaBucketService.MayViewAsync</c> treats being on the guest list as permission to
+    /// open an unrestricted bucket. A placeholder row would therefore hand every anonymous viewer
+    /// the host's photographs, which is the exact thing this feature promises not to do. It would
+    /// also put a fictional person in the dashboard's guest table and its counts.</para>
+    /// </remarks>
+    public async Task<InviteRenderData?> RenderOpenAsync(
+        Guid campaignId, string inviteLink, InviteRenderer render, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign?.OpenLinkCode is null) return null;
+
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        if (template is null) return null;
+
+        var inviter = campaign.InviterId is null
+            ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
+
+        // A stand-in, never saved. The name is what a template's {{guest.name}} falls back to; an
+        // imported design has no such binding, so in practice it is read by nothing at all.
+        var guest = new Guest { Id = Guid.Empty, CampaignId = campaignId, Name = "Friend" };
+        var invite = new Invite
+        {
+            Id = Guid.Empty,
+            CampaignId = campaignId,
+            RsvpStatus = RsvpStatus.NoResponse,
+            // The open link IS the credential and there is no contact to challenge — an OTP here
+            // would be a code sent to nobody.
+            RequiresOtp = false,
+        };
+
+        var payload = render(campaign, template, guest, invite, inviteLink,
+            inviter?.Name, inviter?.PhoneE164, inviter?.Email,
+            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
+
+        Anonymize(payload.Data);
+
+        return new InviteRenderData(
+            payload.PackageUrl, payload.Data, false, campaign.Status.ToString());
+    }
+
+    public async Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByOpenLinkCodeAsync(code ?? string.Empty, ct);
+        return campaign?.Id;
+    }
+
+    /// <summary>
+    /// Strips the three things a nameless viewer must not be offered, on the payload rather than in
+    /// the renderer — the renderer is shared with the personal path and has no business knowing
+    /// this door exists.
+    /// </summary>
+    private static void Anonymize(JsonObject data)
+    {
+        // RSVP: there is no invite row to record an answer against, and a reply from "somebody"
+        // means nothing to a host anyway. RenderedInvitations.WithRsvp appends its bar only when
+        // this link is set, so nulling it removes the control with no template change.
+        if (data["rsvp"] is JsonObject rsvp) rsvp["link"] = null;
+
+        // The gallery is the host's media bucket. Everything else guarding it works off the guest
+        // list, which this viewer is not on — this just stops the invitation advertising a door
+        // that would refuse them.
+        if (data["photos"] is JsonObject photos) photos["link"] = null;
+
+        // Already closed by CameraIsOpen, which requires RsvpStatus.Going and can never see one
+        // here. Emptied anyway so the payload states it rather than relying on that coincidence
+        // holding after somebody edits the camera rules.
+        data["camera"] = new JsonObject();
+    }
+
     public async Task<RsvpResultResponse> RsvpAuthorizedAsync(
         Guid inviteId, RsvpRequest req, CancellationToken ct = default)
     {

@@ -36,10 +36,31 @@ public sealed record CampaignSummaryDto(
     string DeliverySettingsJson,
     int GuestCount,
     CampaignSummaryTemplateDto? Template,
-    PriceBreakdown Price);
+    PriceBreakdown Price,
+    /// <summary>
+    /// Whether the customer brought this design themselves. What the builder branches on: an
+    /// imported design declares no fields, so the steps that fill fields — and Venue and RSVP,
+    /// whose answers would have nowhere to appear — are not shown for one.
+    /// </summary>
+    bool IsImported = false,
+    /// <summary>
+    /// The event's open link, or null when it has none. The whole URL rather than a boolean,
+    /// because the host needs to copy it again tomorrow and the code is the only place it lives.
+    /// </summary>
+    string? OpenLink = null);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
+
+/// <summary>
+/// An event's open link, as the builder shows it back.
+/// </summary>
+/// <param name="Url">
+/// The whole address to share, code and all. Also readable later from the event's dashboard: the
+/// code is stored in the clear precisely so a host can come back for their own public link without
+/// minting a new one and killing the link they already shared.
+/// </param>
+public sealed record OpenLinkResponse(string Url);
 
 /// <summary>Result of cancelling a campaign (§14.3).</summary>
 public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, string? Note = null);
@@ -69,7 +90,19 @@ public sealed record DashboardCampaignDto(
     /// who only wanted the photographs — and the dashboard has to know, or it offers guest tables and
     /// a "send" for something that has nothing to send.
     /// </summary>
-    bool HasInvitation = true);
+    bool HasInvitation = true,
+    /// <summary>
+    /// The event's open link, or null. Carried here so a host can copy the address they are
+    /// sharing without walking back through the builder — it is stored in the clear precisely so
+    /// this is possible; see <c>Campaign.OpenLinkCode</c>.
+    /// </summary>
+    string? OpenLink = null,
+    /// <summary>
+    /// Whether the customer brought this design themselves. The dashboard offers the open link only
+    /// for one — a gallery template's whole value is the per-guest personalisation an anonymous
+    /// viewer cannot be given, and the server refuses it there anyway.
+    /// </summary>
+    bool IsImported = false);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

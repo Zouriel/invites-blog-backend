@@ -19,6 +19,35 @@ public static class TokenService
         return Base64Url(bytes);
     }
 
+    /// <summary>
+    /// A short code for a link a person actually handles — reads aloud, fits in a message, and is
+    /// still far too large to guess.
+    ///
+    /// <para><b>Why not <see cref="GenerateToken"/>.</b> That is 43 URL-safe characters, which is
+    /// right for a link that is emailed and clicked and never read by anybody. An open link gets
+    /// pasted into a group chat and sometimes typed, and 43 characters of base64 is hostile there.
+    /// Ten base62 characters is ~59 bits: at a thousand guesses a second it is seventeen thousand
+    /// years to a one-in-a-million chance of hitting one, and the route that resolves it is rate
+    /// limited on top.</para>
+    ///
+    /// <para>Base62 rather than base64url on purpose — no <c>-</c> or <c>_</c> to lose when a chat
+    /// client decides where a link ends, and nothing that changes meaning when somebody types it.</para>
+    /// </summary>
+    public static string GenerateShortCode()
+    {
+        // Rejection-free: 62 does not divide 256, so taking bytes modulo 62 would favour the first
+        // 8 letters of the alphabet. GetInt32 draws uniformly and is what this is for.
+        var chars = new char[ShortCodeLength];
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = ShortCodeAlphabet[RandomNumberGenerator.GetInt32(ShortCodeAlphabet.Length)];
+        return new string(chars);
+    }
+
+    public const int ShortCodeLength = 10;
+
+    private const string ShortCodeAlphabet =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
     /// <summary>Lowercase-hex SHA-256 of the token, safe to persist and index.</summary>
     public static string Hash(string token)
     {
