@@ -616,7 +616,8 @@ public class CampaignServiceTests
         _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
             .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Public });
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnableOpenLinkAsync(c.Id));
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: true)));
         Assert.Equal("open_link_needs_imported_design", ex.ErrorCode);
         Assert.Null(c.OpenLinkCode);
     }
@@ -634,14 +635,52 @@ public class CampaignServiceTests
             .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Imported });
         _config["Urls:InviteeBase"].Returns("https://me.example.com");
 
-        var first = await Sut().EnableOpenLinkAsync(c.Id);
+        var first = await Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: true));
         var firstCode = c.OpenLinkCode;
-        var second = await Sut().EnableOpenLinkAsync(c.Id);
+        var second = await Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: true));
 
         Assert.NotNull(firstCode);
         Assert.NotEqual(firstCode, c.OpenLinkCode);
         Assert.NotEqual(first.Url, second.Url);
         Assert.StartsWith("https://me.example.com/o/", second.Url);
+    }
+
+    /// <summary>
+    /// Asking for the gated link drops any anonymous code. The alternative is a box that says
+    /// "not anonymous" while an address anyone can open is still resolving.
+    /// </summary>
+    [Fact]
+    public async Task Generating_a_gated_link_drops_the_anonymous_code()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        Own(c);
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: false));
+
+        Assert.False(res.AllowsAnonymous);
+        Assert.Equal($"https://me.example.com/e/{c.Id}", res.Url);
+        Assert.Null(c.OpenLinkCode);
+    }
+
+    /// <summary>
+    /// The gated link is not restricted to imported designs — every campaign has always had one,
+    /// and only the anonymous half is a new right.
+    /// </summary>
+    [Fact]
+    public async Task A_gated_link_is_allowed_for_a_gallery_template()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Public });
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: false));
+
+        Assert.False(res.AllowsAnonymous);
+        Assert.Equal($"https://me.example.com/e/{c.Id}", res.Url);
     }
 
     [Fact]

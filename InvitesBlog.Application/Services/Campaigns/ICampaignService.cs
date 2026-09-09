@@ -80,17 +80,25 @@ public interface ICampaignService
     Task ResendLinkAsync(ResendLinkRequest req, CancellationToken ct = default);
     Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default);
     /// <summary>
-    /// Turns this event's OPEN LINK on, minting a fresh short code, and returns the whole URL.
+    /// Produces this event's public link and returns the whole URL.
     ///
-    /// <para>Always a new code, even when one already exists. Re-ticking the box is how somebody
-    /// retires a link they over-shared, and handing back the old one would make that impossible —
-    /// there is no other control for "the same event, a different address".</para>
+    /// <para>Two kinds, chosen by <see cref="SetOpenLinkRequest.AllowAnonymous"/>. Anonymous mints a
+    /// fresh short code at <c>/o/{code}</c>; gated returns <c>/e/{id}</c>, which needs no code
+    /// because it authenticates the visitor against the guest list. Asking for the gated one also
+    /// DROPS any anonymous code, so the answer to "can anyone open this" is never yes and no at
+    /// once.</para>
     ///
-    /// <para>Imported designs only. A gallery template's whole value is that every guest reads their
-    /// own name, which an anonymous viewer cannot be given, so the offer is not made there and the
-    /// service refuses it rather than trusting the page not to ask.</para>
+    /// <para>Anonymous is always a NEW code, even when one already exists. Generating again is how
+    /// somebody retires a link they over-shared, and handing back the old one would make that
+    /// impossible — there is no other control for "the same event, a different address".</para>
+    ///
+    /// <para>Anonymous is for imported designs only. A gallery template's whole value is that every
+    /// guest reads their own name, which an anonymous viewer cannot be given, so the offer is not
+    /// made there and the service refuses it rather than trusting the page not to ask. The gated
+    /// link carries no such restriction — every campaign has always had one.</para>
     /// </summary>
-    Task<OpenLinkResponse> EnableOpenLinkAsync(Guid id, CancellationToken ct = default);
+    Task<OpenLinkResponse> EnableOpenLinkAsync(
+        Guid id, SetOpenLinkRequest req, CancellationToken ct = default);
 
     /// <summary>Turns it off. The code is dropped, so the link stops resolving immediately.</summary>
     Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default);

@@ -786,7 +786,8 @@ public sealed class CampaignService(
                 (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl,
                 !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl),
                 campaign.OpenLinkCode is { } dashOpenCode ? OpenLinkUrl(dashOpenCode) : null,
-                await IsImportedAsync(campaign, ct)),
+                await IsImportedAsync(campaign, ct),
+                campaign.Status == CampaignStatus.Draft),
             report, guestRows, questions);
     }
 
@@ -892,28 +893,47 @@ public sealed class CampaignService(
     /// </summary>
     // ---------- the open link ----------
 
-    public async Task<OpenLinkResponse> EnableOpenLinkAsync(Guid id, CancellationToken ct = default)
+    public async Task<OpenLinkResponse> EnableOpenLinkAsync(
+        Guid id, SetOpenLinkRequest req, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);
+
+        if (!req.AllowAnonymous)
+        {
+            // The gated link needs no code: /e/{id} asks whoever follows it to prove a contact that
+            // is on the guest list. Any anonymous code is DROPPED — leaving one alive would mean the
+            // box saying "not anonymous" while an address anyone can open is still resolving, which
+            // is the worst possible disagreement for this particular setting to have.
+            if (campaign.OpenLinkCode is not null)
+            {
+                campaign.OpenLinkCode = null;
+                campaign.UpdatedAt = DateTimeOffset.UtcNow;
+                campaigns.Update(campaign);
+                await uow.SaveChangesAsync(ct);
+            }
+
+            return new OpenLinkResponse(GatedLinkUrl(campaign.Id), false);
+        }
 
         // Refused rather than trusted to the page that offers it. A gallery template's whole value
         // is that every guest reads their own name and their own role; an anonymous viewer can be
         // given neither, so an open link there would quietly serve everybody the fallback copy the
         // author wrote for missing data and look like a broken invitation rather than a choice.
+        // Only the ANONYMOUS half is restricted — /e/{id} has always existed for every campaign.
         if (!await IsImportedAsync(campaign, ct))
             throw new BusinessRuleException(
                 "A link anyone can open is for a design you brought yourself. Invitations made from "
                 + "a template are personal to each guest, so they need a guest list.",
                 "open_link_needs_imported_design");
 
-        // A NEW code every time, never the existing one — see ICampaignService. Re-ticking the box
-        // is the only control anybody has for "retire the address I over-shared".
+        // A NEW code every time, never the existing one — see ICampaignService. Generating again is
+        // the only control anybody has for "retire the address I over-shared".
         campaign.OpenLinkCode = TokenService.GenerateShortCode();
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
 
-        return new OpenLinkResponse(OpenLinkUrl(campaign.OpenLinkCode));
+        return new OpenLinkResponse(OpenLinkUrl(campaign.OpenLinkCode), true);
     }
 
     public async Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default)
@@ -927,8 +947,17 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
-    private string OpenLinkUrl(string code) =>
-        $"{(config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/')}/o/{code}";
+    private string OpenLinkUrl(string code) => $"{InviteeBase}/o/{code}";
+
+    /// <summary>
+    /// The link that is public but not anonymous: whoever follows it is asked for an email or phone
+    /// on the guest list and mailed a code. It is derived from the id and has always existed, which
+    /// is why "generating" one only ever means revealing it — and dropping any anonymous code.
+    /// </summary>
+    private string GatedLinkUrl(Guid campaignId) => $"{InviteeBase}/e/{campaignId}";
+
+    private string InviteeBase =>
+        (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
 
     /// <summary>
     /// Whether this event's design was brought by the customer rather than taken from the gallery.

@@ -70,13 +70,15 @@ public sealed class CampaignsController(
     }
 
     /// <summary>
-    /// Turns this event's open link on and hands back the address. Minting a NEW code each time is
-    /// deliberate — see <see cref="ICampaignService.EnableOpenLinkAsync"/>.
+    /// Produces this event's public link and hands back the address. The body says whether anyone
+    /// may open it or whether the visitor is checked against the guest list; minting a NEW code each
+    /// time is deliberate — see <see cref="ICampaignService.EnableOpenLinkAsync"/>.
     /// </summary>
     [HttpPut("{id:guid}/open-link")]
     [HasPermission(Permissions.Campaigns.Write)]
-    public async Task<IActionResult> EnableOpenLink(Guid id, CancellationToken ct) =>
-        Success(await campaigns.EnableOpenLinkAsync(id, ct));
+    public async Task<IActionResult> EnableOpenLink(
+        Guid id, [FromBody] SetOpenLinkRequest req, CancellationToken ct) =>
+        Success(await campaigns.EnableOpenLinkAsync(id, req, ct));
 
     /// <summary>Turns it off. The link stops resolving immediately, cookies included.</summary>
     [HttpDelete("{id:guid}/open-link")]

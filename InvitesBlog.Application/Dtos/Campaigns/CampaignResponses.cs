@@ -56,11 +56,27 @@ public sealed record CampaignImageDto(string Url);
 /// An event's open link, as the builder shows it back.
 /// </summary>
 /// <param name="Url">
-/// The whole address to share, code and all. Also readable later from the event's dashboard: the
-/// code is stored in the clear precisely so a host can come back for their own public link without
-/// minting a new one and killing the link they already shared.
+/// The whole address to share. An anonymous one carries its code and is also readable later from the
+/// event's dashboard — the code is stored in the clear precisely so a host can come back for their
+/// own public link without minting a new one and killing the link they already shared. A gated one
+/// is just <c>/e/{id}</c>, which needs no code because it authenticates whoever follows it.
 /// </param>
-public sealed record OpenLinkResponse(string Url);
+/// <param name="AllowsAnonymous">
+/// Which kind came back, so the page can say what it hands out rather than inferring it from the
+/// shape of the URL.
+/// </param>
+public sealed record OpenLinkResponse(string Url, bool AllowsAnonymous);
+
+/// <param name="AllowAnonymous">
+/// Whether whoever follows this link may open the invitation without proving who they are.
+///
+/// <para>False does NOT mean "no link" — it means the gated one, <c>/e/{id}</c>, which asks the
+/// visitor for an email or phone that is on the guest list and mails them a code. Both are public
+/// addresses the host pastes somewhere; they differ only in what is asked at the door. An event with
+/// no guest list and this set to false therefore produces a link that opens for nobody, which is
+/// why the page says so beside the box.</para>
+/// </param>
+public sealed record SetOpenLinkRequest(bool AllowAnonymous);
 
 /// <summary>Result of cancelling a campaign (§14.3).</summary>
 public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, string? Note = null);
@@ -102,7 +118,18 @@ public sealed record DashboardCampaignDto(
     /// for one — a gallery template's whole value is the per-guest personalisation an anonymous
     /// viewer cannot be given, and the server refuses it there anyway.
     /// </summary>
-    bool IsImported = false);
+    bool IsImported = false,
+    /// <summary>
+    /// Whether this event is still an unfinished draft — a design uploaded, or a template chosen,
+    /// but never sent.
+    ///
+    /// <para>Not the same question as <see cref="DashboardCampaignDto.HasInvitation"/>, and the gap
+    /// between them is what made an unfinished import invisible: a package URL is written the moment
+    /// artwork is uploaded, so "has an invitation" went true while the host was still three steps
+    /// from finishing. The dashboard needs both — one to decide whether to offer an invitation at
+    /// all, the other to offer finishing the one that exists.</para>
+    /// </summary>
+    bool IsDraft = false);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 
