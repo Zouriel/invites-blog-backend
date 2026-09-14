@@ -401,7 +401,8 @@ public sealed class CampaignService(
                 r.Name.Trim(),
                 (r.ContentBlocks ?? Array.Empty<string>())
                     .Where(b => !string.IsNullOrWhiteSpace(b)).Select(b => b.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                InvitesBlog.Application.Campaigns.DressColors.Clean(r.Palette)))
             .ToList();
 
         // Persist the roles as authored — camelCase to match the API wire convention the apps read.

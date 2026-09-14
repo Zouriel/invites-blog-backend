@@ -28,7 +28,33 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         if (bytes is null || bytes.Length == 0) return null;
 
         var html = ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data);
-        return WithPhotoBox(WithRsvp(html, data), data);
+        return WithPhotoBox(WithRsvp(WithDressColors(html, data), data), data);
+    }
+
+    /// <summary>
+    /// Shows a guest the colours they are asked to wear when the template has no
+    /// <c>[data-dress-colors]</c> spot of its own, which is every template pinned before the spot
+    /// existed. Placed before the reply and camera bars: what to wear is part of reading the
+    /// invitation, and those are things done after.
+    /// </summary>
+    private static string WithDressColors(string html, JsonObject data)
+    {
+        if (data["dressColors"] is not JsonArray palettes || palettes.Count == 0) return html;
+        if (html.Contains("data-dress-colors", StringComparison.Ordinal)) return html;
+
+        var section = $"""
+            <section style="position:relative;z-index:2147483000;
+               padding:48px 20px 8px;text-align:center;
+               background:var(--ib-bg,#17131a);color:var(--ib-text,#f4eef6)">
+              <p style="margin:0 0 18px;font:400 12px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+                 letter-spacing:.14em;text-transform:uppercase;
+                 color:color-mix(in srgb, currentColor 62%, transparent)">What to wear</p>
+              {ServerBinder.DressColorsHtml(palettes, withInlineStyle: true)}
+            </section>
+            """;
+
+        var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return close < 0 ? html + section : html[..close] + section + html[close..];
     }
 
     /// <summary>

@@ -104,7 +104,10 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             // injector actually sets on the document. Resolved here because the manifest — the only
             // place a theme key's cssVar is recorded — lives server-side.
             ["themeVars"] = ThemeVars(theme, manifest),
-            ["resolvedBlocks"] = new JsonArray(resolved.Select(b => (JsonNode)b!).ToArray())
+            ["resolvedBlocks"] = new JsonArray(resolved.Select(b => (JsonNode)b!).ToArray()),
+            // What this guest is asked to wear: one palette per role they hold that has one. A
+            // household invited as two roles gets both.
+            ["dressColors"] = InvitesBlog.Application.Campaigns.DressColors.ForGuest(campaign.RolesJson, guestRoles)
         };
 
         // Inviter-filled dynamic fields + images, keyed by their data-var/href/src path. Each value is

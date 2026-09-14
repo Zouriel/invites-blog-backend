@@ -51,6 +51,7 @@ public static class ServerBinder
         // after all three passes above — the same order the JavaScript ran them in.
         HideEmptyOptionals(doc);
         ApplyBlocks(doc, data["resolvedBlocks"] as JsonArray);
+        ApplyDressColors(doc, data["dressColors"] as JsonArray);
         StripReducedMotion(doc);
         SwapRuntime(doc, data);
 
@@ -310,6 +311,59 @@ public static class ServerBinder
         var runtime = doc.CreateElement("script");
         runtime.TextContent = TemplateRuntime.Js;
         (doc.Body ?? doc.DocumentElement).AppendChild(runtime);
+    }
+
+    /// <summary>
+    /// Fills every <c>[data-dress-colors]</c> element with this guest's dress colours, one row of
+    /// swatches per role. An element with nothing to show is hidden, the same as an empty
+    /// <c>[data-optional]</c>. Swatches carry class names, so a designer styles them in their own CSS:
+    /// <c>.ib-dress</c>, <c>.ib-dress__role</c>, <c>.ib-dress__swatches</c>, <c>.ib-dress__swatch</c>.
+    /// </summary>
+    private static void ApplyDressColors(IHtmlDocument doc, JsonArray? palettes)
+    {
+        foreach (var el in doc.QuerySelectorAll("[data-dress-colors]").ToList())
+        {
+            if (palettes is null || palettes.Count == 0)
+            {
+                Hide(el);
+                continue;
+            }
+            el.InnerHtml = DressColorsHtml(palettes, withInlineStyle: false);
+        }
+    }
+
+    /// <summary>
+    /// The swatch markup, shared with the section appended to templates that have no spot of their own.
+    /// Colours arrive validated as <c>#rrggbb</c> (see <c>DressColors.Clean</c>); role names are encoded.
+    /// </summary>
+    public static string DressColorsHtml(JsonArray palettes, bool withInlineStyle)
+    {
+        var sb = new StringBuilder();
+        var showRole = palettes.Count > 1;
+        foreach (var entry in palettes)
+        {
+            var role = entry?["role"]?.ToString() ?? string.Empty;
+            var colors = (entry?["colors"] as JsonArray)?.Select(c => c?.ToString()).OfType<string>().ToList() ?? new();
+            if (colors.Count == 0) continue;
+
+            sb.Append(withInlineStyle
+                ? "<div class=\"ib-dress\" style=\"margin:0 0 18px\">"
+                : "<div class=\"ib-dress\">");
+            if (showRole)
+                sb.Append(withInlineStyle
+                        ? "<p class=\"ib-dress__role\" style=\"margin:0 0 10px;font:600 13px/1.4 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em\">"
+                        : "<p class=\"ib-dress__role\">")
+                  .Append(System.Net.WebUtility.HtmlEncode(role)).Append("</p>");
+            sb.Append(withInlineStyle
+                ? "<div class=\"ib-dress__swatches\" style=\"display:flex;justify-content:center;gap:10px;flex-wrap:wrap\">"
+                : "<div class=\"ib-dress__swatches\">");
+            foreach (var c in colors)
+                sb.Append(withInlineStyle
+                        ? $"<span class=\"ib-dress__swatch\" title=\"{c}\" style=\"display:inline-block;width:44px;height:44px;border-radius:50%;background:{c};box-shadow:0 0 0 2px color-mix(in srgb, currentColor 22%, transparent)\"></span>"
+                        : $"<span class=\"ib-dress__swatch\" title=\"{c}\" style=\"background:{c}\"></span>");
+            sb.Append("</div></div>");
+        }
+        return sb.ToString();
     }
 
     private static void Hide(IElement el)

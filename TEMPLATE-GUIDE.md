@@ -27,6 +27,7 @@ appears. You never touch any other code.
 | `data-src="PATH"` | Fills an **image** (src) — becomes an upload slot in the builder | `<img data-src="event.coverImage">`
 | `data-block="ID"` | A **section shown only to some guests** (by role/gender). A block no rule mentions is shown to everyone. | `<section data-block="maleDressCode">`
 | `data-optional` | **Hides the element when its value is empty** — put it on anything that might be left blank so no empty label shows | `<p data-optional>Dress code: <span data-var="event.dressCode"></span></p>`
+| `data-dress-colors` | Filled with the **colours this guest is asked to wear** (one row of swatches per role they hold). Hidden when there are none. Style `.ib-dress`, `.ib-dress__role`, `.ib-dress__swatches`, `.ib-dress__swatch` in your CSS. Without this tag the colours are added in a plain section near the end of the invitation. | `<div data-dress-colors></div>`
 | `data-reveal` | Gets the class `is-visible` when scrolled into view — animate it in your CSS | `<section data-reveal>`
 | `data-envelope` | The cover gets `is-open` after the first scroll — animate a seal/flap | `<header data-envelope>`
 

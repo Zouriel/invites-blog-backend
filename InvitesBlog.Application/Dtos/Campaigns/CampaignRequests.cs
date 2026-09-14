@@ -55,7 +55,12 @@ public sealed record UpdateInviterRequest(
 public sealed record UpdateDeliverySettingsRequest(string DeliverySettingsJson);
 
 /// <summary>One guest role and the template content blocks it unlocks (dress code, message, etc.).</summary>
-public sealed record RoleDefinitionDto(string Name, IReadOnlyList<string> ContentBlocks);
+/// <param name="Palette">
+/// The dress colours for guests holding this role: hex values like <c>#8a1c2b</c>, usually four shades
+/// of one colour. Empty when the host set none.
+/// </param>
+public sealed record RoleDefinitionDto(
+    string Name, IReadOnlyList<string> ContentBlocks, IReadOnlyList<string>? Palette = null);
 
 /// <summary>Set the campaign's guest roles (§roles step). The server also regenerates RulesJson so
 /// each role's content blocks are shown to guests holding that role.</summary>
