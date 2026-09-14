@@ -72,3 +72,7 @@ public sealed record InviteRenderData(string PackageUrl, JsonObject Data, bool R
 public delegate InviteRenderData InviteRenderer(
     Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink,
     string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays);
+
+/// <summary>The camera on a static invitation. See <c>IInviteService.StaticCameraAsync</c>.</summary>
+public sealed record StaticCameraInfo(
+    Guid CampaignId, Guid BucketId, string EventTitle, bool IsStatic, bool IsOpen, bool IsCancelled);

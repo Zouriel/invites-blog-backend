@@ -112,7 +112,7 @@ public class InviteServiceTests
     /// appends its bar when that value is set.
     /// </summary>
     [Fact]
-    public async Task Open_link_render_strips_rsvp_photos_and_camera()
+    public async Task Open_link_render_strips_rsvp_and_photos_but_keeps_the_camera()
     {
         var c = TestData.Campaign();
         c.OpenLinkCode = "Xk7mQ2p9Lz";
@@ -125,7 +125,9 @@ public class InviteServiceTests
         Assert.NotNull(payload);
         Assert.Null(payload!.Data["rsvp"]!["link"]);
         Assert.Null(payload.Data["photos"]!["link"]);
-        Assert.Empty((JsonObject)payload.Data["camera"]!);
+        // Kept as the renderer built it. An open link is for an uploaded design, whose camera asks
+        // for a name and only adds to the bucket; it never lets the viewer look inside.
+        Assert.IsType<JsonObject>(payload.Data["camera"]);
     }
 
     /// <summary>

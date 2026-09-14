@@ -20,6 +20,12 @@ public static class EventDayWindow
     /// </summary>
     public static readonly TimeSpan ClosesAfter = TimeSpan.FromHours(24);
 
+    /// <summary>Whole days before the event's own day that the window opens.</summary>
+    public const int DaysBefore = 1;
+
+    /// <summary>Whole days after the event's own day that the window stays open, to midnight.</summary>
+    public const int DaysAfter = 1;
+
     /// <summary>
     /// The most days a bucket may stay open for, however generous the plan behind it gets.
     ///
@@ -38,43 +44,41 @@ public static class EventDayWindow
     public static readonly TimeSpan Male = TimeSpan.FromHours(5);
 
     /// <summary>
-    /// Whether it is the night, for an event starting at <paramref name="eventStartAt"/>.
+    /// Whether the event's window is open, for an event starting at <paramref name="eventStartAt"/>.
     ///
-    /// <para><b>Why a window and not a date.</b> A calendar-date comparison expires at midnight, and a
-    /// party that begins at 22:00 is two hours old by then — everything would go dark at exactly the
-    /// point people are using it. So it opens at the start of the event's day and closes
-    /// <see cref="ClosesAfter"/> after it begins, which covers the evening it was meant for including
-    /// the part after midnight.</para>
+    /// <para><b>Three days, not one evening.</b> It opens at midnight at the start of the day BEFORE
+    /// the event and closes when the day AFTER it ends. Guests take photos at the mehendi the night
+    /// before, at the event itself, and over breakfast the morning after, and to them that is all the
+    /// same wedding. The camera on the invitation and the bucket it posts to share this answer, so a
+    /// camera is never offered that leads to a bucket refusing the photo.</para>
     ///
     /// <para><b>Whose day.</b> Malé's, not UTC's. The column is normalised to UTC and the offset the
-    /// inviter typed does not survive the round trip, so the day has to be reconstructed — and taking
-    /// UTC's opens the window at 05:00 local, five hours into a day the guest has been living in
-    /// since midnight. Someone checking their invitation the night before the party is told it is not
-    /// the day yet when their own calendar says it is. <see cref="Male"/> is what everyone here means
-    /// by the date.</para>
+    /// inviter typed does not survive the round trip, so the day has to be reconstructed. Taking UTC's
+    /// would move every boundary to 05:00 local. <see cref="Male"/> is what everyone here means by
+    /// the date.</para>
     /// </summary>
     /// <param name="windowDays">
-    /// How many days it stays open, counted from the moment the event begins. One is the ordinary
-    /// night and the default, so every existing caller keeps the behaviour it had. A subscriber's
-    /// bucket may carry more — clamped to <see cref="MaxWindowDays"/>, and to at least one, because
-    /// a zero or a negative stored by accident would close a bucket that should be open rather than
-    /// fail visibly.
+    /// For a subscriber's bucket, how many days it stays open counted from the moment the event
+    /// begins. It can only make the window longer: it closes at whichever is later, the end of the
+    /// day after or the start plus this many days. Clamped to 1..<see cref="MaxWindowDays"/>.
     /// </param>
     public static bool IsOpen(DateTimeOffset eventStartAt, DateTimeOffset now, int windowDays = 1)
     {
-        // A date near either end of the representable range cannot be shifted into Malé's offset —
-        // `DateTimeOffset`'s constructor throws rather than saturating. That is reachable with real
-        // data: a bucket row whose date was never set reads as year 1, and a 500 from "is it the
-        // night" is a far worse answer than "no". Anything we cannot reason about is closed.
-        var days = Math.Clamp(windowDays, 1, MaxWindowDays);
-        var stays = ClosesAfter * days;
-
-        var limit = stays + Male;
-        if (eventStartAt < DateTimeOffset.MinValue + limit || eventStartAt > DateTimeOffset.MaxValue - limit)
+        // A date near either end of the representable range cannot be shifted into Malé's offset:
+        // `DateTimeOffset` throws rather than saturating. That is reachable with real data (a bucket
+        // row whose date was never set reads as year 1), and "closed" is a far better answer than a 500.
+        var guard = TimeSpan.FromDays(MaxWindowDays + DaysBefore + DaysAfter + 1);
+        if (eventStartAt < DateTimeOffset.MinValue + guard || eventStartAt > DateTimeOffset.MaxValue - guard)
             return false;
 
-        var opens = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
-        var closes = eventStartAt + stays;
-        return now >= opens && now <= closes;
+        var days = Math.Clamp(windowDays, 1, MaxWindowDays);
+        var eventDay = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
+
+        var opens = eventDay.AddDays(-DaysBefore);
+        var dayAfterEnds = eventDay.AddDays(DaysAfter + 1);
+        var longWindowEnds = eventStartAt + ClosesAfter * days;
+        var closes = dayAfterEnds > longWindowEnds ? dayAfterEnds : longWindowEnds;
+
+        return now >= opens && now < closes;
     }
 }

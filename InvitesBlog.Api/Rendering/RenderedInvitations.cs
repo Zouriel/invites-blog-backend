@@ -124,6 +124,10 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
             : data["photos"]?["link"]?.ToString();
         if (string.IsNullOrEmpty(link)) return html;
 
+        // A static invitation is one picture. A bar under it reads as part of the design, so the
+        // camera floats over it instead, bottom right, where a thumb reaches.
+        if (data["invitation"]?["kind"]?.ToString() == "static") return WithFloatingCamera(html, link);
+
         // Safe as a plain string check because the markup has just been through AngleSharp, which
         // normalises every attribute to double quotes — this is not run against author markup.
         // Either binding counts as the designer having placed it: an older template links the gallery,
@@ -165,6 +169,28 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
 
         var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
         return close < 0 ? html + bar : html[..close] + bar + html[close..];
+    }
+
+    /// <summary>
+    /// The camera on a static invitation: a round-ended button fixed to the bottom right of the screen,
+    /// plus room at the end of the page so the last of the design and the reply button can scroll
+    /// clear of it. Shown only while the camera is open, like the bar.
+    /// </summary>
+    private static string WithFloatingCamera(string html, string link)
+    {
+        var button = $"""
+            <div aria-hidden="true" style="height:96px"></div>
+            <a href="{WebUtility.HtmlEncode(link)}" aria-label="Open the camera"
+               style="position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));
+               z-index:2147483001;display:inline-flex;align-items:center;gap:.5em;
+               padding:14px 20px;border-radius:999px;text-decoration:none;
+               font:600 15px/1 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+               color:var(--ib-bg,#17131a);background:var(--ib-accent,#c9a227);
+               box-shadow:0 10px 30px rgba(0,0,0,.35)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1.2em;height:1.2em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Camera</a>
+            """;
+
+        var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return close < 0 ? html + button : html[..close] + button + html[close..];
     }
 
     /// <summary>

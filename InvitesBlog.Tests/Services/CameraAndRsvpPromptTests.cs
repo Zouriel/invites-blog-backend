@@ -38,10 +38,16 @@ public class CameraAndRsvpPromptTests
         Assert.True(Open(twoHoursIn));
     }
 
-    /// <summary>23:59 in Malé on the 27th — still the day before by the only calendar anyone here reads.</summary>
+    /// <summary>
+    /// The day before is part of the window now (the mehendi, the night before), but the day before
+    /// THAT is not: 23:59 in Malé on the 26th is shut, 00:00 on the 27th is open.
+    /// </summary>
     [Fact]
-    public void Shut_the_day_before() =>
-        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 0, TimeSpan.Zero)));
+    public void Shut_until_the_day_before_begins()
+    {
+        Assert.False(Open(new DateTimeOffset(2026, 8, 26, 18, 59, 0, TimeSpan.Zero)));
+        Assert.True(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 0, TimeSpan.Zero)));
+    }
 
     /// <summary>
     /// The regression this window was got wrong once. A guest opening their invitation just after
@@ -59,9 +65,13 @@ public class CameraAndRsvpPromptTests
         Assert.True(Open(justAfterMidnightInMale));
     }
 
+    /// <summary>Open all of the day after, and shut from midnight in Malé when it ends.</summary>
     [Fact]
-    public void Shut_once_the_night_is_over() =>
-        Assert.False(Open(Start.AddHours(25)));
+    public void Shut_once_the_day_after_is_over()
+    {
+        Assert.True(Open(new DateTimeOffset(2026, 8, 29, 18, 59, 0, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 29, 19, 0, 0, TimeSpan.Zero)));
+    }
 
     /// <summary>
     /// The morning after is still the same night. Somebody adding the photographs they took on the
@@ -80,14 +90,27 @@ public class CameraAndRsvpPromptTests
     public void Shut_for_anyone_who_did_not_say_they_were_coming(RsvpStatus rsvp) =>
         Assert.False(Open(Start.AddHours(1), rsvp));
 
+    /// <summary>
+    /// An uploaded design is mostly shared as one link nobody replies through, so its camera follows
+    /// the date alone. Still shut outside the window.
+    /// </summary>
     [Fact]
-    public void The_edges_are_inclusive()
+    public void A_static_invitation_does_not_wait_for_a_reply()
     {
-        // Midnight in Malé, and the second before it.
-        Assert.True(Open(new DateTimeOffset(2026, 8, 27, 19, 0, 0, TimeSpan.Zero)));
-        Assert.False(Open(new DateTimeOffset(2026, 8, 27, 18, 59, 59, TimeSpan.Zero)));
-        Assert.True(Open(Start.AddHours(24)));
-        Assert.False(Open(Start.AddHours(24).AddSeconds(1)));
+        Assert.True(InviteRenderService.CameraIsOpen(Start, RsvpStatus.NoResponse, Start.AddHours(1), rsvpRequired: false));
+        Assert.False(InviteRenderService.CameraIsOpen(
+            Start, RsvpStatus.NoResponse, new DateTimeOffset(2026, 8, 29, 19, 0, 0, TimeSpan.Zero), rsvpRequired: false));
+    }
+
+    [Fact]
+    public void The_edges_fall_on_Male_midnights()
+    {
+        // Midnight in Malé starting the day before, and the second before it.
+        Assert.True(Open(new DateTimeOffset(2026, 8, 26, 19, 0, 0, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 26, 18, 59, 59, TimeSpan.Zero)));
+        // Midnight in Malé ending the day after: the last second is in, midnight itself is out.
+        Assert.True(Open(new DateTimeOffset(2026, 8, 29, 18, 59, 59, TimeSpan.Zero)));
+        Assert.False(Open(new DateTimeOffset(2026, 8, 29, 19, 0, 0, TimeSpan.Zero)));
     }
 
     // ----- the exemption -------------------------------------------------------------------------

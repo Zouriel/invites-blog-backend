@@ -78,6 +78,12 @@ public interface IInviteService
     Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default);
 
     /// <summary>
+    /// What the camera on an uploaded (static) design needs: the event's default bucket, whether the
+    /// window is open, and whether the design is static at all. A dynamic event answers IsStatic=false.
+    /// </summary>
+    Task<StaticCameraInfo?> StaticCameraAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
     /// Records an RSVP for an invite the caller has ALREADY been authorized to answer for — the
     /// cookie-carried counterpart of <see cref="RsvpAsync"/>. Like
     /// <see cref="RenderAuthorizedAsync"/> it performs no access check of its own.

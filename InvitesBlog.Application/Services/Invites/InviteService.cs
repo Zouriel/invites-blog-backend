@@ -166,6 +166,27 @@ public sealed class InviteService(
             payload.PackageUrl, payload.Data, false, campaign.Status.ToString());
     }
 
+    public async Task<StaticCameraInfo?> StaticCameraAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null) return null;
+
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        var isStatic = template?.Visibility == TemplateVisibility.Imported;
+        if (!isStatic)
+            return new StaticCameraInfo(campaign.Id, Guid.Empty, campaign.Title, false, false, false);
+
+        var bucket = await bucketService.ForCampaignAsync(campaign.Id, ct);
+        return new StaticCameraInfo(
+            campaign.Id,
+            bucket.Id,
+            campaign.Title,
+            IsStatic: true,
+            IsOpen: InvitesBlog.Application.Events.EventDayWindow.IsOpen(
+                campaign.EventStartAt, DateTimeOffset.UtcNow, bucket.UploadWindowDays),
+            IsCancelled: campaign.Status == CampaignStatus.Cancelled);
+    }
+
     public async Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default)
     {
         var campaign = await campaigns.GetByOpenLinkCodeAsync(code ?? string.Empty, ct);
@@ -189,10 +210,10 @@ public sealed class InviteService(
         // that would refuse them.
         if (data["photos"] is JsonObject photos) photos["link"] = null;
 
-        // Already closed by CameraIsOpen, which requires RsvpStatus.Going and can never see one
-        // here. Emptied anyway so the payload states it rather than relying on that coincidence
-        // holding after somebody edits the camera rules.
-        data["camera"] = new JsonObject();
+        // The camera STAYS. An open link only exists for an uploaded design, and those are exactly the
+        // invitations shared with people who have no personal link. Their camera asks for a name on
+        // the way in and posts into the event's default bucket; nothing about it lets them LOOK into
+        // the bucket, which is what photos.link above would have done.
     }
 
     public async Task<RsvpResultResponse> RsvpAuthorizedAsync(

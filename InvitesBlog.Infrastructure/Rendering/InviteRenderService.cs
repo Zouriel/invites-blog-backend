@@ -44,6 +44,10 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
 
         // A guest may hold several roles. The first is what a single-valued binding (guest.role, the
         // role theme, role-scoped fields) reads; sections are the union of what every role sees.
+        // A design the customer uploaded is STATIC: the same picture for everyone. It gets its camera
+        // as a floating button rather than a bar, and asks for a name instead of an RSVP.
+        var isStatic = template.Visibility == TemplateVisibility.Imported;
+
         var guestRoles = guest.AllRoles();
         var primaryRole = guestRoles.FirstOrDefault();
 
@@ -85,6 +89,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
                 ["status"] = invite.RsvpStatus.ToString()
             },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
+            ["invitation"] = new JsonObject { ["kind"] = isStatic ? "static" : "dynamic" },
             // The event photo box (§5), derived from the path the guest actually arrived by — same
             // rule as rsvp.link, so the template's own button stays inside whichever flow they came
             // through instead of bouncing to one that wants a session they don't have.
@@ -96,7 +101,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             // camera apart from a payload rendered before there was one.
             ["camera"] = CameraIsOpen(
                 campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow,
-                DateIgnoredFor(campaign.Id), bucketWindowDays)
+                DateIgnoredFor(campaign.Id), bucketWindowDays, rsvpRequired: !isStatic)
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
                 : new JsonObject(),
             ["theme"] = theme,
@@ -292,11 +297,15 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
     /// the day. Configuration rather than a constant so a campaign can be added or dropped without
     /// a deployment, and so the list is visible as the testing affordance it is.</para>
     /// </summary>
+    /// <param name="rsvpRequired">
+    /// False for a design the customer uploaded. Those are mostly shared as one open link where nobody
+    /// replies at all, so the camera follows the date alone; the camera page asks for a name instead.
+    /// </param>
     public static bool CameraIsOpen(
         DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now, bool ignoreDate = false,
-        int windowDays = 1)
+        int windowDays = 1, bool rsvpRequired = true)
     {
-        if (rsvp != RsvpStatus.Going) return false;
+        if (rsvpRequired && rsvp != RsvpStatus.Going) return false;
         if (ignoreDate) return true;
         return EventDayWindow.IsOpen(eventStartAt, now, windowDays);
     }

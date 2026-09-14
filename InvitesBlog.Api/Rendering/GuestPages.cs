@@ -185,6 +185,33 @@ public static class GuestPages
         return Shell("Your invitation", body);
     }
 
+    /// <summary>
+    /// Asked before the camera on a static invitation opens. Most of those are opened from one shared
+    /// link, so we don't know who is holding the phone, and the host wants to know who took what.
+    /// </summary>
+    public static string CameraName(string action, string eventTitle, string? error, GuestPalette? palette = null)
+    {
+        var body = $"""
+            <h1>{E(eventTitle)}</h1>
+            <p>What's your name? The host will see it next to the photos you take.</p>
+            <form method="post" action="{E(action)}">
+              <label for="name">Your name</label>
+              <input class="text" id="name" name="name" maxlength="60" autocomplete="name" required autofocus>
+              {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
+              <button type="submit">Open the camera</button>
+            </form>
+            """;
+        return Shell("Your name", body, palette);
+    }
+
+    /// <summary>The camera outside its window: open from the day before the event to the end of the day after.</summary>
+    public static string CameraClosed(string eventTitle, string backPath, GuestPalette? palette = null) =>
+        Shell("Camera closed", $"""
+            <h1>{E(eventTitle)}</h1>
+            <p>The camera isn't open right now. It opens the day before the event and closes when the day after it ends.</p>
+            <p><a href="{E(backPath)}">Back to the invitation</a></p>
+            """, palette);
+
     /// <summary>The RSVP form. A plain POST — the invitation links here rather than embedding it.</summary>
     /// <param name="action">Where to post — the caller decides, because the path a guest arrived by
     /// (token or cookie) is what authorizes their answer.</param>

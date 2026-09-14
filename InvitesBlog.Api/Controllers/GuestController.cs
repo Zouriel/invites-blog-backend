@@ -323,7 +323,16 @@ public sealed class GuestController(
     public async Task<IActionResult> Camera(string renderId, CancellationToken ct)
     {
         var inviteId = Admitted(renderId);
-        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
+        if (inviteId is null && openCampaignId is null)
+            return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        // A static invitation (an uploaded design) has its own camera: it asks for a name and posts
+        // into the event's default bucket. The open link only ever admits one of those.
+        var staticCamera = await StaticCameraForAsync(inviteId, openCampaignId, ct);
+        if (staticCamera is { IsStatic: true })
+            return await StaticCameraPageAsync(renderId, inviteId, staticCamera, ct);
+        if (inviteId is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
 
         var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
         if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
@@ -382,6 +391,130 @@ public sealed class GuestController(
         {
             // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
             return BadRequest(new { error = e.Message });
+        }
+    }
+
+    // ---------- the camera on a static invitation ----------
+
+    /// <summary>Saves the name the static camera asked for, then opens the camera.</summary>
+    [HttpPost("/r/{renderId}/camera/name")]
+    public async Task<IActionResult> CameraNameSubmit(string renderId, [FromForm] string? name, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
+        if (inviteId is null && openCampaignId is null)
+            return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        var staticCamera = await StaticCameraForAsync(inviteId, openCampaignId, ct);
+        if (staticCamera is not { IsStatic: true }) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        var trimmed = (name ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+            return Html(GuestPages.CameraName(
+                $"/r/{renderId}/camera/name", staticCamera.EventTitle, "Please type your name.",
+                await PaletteForAsync(inviteId, ct)));
+
+        // An hour, and sent only to the invitation's own pages. Long enough to put the phone down and
+        // pick it up again without being asked twice; short enough that a phone handed to someone
+        // else later that night doesn't credit their photos to the first person.
+        Response.Cookies.Append(CameraNameCookie, Uri.EscapeDataString(trimmed.Length > 60 ? trimmed[..60] : trimmed),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = "/r/",
+                MaxAge = TimeSpan.FromHours(1),
+            });
+
+        return Redirect($"/r/{renderId}/camera");
+    }
+
+    /// <summary>One frame or clip from the static camera, into the event's default bucket under the typed name.</summary>
+    [HttpPost("/r/{renderId}/camera/upload")]
+    [DisableRequestSizeLimit]
+    [Microsoft.AspNetCore.Mvc.RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
+    public async Task<IActionResult> CameraUpload(
+        string renderId, IFormFile? file, IFormFile? poster, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
+        if (inviteId is null && openCampaignId is null)
+            return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
+
+        var staticCamera = await StaticCameraForAsync(inviteId, openCampaignId, ct);
+        if (staticCamera is not { IsStatic: true }) return NotFound(new { error = "not_found" });
+
+        var name = CameraName();
+        if (name is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "name" });
+        if (file is null || file.Length == 0) return BadRequest(new { error = "empty" });
+
+        try
+        {
+            var photo = await photos.AddToBucketAsync(
+                staticCamera.BucketId, staticCamera.CampaignId, name,
+                await ReadAsync(file, ct), file.ContentType, file.FileName,
+                poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null, ct);
+            return Ok(new { id = photo.Id, thumbUrl = photo.ThumbUrl });
+        }
+        catch (AppException e)
+        {
+            // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
+            return BadRequest(new { error = e.Message });
+        }
+    }
+
+    private async Task<IActionResult> StaticCameraPageAsync(
+        string renderId, Guid? inviteId, StaticCameraInfo camera, CancellationToken ct)
+    {
+        var palette = await PaletteForAsync(inviteId, ct);
+        if (camera.IsCancelled)
+            return Html(GuestPages.Cancelled("This event has been cancelled, so its camera is closed."));
+        if (!camera.IsOpen)
+            return Html(GuestPages.CameraClosed(camera.EventTitle, $"/r/{renderId}", palette));
+
+        if (CameraName() is null)
+            return Html(GuestPages.CameraName($"/r/{renderId}/camera/name", camera.EventTitle, null, palette));
+
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        var html = GuestCameraPage.Render(
+            $"/r/{renderId}/camera/upload",
+            $"/r/{renderId}",
+            camera.EventTitle,
+            palette,
+            nonce,
+            backLabel: "Invitation",
+            gateNote: "Your phone didn't let us open the camera. Check that this site is allowed to use it, then try again.",
+            gateAction: "Back to the invitation");
+        return CameraHtml(html, nonce);
+    }
+
+    private async Task<StaticCameraInfo?> StaticCameraForAsync(Guid? inviteId, Guid? openCampaignId, CancellationToken ct)
+    {
+        var campaignId = openCampaignId
+                         ?? (inviteId is null ? null : (await invites.InviteSubjectAsync(inviteId.Value, ct))?.CampaignId);
+        return campaignId is null ? null : await invites.StaticCameraAsync(campaignId.Value, ct);
+    }
+
+    /// <summary>The guest's own palette on a personal link; the open link has no guest to take one from.</summary>
+    private async Task<GuestPalette> PaletteForAsync(Guid? inviteId, CancellationToken ct) =>
+        inviteId is null ? GuestPalette.Fallback : await PaletteAsync(inviteId.Value, ct);
+
+    private const string CameraNameCookie = "ib_camera_name";
+
+    /// <summary>The name the static camera was given in the last hour, or null.</summary>
+    private string? CameraName()
+    {
+        var raw = Request.Cookies[CameraNameCookie];
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        try
+        {
+            var name = Uri.UnescapeDataString(raw).Trim();
+            return name.Length == 0 ? null : name;
+        }
+        catch (UriFormatException)
+        {
+            return null;
         }
     }
 
