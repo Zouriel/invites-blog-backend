@@ -24,7 +24,7 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
               $"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#14100c;padding:32px 12px;\"><tr><td align=\"center\">" +
                 $"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:520px;background:#1c1611;border:1px solid #3a2f1e;border-radius:16px;\">" +
                   $"<tr><td style=\"padding:36px 40px 4px;text-align:center;font-family:Georgia,'Times New Roman',serif;font-size:22px;color:#f4efe6;\">" +
-                    $"<span style=\"color:#d8b25a;\">&#10022;</span> invites<span style=\"color:#d8b25a;\">.</span>blog</td></tr>" +
+                    $"{InvitesBlog.Infrastructure.Email.EmailLayout.BrandMark}invites<span style=\"color:#d8b25a;\">.</span>blog</td></tr>" +
                   $"<tr><td style=\"padding:12px 40px 0;text-align:center;\">" +
                     $"<p style=\"font-family:{sans};font-size:16px;line-height:1.65;color:#e7ddca;margin:14px 0 0;\">{text}</p></td></tr>" +
                   $"<tr><td style=\"padding:30px 40px 34px;text-align:center;\">" +

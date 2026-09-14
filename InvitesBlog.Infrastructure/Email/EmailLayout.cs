@@ -20,6 +20,12 @@ public static class EmailLayout
     private const string TextMuted = "#8a7d68";
 
     /// <summary>
+    /// The invites.blog mark as a hosted PNG, since Gmail and Outlook don't render SVG. Light letters
+    /// for the dark card; blank alt so a blocked image leaves only the wordmark beside it.
+    /// </summary>
+    public const string BrandMark = "<img src=\"https://invites.blog/brand/ib-mark-on-dark.png\" width=\"26\" height=\"26\" alt=\"\" style=\"display:inline-block;vertical-align:-5px;border:0;margin-right:4px;\">";
+
+    /// <summary>
     /// Wraps <paramref name="bodyHtml"/> in the branded card.
     /// </summary>
     /// <param name="preheader">
@@ -37,7 +43,7 @@ public static class EmailLayout
               $"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:{PageBg};padding:32px 12px;\"><tr><td align=\"center\">" +
                 $"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:520px;background:{CardBg};border:1px solid {Border};border-radius:16px;\">" +
                   $"<tr><td style=\"padding:36px 40px 4px;text-align:center;font-family:{Serif};font-size:22px;color:{TextBright};\">" +
-                    $"<span style=\"color:{Gold};\">&#10022;</span> invites<span style=\"color:{Gold};\">.</span>blog</td></tr>" +
+                    $"{BrandMark}invites<span style=\"color:{Gold};\">.</span>blog</td></tr>" +
                   $"<tr><td style=\"padding:0 40px;\">{bodyHtml}</td></tr>" +
                   $"<tr><td style=\"padding:18px 40px;border-top:1px solid {Border};text-align:center;font-family:{Sans};font-size:12px;color:{TextMuted};line-height:1.7;\">" +
                     $"{footer}<a href=\"https://invites.blog/privacy\" style=\"color:{TextMuted};\">Privacy</a></td></tr>" +
