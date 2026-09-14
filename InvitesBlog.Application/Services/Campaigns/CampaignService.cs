@@ -123,7 +123,16 @@ public sealed class CampaignService(
             }
             campaign.IsSensitive = req.IsSensitive.Value;
         }
-        if (req.EventStartAt is not null) campaign.EventStartAt = req.EventStartAt.Value;
+        if (req.EventStartAt is not null)
+        {
+            // Moving an event into the past would close its camera and bucket for good. Keeping a date
+            // that is already past (an old event being tidied up) is still allowed.
+            var sameDay = req.EventStartAt.Value.ToOffset(Events.EventDayWindow.Male).Date
+                          == campaign.EventStartAt.ToOffset(Events.EventDayWindow.Male).Date;
+            if (!sameDay && IsBeforeToday(req.EventStartAt.Value))
+                throw new Exceptions.BusinessRuleException("Pick today or a later date.", "event_date_in_past");
+            campaign.EventStartAt = req.EventStartAt.Value;
+        }
         if (req.EventEndAt is not null) campaign.EventEndAt = req.EventEndAt;
         if (req.EventType is not null) campaign.EventType = req.EventType;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
@@ -481,6 +490,10 @@ public sealed class CampaignService(
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
+        if (eventDate is null)
+            throw new BusinessRuleException("Pick the date of your event.", "event_date_required");
+        if (IsBeforeToday(eventDate.Value))
+            throw new BusinessRuleException("Pick today or a later date.", "event_date_in_past");
 
         // A placeholder to pin. Marked Imported, which every gallery read already fails to match, so
         // it is invisible everywhere a template would otherwise be listed.
@@ -631,6 +644,7 @@ public sealed class CampaignService(
         var campaign = await LoadOwnedAsync(id, ct);
         var guestCount = await guests.CountByCampaignAsync(id, ct);
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
         var price = PricingCalculator.CalculateInitial(
             Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount,
             campaign.DesignerFee, campaign.DesignerFeeName);
@@ -647,7 +661,8 @@ public sealed class CampaignService(
                 SnapshotManifest(campaign, template), template.PreviewImageUrl),
             price,
             template?.Visibility == TemplateVisibility.Imported,
-            campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null);
+            campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
+            inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization);
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -743,7 +758,9 @@ public sealed class CampaignService(
                 !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl),
                 campaign.OpenLinkCode is { } dashOpenCode ? OpenLinkUrl(dashOpenCode) : null,
                 await IsImportedAsync(campaign, ct),
-                campaign.Status == CampaignStatus.Draft),
+                campaign.Status == CampaignStatus.Draft,
+                InvitesBlog.Application.Campaigns.CampaignResume.Step(
+                    campaign, await IsImportedAsync(campaign, ct), guestList.Count)),
             report, guestRows, questions);
     }
 
@@ -923,6 +940,11 @@ public sealed class CampaignService(
     /// finding the row again — reading it here would make a rename over there silently turn this
     /// feature off.</para>
     /// </summary>
+    /// <summary>Whether a date falls on a day before today, by Malé's calendar.</summary>
+    private static bool IsBeforeToday(DateTimeOffset when) =>
+        when.ToOffset(Events.EventDayWindow.Male).Date
+        < DateTimeOffset.UtcNow.ToOffset(Events.EventDayWindow.Male).Date;
+
     private async Task<bool> IsImportedAsync(Campaign campaign, CancellationToken ct)
     {
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);

@@ -302,7 +302,7 @@ public static class GuestPages
         var body = $"""
             <div class="wrap">
               <h1>{E(eventTitle)}</h1>
-              <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the night</p>
+              <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the event</p>
               {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
               {tiles}
               <a class="back" href="{E(backTo)}">Back to the invitation</a>

@@ -405,6 +405,10 @@ public sealed class MediaBucketService(
             ? MediaBucketPlans.For(tier, Options) ?? MediaBucketPlans.Free(Options)
             : MediaBucketPlans.Free(Options);
 
+        if (!plan.IsFree && !currentUser.HasPermission(Permissions.Buckets.LargerSizes))
+            throw new BusinessRuleException(
+                "Bigger sizes are for subscribers. Start with the free size.", "tier_needs_subscription");
+
         // EVERY bucket belongs to a campaign, because the campaign is what holds the title, the
         // cover and the guest list — the three things a bucket deliberately has none of. A bucket
         // bought on its own is therefore a campaign with no invitation, not a loose object.
@@ -480,6 +484,11 @@ public sealed class MediaBucketService(
         if (plan.CapacityBytes < bucket.UsedBytes)
             throw new BusinessRuleException(
                 $"There's already more than {plan.Gb} GB in this bucket.", "tier_below_usage");
+
+        // Paid sizes are a subscriber perk until billing exists. See Permissions.Buckets.LargerSizes.
+        if (!plan.IsFree && !currentUser.HasPermission(Permissions.Buckets.LargerSizes))
+            throw new BusinessRuleException(
+                "Bigger sizes are for subscribers. Your event keeps its free 2 GB.", "tier_needs_subscription");
 
         bucket.Tier = plan.Tier;
         bucket.CapacityBytes = plan.CapacityBytes;

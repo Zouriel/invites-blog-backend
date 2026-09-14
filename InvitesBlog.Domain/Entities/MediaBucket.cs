@@ -112,7 +112,7 @@ public sealed class MediaBucket
     /// What a bucket is called before anybody names it — including every bucket that existed before
     /// buckets had names.
     /// </summary>
-    public const string DefaultName = "Night's bucket";
+    public const string DefaultName = "Photos";
 
     /// <summary>
     /// The most buckets one event may hold.

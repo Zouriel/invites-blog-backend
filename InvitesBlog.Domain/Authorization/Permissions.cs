@@ -97,6 +97,13 @@ public static class Permissions
         /// instead of the single day everyone else gets.
         /// </summary>
         public const string ExtendedWindow = "buckets.extended_window";
+
+        /// <summary>
+        /// Moving a bucket onto one of the paid sizes. A subscriber perk while there is no billing:
+        /// the sizes are shown to everyone, but only an account an admin has made a subscriber can
+        /// choose one.
+        /// </summary>
+        public const string LargerSizes = "buckets.larger_sizes";
     }
 
     public static class Otp
@@ -154,6 +161,7 @@ public static class Permissions
         (Buckets.Manage, "buckets", "Create, resize and share a media bucket"),
         (Buckets.Multiple, "buckets", "Keep more than one bucket on an event"),
         (Buckets.ExtendedWindow, "buckets", "Collect for more than the one night"),
+        (Buckets.LargerSizes, "buckets", "Choose a paid bucket size"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),
@@ -255,7 +263,7 @@ public static class Roles
         // Only the difference. See the remarks on the constant.
         [Subscriber] = new[]
         {
-            Permissions.Buckets.Multiple, Permissions.Buckets.ExtendedWindow,
+            Permissions.Buckets.Multiple, Permissions.Buckets.ExtendedWindow, Permissions.Buckets.LargerSizes,
         },
 
         [Public] = new[]

@@ -47,7 +47,12 @@ public sealed record CampaignSummaryDto(
     /// The event's open link, or null when it has none. The whole URL rather than a boolean,
     /// because the host needs to copy it again tomorrow and the code is the only place it lives.
     /// </summary>
-    string? OpenLink = null);
+    string? OpenLink = null,
+    /// <summary>The host details saved on the Inviter step, so the step shows them again.</summary>
+    string? InviterName = null,
+    string? InviterEmail = null,
+    string? InviterPhone = null,
+    string? InviterOrganization = null);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
@@ -129,7 +134,9 @@ public sealed record DashboardCampaignDto(
     /// from finishing. The dashboard needs both — one to decide whether to offer an invitation at
     /// all, the other to offer finishing the one that exists.</para>
     /// </summary>
-    bool IsDraft = false);
+    bool IsDraft = false,
+    /// <summary>Where "Continue setting it up" goes — see CampaignResume. Null when nothing is unfinished.</summary>
+    string? ResumeStep = null);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

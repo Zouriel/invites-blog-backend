@@ -377,7 +377,7 @@ public sealed class AccountService(
         // invitation looks like. It is only the FALLBACK though — see the cover lookup below.
         var byTemplate = await templates.Query()
             .Where(t => templateIds.Contains(t.Id))
-            .ToDictionaryAsync(t => t.Id, t => new { t.Name, t.PreviewImageUrl }, ct);
+            .ToDictionaryAsync(t => t.Id, t => new { t.Name, t.PreviewImageUrl, t.Visibility }, ct);
 
         // One grouped count for the whole page rather than a query per campaign — a person with
         // twenty invitations would otherwise pay twenty round trips to render twenty small numbers.
@@ -416,7 +416,10 @@ public sealed class AccountService(
                 // No pinned package means no invitation to render: the campaign exists for its media
                 // bucket. A design the customer brought themselves DOES have one, so this separates
                 // "bucket only" from "invitation" without needing to know which kind of invitation.
-                MediaOnly: string.IsNullOrWhiteSpace(c.TemplatePackageUrl)));
+                MediaOnly: string.IsNullOrWhiteSpace(c.TemplatePackageUrl),
+                ResumeStep: InvitesBlog.Application.Campaigns.CampaignResume.Step(
+                    c, template?.Visibility.ToString() == "Imported",
+                    guestCounts.GetValueOrDefault(c.Id))));
         }
         return result;
     }

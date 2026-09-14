@@ -92,7 +92,9 @@ public sealed record MyCampaignDto(
     /// bucket, or both, and the list has to be able to say which — otherwise a bucket somebody
     /// bought for a trip is indistinguishable from an invitation they never finished.
     /// </summary>
-    bool MediaOnly = false);
+    bool MediaOnly = false,
+    /// <summary>The wizard step to continue from when the invitation isn't finished; null when it is.</summary>
+    string? ResumeStep = null);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(

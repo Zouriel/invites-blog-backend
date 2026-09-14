@@ -179,12 +179,26 @@ public class MediaBucketServiceTests
         bucket.TermStartAt = DateTimeOffset.UtcNow.AddMonths(-1);
         bucket.TermEndAt = remaining;
         Stored(bucket);
+        _currentUser.HasPermission(Permissions.Buckets.LargerSizes).Returns(true);
 
         await Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb20"));
 
         // Six more months on top of the five still outstanding, not six from today.
         Assert.True(bucket.TermEndAt > remaining.AddMonths(5));
         Assert.Equal(20 * MediaBucketPlans.BytesPerGb, bucket.CapacityBytes);
+    }
+
+    /// <summary>Paid sizes are a subscriber perk while there is no billing.</summary>
+    [Fact]
+    public async Task A_paid_size_is_refused_without_a_subscription()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        _currentUser.HasPermission(Permissions.Buckets.LargerSizes).Returns(false);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb50")));
+        Assert.Equal("tier_needs_subscription", e.ErrorCode);
     }
 
     [Fact]
@@ -682,11 +696,11 @@ public class MediaBucketServiceTests
         Assert.Equal(MediaBucket.DefaultName, result.Name);
     }
 
-    /// <summary>Every bucket that predates names reads as what it always was.</summary>
+    /// <summary>A bucket is called "Photos" until its owner names it.</summary>
     [Fact]
-    public void A_new_bucket_is_the_nights_bucket_until_it_is_named()
+    public void A_new_bucket_is_called_photos_until_it_is_named()
     {
-        Assert.Equal("Night's bucket", new MediaBucket().Name);
+        Assert.Equal("Photos", new MediaBucket().Name);
     }
 
     // ---------- who may look into which bucket ----------
@@ -766,7 +780,7 @@ public class MediaBucketServiceTests
     /// would offer two identical switches, which is the confusion the name exists to remove.
     /// </summary>
     [Fact]
-    public async Task A_second_bucket_is_not_also_called_the_nights_bucket()
+    public async Task A_second_bucket_is_not_also_called_photos()
     {
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
@@ -785,6 +799,6 @@ public class MediaBucketServiceTests
 
         await Sut().CreateAsync(new CreateMediaBucketRequest("A wedding", null, campaignId, null));
 
-        Assert.Equal("Night's bucket 2", saved!.Name);
+        Assert.Equal("Photos 2", saved!.Name);
     }
 }
