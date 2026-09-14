@@ -62,11 +62,6 @@ public sealed class DesignerTemplatesController(
         Success(await designer.ResubmitAsync(
             id, await BuildAsync(name, category, description, index, preview, null, null, null, ct), ct));
 
-    /// <summary>The designer's half of the two-party consent that releases a commission to the gallery.</summary>
-    [HttpPost("{id:guid}/consent-to-publish")]
-    public async Task<IActionResult> ConsentToPublish(Guid id, CancellationToken ct) =>
-        Success(await designer.ConsentToPublishAsync(id, ct));
-
     private static async Task<SubmitTemplateRequest> BuildAsync(
         string name, string category, string? description, IFormFile index, IFormFile preview,
         Guid? publishedTemplateId, Guid? commissionInquiryId, decimal? usagePrice,

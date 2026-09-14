@@ -158,16 +158,6 @@ public sealed class DesignerTemplateService(
         }).ToList();
     }
 
-    public async Task<DesignerTemplateDto> ConsentToPublishAsync(Guid id, CancellationToken ct = default)
-    {
-        var entity = await LoadMineAsync(id, ct);
-        entity.DesignerConsentToPublish = true;
-        entity.UpdatedAt = DateTimeOffset.UtcNow;
-        submissions.Update(entity);
-        await uow.SaveChangesAsync(ct);
-        return ToDto(entity);
-    }
-
     /// <summary>
     /// Resolves the commission a submission answers, from the inquiry rather than from the request
     /// body: only an inquiry actually assigned to THIS designer can set a requester email or a price.

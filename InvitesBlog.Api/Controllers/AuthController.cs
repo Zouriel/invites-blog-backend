@@ -44,17 +44,6 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
         string provider, [FromBody] OAuthLoginRequest request, CancellationToken ct) =>
         Success(await accounts.OAuthAsync(provider, request, ct));
 
-    /// <summary>Sends a sign-in code to a phone number or an email address.</summary>
-    [HttpPost("code/request")]
-    [AllowAnonymous]
-    public async Task<IActionResult> RequestCode([FromBody] RequestCodeRequest request, CancellationToken ct) =>
-        Success(await accounts.RequestCodeAsync(request, ct));
-
-    [HttpPost("code/verify")]
-    [AllowAnonymous]
-    public async Task<IActionResult> VerifyCode([FromBody] VerifyCodeRequest request, CancellationToken ct) =>
-        Success(await accounts.VerifyCodeAsync(request, ct));
-
     /// <summary>
     /// Step one of a customer sign-up: send a code to the address being claimed. Rate-limited with
     /// the other code-senders, since it is an anonymous endpoint that causes mail to be sent.

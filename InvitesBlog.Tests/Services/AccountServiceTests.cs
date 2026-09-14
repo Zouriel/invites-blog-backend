@@ -169,22 +169,6 @@ public class AccountServiceTests
     }
 
     [Fact]
-    public async Task Verifying_a_phone_code_creates_a_customer_account_on_first_use()
-    {
-        Existing();
-        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new VerifiedContact("phone", "+9607771234"));
-        AppUser? created = null;
-        await _users.AddAsync(Arg.Do<AppUser>(u => created = u), Arg.Any<CancellationToken>());
-
-        await Sut().VerifyCodeAsync(new VerifyCodeRequest(Guid.NewGuid(), "123456"));
-
-        Assert.Equal("+9607771234", created!.PhoneE164);
-        Assert.Null(created.Email);
-        Assert.Equal(_customerRoleId, Assert.Single(created.UserRoles).RoleId);
-    }
-
-    [Fact]
     public async Task A_new_account_references_its_role_by_id_only()
     {
         // The role lookup is no-tracking, so attaching the instance as a navigation makes EF treat
@@ -196,7 +180,7 @@ public class AccountServiceTests
         AppUser? created = null;
         await _users.AddAsync(Arg.Do<AppUser>(u => created = u), Arg.Any<CancellationToken>());
 
-        await Sut().VerifyCodeAsync(new VerifyCodeRequest(Guid.NewGuid(), "123456"));
+        await Sut().SignUpAsync(new SignUpRequest(Guid.NewGuid(), "123456", "correct-horse-battery", default));
 
         var link = Assert.Single(created!.UserRoles);
         Assert.Equal(_customerRoleId, link.RoleId);

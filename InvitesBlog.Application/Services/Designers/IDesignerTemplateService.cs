@@ -25,8 +25,6 @@ public interface IDesignerTemplateService
     Task<IReadOnlyList<DesignerTemplateDto>> ListMineAsync(CancellationToken ct = default);
     Task<DesignerTemplateDto> GetMineAsync(Guid id, CancellationToken ct = default);
 
-    /// <summary>The designer half of the two-party consent that releases a commission to the gallery.</summary>
-    Task<DesignerTemplateDto> ConsentToPublishAsync(Guid id, CancellationToken ct = default);
 }
 
 /// <summary>The admin review queue (§Phase 4.2).</summary>

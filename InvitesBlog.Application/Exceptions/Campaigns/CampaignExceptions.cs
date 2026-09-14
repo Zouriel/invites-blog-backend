@@ -9,9 +9,6 @@ public sealed class CampaignAccessDeniedException()
 public sealed class CampaignHasNoGuestsException()
     : BusinessRuleException("Add at least one guest before checkout.", "campaign_no_guests");
 
-public sealed class CampaignInvalidStateException(string message)
-    : InvalidStateException(message, "campaign_invalid_state");
-
 /// <summary>The dashboard magic-link token is missing or does not match the campaign (§13.3).</summary>
 public sealed class InvalidDashboardTokenException()
     : UnauthorizedException("The dashboard link is missing or invalid.", "dashboard_token_invalid");

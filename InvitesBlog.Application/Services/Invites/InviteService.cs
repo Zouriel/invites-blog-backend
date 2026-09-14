@@ -581,27 +581,6 @@ public sealed class InviteService(
         return (contact, byEmail?.PhoneE164);
     }
 
-    public async Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default)
-    {
-        var contact = currentUser.Contact;
-        var type = currentUser.ContactType;
-        if (string.IsNullOrEmpty(contact)) throw new UnauthorizedException();
-
-        // Possession of the raw invite token is the authorization to claim it — otherwise any
-        // authenticated user who guessed/learned an invite id could hijack it onto their inbox.
-        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
-            ?? throw new InviteNotFoundException();
-        var guest = await guests.GetByIdAsync(invite.GuestId, ct)
-            ?? throw new InviteNotFoundException();
-
-        // Link the invite to the verified identity so it appears in the inbox permanently (§4.9.2).
-        if (type == "phone") guest.PhoneE164 = contact;
-        else guest.Email = contact;
-        await uow.SaveChangesAsync(ct);
-
-        return new ClaimResponse(true);
-    }
-
     public async Task<InviteReauthRequestedResponse> RequestReauthAsync(string token, CancellationToken ct = default)
     {
         var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)

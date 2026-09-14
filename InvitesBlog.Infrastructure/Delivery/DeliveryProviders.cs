@@ -52,17 +52,3 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
             Headers: headers), ct);
     }
 }
-
-/// <summary>
-/// Placeholder channel for Telegram/WhatsApp/Viber/SMS (post-MVP, §17.3). Logs the message and
-/// reports success so the dispatch pipeline and fallback logic (§13.2) can be exercised end-to-end.
-/// </summary>
-public sealed class LogInviteDeliveryProvider(string channel, ILogger logger) : IInviteDeliveryProvider
-{
-    public string Channel => channel;
-    public Task<DeliveryResult> SendAsync(InviteDeliveryMessage m, CancellationToken ct)
-    {
-        logger.LogInformation("📨 {Channel} → {To}: {Text} [{Link}]", channel, m.RecipientAddress, m.MessageText, m.InviteLink);
-        return Task.FromResult(DeliveryResult.Ok($"{channel}-{Guid.NewGuid():N}"));
-    }
-}

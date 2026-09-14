@@ -28,12 +28,6 @@ public interface IAccountService
     Task<CodeSentResponse> RequestCodeAsync(RequestCodeRequest request, CancellationToken ct = default);
 
     /// <summary>
-    /// Verifies a code and signs them in, creating the account on first use — a customer who has only
-    /// ever received invitations gets an account the first time they ask for one.
-    /// </summary>
-    Task<AuthResultDto> VerifyCodeAsync(VerifyCodeRequest request, CancellationToken ct = default);
-
-    /// <summary>
     /// Creates a customer account: the code proves the address, the password is what they sign in
     /// with from then on. The two-step exists because an account's email is trusted for matching
     /// invitations, so an unproven one would read another person's post.

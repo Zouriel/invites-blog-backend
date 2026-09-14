@@ -38,9 +38,6 @@ public sealed class InviteeJwt(IConfiguration config) : IInviteeTokenIssuer
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public string IssueForRole(string role, IReadOnlyDictionary<string, string> claims, TimeSpan lifetime) =>
-        IssueForRoles([role], claims, lifetime);
-
     public string IssueForRoles(
         IReadOnlyCollection<string> roles, IReadOnlyDictionary<string, string> claims, TimeSpan lifetime)
     {

@@ -28,9 +28,4 @@ public sealed class TemplatesController(ITemplateService templates, ICurrentUser
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> GetBySlug(string slug, CancellationToken ct) =>
         Success(await templates.GetBySlugAsync(slug, ct));
-
-    [HttpGet("meta/categories")]
-    [HasPermission(Permissions.Templates.Read)]
-    public async Task<IActionResult> Categories(CancellationToken ct) =>
-        Success(await templates.GetCategoriesAsync(ct));
 }

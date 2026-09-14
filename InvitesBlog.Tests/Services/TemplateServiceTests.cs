@@ -50,16 +50,4 @@ public class TemplateServiceTests
         Assert.Equal("Alpha", wedding.Items[0].Name);
     }
 
-    [Fact]
-    public async Task GetCategories_returns_distinct_active_categories_sorted()
-    {
-        var a = TestData.Template(); a.Category = "wedding";
-        var b = TestData.Template(); b.Category = "birthday";
-        var c = TestData.Template(); c.Category = "wedding";
-        _templates.Query().Returns(new[] { a, b, c }.AsAsyncQueryable());
-
-        var cats = await Sut().GetCategoriesAsync();
-
-        Assert.Equal(new[] { "birthday", "wedding" }, cats);
-    }
 }

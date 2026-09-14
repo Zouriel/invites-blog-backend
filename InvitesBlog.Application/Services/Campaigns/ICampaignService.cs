@@ -30,20 +30,14 @@ public interface ICampaignService
     /// status — stays in one place and cannot drift between the two ways in.</para>
     /// </summary>
     /// <param name="eventDate">
-    /// The night it is for, applied here rather than through <see cref="SetEventDateAsync"/> because
-    /// that one checks ownership and the caller may own nothing yet: the possession token that makes
+    /// The night it is for, applied here in the same call rather than by a second, ownership-checked
+    /// update, because the caller may own nothing yet: the possession token that makes
     /// this campaign theirs is minted by this very call and handed back in its response, so it is not
     /// on the request being served. Checking would refuse everybody who is not already signed in —
     /// which is most of the people the unguarded create page exists for.
     /// </param>
     Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default);
-
-    /// <summary>
-    /// Sets the night an event is for. Normalised to UTC before storing — a browser sends whatever
-    /// offset it is in, and Npgsql accepts none but UTC for `timestamp with time zone`.
-    /// </summary>
-    Task SetEventDateAsync(Guid campaignId, DateTimeOffset when, CancellationToken ct = default);
 
     /// <summary>
     /// Gives an event that has no invitation one, by pinning a template onto it.
@@ -77,7 +71,6 @@ public interface ICampaignService
     Task<CampaignImageDto> AddImageAsync(Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default);
     Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default);
     Task<PriceBreakdown> GetPricingAsync(Guid id, int? inviteCount, CancellationToken ct = default);
-    Task ResendLinkAsync(ResendLinkRequest req, CancellationToken ct = default);
     Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default);
     /// <summary>
     /// Produces this event's public link and returns the whole URL.

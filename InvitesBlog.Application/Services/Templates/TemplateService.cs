@@ -46,10 +46,6 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
             t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);
     }
 
-    public async Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken ct = default) =>
-        await templates.Query().Where(t => t.IsActive && t.Visibility == TemplateVisibility.Public)
-            .Select(t => t.Category).Distinct().OrderBy(c => c).ToListAsync(ct);
-
     public async Task<IReadOnlyList<TemplateListItemDto>> GetDedicatedForAsync(string email, CancellationToken ct = default)
     {
         var normalized = (email ?? "").Trim().ToLowerInvariant();

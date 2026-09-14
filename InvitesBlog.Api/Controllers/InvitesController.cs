@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Invites;
-using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Services.Invites;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
@@ -11,7 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace InvitesBlog.Api.Controllers;
 
-/// <summary>§10.8 Invitee: token view (no login), RSVP, inbox, claim. Thin controller — delegates to
+/// <summary>§10.8 Invitee: token view (no login), RSVP and inbox. Thin controller — delegates to
 /// <see cref="IInviteService"/>. It also bridges the Infrastructure <see cref="InviteRenderService"/>
 /// into the service (the Application layer cannot reference Infrastructure).</summary>
 [Route("api/invites")]
@@ -30,22 +29,6 @@ public sealed class InvitesController(
     [HasPermission(Permissions.Invites.Rsvp)]
     public async Task<IActionResult> Rsvp(string token, [FromBody] RsvpRequest req, CancellationToken ct) =>
         Success(await invites.RsvpAsync(token, ClientIp(), req, ct));
-
-    // Personal-link IP binding (§ personal invite links): the frontend calls these two when
-    // GetByToken comes back requires-OTP because this open is from an IP not yet trusted for the
-    // invite. No contact is taken from the caller — the link is already user-bound, so the code goes
-    // to whatever contact the guest row itself has on file.
-    [HttpPost("by-token/{token}/reauth/request")]
-    [AllowAnonymous]
-    [HasPermission(Permissions.Invites.View)]
-    public async Task<IActionResult> RequestReauth(string token, CancellationToken ct) =>
-        Success(await invites.RequestReauthAsync(token, ct));
-
-    [HttpPost("by-token/{token}/reauth/verify")]
-    [AllowAnonymous]
-    [HasPermission(Permissions.Invites.View)]
-    public async Task<IActionResult> VerifyReauth(string token, [FromBody] VerifyOtpRequest req, CancellationToken ct) =>
-        Success(await invites.VerifyReauthAsync(token, ClientIp(), req, Render, ct));
 
     // Authenticated RSVP from the inbox (ownership-checked by verified contact).
     [HttpPost("{inviteId:guid}/rsvp")]
@@ -84,12 +67,6 @@ public sealed class InvitesController(
         var renderBase = (config["Urls:InviteeBase"] ?? "https://me.invites.blog").TrimEnd('/');
         return Success(new { url = $"{renderBase}/h/{tickets.IssueHandoff(inviteId, DateTimeOffset.UtcNow)}" });
     }
-
-    // Claim by possession of the raw token (not by invite id — see ClaimAsync).
-    [HttpPost("by-token/{token}/claim")]
-    [HasPermission(Permissions.Invites.Claim)]
-    public async Task<IActionResult> Claim(string token, CancellationToken ct) =>
-        Success(await invites.ClaimAsync(token, ct));
 
     // Bridges the Infrastructure renderer into the Application service without a layer dependency.
     private InviteRenderData Render(

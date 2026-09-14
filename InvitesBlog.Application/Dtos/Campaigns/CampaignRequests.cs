@@ -66,5 +66,3 @@ public sealed record RoleDefinitionDto(
 /// each role's content blocks are shown to guests holding that role.</summary>
 public sealed record SetRolesRequest(IReadOnlyList<RoleDefinitionDto> Roles);
 
-/// <summary>Request the dashboard links for an inviter's email (§4.6 recovery path).</summary>
-public sealed record ResendLinkRequest(string Email);

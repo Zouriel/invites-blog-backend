@@ -37,7 +37,6 @@ public class BaseRepository<T>(AppDbContext db) : IRepository<T> where T : class
         tracking ? Set : Set.AsNoTracking();
 
     public async Task AddAsync(T entity, CancellationToken ct = default) => await Set.AddAsync(entity, ct);
-    public async Task AddRangeAsync(IEnumerable<T> entities, CancellationToken ct = default) => await Set.AddRangeAsync(entities, ct);
     public void Update(T entity) => Set.Update(entity);
     public void Remove(T entity) => Set.Remove(entity);
     public void RemoveRange(IEnumerable<T> entities) => Set.RemoveRange(entities);

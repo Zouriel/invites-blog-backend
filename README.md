@@ -210,9 +210,8 @@ Worth knowing before reading the pricing code:
   is `FakePaymentProvider`. No real money has moved through this.
 - **Delivery is email only.** The landing page's Telegram and WhatsApp are marked "coming soon"
   and there is no provider behind either.
-- **The worker is not deployed.** `RetentionCleanupService` lives in `InvitesBlog.Worker`, which has
-  no container in production, so retention does not currently run. Background work that must run is
-  registered in the API host instead.
+- **Retention cleanup does not run.** There is no background job deleting guest data after a
+  campaign's retention period. Background work that must run is registered in the API host.
 
 ## Security & privacy
 

@@ -5,7 +5,6 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Admin;
 using InvitesBlog.Application.Exceptions;
-using InvitesBlog.Application.Exceptions.Admin;
 using InvitesBlog.Application.Filters.Admin;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Authorization;

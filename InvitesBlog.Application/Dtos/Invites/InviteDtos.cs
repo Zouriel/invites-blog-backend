@@ -51,7 +51,6 @@ public sealed record InboxCardResponse(
     Guid InviteId, Guid CampaignId, string EventTitle, DateTimeOffset EventDate, string VenueType,
     string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled, string? InviterName = null,
     string? PreviewImageUrl = null, int PhotoCount = 0);
-public sealed record ClaimResponse(bool Claimed);
 
 /// <summary>
 /// The resolved render payload the Application service needs to shape <see cref="InviteViewResponse"/>.

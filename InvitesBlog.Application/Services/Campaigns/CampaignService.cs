@@ -435,22 +435,6 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
-    public async Task SetEventDateAsync(
-        Guid campaignId, DateTimeOffset when, CancellationToken ct = default)
-    {
-        if (!await ownership.OwnsAsync(campaignId, ct))
-            throw new ForbiddenException("That event isn't yours.");
-
-        var campaign = await campaigns.Query(tracking: true)
-            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
-            ?? throw new NotFoundException("That event no longer exists.");
-
-        campaign.EventStartAt = when.ToUniversalTime();
-        campaign.UpdatedAt = DateTimeOffset.UtcNow;
-        campaigns.Update(campaign);
-        await uow.SaveChangesAsync(ct);
-    }
-
     public async Task<CampaignSummaryDto> AttachTemplateAsync(
         Guid campaignId, Guid templateId, CancellationToken ct = default)
     {
@@ -523,7 +507,7 @@ public sealed class CampaignService(
 
         var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
 
-        // Written straight through, NOT via SetEventDateAsync — see the interface note: that one
+        // Written straight through, not via a separate ownership-checked update — see the interface note: that one
         // checks ownership, and the token making this campaign theirs is in the response being built.
         if (eventDate is { } when)
         {
@@ -688,36 +672,6 @@ public sealed class CampaignService(
         var count = inviteCount ?? await guests.CountByCampaignAsync(id, ct);
         return PricingCalculator.CalculateInitial(
             count, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName);
-    }
-
-    public async Task ResendLinkAsync(ResendLinkRequest req, CancellationToken ct = default)
-    {
-        // Anonymous, rate-limited. Always succeeds so it never leaks which emails exist (§4.6).
-        var normEmail = req.Email.Trim().ToLowerInvariant();
-        var inviter = await inviters.GetByEmailAsync(normEmail, ct);
-        if (inviter is null) return;
-
-        var owned = await campaigns.Query(tracking: true).Where(c => c.InviterId == inviter.Id).ToListAsync(ct);
-        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
-
-        // Regenerate dashboard links (we only stored hashes) and email them.
-        var links = new List<string>();
-        foreach (var c in owned)
-        {
-            var raw = TokenService.GenerateToken();
-            c.DashboardTokenHash = TokenService.Hash(raw);
-            links.Add($"{inviterBase}/dashboard/{c.Id}?token={raw}");
-        }
-        await uow.SaveChangesAsync(ct);
-
-        if (links.Count > 0)
-            await email.SendAsync(new Application.Abstractions.EmailMessage(
-                To: normEmail,
-                Subject: "Your invites.blog links",
-                Html: "<p>Here are your campaign links:</p><ul>" +
-                      string.Join("", links.Select(l => $"<li><a href=\"{l}\">{l}</a></li>")) + "</ul>",
-                Stream: Application.Abstractions.EmailStream.System,
-                Tags: new[] { new KeyValuePair<string, string>("kind", "magic_link") }), ct);
     }
 
     public async Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default)

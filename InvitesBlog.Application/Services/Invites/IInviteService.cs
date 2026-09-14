@@ -94,8 +94,6 @@ public interface IInviteService
     /// <summary>Authenticated RSVP from the inbox (by invite id, ownership-checked).</summary>
     Task<RsvpResultResponse> RsvpByInviteIdAsync(Guid inviteId, RsvpRequest req, CancellationToken ct = default);
     Task<IReadOnlyList<InboxCardResponse>> GetInboxAsync(CancellationToken ct = default);
-    /// <summary>Claim an invite to the caller's inbox — authorized by possession of the raw token.</summary>
-    Task<ClaimResponse> ClaimAsync(string token, CancellationToken ct = default);
 
     /// <summary>
     /// Sends a reauth OTP for a personal invite link opened from an untrusted IP. The caller never

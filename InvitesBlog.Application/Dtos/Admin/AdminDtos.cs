@@ -23,9 +23,3 @@ public sealed record AuditLogDto(
 /// <param name="Role">The role's NAME, which is what the seeder and every check use.</param>
 /// <param name="Granted">True to give it, false to take it away.</param>
 public sealed record SetUserRoleRequest(string Role, bool Granted);
-
-/// <summary>Admin login credentials.</summary>
-public sealed record AdminLoginRequest(string Email, string Password);
-
-/// <summary>A successful admin login: the issued admin JWT plus the signed-in user.</summary>
-public sealed record AdminLoginResultDto(string Token, DateTimeOffset ExpiresAt, AdminUserDto User);

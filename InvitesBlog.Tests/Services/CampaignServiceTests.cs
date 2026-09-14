@@ -300,31 +300,6 @@ public class CampaignServiceTests
         Assert.NotNull(price);
     }
 
-    // ----- Resend link -----
-
-    [Fact]
-    public async Task ResendLink_unknown_email_sends_nothing()
-    {
-        _inviters.GetByEmailAsync("ghost@test.com", Arg.Any<CancellationToken>()).Returns((Inviter?)null);
-        await Sut().ResendLinkAsync(new ResendLinkRequest("Ghost@Test.com"));
-        await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ResendLink_known_email_regenerates_and_emails_links()
-    {
-        var inviter = new Inviter { Id = Guid.NewGuid(), Email = "host@test.com", Name = "Host", PhoneE164 = "+9607777777" };
-        var owned = TestData.Campaign();
-        owned.InviterId = inviter.Id;
-        _inviters.GetByEmailAsync("host@test.com", Arg.Any<CancellationToken>()).Returns(inviter);
-        _campaigns.Query(true).Returns(new[] { owned }.AsAsyncQueryable());
-
-        await Sut().ResendLinkAsync(new ResendLinkRequest("host@test.com"));
-
-        Assert.False(string.IsNullOrEmpty(owned.DashboardTokenHash));
-        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "host@test.com"), Arg.Any<CancellationToken>());
-    }
-
     // ----- RSVP questions -----
 
     /// <summary>

@@ -136,13 +136,6 @@ public sealed class AccountService(
         RequestCodeRequest request, CancellationToken ct = default) =>
         await SendCodeAsync(request, ct);
 
-    public async Task<AuthResultDto> VerifyCodeAsync(VerifyCodeRequest request, CancellationToken ct = default)
-    {
-        var verified = await otp.VerifyContactAsync(new VerifyOtpRequest(request.ChallengeId, request.Code), ct);
-        var user = await FindByContactAsync(verified, ct) ?? await CreateFromContactAsync(verified, ct);
-        return await IssueAsync(user, ct);
-    }
-
     /// <summary>
     /// Creates a customer account from a proven address plus a password.
     ///

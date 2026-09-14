@@ -169,16 +169,6 @@ public sealed class CampaignsController(
     public async Task<IActionResult> GetPricing(Guid id, [FromQuery] int? inviteCount, CancellationToken ct) =>
         Success(await campaigns.GetPricingAsync(id, inviteCount, ct));
 
-    // Public recovery path — emails the links, never displays them. Rate limited to curb enumeration.
-    [HttpPost("access/resend-link")]
-    [HasPermission(Permissions.Dashboard.Read)]
-    [EnableRateLimiting("resend")]
-    public async Task<IActionResult> ResendLink([FromBody] ResendLinkRequest req, CancellationToken ct)
-    {
-        await campaigns.ResendLinkAsync(req, ct);
-        return SuccessMessage("If that email has campaigns, we've sent the links.");
-    }
-
     // Magic-link dashboard (§13.3). Public role holds Dashboard.Read; the ?token= is validated
     // (hashed + matched) in the service. Mapped explicitly off the campaigns route prefix.
     [HttpGet("/api/dashboard/{id:guid}")]
