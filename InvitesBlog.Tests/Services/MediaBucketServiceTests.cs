@@ -894,4 +894,20 @@ public class MediaBucketServiceTests
             () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(5)));
         Assert.Equal("allocation_needs_subscription", e.ErrorCode);
     }
+
+    /// <summary>A bucket whose event was deleted must not stop its owner's other buckets from loading.</summary>
+    [Fact]
+    public async Task A_bucket_left_by_a_deleted_event_does_not_break_the_others()
+    {
+        var bucket = OnPremium(allocated: 10 * PlanCatalog.Gb);
+        var orphan = Mine();
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket, orphan }.AsAsyncQueryable());
+        _plans.ForCampaignAsync(orphan.CampaignId, Arg.Any<CancellationToken>())
+            .Returns<EventPlan>(_ => throw new NotFoundException("That event no longer exists."));
+
+        var mine = await Sut().MineAsync();
+
+        Assert.Equal(2, mine.Count);
+        Assert.Equal(10 * PlanCatalog.Gb, mine.Single(b => b.Id == bucket.Id).AccountAllocatedBytes);
+    }
 }

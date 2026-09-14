@@ -730,6 +730,26 @@ public sealed class MediaBucketService(
                 "account_full");
     }
 
+    /// <summary>
+    /// The plan for an event, or null when the event has been deleted. Buckets can outlive their
+    /// event, and one of those must not break every page that lists its owner's buckets.
+    /// </summary>
+    private async Task<EventPlan?> PlanOrNullAsync(Guid campaignId, CancellationToken ct)
+    {
+        try
+        {
+            return await plans.ForCampaignAsync(campaignId, ct);
+        }
+        catch (NotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>What a bucket whose event is gone is described with: the free plan, nothing to resize.</summary>
+    private static readonly EventPlan OrphanPlan = PlanRules.Evaluate(
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, SubscriptionTier.None, null, null, 0, null, null, null);
+
     /// <summary>What a bucket holds on a subscription: its own size, or the plan's starting size.</summary>
     private static long Allocation(MediaBucket bucket, EventPlan plan) =>
         bucket.AllocatedBytes
@@ -742,8 +762,8 @@ public sealed class MediaBucketService(
         long total = 0;
         foreach (var group in mine.GroupBy(b => b.CampaignId))
         {
-            var plan = await plans.ForCampaignAsync(group.Key, ct);
-            if (!plan.Allocatable) continue;
+            // A bucket left behind by a deleted event has no plan and takes no space.
+            if (await PlanOrNullAsync(group.Key, ct) is not { Allocatable: true } plan) continue;
             total += group.Sum(b => Allocation(b, plan));
         }
         return total;
@@ -1074,7 +1094,8 @@ public sealed class MediaBucketService(
 
         // The plan is the EVENT's, so every bucket on an event shows the same space and the same end.
         var eventPlans = new Dictionary<Guid, EventPlan>();
-        foreach (var id in campaignIds) eventPlans[id] = await plans.ForCampaignAsync(id, ct);
+        foreach (var id in campaignIds)
+            eventPlans[id] = await PlanOrNullAsync(id, ct) ?? OrphanPlan;
         var usedByEvent = (await buckets.Query()
                 .Where(b => campaignIds.Contains(b.CampaignId))
                 .Select(b => new { b.CampaignId, b.UsedBytes })
