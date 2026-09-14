@@ -30,15 +30,6 @@ public sealed class MediaBucketsController(
         Success(await buckets.MineAsync(ct));
 
     /// <summary>
-    /// The sizes on offer. Unscoped when no bucket is named — that is the price list someone reads
-    /// before they own anything, which is exactly when they are deciding whether to.
-    /// </summary>
-    [HttpGet("plans")]
-    [HasPermission(Permissions.Buckets.Read)]
-    public async Task<IActionResult> Plans([FromQuery] Guid? bucketId, CancellationToken ct) =>
-        Success(await buckets.PlansAsync(bucketId, ct));
-
-    /// <summary>
     /// One bucket. The VIEW door — a member the owner let in gets the bucket itself, because the
     /// alternative is a page that can list photographs but not say whose night they are.
     /// </summary>
@@ -111,12 +102,6 @@ public sealed class MediaBucketsController(
     public async Task<IActionResult> Rename(
         Guid bucketId, [FromBody] RenameMediaBucketRequest req, CancellationToken ct) =>
         Success(await buckets.RenameAsync(bucketId, req, ct));
-
-    [HttpPost("{bucketId:guid}/tier")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> ChooseTier(
-        Guid bucketId, [FromBody] ChooseMediaBucketTierRequest req, CancellationToken ct) =>
-        Success(await buckets.ChooseTierAsync(bucketId, req, ct));
 
     // ---------- what is in it ----------
 

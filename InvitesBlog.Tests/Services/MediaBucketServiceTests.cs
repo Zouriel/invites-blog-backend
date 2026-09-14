@@ -4,6 +4,7 @@ using InvitesBlog.Application.Dtos.MediaBuckets;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.MediaBuckets;
 using InvitesBlog.Application.Phones;
+using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.MediaBuckets;
@@ -62,12 +63,13 @@ public class MediaBucketServiceTests
     }
 
     private readonly IRepository<MediaBucketMember> _members = Substitute.For<IRepository<MediaBucketMember>>();
+    private readonly IPlanService _plans = TestData.FreePlans();
 
     private MediaBucketService Sut() => new(
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
-        Options.Create(new MediaBucketOptions()), _uow);
+        Options.Create(new MediaBucketOptions()), _uow, _plans);
 
     private MediaBucket Mine(long capacityGb = 10, long used = 0) => new()
     {
@@ -100,6 +102,9 @@ public class MediaBucketServiceTests
     {
         _buckets.GetByIdAsync(bucket.Id, Arg.Any<CancellationToken>()).Returns(bucket);
         _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket }.AsAsyncQueryable());
+        // The event's space is the plan's now; these tests give it the bucket's old capacity.
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(eventBytes: bucket.CapacityBytes));
     }
 
     // ---------- the quota ----------
@@ -148,67 +153,7 @@ public class MediaBucketServiceTests
 
         var e = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().EnsureRoomAsync(bucket.Id, 1024));
-        Assert.Contains("Choose a bucket size", e.Message);
-    }
-
-    // ---------- tiers ----------
-
-    /// <summary>
-    /// Shrinking below what is already stored has no honest outcome — somebody would be over their
-    /// limit for photographs they have already been told are kept, and nothing here gets to pick
-    /// which of them to stop keeping.
-    /// </summary>
-    [Fact]
-    public async Task A_bucket_cannot_be_resized_below_what_is_already_in_it()
-    {
-        var bucket = Mine(capacityGb: 50, used: 30 * MediaBucketPlans.BytesPerGb);
-        bucket.Tier = MediaBucketTier.Gb50;
-        Stored(bucket);
-
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb20")));
-        Assert.Equal("tier_below_usage", e.ErrorCode);
-    }
-
-    /// <summary>Topping up mid-term must not cost somebody the months they had left.</summary>
-    [Fact]
-    public async Task Buying_again_extends_the_term_rather_than_restarting_it()
-    {
-        var bucket = Mine();
-        var remaining = DateTimeOffset.UtcNow.AddMonths(5);
-        bucket.TermStartAt = DateTimeOffset.UtcNow.AddMonths(-1);
-        bucket.TermEndAt = remaining;
-        Stored(bucket);
-        _currentUser.HasPermission(Permissions.Buckets.LargerSizes).Returns(true);
-
-        await Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb20"));
-
-        // Six more months on top of the five still outstanding, not six from today.
-        Assert.True(bucket.TermEndAt > remaining.AddMonths(5));
-        Assert.Equal(20 * MediaBucketPlans.BytesPerGb, bucket.CapacityBytes);
-    }
-
-    /// <summary>Paid sizes are a subscriber perk while there is no billing.</summary>
-    [Fact]
-    public async Task A_paid_size_is_refused_without_a_subscription()
-    {
-        var bucket = Mine();
-        Stored(bucket);
-        _currentUser.HasPermission(Permissions.Buckets.LargerSizes).Returns(false);
-
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb50")));
-        Assert.Equal("tier_needs_subscription", e.ErrorCode);
-    }
-
-    [Fact]
-    public async Task An_unknown_tier_is_refused()
-    {
-        var bucket = Mine();
-        Stored(bucket);
-
-        await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().ChooseTierAsync(bucket.Id, new ChooseMediaBucketTierRequest("Gb999")));
+        Assert.Contains("See the plans for more space", e.Message);
     }
 
     [Fact]
@@ -488,7 +433,7 @@ public class MediaBucketServiceTests
         // Ownership is proved by the possession token in this test; what is under test is the
         // SECOND bucket, not who the event belongs to.
         _currentUser.CampaignId.Returns(campaignId);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(false);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(TestData.Plan());
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _inviters.FirstOrDefaultAsync(
@@ -517,7 +462,8 @@ public class MediaBucketServiceTests
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
         // A subscriber: the cap is what refuses this, not the permission.
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
@@ -535,7 +481,8 @@ public class MediaBucketServiceTests
     {
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
@@ -638,7 +585,8 @@ public class MediaBucketServiceTests
         var night = new DateTimeOffset(2026, 10, 1, 15, 0, 0, TimeSpan.Zero);
         var afterParty = night.AddDays(1);
         _currentUser.CampaignId.Returns(campaignId);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
         _buckets.AnyAsync(
@@ -661,7 +609,7 @@ public class MediaBucketServiceTests
     {
         var bucket = Mine();
         Stored(bucket);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(false);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(TestData.Plan());
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("The ceremony")));
@@ -673,7 +621,8 @@ public class MediaBucketServiceTests
     {
         var bucket = Mine();
         Stored(bucket);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
 
         var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("  The ceremony  "));
 
@@ -689,7 +638,8 @@ public class MediaBucketServiceTests
         var bucket = Mine();
         bucket.Name = "The ceremony";
         Stored(bucket);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
 
         var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("   "));
 
@@ -784,7 +734,8 @@ public class MediaBucketServiceTests
     {
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
-        _currentUser.HasPermission(Permissions.Buckets.Multiple).Returns(true);
+        _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.AnyAsync(

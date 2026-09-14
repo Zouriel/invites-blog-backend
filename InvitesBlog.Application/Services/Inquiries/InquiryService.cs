@@ -274,7 +274,7 @@ public sealed class InquiryService(
             $"<p style=\"font-size:16px;line-height:1.6\">Hi {safeDesigner},</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\"><strong>{safeWho}</strong> asked for you by name for a {safeOccasion} invitation.</p>" +
             $"<blockquote style=\"margin:18px 0;padding:12px 16px;border-left:3px solid #f0c8d8;color:#5a3547;font-size:15px;line-height:1.6\">{safeBrief}</blockquote>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See the request</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See the request</a></p>" +
             "<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">We'll agree the terms with them and hand it over — you'll see it move to \u201cTo build\u201d.<br>Sent via invites.blog</p></div>";
         return new EmailMessage(To: to, Subject: $"{safeWho} asked for you \u2728", Html: html, Stream: EmailStream.System);
     }
@@ -289,7 +289,7 @@ public sealed class InquiryService(
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#2a1420\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">Dear {safeName},</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\">Wonderful news — your custom invitation, <strong>{safeTpl}</strong>, is ready to view.</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">View your invitation</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">View your invitation</a></p>" +
             $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">Open the link and verify this email address to see it. Or paste this into your browser:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
         return new EmailMessage(To: to, Subject: "Your invitation is ready ✨", Html: html, Stream: EmailStream.System);
     }

@@ -1,17 +1,6 @@
 using InvitesBlog.Domain.Enums;
 
 namespace InvitesBlog.Application.Dtos.MediaBuckets;
-
-/// <summary>One size of bucket as it is offered for sale.</summary>
-public sealed record MediaBucketPlanDto(
-    string Tier,
-    int Gb,
-    decimal Price,
-    string Currency,
-    int TermMonths,
-    /// <summary>True for the tier this bucket is already on, so the picker can say so.</summary>
-    bool IsCurrent);
-
 /// <summary>
 /// A bucket as its owner sees it in a list. Deliberately not the photographs — a grid of buckets
 /// shows covers and how full each one is, and loading a thousand rows of media to draw that would
@@ -28,8 +17,10 @@ public sealed record MediaBucketDto(
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
+    /// <summary>The event's plan: Free, Basic, EventPass or Premium.</summary>
     string Tier,
-    int Gb,
+    /// <summary>The event's space in GB, to one decimal. Shared by all of the event's buckets.</summary>
+    double Gb,
     long CapacityBytes,
     long UsedBytes,
     /// <summary>0–100, rounded, so every surface draws the same bar from the same number.</summary>
@@ -51,7 +42,13 @@ public sealed record MediaBucketDto(
     DateTimeOffset? TermEndAt,
     /// <summary>Whether the paid term has run out. Always false on the free tier, which has no term.</summary>
     bool Expired,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    int MaxBuckets = 1,
+    int MaxWindowDays = 1,
+    /// <summary>Active, UploadsClosed, OrganiserOnly or Deleted. See MediaPhase.</summary>
+    string Phase = "Active",
+    /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
+    long EventUsedBytes = 0);
 
 /// <summary>
 /// Creating a bucket. <c>EventDate</c> is the night it is for and is required for a standalone one;
@@ -80,10 +77,6 @@ public sealed record SetBucketAccessRequest(IReadOnlyList<Guid> GuestIds, bool A
 
 /// <summary>Renaming a bucket. Blank falls back to the default rather than leaving a gap.</summary>
 public sealed record RenameMediaBucketRequest(string Name);
-
-/// <summary>Moving a bucket onto a different size.</summary>
-public sealed record ChooseMediaBucketTierRequest(string Tier);
-
 /// <summary>
 /// A QR code as the dashboard shows it.
 ///

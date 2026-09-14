@@ -34,7 +34,10 @@ public sealed record AccountDto(
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> LinkedProviders,
     /// <summary>"light" or "dark", or null to take the default. Follows the account, not the browser.</summary>
-    string? ThemePreference = null);
+    string? ThemePreference = null,
+    /// <summary>The subscription in force right now: None, Basic or Premium.</summary>
+    string SubscriptionTier = "None",
+    DateTimeOffset? SubscriptionEndsAt = null);
 
 /// <summary>Sets the account's light/dark preference. Anything but "dark" is treated as light.</summary>
 public sealed record SetThemeRequest(string? Theme);

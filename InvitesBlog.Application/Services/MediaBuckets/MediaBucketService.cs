@@ -7,6 +7,7 @@ using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.MediaBuckets;
 using InvitesBlog.Application.Phones;
 using InvitesBlog.Application.Security;
+using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
@@ -57,18 +58,6 @@ public interface IMediaBucketService
     Task<MediaBucketDto> GetAsync(Guid bucketId, CancellationToken ct = default);
 
     Task<MediaBucketDto> CreateAsync(CreateMediaBucketRequest req, CancellationToken ct = default);
-
-    /// <summary>
-    /// Moves the bucket onto a tier. <b>Payment is not wired up yet</b> — this grants the capacity and
-    /// starts the term outright, so the shape of the product can be built and used before there is a
-    /// checkout behind it. When one arrives, this is what it calls after it is paid.
-    /// </summary>
-    Task<MediaBucketDto> ChooseTierAsync(
-        Guid bucketId, ChooseMediaBucketTierRequest req, CancellationToken ct = default);
-
-    /// <summary>The sizes on offer, with this bucket's current one marked.</summary>
-    Task<IReadOnlyList<MediaBucketPlanDto>> PlansAsync(Guid? bucketId, CancellationToken ct = default);
-
     /// <summary>
     /// The bucket a campaign's media goes into, creating it on the free tier the first time.
     ///
@@ -77,6 +66,9 @@ public interface IMediaBucketService
     /// for what they already had.</para>
     /// </summary>
     Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>Where the event's photos are in their lifetime. See MediaPhase.</summary>
+    Task<MediaPhase> PhaseForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
     /// <summary>
     /// How many days this event's default bucket collects for — 1 when it has no bucket yet.
@@ -202,7 +194,8 @@ public sealed class MediaBucketService(
     PhoneNormalizer phones,
     IConfiguration config,
     IOptions<MediaBucketOptions> options,
-    IUnitOfWork uow) : IMediaBucketService
+    IUnitOfWork uow,
+    IPlanService plans) : IMediaBucketService
 {
     private MediaBucketOptions Options => options.Value;
 
@@ -260,6 +253,13 @@ public sealed class MediaBucketService(
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return true;
         var campaignId = bucket.CampaignId;
+
+        // After a plan has run out for 30 days only the organiser can still look; after 90 the photos are gone.
+        var phase = (await plans.ForCampaignAsync(campaignId, ct)).Phase;
+        if (phase == MediaPhase.Deleted) return false;
+        if (phase == MediaPhase.OrganiserOnly)
+            return await ownership.AccessAsync(campaignId, ct) >= CampaignAccess.Manager;
+
         // The organiser, and everyone the event is for, see every bucket on it.
         if (await ownership.AccessAsync(campaignId, ct) >= CampaignAccess.Celebrant) return true;
 
@@ -378,33 +378,23 @@ public sealed class MediaBucketService(
             if (!await ownership.OwnsAsync(existing, ct))
                 throw new ForbiddenException("That event isn't yours.");
             var already = await buckets.CountAsync(b => b.CampaignId == existing, ct);
+            var existingPlan = await plans.ForCampaignAsync(existing, ct);
 
-            // A second bucket on one event is what a subscription buys: the ceremony and the
-            // after-party, each with its own night and its own audience. Everyone else keeps the one
-            // free bucket every event has always had.
-            if (already > 0 && !currentUser.HasPermission(Permissions.Buckets.Multiple))
+            // A second bucket on one event comes with Premium or an event pass: the ceremony and the
+            // after-party, each with its own night and its own audience.
+            if (already > 0 && already >= existingPlan.MaxBuckets && existingPlan.MaxBuckets < MediaBucket.MaxPerCampaign)
                 throw new BusinessRuleException(
-                    "That event already has a media bucket. Keeping more than one on the same event "
-                    + "is part of a subscription.",
+                    "That event already has a media bucket. More than one on the same event comes with "
+                    + "Premium or an event pass.",
                     "bucket_exists_for_campaign");
 
-            // And a ceiling above that, which a subscription does NOT lift — see
-            // MediaBucket.MaxPerCampaign. Checked after the subscription gate so somebody who cannot
-            // have a second one is told that rather than being quoted a limit they are nowhere near.
+            // And a ceiling above that, which no plan lifts. See MediaBucket.MaxPerCampaign.
             if (already >= MediaBucket.MaxPerCampaign)
                 throw new BusinessRuleException(
                     $"An event can hold {MediaBucket.MaxPerCampaign} media buckets at most. Remove "
                     + "one, or give the extra night an event of its own.",
                     "bucket_limit_reached");
         }
-
-        var plan = ParseTier(req.Tier) is { } tier
-            ? MediaBucketPlans.For(tier, Options) ?? MediaBucketPlans.Free(Options)
-            : MediaBucketPlans.Free(Options);
-
-        if (!plan.IsFree && !currentUser.HasPermission(Permissions.Buckets.LargerSizes))
-            throw new BusinessRuleException(
-                "Bigger sizes are for subscribers. Start with the free size.", "tier_needs_subscription");
 
         // EVERY bucket belongs to a campaign, because the campaign is what holds the title, the
         // cover and the guest list — the three things a bucket deliberately has none of. A bucket
@@ -428,7 +418,8 @@ public sealed class MediaBucketService(
         // Collecting for longer than the one night is the other half of a subscription. Asked for
         // here and FROZEN onto the row, so revoking the subscription later cannot shut a bucket
         // somebody has already printed codes for — see MediaBucket.UploadWindowDays.
-        var windowDays = WindowFor(req.WindowDays);
+        var eventPlan = await plans.ForCampaignAsync(eventId, ct);
+        var windowDays = WindowFor(req.WindowDays, eventPlan.MaxWindowDays);
 
         var campaignDate = (await campaigns.GetByIdAsync(eventId, ct))?.EventStartAt
                            ?? throw new NotFoundException("That event no longer exists.");
@@ -442,11 +433,10 @@ public sealed class MediaBucketService(
         var isFirst = !await buckets.AnyAsync(b => b.CampaignId == eventId, ct);
         var eventDate = isFirst ? campaignDate : req.EventDate ?? campaignDate;
 
-        var bucket = NewBucket(userId, eventId, eventDate, plan, windowDays);
+        var bucket = NewBucket(userId, eventId, eventDate, windowDays);
 
         var chosenName = req.Name?.Trim();
-        if (!string.IsNullOrWhiteSpace(chosenName)
-            && currentUser.HasPermission(Permissions.Buckets.Multiple))
+        if (!string.IsNullOrWhiteSpace(chosenName) && eventPlan.MaxBuckets > 1)
         {
             bucket.Name = chosenName.Length > 80 ? chosenName[..80] : chosenName;
         }
@@ -464,81 +454,6 @@ public sealed class MediaBucketService(
 
         return (await DescribeAsync([bucket], ct))[0];
     }
-
-    public async Task<MediaBucketDto> ChooseTierAsync(
-        Guid bucketId, ChooseMediaBucketTierRequest req, CancellationToken ct = default)
-    {
-        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
-
-        var tier = ParseTier(req.Tier)
-                   ?? throw new BusinessRuleException("That isn't a size we offer.", "unknown_tier");
-        var plan = MediaBucketPlans.For(tier, Options)
-                   ?? throw new BusinessRuleException("That isn't a size we offer.", "unknown_tier");
-
-        // Downwards is refused rather than silently accepted. A smaller bucket than what is already
-        // in it would put someone permanently over their limit for photographs they have already
-        // been told are safe, and there is no good answer to which of them to stop keeping.
-        if (plan.CapacityBytes < bucket.UsedBytes)
-            throw new BusinessRuleException(
-                $"There's already more than {plan.Gb} GB in this bucket.", "tier_below_usage");
-
-        // Paid sizes are a subscriber perk until billing exists. See Permissions.Buckets.LargerSizes.
-        if (!plan.IsFree && !currentUser.HasPermission(Permissions.Buckets.LargerSizes))
-            throw new BusinessRuleException(
-                "Bigger sizes are for subscribers. Your event keeps its free 2 GB.", "tier_needs_subscription");
-
-        bucket.Tier = plan.Tier;
-        bucket.CapacityBytes = plan.CapacityBytes;
-
-        if (plan.IsFree)
-        {
-            bucket.TermStartAt = null;
-            bucket.TermEndAt = null;
-        }
-        else
-        {
-            var now = DateTimeOffset.UtcNow;
-            // A term that is still running is EXTENDED, not restarted — someone topping up in month
-            // five should not lose the month they still had.
-            var from = bucket.TermEndAt is { } end && end > now ? end : now;
-            bucket.TermStartAt ??= now;
-            bucket.TermEndAt = from.AddMonths(plan.TermMonths);
-        }
-
-        bucket.UpdatedAt = DateTimeOffset.UtcNow;
-        buckets.Update(bucket);
-        await uow.SaveChangesAsync(ct);
-
-        return (await DescribeAsync([bucket], ct))[0];
-    }
-
-    public async Task<IReadOnlyList<MediaBucketPlanDto>> PlansAsync(
-        Guid? bucketId, CancellationToken ct = default)
-    {
-        var current = bucketId is { } id ? (await OwnedAsync(id, ct)).Tier : (MediaBucketTier?)null;
-
-        return MediaBucketPlans.Purchasable(Options)
-            .Select(p => new MediaBucketPlanDto(
-                p.Tier.ToString(), p.Gb, p.Price, p.Currency, p.TermMonths, p.Tier == current))
-            .ToList();
-    }
-
-    /// <summary>
-    /// The event's DEFAULT bucket, provisioning one if it has none.
-    ///
-    /// <para>It used to be "the" bucket, guaranteed by a unique index. A subscriber may now keep
-    /// several on one event, so every caller that used to mean the only one — the camera on the
-    /// invitation, an upload from the dashboard, the adoption of photographs older than buckets —
-    /// has to mean a PARTICULAR one, and this is it.</para>
-    ///
-    /// <para>The oldest wins, which is the one provisioned free when the event was made. Chosen over
-    /// a flag on the row because there is nothing to keep in step and nothing to repair: no second
-    /// bucket can ever be created before the first, so the answer cannot change when one is added.
-    /// Ordered by id as well as by date, so two rows written in the same instant still resolve the
-    /// same way on every read rather than by whatever the database felt like returning.</para>
-    /// </summary>
-
-    // ---------- who may look into which bucket ----------
 
     public async Task<BucketAccessDto> AccessAsync(Guid bucketId, CancellationToken ct = default)
     {
@@ -651,9 +566,9 @@ public sealed class MediaBucketService(
     {
         var bucket = await OwnedAsync(bucketId, ct, tracking: true);
 
-        if (!currentUser.HasPermission(Permissions.Buckets.Multiple))
+        if ((await plans.ForCampaignAsync(bucket.CampaignId, ct)).MaxBuckets <= 1)
             throw new BusinessRuleException(
-                "Renaming a bucket is part of a subscription.", "rename_needs_subscription");
+                "Naming buckets comes with Premium or an event pass.", "rename_needs_subscription");
 
         // Blank is the default rather than an error: somebody clearing the box means "put it back",
         // and an empty name would render as a gap where the bucket's title should be.
@@ -702,7 +617,7 @@ public sealed class MediaBucketService(
         // claimed has no account behind it, and an empty owner is correct there rather than an error.
         var bucket = NewBucket(
             campaign.CreatedByUserId ?? currentUser.UserId ?? Guid.Empty,
-            campaignId, campaign.EventStartAt, MediaBucketPlans.Free(Options));
+            campaignId, campaign.EventStartAt);
 
         await buckets.AddAsync(bucket, ct);
 
@@ -772,21 +687,44 @@ public sealed class MediaBucketService(
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
                      ?? throw new NotFoundException("That media bucket no longer exists.");
+        var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        if (bucket.UsedBytes + incomingBytes <= bucket.CapacityBytes) return;
+        // Space is per EVENT, shared by all of its buckets.
+        var eventUsed = await buckets.Query()
+            .Where(b => b.CampaignId == bucket.CampaignId)
+            .SumAsync(b => b.UsedBytes, ct);
+        if (eventUsed + incomingBytes > plan.EventBytes)
+            throw new BusinessRuleException(
+                plan.Kind is PlanKind.Premium or PlanKind.EventPass
+                    ? $"This event's {Size(plan.EventBytes)} is full."
+                    : $"This event's {Size(plan.EventBytes)} is full. See the plans for more space.",
+                "bucket_full");
 
-        var gb = bucket.CapacityBytes / (double)MediaBucketPlans.BytesPerGb;
-        throw new BusinessRuleException(
-            bucket.Tier == MediaBucketTier.Free
-                ? $"This bucket's free {gb:0.#} GB is full. Choose a bucket size to keep adding."
-                : $"This bucket's {gb:0.#} GB is full.",
-            "bucket_full");
+        // And a subscription's limit across all of the account's events.
+        if (plan.AccountBytes is { } cap && plan.OwnerUserId is { } owner
+            && await plans.AccountUsedBytesAsync(owner, ct) + incomingBytes > cap)
+            throw new BusinessRuleException(
+                $"This account's {Size(cap)} across all events is full. Remove some photos or move to a bigger plan.",
+                "account_full");
     }
+
+    private static string Size(long bytes) =>
+        bytes >= PlanCatalog.Gb
+            ? $"{bytes / (double)PlanCatalog.Gb:0.#} GB"
+            : $"{bytes / PlanCatalog.Mb} MB";
+
+    public async Task<MediaPhase> PhaseForCampaignAsync(Guid campaignId, CancellationToken ct = default) =>
+        (await plans.ForCampaignAsync(campaignId, ct)).Phase;
 
     public async Task EnsureOpenAsync(Guid bucketId, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
                      ?? throw new NotFoundException("That media bucket no longer exists.");
+
+        if ((await plans.ForCampaignAsync(bucket.CampaignId, ct)).Phase != MediaPhase.Active)
+            throw new BusinessRuleException(
+                "This event's plan has ended, so nothing new can be added. Everything already here is kept for now.",
+                "plan_ended");
 
         // Through the EVENT, the same way the DTO reads it — see Night(). The copy on the bucket is
         // only reached when there is somehow no event behind it.
@@ -933,16 +871,14 @@ public sealed class MediaBucketService(
     /// ask for: what this number really governs is how long a QR code printed onto a table card goes
     /// on working, so it is clamped here as well as in <c>EventDayWindow</c>.</para>
     /// </summary>
-    private int WindowFor(int? asked)
+    private static int WindowFor(int? asked, int maxDays)
     {
         if (asked is not { } days || days <= 1) return 1;
-        if (!currentUser.HasPermission(Permissions.Buckets.ExtendedWindow)) return 1;
-        return Math.Min(days, EventDayWindow.MaxWindowDays);
+        return Math.Min(days, Math.Min(maxDays, EventDayWindow.MaxWindowDays));
     }
 
     private MediaBucket NewBucket(
-        Guid ownerId, Guid campaignId, DateTimeOffset eventDate, MediaBucketPlan plan,
-        int windowDays = 1)
+        Guid ownerId, Guid campaignId, DateTimeOffset eventDate, int windowDays = 1)
     {
         var now = DateTimeOffset.UtcNow;
         return new MediaBucket
@@ -951,12 +887,11 @@ public sealed class MediaBucketService(
             OwnerUserId = ownerId,
             CampaignId = campaignId,
             EventDate = eventDate.ToUniversalTime(),
-            Tier = plan.Tier,
-            CapacityBytes = plan.CapacityBytes,
+            // Space comes from the event's plan now, not from the bucket. See PlanService.
+            Tier = MediaBucketTier.Free,
+            CapacityBytes = 0,
             UploadWindowDays = windowDays,
             UsedBytes = 0,
-            TermStartAt = plan.IsFree ? null : now,
-            TermEndAt = plan.IsFree ? null : now.AddMonths(plan.TermMonths),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -1021,29 +956,48 @@ public sealed class MediaBucketService(
             .Select(g => g.OrderBy(b => b.CreatedAt).ThenBy(b => b.Id).First().Id)
             .ToHashSet();
 
+        // The plan is the EVENT's, so every bucket on an event shows the same space and the same end.
+        var eventPlans = new Dictionary<Guid, EventPlan>();
+        foreach (var id in campaignIds) eventPlans[id] = await plans.ForCampaignAsync(id, ct);
+        var usedByEvent = (await buckets.Query()
+                .Where(b => campaignIds.Contains(b.CampaignId))
+                .Select(b => new { b.CampaignId, b.UsedBytes })
+                .ToListAsync(ct))
+            .GroupBy(x => x.CampaignId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.UsedBytes));
+
         var now = DateTimeOffset.UtcNow;
-        return rows.Select(b => new MediaBucketDto(
-            b.Id,
-            b.Name,
-            Title(b, events),
-            Cover(b, events),
-            b.Tier.ToString(),
-            (int)Math.Round(b.CapacityBytes / (double)MediaBucketPlans.BytesPerGb),
-            b.CapacityBytes,
-            b.UsedBytes,
-            b.CapacityBytes <= 0
-                ? 0
-                : (int)Math.Clamp(Math.Round(b.UsedBytes * 100.0 / b.CapacityBytes), 0, 100),
-            counts.GetValueOrDefault(b.Id),
-            b.CampaignId,
-            Title(b, events),
-            Night(b, events),
-            EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays),
-            b.UploadWindowDays,
-            defaults.Contains(b.Id),
-            b.TermEndAt,
-            b.TermEndAt is { } end && end <= now,
-            b.CreatedAt)).ToList();
+        return rows.Select(b =>
+        {
+            var plan = eventPlans[b.CampaignId];
+            var eventUsed = usedByEvent.GetValueOrDefault(b.CampaignId);
+            return new MediaBucketDto(
+                b.Id,
+                b.Name,
+                Title(b, events),
+                Cover(b, events),
+                plan.Kind.ToString(),
+                Math.Round(plan.EventBytes / (double)MediaBucketPlans.BytesPerGb, 1),
+                plan.EventBytes,
+                b.UsedBytes,
+                plan.EventBytes <= 0
+                    ? 0
+                    : (int)Math.Clamp(Math.Round(eventUsed * 100.0 / plan.EventBytes), 0, 100),
+                counts.GetValueOrDefault(b.Id),
+                b.CampaignId,
+                Title(b, events),
+                Night(b, events),
+                EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays),
+                b.UploadWindowDays,
+                defaults.Contains(b.Id),
+                plan.CoveredUntil,
+                plan.Phase != MediaPhase.Active,
+                b.CreatedAt,
+                plan.MaxBuckets,
+                plan.MaxWindowDays,
+                plan.Phase.ToString(),
+                eventUsed);
+        }).ToList();
     }
 
     private string ContributeUrl(string token) => $"{ContributeBase}/q/{token}";

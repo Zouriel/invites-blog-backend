@@ -146,7 +146,7 @@ public sealed class CelebrantService(
             $"<p style=\"font-size:16px;line-height:1.6\">Hi {name},</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\">You've been added to <strong>{title}</strong> on invites.blog. " +
             "Sign in with this email to see who's coming and all the photos from the event.</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open the event</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open the event</a></p>" +
             "<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">Sent via invites.blog</p></div>";
 
         await email.SendAsync(new EmailMessage(

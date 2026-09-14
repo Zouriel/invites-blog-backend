@@ -24,7 +24,8 @@ public class AdminServiceTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
     private AdminService Sut() => new(
-        _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow);
+        _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow,
+        Substitute.For<ICampaignRepository>());
 
     // ---------- granting and revoking a role ----------
 
@@ -66,12 +67,12 @@ public class AdminServiceTests
     public async Task Granting_a_role_adds_it_and_records_why()
     {
         var user = Account(Roles.Customer);
-        RoleRow(Roles.Subscriber);
+        RoleRow(Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Subscriber, true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, true));
 
-        Assert.Contains(Roles.Subscriber, result.Roles);
+        Assert.Contains(Roles.Designer, result.Roles);
         await _auditLogs.Received().AddAsync(
             Arg.Is<AuditLog>(a => a.Action == "admin.role.grant"), Arg.Any<CancellationToken>());
         await _uow.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -84,10 +85,10 @@ public class AdminServiceTests
     [Fact]
     public async Task Granting_a_role_somebody_already_holds_changes_nothing()
     {
-        var user = Account(Roles.Customer, Roles.Subscriber);
+        var user = Account(Roles.Customer, Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Subscriber, true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, true));
 
         Assert.Equal(2, result.Roles.Count);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -96,12 +97,12 @@ public class AdminServiceTests
     [Fact]
     public async Task Revoking_takes_the_role_away()
     {
-        var user = Account(Roles.Customer, Roles.Subscriber);
+        var user = Account(Roles.Customer, Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Subscriber, false));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, false));
 
-        Assert.DoesNotContain(Roles.Subscriber, result.Roles);
+        Assert.DoesNotContain(Roles.Designer, result.Roles);
         await _auditLogs.Received().AddAsync(
             Arg.Is<AuditLog>(a => a.Action == "admin.role.revoke"), Arg.Any<CancellationToken>());
     }
@@ -128,12 +129,12 @@ public class AdminServiceTests
     public async Task The_role_name_is_matched_without_regard_to_case()
     {
         var user = Account(Roles.Customer);
-        RoleRow(Roles.Subscriber);
+        RoleRow(Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("subscriber", true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("designer", true));
 
-        Assert.Contains(Roles.Subscriber, result.Roles);
+        Assert.Contains(Roles.Designer, result.Roles);
     }
 
     /// <summary>The likeliest way to lock everybody out is to try the toggle on your own row.</summary>
@@ -184,26 +185,26 @@ public class AdminServiceTests
     [Fact]
     public async Task Revoking_a_subscription_from_a_lone_admin_is_fine()
     {
-        var user = Account(Roles.Admin, Roles.Subscriber);
+        var user = Account(Roles.Admin, Roles.Designer);
         _currentUser.UserId.Returns(user.Id);
         _userRoles.CountAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<UserRole, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(1);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Subscriber, false));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, false));
 
         Assert.Contains(Roles.Admin, result.Roles);
-        Assert.DoesNotContain(Roles.Subscriber, result.Roles);
+        Assert.DoesNotContain(Roles.Designer, result.Roles);
     }
 
     [Fact]
     public async Task An_account_that_is_not_there_is_a_not_found()
     {
         Account(Roles.Customer);
-        RoleRow(Roles.Subscriber);
+        RoleRow(Roles.Designer);
 
         await Assert.ThrowsAsync<NotFoundException>(
-            () => Sut().SetUserRoleAsync(Guid.NewGuid(), new SetUserRoleRequest(Roles.Subscriber, true)));
+            () => Sut().SetUserRoleAsync(Guid.NewGuid(), new SetUserRoleRequest(Roles.Designer, true)));
     }
 
     [Fact]

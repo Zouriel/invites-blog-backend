@@ -15,6 +15,7 @@ using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
+using InvitesBlog.Application.Plans;
 namespace InvitesBlog.Application.Services.Campaigns;
 
 /// <summary>
@@ -49,7 +50,8 @@ public sealed class CampaignService(
     IValidator<UpdateContentRequest> contentValidator,
     IValidator<UpdateVenueRequest> venueValidator,
     IValidator<UpdateInviterRequest> inviterValidator,
-    IValidator<UpdateDeliverySettingsRequest> deliveryValidator) : ICampaignService
+    IValidator<UpdateDeliverySettingsRequest> deliveryValidator,
+    IPlanService plans) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -392,7 +394,7 @@ public sealed class CampaignService(
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#2a1420\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">Dear {name},</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\">{body}</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#db2777;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open your invitation</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open your invitation</a></p>" +
             $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">This is your personal invitation link — open it anytime:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
         return new Application.Abstractions.EmailMessage(
             To: to, Subject: $"You're invited — {(string.IsNullOrWhiteSpace(eventTitle) ? "invites.blog" : eventTitle)}",
@@ -645,9 +647,12 @@ public sealed class CampaignService(
         var guestCount = await guests.CountByCampaignAsync(id, ct);
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
+        var plan = await plans.ForCampaignAsync(id, ct);
         var price = PricingCalculator.CalculateInitial(
             Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount,
-            campaign.DesignerFee, campaign.DesignerFeeName);
+            campaign.DesignerFee, campaign.DesignerFeeName,
+            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
+            minimumCovered: plan.PassCoversFirstSend);
 
         return new CampaignSummaryDto(
             campaign.Id, campaign.Title, campaign.Slug, campaign.Status.ToString(),
@@ -685,8 +690,11 @@ public sealed class CampaignService(
     {
         var campaign = await LoadOwnedAsync(id, ct);
         var count = inviteCount ?? await guests.CountByCampaignAsync(id, ct);
+        var plan = await plans.ForCampaignAsync(id, ct);
         return PricingCalculator.CalculateInitial(
-            count, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName);
+            count, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName,
+            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
+            minimumCovered: plan.PassCoversFirstSend);
     }
 
     public async Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default)

@@ -11,6 +11,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
+using InvitesBlog.Application.Plans;
 namespace InvitesBlog.Application.Services.Photos;
 
 /// <summary>The event photo box (§5): what guests shot at the party, for everyone who was there.</summary>
@@ -135,6 +136,10 @@ public sealed class EventPhotoService(
                        ?? throw new NotFoundException("That event no longer exists.");
 
         var moderates = await MayHostAsync(campaignId, ct);
+
+        // Thirty days after a plan runs out, only the organiser can still look.
+        if (!moderates && await bucketService.PhaseForCampaignAsync(campaignId, ct) >= MediaPhase.OrganiserOnly)
+            throw new ForbiddenException("The photos from this event are only available to its organiser now.");
         // The people the event is for look at it too, without moderating.
         if (!moderates
             && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
@@ -219,7 +224,7 @@ public sealed class EventPhotoService(
             live.Count,
             // Full, out of term, or off its night: the owner can still look at what is already in it.
             // Only adding stops. The night was missing here — the same gap the campaign box had.
-            bucket.IsOpen && !bucket.Expired && bucket.UsedBytes < bucket.CapacityBytes,
+            bucket.IsOpen && !bucket.Expired && bucket.EventUsedBytes < bucket.CapacityBytes,
             live.Select(p => new EventPhotoDto(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height,
                 p.UploaderName,
@@ -235,9 +240,9 @@ public sealed class EventPhotoService(
                     ? "This one isn't open yet — it opens on the day."
                     : "This one has closed. Everything already added is still here."
                 : bucket.Expired
-                    ? "This bucket's term has ended. Everything in it is still here."
-                    : bucket.UsedBytes >= bucket.CapacityBytes
-                        ? "This bucket is full. Choose a bigger size to keep adding."
+                    ? "This event's plan has ended. Everything already here is kept for now."
+                    : bucket.EventUsedBytes >= bucket.CapacityBytes
+                        ? "This event is out of space. See the plans for more."
                         : null);
     }
 
@@ -455,7 +460,11 @@ public sealed class EventPhotoService(
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
 
-        if (!await MayHostAsync(campaignId, ct)
+        var hosts = await MayHostAsync(campaignId, ct);
+        if (!hosts && await bucketService.PhaseForCampaignAsync(campaignId, ct) >= MediaPhase.OrganiserOnly)
+            throw new ForbiddenException("The photos from this event are only available to its organiser now.");
+
+        if (!hosts
             && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
             && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
             throw new ForbiddenException("This photo box belongs to an event you're not on.");

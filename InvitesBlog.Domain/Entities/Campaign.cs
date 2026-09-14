@@ -82,6 +82,18 @@ public sealed class Campaign
     public DateTimeOffset EventStartAt { get; set; }
     public DateTimeOffset? EventEndAt { get; set; }
     public int PaidInviteCapacity { get; set; }
+
+    /// <summary>Premium for this one event until then. Null when it never had a pass.</summary>
+    public DateTimeOffset? EventPassUntil { get; set; }
+
+    /// <summary>How far the "your photos are ending" emails have got: 0 none, 1 ended, 2 reminder, 3 final notice.</summary>
+    public int MediaNoticeStage { get; set; }
+
+    /// <summary>The cover end those emails count from. A renewal moves it, which starts them over.</summary>
+    public DateTimeOffset? MediaNoticeAnchor { get; set; }
+
+    /// <summary>When the event's photos were removed after its cover ran out.</summary>
+    public DateTimeOffset? MediaDeletedAt { get; set; }
     public bool HasDesignerDiscount { get; set; }
     public bool IsSensitive { get; set; }                     // §4.9.1 OTP-before-view
     public int RetentionDays { get; set; } = 90;              // §15.4

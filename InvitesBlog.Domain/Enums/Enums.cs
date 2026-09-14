@@ -127,3 +127,11 @@ public enum MediaBucketTier
     Gb30,
     Gb50
 }
+
+/// <summary>A paid subscription on an account. <c>None</c> is the free plan.</summary>
+public enum SubscriptionTier
+{
+    None,
+    Basic,
+    Premium
+}

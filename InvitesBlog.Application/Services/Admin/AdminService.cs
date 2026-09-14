@@ -11,6 +11,8 @@ using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
+using InvitesBlog.Application.Plans;
+using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Application.Services.Admin;
 
 /// <summary>
@@ -25,7 +27,8 @@ public sealed class AdminService(
     IRepository<AuditLog> auditLogs,
     IRepository<UserRole> userRoles,
     ICurrentUser currentUser,
-    IUnitOfWork uow) : IAdminService
+    IUnitOfWork uow,
+    ICampaignRepository campaigns) : IAdminService
 {
     private static readonly TimeSpan AdminSessionLifetime = TimeSpan.FromHours(8);
 
@@ -50,9 +53,7 @@ public sealed class AdminService(
             .Skip(filter.Skip).Take(filter.PageSize)
             .ToListAsync(ct);
 
-        var items = page.Select(u => new AdminUserDto(
-            u.Id, u.Email, u.DisplayName, u.IsActive,
-            u.UserRoles.Select(ur => ur.Role.Name).OrderBy(n => n).ToList())).ToList();
+        var items = page.Select(Describe).ToList();
 
         return PagedResult<AdminUserDto>.Create(items, total, filter);
     }
@@ -195,5 +196,107 @@ public sealed class AdminService(
 
     private static AdminUserDto Describe(AppUser u) => new(
         u.Id, u.Email, u.DisplayName, u.IsActive,
-        u.UserRoles.Select(ur => ur.Role.Name).OrderBy(n => n).ToList());
+        u.UserRoles.Select(ur => ur.Role?.Name).OfType<string>().OrderBy(n => n).ToList(),
+        u.SubscriptionTier.ToString(),
+        u.SubscriptionEndsAt,
+        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+
+    /// <summary>
+    /// Sets an account's subscription by hand, until billing exists.
+    ///
+    /// <para>Choosing None ends an active subscription now rather than erasing it, because the end
+    /// date is when the account's events stopped being covered and their photo retention counts
+    /// from it.</para>
+    /// </summary>
+    public async Task<AdminUserDto> SetSubscriptionAsync(
+        Guid userId, SetSubscriptionRequest req, CancellationToken ct = default)
+    {
+        if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier))
+            throw new BusinessRuleException("Choose None, Basic or Premium.", "tier_unknown");
+
+        var now = DateTimeOffset.UtcNow;
+        if (tier != SubscriptionTier.None && req.EndsAt is { } requested && requested <= now)
+            throw new BusinessRuleException("The end date has to be in the future.", "tier_end_in_past");
+
+        var user = await users.Query(tracking: true)
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new NotFoundException("That account no longer exists.");
+
+        var wasActive = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+        if (tier == SubscriptionTier.None)
+        {
+            if (wasActive) user.SubscriptionEndsAt = now;
+            user.SubscriptionTier = SubscriptionTier.None;
+        }
+        else
+        {
+            user.SubscriptionTier = tier;
+            user.SubscriptionEndsAt = req.EndsAt;
+        }
+
+        await auditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "admin.subscription.set",
+            Actor = currentUser.UserId?.ToString() ?? "admin",
+            DataJson = JsonSerializer.Serialize(new { user = user.Id, tier = tier.ToString(), endsAt = user.SubscriptionEndsAt }),
+            CreatedAt = now,
+        }, ct);
+
+        await uow.SaveChangesAsync(ct);
+        return Describe(user);
+    }
+
+    public async Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var rows = await campaigns.Query()
+            .Where(c => c.CreatedByUserId == userId)
+            .OrderByDescending(c => c.EventStartAt)
+            .Select(c => new { c.Id, c.Title, c.EventStartAt, c.EventPassUntil })
+            .ToListAsync(ct);
+        return rows.Select(c => new AdminUserEventDto(
+            c.Id, c.Title, c.EventStartAt, c.EventPassUntil, c.EventPassUntil is { } until && until > now)).ToList();
+    }
+
+    /// <summary>
+    /// Grants a pass on one event, or takes it away. A pass runs six months from the event day, or
+    /// from today if the event has passed; granting again on an event that still has one adds six
+    /// more months to it.
+    /// </summary>
+    public async Task<AdminUserEventDto> SetEventPassAsync(
+        Guid campaignId, SetEventPassRequest req, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+
+        if (req.Granted)
+        {
+            var from = campaign.EventPassUntil is { } until && until > now
+                ? until
+                : campaign.EventStartAt > now ? campaign.EventStartAt : now;
+            campaign.EventPassUntil = from.AddMonths(PlanCatalog.EventPassMonths);
+        }
+        else
+        {
+            campaign.EventPassUntil = null;
+        }
+
+        await auditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = req.Granted ? "admin.event_pass.grant" : "admin.event_pass.revoke",
+            Actor = currentUser.UserId?.ToString() ?? "admin",
+            CampaignId = campaign.Id,
+            DataJson = JsonSerializer.Serialize(new { until = campaign.EventPassUntil }),
+            CreatedAt = now,
+        }, ct);
+
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+        return new AdminUserEventDto(campaign.Id, campaign.Title, campaign.EventStartAt, campaign.EventPassUntil,
+            campaign.EventPassUntil is { } end && end > now);
+    }
 }

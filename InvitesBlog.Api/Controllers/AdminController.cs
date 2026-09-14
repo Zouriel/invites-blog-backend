@@ -43,6 +43,22 @@ public sealed class AdminController(IAdminService admin) : BaseApiController
     public async Task<IActionResult> SetRole(Guid id, [FromBody] SetUserRoleRequest req, CancellationToken ct) =>
         Success(await admin.SetUserRoleAsync(id, req, ct));
 
+    /// <summary>Sets an account's subscription. Until billing exists, this is how anyone gets one.</summary>
+    [HttpPut("users/{id:guid}/subscription")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> SetSubscription(Guid id, [FromBody] SetSubscriptionRequest req, CancellationToken ct) =>
+        Success(await admin.SetSubscriptionAsync(id, req, ct));
+
+    [HttpGet("users/{id:guid}/events")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> UserEvents(Guid id, CancellationToken ct) =>
+        Success(await admin.UserEventsAsync(id, ct));
+
+    [HttpPut("events/{id:guid}/pass")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> SetEventPass(Guid id, [FromBody] SetEventPassRequest req, CancellationToken ct) =>
+        Success(await admin.SetEventPassAsync(id, req, ct));
+
     [HttpGet("audit")]
     [HasPermission(Permissions.Admin.ReadAudit)]
     public async Task<IActionResult> Audit([FromQuery] AuditLogFilter filter, CancellationToken ct) =>

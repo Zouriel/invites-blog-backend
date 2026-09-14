@@ -82,4 +82,21 @@ public class PricingCalculatorTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => PricingCalculator.CalculateInitial(-1, false));
     }
+
+    [Fact]
+    public void Premium_pays_for_extra_invitations_twenty_at_a_time()
+    {
+        var price = PricingCalculator.CalculateInitial(90, hasDesignerDiscount: false, premiumRate: true);
+
+        Assert.Equal(20, price.BlockSize);
+        Assert.Equal(2, price.ExtraBlocks);
+        Assert.Equal(7m, price.Total);
+    }
+
+    [Fact]
+    public void An_event_pass_covers_the_first_fifty()
+    {
+        Assert.Equal(0m, PricingCalculator.CalculateInitial(50, false, minimumCovered: true).Total);
+        Assert.Equal(1m, PricingCalculator.CalculateInitial(55, false, minimumCovered: true).Total);
+    }
 }

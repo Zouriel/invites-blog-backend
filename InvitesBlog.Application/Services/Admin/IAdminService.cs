@@ -22,4 +22,13 @@ public interface IAdminService
     /// </summary>
     Task<AdminUserDto> SetUserRoleAsync(
         Guid userId, SetUserRoleRequest req, CancellationToken ct = default);
+
+    /// <summary>Sets an account's subscription tier and optional end date.</summary>
+    Task<AdminUserDto> SetSubscriptionAsync(Guid userId, SetSubscriptionRequest req, CancellationToken ct = default);
+
+    /// <summary>The events an account organised, with their passes.</summary>
+    Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Grants or removes an event pass.</summary>
+    Task<AdminUserEventDto> SetEventPassAsync(Guid campaignId, SetEventPassRequest req, CancellationToken ct = default);
 }

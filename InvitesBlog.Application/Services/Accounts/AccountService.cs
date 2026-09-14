@@ -14,6 +14,7 @@ using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
+using InvitesBlog.Application.Plans;
 namespace InvitesBlog.Application.Services.Accounts;
 
 /// <summary>
@@ -652,7 +653,11 @@ public sealed class AccountService(
             !string.IsNullOrEmpty(user.PasswordHash),
             RoleNames(user).Order().ToList(),
             providers,
-            user.ThemePreference);
+            user.ThemePreference,
+            PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow)
+                ? user.SubscriptionTier.ToString()
+                : "None",
+            user.SubscriptionEndsAt);
     }
 
     /// <summary>

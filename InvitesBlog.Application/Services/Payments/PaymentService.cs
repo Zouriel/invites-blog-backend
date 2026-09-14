@@ -9,6 +9,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Configuration;
 
+using InvitesBlog.Application.Plans;
 namespace InvitesBlog.Application.Services.Payments;
 
 /// <summary>
@@ -24,7 +25,8 @@ public sealed class PaymentService(
     IGuestRepository guests,
     IUnitOfWork unitOfWork,
     IPaymentProvider provider,
-    IConfiguration config) : IPaymentService
+    IConfiguration config,
+    IPlanService plans) : IPaymentService
 {
     private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";
@@ -37,8 +39,11 @@ public sealed class PaymentService(
         if (guestCount == 0) throw new CampaignHasNoGuestsException();
 
         var inviteCount = Math.Max(guestCount, PricingCalculator.IncludedInvites);
+        var plan = await plans.ForCampaignAsync(campaignId, ct);
         var price = PricingCalculator.CalculateInitial(
-            inviteCount, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName);
+            inviteCount, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName,
+            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
+            minimumCovered: plan.PassCoversFirstSend);
         var capacity = price.IncludedInvites + price.ExtraBlocks * price.BlockSize;
 
         var payment = new Payment
@@ -73,8 +78,10 @@ public sealed class PaymentService(
         var campaign = await AuthorizeAsync(campaignId, ct);
 
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
+        var plan = await plans.ForCampaignAsync(campaignId, ct);
         var topUp = PricingCalculator.CalculateTopUp(
-            campaign.PaidInviteCapacity, guestCount, 0, campaign.HasDesignerDiscount);
+            campaign.PaidInviteCapacity, guestCount, 0, campaign.HasDesignerDiscount,
+            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize);
         if (topUp.ExtraBlocks == 0)
             return new TopUpResponse(null, null, "No top-up needed; capacity covers all guests.");
 
@@ -117,7 +124,7 @@ public sealed class PaymentService(
             <!doctype html><html><head><meta charset="utf-8"><title>Demo checkout</title>
             <style>body{font-family:system-ui;max-width:420px;margin:12vh auto;text-align:center}
             a.btn{display:block;padding:14px;border-radius:10px;text-decoration:none;margin:10px 0}
-            .pay{background:#8a6d1a;color:#fff}.cancel{background:#eee;color:#333}</style></head>
+            .pay{background:#1b3d59;color:#fff}.cancel{background:#eee;color:#333}</style></head>
             <body><h2>invites.blog demo checkout</h2>
             <p>Amount due: <strong>${{amount}}</strong></p>
             <a class="btn pay" href="{{complete}}">Simulate successful payment</a>

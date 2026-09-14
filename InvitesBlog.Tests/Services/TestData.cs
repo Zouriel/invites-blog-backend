@@ -12,6 +12,21 @@ namespace InvitesBlog.Tests.Services;
 /// </summary>
 internal static class TestData
 {
+    /// <summary>A plan for tests: active and free-sized unless told otherwise.</summary>
+    public static InvitesBlog.Application.Plans.EventPlan Plan(
+        long eventBytes = 10 * InvitesBlog.Application.Plans.PlanCatalog.Gb, int maxBuckets = 1, int maxWindowDays = 1,
+        InvitesBlog.Application.Plans.MediaPhase phase = InvitesBlog.Application.Plans.MediaPhase.Active,
+        InvitesBlog.Application.Plans.PlanKind kind = InvitesBlog.Application.Plans.PlanKind.Free) =>
+        new(kind, eventBytes, null, maxBuckets, maxWindowDays, 10, false, null, phase, null);
+
+    /// <summary>A plan service that answers every event with <see cref="Plan"/>.</summary>
+    public static InvitesBlog.Application.Plans.IPlanService FreePlans()
+    {
+        var plans = Substitute.For<InvitesBlog.Application.Plans.IPlanService>();
+        plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Plan());
+        return plans;
+    }
+
     /// <summary>A celebrants table with nobody in it, for services that look people up there.</summary>
     public static InvitesBlog.Application.Abstractions.Persistence.IRepository<CampaignCelebrant> NoCelebrants()
     {

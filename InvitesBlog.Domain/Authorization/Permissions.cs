@@ -82,28 +82,6 @@ public static class Permissions
     {
         public const string Read = "buckets.read";
         public const string Manage = "buckets.manage";
-
-        /// <summary>
-        /// Keep more than one bucket on the same event — the ceremony and the after-party, each with
-        /// its own night and its own audience.
-        ///
-        /// <para>A subscriber's right rather than a customer's. Every event still gets one bucket
-        /// free, so this grants a SECOND one and not the feature itself.</para>
-        /// </summary>
-        public const string Multiple = "buckets.multiple";
-
-        /// <summary>
-        /// Collect for longer than the night itself — up to <c>MediaBucketOptions.MaxWindowDays</c>
-        /// instead of the single day everyone else gets.
-        /// </summary>
-        public const string ExtendedWindow = "buckets.extended_window";
-
-        /// <summary>
-        /// Moving a bucket onto one of the paid sizes. A subscriber perk while there is no billing:
-        /// the sizes are shown to everyone, but only an account an admin has made a subscriber can
-        /// choose one.
-        /// </summary>
-        public const string LargerSizes = "buckets.larger_sizes";
     }
 
     public static class Otp
@@ -159,9 +137,6 @@ public static class Permissions
         (Photos.Moderate, "photos", "Remove any photo from an event"),
         (Buckets.Read, "buckets", "See your media buckets"),
         (Buckets.Manage, "buckets", "Create, resize and share a media bucket"),
-        (Buckets.Multiple, "buckets", "Keep more than one bucket on an event"),
-        (Buckets.ExtendedWindow, "buckets", "Collect for more than the one night"),
-        (Buckets.LargerSizes, "buckets", "Choose a paid bucket size"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),
@@ -183,16 +158,6 @@ public static class Roles
     public const string Invitee = "Invitee";       // OTP-JWT principals
     public const string Public = "Public";         // anonymous callers
 
-    /// <summary>
-    /// Held ALONGSIDE <see cref="Customer"/>, never instead of it.
-    ///
-    /// <para>Roles here are additive, so this one carries only what a subscription adds and nothing
-    /// a customer already has — which is what lets it be granted and revoked on its own without
-    /// taking somebody's ordinary account away with it. There is no billing behind it yet: it is a
-    /// list an admin keeps by hand, and the permissions are what the rest of the app actually
-    /// asks about, so wiring checkout in later changes who holds this and nothing else.</para>
-    /// </summary>
-    public const string Subscriber = "Subscriber";
 
     /// <summary>
     /// The roles an admin may grant or take away by hand.
@@ -203,7 +168,7 @@ public static class Roles
     /// than to an account. Granting one to a user would put a row in the table that no sign-in ever
     /// reads, which looks like it worked and does nothing.</para>
     /// </summary>
-    public static IReadOnlyList<string> Grantable { get; } = [Admin, Designer, Customer, Subscriber];
+    public static IReadOnlyList<string> Grantable { get; } = [Admin, Designer, Customer];
 
     public static IReadOnlyDictionary<string, string[]> Definitions { get; } = new Dictionary<string, string[]>
     {
@@ -258,12 +223,6 @@ public static class Roles
             // A guest sees the box and shoots into it; they may remove their own photo, which is
             // checked against the uploader rather than granted as a permission.
             Permissions.Photos.Read, Permissions.Photos.Upload,
-        },
-
-        // Only the difference. See the remarks on the constant.
-        [Subscriber] = new[]
-        {
-            Permissions.Buckets.Multiple, Permissions.Buckets.ExtendedWindow, Permissions.Buckets.LargerSizes,
         },
 
         [Public] = new[]

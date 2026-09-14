@@ -1,3 +1,6 @@
+
+using InvitesBlog.Domain.Enums;
+
 namespace InvitesBlog.Domain.Entities;
 
 /// <summary>
@@ -29,6 +32,15 @@ public sealed class AppUser
     /// laptop they set it on, and a per-browser preference silently disagrees with itself.
     /// </summary>
     public string? ThemePreference { get; set; }
+
+    /// <summary>The account's subscription. Set by an admin until billing exists.</summary>
+    public SubscriptionTier SubscriptionTier { get; set; }
+
+    /// <summary>
+    /// When the subscription stops, or null for no end. Kept after it ends: it is also when the
+    /// account's events stopped being covered, which the photo retention counts from.
+    /// </summary>
+    public DateTimeOffset? SubscriptionEndsAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

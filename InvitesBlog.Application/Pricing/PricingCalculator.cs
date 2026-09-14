@@ -41,18 +41,22 @@ public static class PricingCalculator
     /// Price for the initial campaign payment (§4.7.2), plus the template's per-use designer fee when
     /// it has one (§6 community templates). The fee is charged once per campaign, like the minimum.
     /// </summary>
+    /// <param name="premiumRate">Premium subscribers get extra invitations at the discounted block size.</param>
+    /// <param name="minimumCovered">An event pass includes the first 50, so the minimum isn't charged.</param>
     public static PriceBreakdown CalculateInitial(
-        int inviteCount, bool hasDesignerDiscount, decimal designerFee = 0m, string? designerName = null)
+        int inviteCount, bool hasDesignerDiscount, decimal designerFee = 0m, string? designerName = null,
+        bool premiumRate = false, bool minimumCovered = false)
     {
         if (inviteCount < 0)
             throw new ArgumentOutOfRangeException(nameof(inviteCount));
 
-        var blockSize = BlockSize(hasDesignerDiscount);
+        var blockSize = BlockSize(hasDesignerDiscount || premiumRate);
+        var minimum = minimumCovered ? 0m : MinimumPrice;
         var extraInvites = Math.Max(0, inviteCount - IncludedInvites);
         var extraBlocks = (int)Math.Ceiling(extraInvites / (double)blockSize);
         var extraCost = extraBlocks * PricePerBlock;
         var fee = Math.Max(0m, designerFee);
-        var total = MinimumPrice + extraCost + fee;
+        var total = minimum + extraCost + fee;
 
         return new PriceBreakdown(
             InviteCount: inviteCount,
@@ -60,7 +64,7 @@ public static class PricingCalculator
             ExtraInvites: extraInvites,
             ExtraBlocks: extraBlocks,
             BlockSize: blockSize,
-            MinimumPrice: MinimumPrice,
+            MinimumPrice: minimum,
             ExtraCost: extraCost,
             Total: total,
             HasDesignerDiscount: hasDesignerDiscount,
@@ -77,13 +81,14 @@ public static class PricingCalculator
         int currentPaidCapacity,
         int currentGuestCount,
         int additionalGuests,
-        bool hasDesignerDiscount)
+        bool hasDesignerDiscount,
+        bool premiumRate = false)
     {
         if (currentPaidCapacity < 0) throw new ArgumentOutOfRangeException(nameof(currentPaidCapacity));
         if (currentGuestCount < 0) throw new ArgumentOutOfRangeException(nameof(currentGuestCount));
         if (additionalGuests < 0) throw new ArgumentOutOfRangeException(nameof(additionalGuests));
 
-        var blockSize = BlockSize(hasDesignerDiscount);
+        var blockSize = BlockSize(hasDesignerDiscount || premiumRate);
         var projectedGuests = currentGuestCount + additionalGuests;
         var capacityShortfall = Math.Max(0, projectedGuests - currentPaidCapacity);
         var extraBlocks = (int)Math.Ceiling(capacityShortfall / (double)blockSize);

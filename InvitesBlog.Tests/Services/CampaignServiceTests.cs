@@ -58,7 +58,8 @@ public class CampaignServiceTests
     private CampaignService Sut() => new(
         _currentUser, _imageOptimizer, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
         _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
-        new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV);
+        new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
+        TestData.FreePlans());
 
     private void Own(Campaign c)
     {

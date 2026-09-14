@@ -2,7 +2,21 @@ namespace InvitesBlog.Application.Dtos.Admin;
 
 /// <summary>An application user with the names of the roles assigned to them.</summary>
 public sealed record AdminUserDto(
-    Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles);
+    Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles,
+    /// <summary>None, Basic or Premium, as set, whether or not it has ended.</summary>
+    string SubscriptionTier = "None",
+    DateTimeOffset? SubscriptionEndsAt = null,
+    bool SubscriptionActive = false);
+
+/// <summary>Sets an account's subscription. <c>None</c> ends it now.</summary>
+public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
+
+/// <summary>An event an account organised, with its pass.</summary>
+public sealed record AdminUserEventDto(
+    Guid Id, string Title, DateTimeOffset EventStartAt, DateTimeOffset? EventPassUntil, bool PassActive);
+
+/// <summary>Grants an event pass (adding six months) or takes it away.</summary>
+public sealed record SetEventPassRequest(bool Granted);
 
 /// <summary>A role with the names of the permissions it grants.</summary>
 public sealed record AdminRoleDto(
