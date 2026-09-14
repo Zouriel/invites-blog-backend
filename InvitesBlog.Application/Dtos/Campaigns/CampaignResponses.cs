@@ -136,7 +136,12 @@ public sealed record DashboardCampaignDto(
     /// </summary>
     bool IsDraft = false,
     /// <summary>Where "Continue setting it up" goes — see CampaignResume. Null when nothing is unfinished.</summary>
-    string? ResumeStep = null);
+    string? ResumeStep = null,
+    /// <summary>
+    /// Who is looking: "organiser", "manager" (a celebrant with full access) or "celebrant"
+    /// (read-only). The page hides what the viewer can't do.
+    /// </summary>
+    string Viewer = "organiser");
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

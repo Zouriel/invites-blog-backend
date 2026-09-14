@@ -12,6 +12,14 @@ namespace InvitesBlog.Tests.Services;
 /// </summary>
 internal static class TestData
 {
+    /// <summary>A celebrants table with nobody in it, for services that look people up there.</summary>
+    public static InvitesBlog.Application.Abstractions.Persistence.IRepository<CampaignCelebrant> NoCelebrants()
+    {
+        var repo = Substitute.For<InvitesBlog.Application.Abstractions.Persistence.IRepository<CampaignCelebrant>>();
+        repo.Query(Arg.Any<bool>()).Returns(Array.Empty<CampaignCelebrant>().AsAsyncQueryable());
+        return repo;
+    }
+
     public static Template Template(Guid? id = null, bool active = true) => new()
     {
         Id = id ?? Guid.NewGuid(),

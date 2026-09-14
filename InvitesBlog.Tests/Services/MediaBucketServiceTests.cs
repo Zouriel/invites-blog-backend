@@ -65,7 +65,7 @@ public class MediaBucketServiceTests
 
     private MediaBucketService Sut() => new(
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
         Options.Create(new MediaBucketOptions()), _uow);
 
@@ -800,5 +800,78 @@ public class MediaBucketServiceTests
         await Sut().CreateAsync(new CreateMediaBucketRequest("A wedding", null, campaignId, null));
 
         Assert.Equal("Photos 2", saved!.Name);
+    }
+
+    // ---------- the bucket's own guest list ----------
+
+    private Guest[] GuestsOn(MediaBucket bucket, int count)
+    {
+        var guests = Enumerable.Range(0, count)
+            .Select(i => TestData.Guest(bucket.CampaignId, email: $"g{i}@test.com", phone: null))
+            .ToArray();
+        _guests.ListByCampaignAsync(bucket.CampaignId, Arg.Any<bool>(), Arg.Any<CancellationToken>()).Returns(guests);
+        return guests;
+    }
+
+    [Fact]
+    public async Task An_open_bucket_lists_every_guest_as_allowed()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        GuestsOn(bucket, 3);
+
+        var access = await Sut().AccessAsync(bucket.Id);
+
+        Assert.False(access.IsRestricted);
+        Assert.Equal(3, access.Guests.Count);
+        Assert.All(access.Guests, g => Assert.True(g.Allowed));
+    }
+
+    /// <summary>
+    /// Switching the first guest off closes the bucket, and the rest must stay in: rows are written
+    /// for everybody still allowed, or the bucket would go dark for the whole list.
+    /// </summary>
+    [Fact]
+    public async Task Switching_one_guest_off_closes_the_bucket_and_keeps_the_others_in()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        var guests = GuestsOn(bucket, 3);
+
+        await Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([guests[0].Id], Allowed: false));
+
+        Assert.True(bucket.IsRestricted);
+        await _members.Received(1).AddAsync(Arg.Is<MediaBucketMember>(m => m.GuestId == guests[1].Id), Arg.Any<CancellationToken>());
+        await _members.Received(1).AddAsync(Arg.Is<MediaBucketMember>(m => m.GuestId == guests[2].Id), Arg.Any<CancellationToken>());
+        await _members.DidNotReceive().AddAsync(Arg.Is<MediaBucketMember>(m => m.GuestId == guests[0].Id), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Allowing everyone again reopens it, so a guest added later is let in without asking.</summary>
+    [Fact]
+    public async Task Allowing_the_last_guest_back_reopens_the_bucket_and_clears_its_rows()
+    {
+        var bucket = Mine();
+        bucket.IsRestricted = true;
+        Stored(bucket);
+        var guests = GuestsOn(bucket, 2);
+        var row = new MediaBucketMember { BucketId = bucket.Id, GuestId = guests[1].Id, CampaignId = bucket.CampaignId };
+        _members.Query(Arg.Any<bool>()).Returns(new[] { row }.AsAsyncQueryable());
+
+        await Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([guests[0].Id], Allowed: true));
+
+        Assert.False(bucket.IsRestricted);
+        _members.Received(1).Remove(row);
+        await _members.DidNotReceive().AddAsync(Arg.Any<MediaBucketMember>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Somebody_else_s_bucket_access_cannot_be_changed()
+    {
+        var bucket = Theirs();
+        Stored(bucket);
+        GuestsOn(bucket, 1);
+
+        await Assert.ThrowsAsync<ForbiddenException>(
+            () => Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: false)));
     }
 }

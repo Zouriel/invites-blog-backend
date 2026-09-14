@@ -695,10 +695,16 @@ public sealed class CampaignService(
         // that's how it worked before sign-in existed, and those links are still out there. A signed-in
         // person opening their own campaign from Sent has no such token and shouldn't need one: the
         // account already proves who they are.
+        // A celebrant with read-only access gets the same page, minus what is private to running it:
+        // guests' emails and phone numbers.
+        var access = string.IsNullOrEmpty(token)
+            ? await ownership.AccessAsync(id, ct)
+            : CampaignAccess.Organiser;
         var campaign = string.IsNullOrEmpty(token)
-            ? await ownership.OwnsAsync(id, ct) ? await campaigns.GetByIdAsync(id, ct) : null
+            ? access >= CampaignAccess.Celebrant ? await campaigns.GetByIdAsync(id, ct) : null
             : await campaigns.GetByDashboardTokenHashAsync(id, TokenService.Hash(token), ct);
         if (campaign is null) throw new InvalidDashboardTokenException();
+        var showContacts = access >= CampaignAccess.Manager;
 
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: true, ct);
         var inviteList = await invites.ListByCampaignAsync(id, ct);
@@ -740,7 +746,8 @@ public sealed class CampaignService(
                 ? AnswersOf(reply)
                 : null;
             return new DashboardGuestDto(
-                g.Id, g.Name, g.Email, g.PhoneE164, g.Role, g.Gender, g.OptedOut,
+                g.Id, g.Name, showContacts ? g.Email : null, showContacts ? g.PhoneE164 : null,
+                g.Role, g.Gender, g.OptedOut,
                 inv?.Status.ToString() ?? "None",
                 inv?.RsvpStatus.ToString() ?? "NoResponse",
                 inv?.ViewedAt,
@@ -760,7 +767,13 @@ public sealed class CampaignService(
                 await IsImportedAsync(campaign, ct),
                 campaign.Status == CampaignStatus.Draft,
                 InvitesBlog.Application.Campaigns.CampaignResume.Step(
-                    campaign, await IsImportedAsync(campaign, ct), guestList.Count)),
+                    campaign, await IsImportedAsync(campaign, ct), guestList.Count),
+                access switch
+                {
+                    CampaignAccess.Celebrant => "celebrant",
+                    CampaignAccess.Manager => "manager",
+                    _ => "organiser",
+                }),
             report, guestRows, questions);
     }
 

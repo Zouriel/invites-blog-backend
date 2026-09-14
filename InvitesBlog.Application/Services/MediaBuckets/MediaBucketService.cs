@@ -96,15 +96,11 @@ public interface IMediaBucketService
     /// </summary>
     Task<MediaBucketDto> RenameAsync(
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
+    /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
+    Task<BucketAccessDto> AccessAsync(Guid bucketId, CancellationToken ct = default);
 
-    /// <summary>Every bucket on an event, with whether one guest may look into each.</summary>
-    Task<IReadOnlyList<GuestBucketAccessDto>> BucketsForGuestAsync(
-        Guid campaignId, Guid guestId, CancellationToken ct = default);
-
-    /// <summary>Lets one guest into one bucket, or shuts them out of it.</summary>
-    Task<IReadOnlyList<GuestBucketAccessDto>> SetGuestBucketAccessAsync(
-        Guid campaignId, Guid guestId, SetGuestBucketAccessRequest req, CancellationToken ct = default);
-
+    /// <summary>Allows or stops some guests from seeing the bucket. See the implementation for the two states.</summary>
+    Task<BucketAccessDto> SetAccessAsync(Guid bucketId, SetBucketAccessRequest req, CancellationToken ct = default);
     /// <summary>The buckets on an event that the CALLER may look into. Their own view, not the owner's.</summary>
     Task<IReadOnlyList<MediaBucketDto>> VisibleForCampaignAsync(
         Guid campaignId, CancellationToken ct = default);
@@ -264,7 +260,8 @@ public sealed class MediaBucketService(
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return true;
         var campaignId = bucket.CampaignId;
-        if (await ownership.OwnsAsync(campaignId, ct)) return true;
+        // The organiser, and everyone the event is for, see every bucket on it.
+        if (await ownership.AccessAsync(campaignId, ct) >= CampaignAccess.Celebrant) return true;
 
         // The event's guest list is who may look — drawn FROM, never copied. A bucket that has not
         // been restricted is open to all of it, which is what every bucket predating members is.
@@ -543,98 +540,75 @@ public sealed class MediaBucketService(
 
     // ---------- who may look into which bucket ----------
 
-    public async Task<IReadOnlyList<GuestBucketAccessDto>> BucketsForGuestAsync(
-        Guid campaignId, Guid guestId, CancellationToken ct = default)
+    public async Task<BucketAccessDto> AccessAsync(Guid bucketId, CancellationToken ct = default)
     {
-        if (!await ownership.OwnsAsync(campaignId, ct))
-            throw new ForbiddenException("That event isn't yours.");
-
-        var rows = await buckets.Query()
-            .Where(b => b.CampaignId == campaignId)
-            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
-            .ToListAsync(ct);
-        if (rows.Count == 0) return [];
-
-        var admitted = await members.Query()
-            .Where(m => m.CampaignId == campaignId && m.GuestId == guestId)
-            .Select(m => m.BucketId)
-            .ToListAsync(ct);
-
-        var first = rows[0].Id;
-        return rows.Select(b => new GuestBucketAccessDto(
-            b.Id,
-            b.Name,
-            b.EventDate,
-            b.Id == first,
-            // An unrestricted bucket is open to the whole list, so everyone is granted whether or
-            // not a row exists. See MediaBucket.IsRestricted for why absence cannot mean "nobody".
-            !b.IsRestricted || admitted.Contains(b.Id),
-            b.IsRestricted)).ToList();
+        var bucket = await OwnedAsync(bucketId, ct);
+        return await DescribeAccessAsync(bucket, ct);
     }
 
     /// <summary>
-    /// Lets one guest into one bucket, or shuts them out.
+    /// Allows or stops some of the event's guests from seeing one bucket.
     ///
-    /// <para><b>The first exclusion is what closes a bucket.</b> Up to that point it is open to the
-    /// whole guest list and holds no rows at all; shutting one person out therefore has to write a
-    /// row for everybody ELSE in the same breath, or the single removal would read as "only this
-    /// person is excluded" while the empty table said "everyone is welcome". After that the list is
-    /// exact, and a guest added to the event later is NOT admitted by accident — a control over who
-    /// sees photographs of an evening should fail closed.</para>
+    /// <para>The bucket keeps two states. While everyone is allowed it holds no rows at all and is
+    /// open to the whole guest list, including anyone added later. The first guest switched off
+    /// closes it: rows are written for everybody still allowed, and from then on a new guest starts
+    /// switched off. Allowing everyone again reopens it and clears the rows, so new guests are let in
+    /// again. Either way the switches on screen are exactly who can look.</para>
     /// </summary>
-    public async Task<IReadOnlyList<GuestBucketAccessDto>> SetGuestBucketAccessAsync(
-        Guid campaignId, Guid guestId, SetGuestBucketAccessRequest req, CancellationToken ct = default)
+    public async Task<BucketAccessDto> SetAccessAsync(
+        Guid bucketId, SetBucketAccessRequest req, CancellationToken ct = default)
     {
-        if (!await ownership.OwnsAsync(campaignId, ct))
-            throw new ForbiddenException("That event isn't yours.");
+        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+        var guests = await guestRepository.ListByCampaignAsync(bucket.CampaignId, includeOptedOut: true, ct);
+        var everyone = guests.Select(g => g.Id).ToHashSet();
 
-        var bucket = await buckets.Query(tracking: true)
-            .FirstOrDefaultAsync(b => b.Id == req.BucketId && b.CampaignId == campaignId, ct)
-            ?? throw new NotFoundException("That bucket isn't on this event.");
+        var rows = await members.Query(tracking: true).Where(m => m.BucketId == bucket.Id).ToListAsync(ct);
+        var allowed = bucket.IsRestricted ? rows.Select(m => m.GuestId).ToHashSet() : new HashSet<Guid>(everyone);
 
-        var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: true, ct);
-        if (guests.All(g => g.Id != guestId))
-            throw new NotFoundException("That guest isn't on this event.");
-
-        var existing = await members.Query(tracking: true)
-            .Where(m => m.BucketId == bucket.Id)
-            .ToListAsync(ct);
-
-        if (!req.Granted && !bucket.IsRestricted)
+        foreach (var id in (req.GuestIds ?? []).Where(everyone.Contains))
         {
-            // Closing it for the first time: everyone else keeps what they already had.
-            bucket.IsRestricted = true;
+            if (req.Allowed) allowed.Add(id);
+            else allowed.Remove(id);
+        }
+
+        var open = allowed.SetEquals(everyone);
+        foreach (var row in rows.Where(r => open || !allowed.Contains(r.GuestId))) members.Remove(row);
+        if (!open)
+        {
+            var have = rows.Select(r => r.GuestId).ToHashSet();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var id in allowed.Where(id => !have.Contains(id)))
+                await members.AddAsync(new MediaBucketMember
+                {
+                    BucketId = bucket.Id, GuestId = id, CampaignId = bucket.CampaignId, AddedAt = now,
+                }, ct);
+        }
+
+        if (bucket.IsRestricted == open)
+        {
+            bucket.IsRestricted = !open;
             bucket.UpdatedAt = DateTimeOffset.UtcNow;
             buckets.Update(bucket);
-
-            var now = DateTimeOffset.UtcNow;
-            foreach (var g in guests.Where(g => g.Id != guestId))
-                await members.AddAsync(new MediaBucketMember
-                {
-                    BucketId = bucket.Id,
-                    GuestId = g.Id,
-                    CampaignId = campaignId,
-                    AddedAt = now,
-                }, ct);
-        }
-        else if (req.Granted)
-        {
-            if (existing.All(m => m.GuestId != guestId))
-                await members.AddAsync(new MediaBucketMember
-                {
-                    BucketId = bucket.Id,
-                    GuestId = guestId,
-                    CampaignId = campaignId,
-                    AddedAt = DateTimeOffset.UtcNow,
-                }, ct);
-        }
-        else
-        {
-            if (existing.FirstOrDefault(m => m.GuestId == guestId) is { } row) members.Remove(row);
         }
 
         await uow.SaveChangesAsync(ct);
-        return await BucketsForGuestAsync(campaignId, guestId, ct);
+        return await DescribeAccessAsync(bucket, ct);
+    }
+
+    private async Task<BucketAccessDto> DescribeAccessAsync(MediaBucket bucket, CancellationToken ct)
+    {
+        var guests = await guestRepository.ListByCampaignAsync(bucket.CampaignId, includeOptedOut: true, ct);
+        var admitted = bucket.IsRestricted
+            ? (await members.Query().Where(m => m.BucketId == bucket.Id).Select(m => m.GuestId).ToListAsync(ct))
+                .ToHashSet()
+            : null;
+
+        return new BucketAccessDto(
+            bucket.Id,
+            bucket.IsRestricted,
+            guests.OrderBy(g => g.Name)
+                .Select(g => new BucketAccessGuestDto(g.Id, g.Name, g.AllRoles(), admitted is null || admitted.Contains(g.Id)))
+                .ToList());
     }
 
     public async Task<IReadOnlyList<MediaBucketDto>> VisibleForCampaignAsync(
@@ -648,7 +622,7 @@ public sealed class MediaBucketService(
 
         // The owner sees all of them; that is the same door as MayViewAsync's first two checks.
         if ((currentUser.UserId is { } me && rows[0].OwnerUserId == me)
-            || await ownership.OwnsAsync(campaignId, ct))
+            || await ownership.AccessAsync(campaignId, ct) >= CampaignAccess.Celebrant)
             return await DescribeAsync(rows, ct);
 
         var guest = await GuestOnThisEventAsync(campaignId, ct);

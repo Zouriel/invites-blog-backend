@@ -94,7 +94,11 @@ public sealed record MyCampaignDto(
     /// </summary>
     bool MediaOnly = false,
     /// <summary>The wizard step to continue from when the invitation isn't finished; null when it is.</summary>
-    string? ResumeStep = null);
+    string? ResumeStep = null,
+    /// <summary>"host" for the organiser's own events, "celebrant" for an event this person is for.</summary>
+    string Relation = "host",
+    /// <summary>For a celebrant: whether the organiser gave them full access.</summary>
+    bool CanManage = true);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(

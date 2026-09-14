@@ -19,7 +19,9 @@ public class CampaignOwnershipServiceTests
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
 
-    private CampaignOwnershipService Sut() => new(_currentUser, _users, _campaigns, _inviters);
+    private readonly IRepository<CampaignCelebrant> _celebrants = TestData.NoCelebrants();
+
+    private CampaignOwnershipService Sut() => new(_currentUser, _users, _campaigns, _inviters, _celebrants);
 
     private static AppUser Account(string? email = "host@test.com", string? phone = null) => new()
     {
@@ -159,5 +161,68 @@ public class CampaignOwnershipServiceTests
         _currentUser.UserId.Returns((Guid?)null);
 
         Assert.False(await Sut().OwnsAsync(BookedBy("host@test.com").Id));
+    }
+
+    // ---------- celebrants: the people an event is for ----------
+
+    private Campaign CelebratingWith(CampaignCelebrant celebrant)
+    {
+        var campaign = BookedBy("host@test.com");
+        celebrant.CampaignId = campaign.Id;
+        _celebrants.Query(Arg.Any<bool>()).Returns(new[] { celebrant }.AsAsyncQueryable());
+        return campaign;
+    }
+
+    private static CampaignCelebrant Celebrant(string? email = "bride@test.com", string? phone = null, bool canManage = false) => new()
+    {
+        Id = Guid.NewGuid(), Name = "Bride", Email = email, PhoneE164 = phone, CanManage = canManage,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    [Fact]
+    public async Task A_celebrant_can_look_but_does_not_own_it()
+    {
+        SignedInAs(Account(email: "bride@test.com"));
+        var campaign = CelebratingWith(Celebrant());
+
+        Assert.Equal(CampaignAccess.Celebrant, await Sut().AccessAsync(campaign.Id));
+        Assert.False(await Sut().OwnsAsync(campaign.Id));
+    }
+
+    [Fact]
+    public async Task A_celebrant_given_full_access_runs_it_like_the_organiser()
+    {
+        SignedInAs(Account(email: "bride@test.com"));
+        var campaign = CelebratingWith(Celebrant(canManage: true));
+
+        Assert.Equal(CampaignAccess.Manager, await Sut().AccessAsync(campaign.Id));
+        Assert.True(await Sut().OwnsAsync(campaign.Id));
+    }
+
+    [Fact]
+    public async Task A_celebrant_is_matched_on_phone_too()
+    {
+        SignedInAs(Account(email: null, phone: "+9607654321"));
+        var campaign = CelebratingWith(Celebrant(email: null, phone: "+9607654321"));
+
+        Assert.Equal(CampaignAccess.Celebrant, await Sut().AccessAsync(campaign.Id));
+    }
+
+    [Fact]
+    public async Task Somebody_else_s_celebrant_row_grants_nothing()
+    {
+        SignedInAs(Account(email: "stranger@test.com"));
+        var campaign = CelebratingWith(Celebrant());
+
+        Assert.Equal(CampaignAccess.None, await Sut().AccessAsync(campaign.Id));
+    }
+
+    [Fact]
+    public async Task The_organiser_outranks_a_celebrant_row_with_the_same_contact()
+    {
+        SignedInAs(Account(email: "host@test.com"));
+        var campaign = CelebratingWith(Celebrant(email: "host@test.com"));
+
+        Assert.Equal(CampaignAccess.Organiser, await Sut().AccessAsync(campaign.Id));
     }
 }

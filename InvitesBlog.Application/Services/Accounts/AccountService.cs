@@ -36,6 +36,7 @@ public sealed class AccountService(
     IGuestRepository guests,
     ITemplateRepository templates,
     IRepository<EventPhoto> photos,
+    IRepository<CampaignCelebrant> celebrants,
     IEnumerable<IExternalAuthProvider> authProviders,
     IValidator<RegisterDesignerRequest> registerValidator,
     IEnumerable<IOtpSender> otpSenders,
@@ -365,9 +366,23 @@ public sealed class AccountService(
         // Two ways a campaign is yours: you are the host on it, or you started it. The second matters
         // for drafts — the inviter is only attached at the host-details step, so a campaign abandoned
         // before then matches no inviter and would otherwise be invisible to everyone.
+        // And a third: an event this person is FOR (a celebrant), matched on their account's contacts.
+        var myEmail = me.Email?.Trim().ToLowerInvariant();
+        var myPhone = me.PhoneE164?.Trim();
+        var celebrating = (myEmail is null && myPhone is null)
+            ? new Dictionary<Guid, bool>()
+            : (await celebrants.Query()
+                .Where(c => (myEmail != null && c.Email == myEmail) || (myPhone != null && c.PhoneE164 == myPhone))
+                .Select(c => new { c.CampaignId, c.CanManage })
+                .ToListAsync(ct))
+              .GroupBy(c => c.CampaignId)
+              .ToDictionary(g => g.Key, g => g.Any(c => c.CanManage));
+        var celebratingIds = celebrating.Keys.ToList();
+
         var mine = await campaigns.Query()
             .Where(c => c.CreatedByUserId == me.Id
-                        || (c.InviterId != null && inviterIds.Contains(c.InviterId!.Value)))
+                        || (c.InviterId != null && inviterIds.Contains(c.InviterId!.Value))
+                        || celebratingIds.Contains(c.Id))
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync(ct);
         if (mine.Count == 0) return [];
@@ -419,7 +434,12 @@ public sealed class AccountService(
                 MediaOnly: string.IsNullOrWhiteSpace(c.TemplatePackageUrl),
                 ResumeStep: InvitesBlog.Application.Campaigns.CampaignResume.Step(
                     c, template?.Visibility.ToString() == "Imported",
-                    guestCounts.GetValueOrDefault(c.Id))));
+                    guestCounts.GetValueOrDefault(c.Id)),
+                Relation: IsHost(c) ? "host" : "celebrant",
+                CanManage: IsHost(c) || celebrating.GetValueOrDefault(c.Id)));
+
+            bool IsHost(Campaign x) =>
+                x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));
         }
         return result;
     }

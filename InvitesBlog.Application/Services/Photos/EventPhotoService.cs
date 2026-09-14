@@ -135,7 +135,10 @@ public sealed class EventPhotoService(
                        ?? throw new NotFoundException("That event no longer exists.");
 
         var moderates = await MayHostAsync(campaignId, ct);
-        if (!moderates && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
+        // The people the event is for look at it too, without moderating.
+        if (!moderates
+            && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
+            && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
             throw new ForbiddenException("This photo box belongs to an event you're not on.");
 
         var live = await photos.Query()
@@ -452,7 +455,9 @@ public sealed class EventPhotoService(
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
 
-        if (!await MayHostAsync(campaignId, ct) && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
+        if (!await MayHostAsync(campaignId, ct)
+            && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
+            && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
             throw new ForbiddenException("This photo box belongs to an event you're not on.");
 
         var wanted = ids is { Count: > 0 } ? ids.ToHashSet() : null;

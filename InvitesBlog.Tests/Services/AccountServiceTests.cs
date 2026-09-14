@@ -78,7 +78,7 @@ public class AccountServiceTests
         _guests.Query().Returns(Array.Empty<Guest>().AsAsyncQueryable());
         return new(
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
-            _templates, _photos, _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
+            _templates, _photos, TestData.NoCelebrants(), _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
             [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config);
     }
 

@@ -85,23 +85,17 @@ public sealed class MediaBucketsController(
     /// <para>PUT because it states the name it should have afterwards, and refused for anyone
     /// without the right to keep more than one: that is the only situation a name is needed in.</para>
     /// </summary>
-    /// <summary>
-    /// Every bucket on an event, with whether one guest may look into each.
-    ///
-    /// <para>Hung off the GUEST rather than off the bucket on purpose: this is what the panel for
-    /// editing a guest asks, so an owner manages one person in one place instead of opening each
-    /// bucket in turn to find them.</para>
-    /// </summary>
-    [HttpGet("/api/campaigns/{campaignId:guid}/guests/{guestId:guid}/buckets")]
+    /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
+    [HttpGet("{bucketId:guid}/access")]
     [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> GuestBuckets(Guid campaignId, Guid guestId, CancellationToken ct) =>
-        Success(await buckets.BucketsForGuestAsync(campaignId, guestId, ct));
+    public async Task<IActionResult> Access(Guid bucketId, CancellationToken ct) =>
+        Success(await buckets.AccessAsync(bucketId, ct));
 
-    [HttpPut("/api/campaigns/{campaignId:guid}/guests/{guestId:guid}/buckets")]
+    [HttpPut("{bucketId:guid}/access")]
     [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> SetGuestBucket(
-        Guid campaignId, Guid guestId, [FromBody] SetGuestBucketAccessRequest req, CancellationToken ct) =>
-        Success(await buckets.SetGuestBucketAccessAsync(campaignId, guestId, req, ct));
+    public async Task<IActionResult> SetAccess(
+        Guid bucketId, [FromBody] SetBucketAccessRequest req, CancellationToken ct) =>
+        Success(await buckets.SetAccessAsync(bucketId, req, ct));
 
     /// <summary>
     /// The buckets on an event that the CALLER may look into — a guest's own view of the night.

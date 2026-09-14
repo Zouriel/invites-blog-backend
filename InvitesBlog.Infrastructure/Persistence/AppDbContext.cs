@@ -15,6 +15,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
+    public DbSet<CampaignCelebrant> CampaignCelebrants => Set<CampaignCelebrant>();
     public DbSet<Invite> Invites => Set<Invite>();
     public DbSet<InviteTrustedIp> InviteTrustedIps => Set<InviteTrustedIp>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
@@ -147,6 +148,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("idx_guests_campaign_id_id");
             e.Property(x => x.MetadataJson).HasColumnType("jsonb");
             e.Property(x => x.Roles).HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
+        });
+
+        b.Entity<CampaignCelebrant>(e =>
+        {
+            e.ToTable("campaign_celebrants");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_campaign_celebrants_campaign_id");
+            // Looked up by the signed-in account's contacts on every events list and access check.
+            e.HasIndex(x => x.Email).HasDatabaseName("idx_campaign_celebrants_email");
+            e.HasIndex(x => x.PhoneE164).HasDatabaseName("idx_campaign_celebrants_phone_e164");
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Invite>(e =>
