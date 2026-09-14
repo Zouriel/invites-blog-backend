@@ -146,6 +146,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsUnique()
                 .HasDatabaseName("idx_guests_campaign_id_id");
             e.Property(x => x.MetadataJson).HasColumnType("jsonb");
+            e.Property(x => x.Roles).HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
         });
 
         b.Entity<Invite>(e =>

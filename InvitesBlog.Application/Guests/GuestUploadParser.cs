@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ClosedXML.Excel;
 using InvitesBlog.Application.Phones;
+using InvitesBlog.Domain.Entities;
 
 namespace InvitesBlog.Application.Guests;
 
@@ -11,7 +12,8 @@ public sealed record ParsedGuest(
     string Name,
     string? Role,
     string Gender,
-    string MetadataJson);
+    string MetadataJson,
+    IReadOnlyList<string>? Roles = null);
 
 public sealed record GuestUploadError(int Row, string Field, string Message);
 
@@ -28,9 +30,11 @@ public sealed record GuestUploadResult(
     IReadOnlyList<GuestUploadError> Errors,
     IReadOnlyList<ParsedGuest> ValidGuests,
     bool FileRejected = false,
-    string? FileRejectionReason = null)
+    string? FileRejectionReason = null,
+    int RoleErrors = 0)
 {
-    public bool CanContinue => !FileRejected && ValidRows >= 1;   // §4.4.6
+    /// <summary>§4.4.6, plus: nobody left without a role, since roles are required when a campaign has them.</summary>
+    public bool CanContinue => !FileRejected && ValidRows >= 1 && RoleErrors == 0;
 }
 
 /// <summary>
@@ -47,7 +51,14 @@ public sealed class GuestUploadParser
 
     public GuestUploadParser(PhoneNormalizer phones) => _phones = phones;
 
-    public GuestUploadResult Parse(Stream excelStream, string defaultCountry = "MV")
+    /// <param name="knownRoles">
+    /// The campaign's roles. When given, every row must name at least one of them and nothing else,
+    /// because an invitation with roles personalises on them and a guest without one gets a
+    /// half-built invitation. Names are matched ignoring case and stored as the campaign spells them.
+    /// Null or empty skips the check (a design the customer uploaded has no roles).
+    /// </param>
+    public GuestUploadResult Parse(
+        Stream excelStream, string defaultCountry = "MV", IReadOnlyCollection<string>? knownRoles = null)
     {
         XLWorkbook workbook;
         try
@@ -105,7 +116,7 @@ public sealed class GuestUploadParser
             var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var seenPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            int total = 0, invalid = 0, duplicates = 0, missingPhone = 0, missingEmail = 0, sciNoteCount = 0;
+            int total = 0, invalid = 0, duplicates = 0, missingPhone = 0, missingEmail = 0, sciNoteCount = 0, missingRoles = 0;
 
             for (var i = 1; i < rows.Count; i++)
             {
@@ -180,10 +191,42 @@ public sealed class GuestUploadParser
                 var finalName = string.IsNullOrWhiteSpace(name) ? "Guest" : name;
                 var finalGender = string.IsNullOrWhiteSpace(gender) ? "unspecified" : gender.ToLowerInvariant();
                 if (!KnownGenders.Contains(finalGender)) finalGender = "unspecified";
-                var finalRole = string.IsNullOrWhiteSpace(role) ? null : role.ToLowerInvariant();
+                // A guest can hold several roles, written in one cell and separated by ; , or |.
+                // Kept as typed rather than lowercased, so they match the names on the Roles step.
+                var roleList = Guest.NormalizeRoles((role ?? string.Empty).Split(RoleSeparators));
+
+                if (knownRoles is { Count: > 0 })
+                {
+                    if (roleList.Count == 0)
+                    {
+                        errors.Add(new GuestUploadError(excelRowNum, "role",
+                            "No role. Every guest needs at least one."));
+                        invalid++;
+                        missingRoles++;
+                        continue;
+                    }
+
+                    var unknown = roleList.FirstOrDefault(r =>
+                        !knownRoles.Any(k => string.Equals(k, r, StringComparison.OrdinalIgnoreCase)));
+                    if (unknown is not null)
+                    {
+                        errors.Add(new GuestUploadError(excelRowNum, "role",
+                            $"\"{unknown}\" isn't one of this invitation's roles."));
+                        invalid++;
+                        missingRoles++;
+                        continue;
+                    }
+
+                    roleList = roleList
+                        .Select(r => knownRoles.First(k => string.Equals(k, r, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                }
+
+                var finalRole = roleList.FirstOrDefault();
 
                 Increment(genderDist, finalGender);
-                Increment(roleDist, finalRole ?? "(none)");
+                if (roleList.Count == 0) Increment(roleDist, "(none)");
+                foreach (var r in roleList) Increment(roleDist, r);
 
                 // Custom columns → metadata.
                 var metadata = new Dictionary<string, string>();
@@ -200,7 +243,8 @@ public sealed class GuestUploadParser
                     Name: finalName,
                     Role: finalRole,
                     Gender: finalGender,
-                    MetadataJson: JsonSerializer.Serialize(metadata)));
+                    MetadataJson: JsonSerializer.Serialize(metadata),
+                    Roles: roleList));
             }
 
             if (sciNoteCount > 0)
@@ -217,9 +261,12 @@ public sealed class GuestUploadParser
                 GenderDistribution: genderDist,
                 Warnings: warnings,
                 Errors: errors,
-                ValidGuests: valid);
+                ValidGuests: valid,
+                RoleErrors: missingRoles);
         }
     }
+
+    private static readonly char[] RoleSeparators = { ';', ',', '|' };
 
     private static bool IsKnownHeader(string h) =>
         h.Equals("email", StringComparison.OrdinalIgnoreCase) ||

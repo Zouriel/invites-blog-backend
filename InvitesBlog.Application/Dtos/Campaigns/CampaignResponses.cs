@@ -148,7 +148,9 @@ public sealed record DashboardGuestDto(
     DateTimeOffset? ViewedAt,
     string? DeliveryChannel,   // channel of the latest delivery attempt ("viber" / "email" / …)
     /// <summary>Their latest answers, keyed by question. Empty until they reply.</summary>
-    IReadOnlyDictionary<string, string>? RsvpAnswers = null);
+    IReadOnlyDictionary<string, string>? RsvpAnswers = null,
+    /// <summary>Every role the guest holds; <c>Role</c> is the first of them.</summary>
+    IReadOnlyList<string>? Roles = null);
 
 public sealed record DashboardResponse(
     DashboardCampaignDto Campaign,

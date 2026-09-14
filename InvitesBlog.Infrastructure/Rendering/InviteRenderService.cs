@@ -42,10 +42,16 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             }
         };
 
+        // A guest may hold several roles. The first is what a single-valued binding (guest.role, the
+        // role theme, role-scoped fields) reads; sections are the union of what every role sees.
+        var guestRoles = guest.AllRoles();
+        var primaryRole = guestRoles.FirstOrDefault();
+
         var guestObj = new JsonObject
         {
             ["name"] = guest.Name,
-            ["role"] = guest.Role,
+            ["role"] = primaryRole,
+            ["roles"] = new JsonArray(guestRoles.Select(r => (JsonNode?)JsonValue.Create(r)).ToArray()),
             ["gender"] = guest.Gender
         };
 
@@ -56,16 +62,8 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             ? template.ManifestJson
             : campaign.TemplateManifestJson;
         var manifest = JsonSerializer.Deserialize<TemplateManifest>(manifestJson, JsonOpts);
-        var attrs = new Dictionary<string, string?>
-        {
-            ["role"] = guest.Role,
-            ["gender"] = guest.Gender,
-            ["name"] = guest.Name,
-            ["email"] = guest.Email,
-            ["phone"] = guest.PhoneE164
-        };
-        var resolved = ruleEngine.Resolve(campaign.RulesJson, attrs, manifest?.ContentBlocks);
-        var theme = ResolveTheme(campaign.ThemeOverridesJson, guest.Role);
+        var resolved = ResolveBlocks(campaign.RulesJson, guest, guestRoles, manifest?.ContentBlocks);
+        var theme = ResolveTheme(campaign.ThemeOverridesJson, primaryRole);
 
         var data = new JsonObject
         {
@@ -119,8 +117,8 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             .GroupBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Type, StringComparer.OrdinalIgnoreCase);
 
-        ApplyPathMap(data, content["fields"] as JsonObject, guest.Role, fieldTypes);
-        ApplyPathMap(data, content["imageSlots"] as JsonObject, guest.Role);
+        ApplyPathMap(data, content["fields"] as JsonObject, guestRoles, fieldTypes);
+        ApplyPathMap(data, content["imageSlots"] as JsonObject, guestRoles);
 
         // Serve the package the campaign PINNED, not whatever the template points at now — an
         // approved edit moves the live row to a new version, and an already-sent invite must not
@@ -138,8 +136,33 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
     /// <c>{ "value": …, "roles": [...] }</c>, in which case an empty/absent role list still means
     /// everyone and a populated one means only those roles. A value may be an array (a gallery slot).
     /// </summary>
+    /// <summary>
+    /// The sections this guest sees: everything each of their roles would see on its own, in first-seen
+    /// order. One pass with no role when they have none, so neutral blocks still resolve.
+    /// </summary>
+    private IReadOnlyList<string> ResolveBlocks(
+        string rulesJson, Guest guest, IReadOnlyList<string> roles, IReadOnlyCollection<string>? allBlocks)
+    {
+        var result = new List<string>();
+        var passes = roles.Count == 0 ? new string?[] { null } : roles.Select(r => (string?)r).ToArray();
+        foreach (var role in passes)
+        {
+            var attrs = new Dictionary<string, string?>
+            {
+                ["role"] = role,
+                ["gender"] = guest.Gender,
+                ["name"] = guest.Name,
+                ["email"] = guest.Email,
+                ["phone"] = guest.PhoneE164
+            };
+            foreach (var block in ruleEngine.Resolve(rulesJson, attrs, allBlocks))
+                if (!result.Contains(block, StringComparer.OrdinalIgnoreCase)) result.Add(block);
+        }
+        return result;
+    }
+
     private static void ApplyPathMap(
-        JsonObject data, JsonObject? map, string? guestRole,
+        JsonObject data, JsonObject? map, IReadOnlyList<string> guestRoles,
         IReadOnlyDictionary<string, string>? fieldTypes = null)
     {
         if (map is null) return;
@@ -151,7 +174,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
                 ? (scoped["value"], scoped["roles"] as JsonArray)
                 : (node, null);
 
-            if (value is null || !AppliesTo(roles, guestRole)) continue;
+            if (value is null || !AppliesTo(roles, guestRoles)) continue;
 
             // A gallery slot keeps its array so the template can repeat over it; anything else is text.
             if (value is JsonArray gallery)
@@ -192,11 +215,11 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
         _ => text
     };
 
-    /// <summary>An empty or absent role list means "everyone"; otherwise the guest's role must be listed.</summary>
-    private static bool AppliesTo(JsonArray? roles, string? guestRole)
+    /// <summary>An empty or absent role list means "everyone"; otherwise one of the guest's roles must be listed.</summary>
+    private static bool AppliesTo(JsonArray? roles, IReadOnlyList<string> guestRoles)
     {
         if (roles is null || roles.Count == 0) return true;
-        return roles.Any(r => string.Equals(r?.ToString(), guestRole, StringComparison.OrdinalIgnoreCase));
+        return roles.Any(r => guestRoles.Any(g => string.Equals(r?.ToString(), g, StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>

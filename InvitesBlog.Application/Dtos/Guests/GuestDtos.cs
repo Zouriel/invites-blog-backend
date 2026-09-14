@@ -12,11 +12,13 @@ namespace InvitesBlog.Application.Dtos.Guests;
 /// </summary>
 public sealed record AddGuestRequest(
     string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
-    bool? SendNow = null);
+    bool? SendNow = null,
+    IReadOnlyList<string>? Roles = null);
 
 /// <summary>Fix a guest's contact details (§4.7.4).</summary>
 public sealed record UpdateGuestRequest(
-    string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry);
+    string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
+    IReadOnlyList<string>? Roles = null);
 
 /// <summary>Confirm a previously parsed upload, materializing its guests (§15.3).</summary>
 public sealed record ConfirmUploadRequest(Guid UploadId);

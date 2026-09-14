@@ -775,7 +775,8 @@ public sealed class CampaignService(
                 inv?.RsvpStatus.ToString() ?? "NoResponse",
                 inv?.ViewedAt,
                 channel,
-                answers);
+                answers,
+                g.AllRoles());
         }).ToList();
 
         return new DashboardResponse(

@@ -38,9 +38,9 @@ public sealed class GuestService(
     public async Task<GuestUploadSummaryDto> UploadAsync(
         Guid campaignId, Stream fileStream, string fileName, string defaultCountry, CancellationToken ct = default)
     {
-        await EnsureCampaignAsync(campaignId, ct);
+        var campaign = await EnsureCampaignAsync(campaignId, ct);
 
-        var result = parser.Parse(fileStream, defaultCountry);
+        var result = parser.Parse(fileStream, defaultCountry, DefinedRoles(campaign.RolesJson));
         if (result.FileRejected)
             throw new GuestFileRejectedException(result.FileRejectionReason ?? "The file was rejected.");
 
@@ -89,9 +89,27 @@ public sealed class GuestService(
         var sb = new StringBuilder("email,phone,name,role,gender\r\n");
         foreach (var g in parsed)
             sb.Append(Csv(g.Email)).Append(',').Append(Csv(g.PhoneE164)).Append(',')
-              .Append(Csv(g.Name)).Append(',').Append(Csv(g.Role)).Append(',')
+              .Append(Csv(g.Name)).Append(',').Append(Csv(string.Join("; ", g.Roles ?? (g.Role is null ? Array.Empty<string>() : new[] { g.Role })))).Append(',')
               .Append(Csv(g.Gender)).Append("\r\n");
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    /// <summary>The role names saved on the Roles step. Empty for a campaign that has none.</summary>
+    private static IReadOnlyList<string> DefinedRoles(string? rolesJson)
+    {
+        if (string.IsNullOrWhiteSpace(rolesJson)) return Array.Empty<string>();
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(rolesJson)?["roles"] is System.Text.Json.Nodes.JsonArray arr
+                ? arr.Select(r => r?["name"]?.ToString()?.Trim())
+                    .Where(n => !string.IsNullOrEmpty(n)).Select(n => n!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                : Array.Empty<string>();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<string>();
+        }
     }
 
     /// <summary>RFC-4180 quoting + neutralizes spreadsheet formula injection (=/+/-/@ leading values).</summary>
@@ -135,7 +153,9 @@ public sealed class GuestService(
         var parsed = new ParsedGuest(
             req.Email?.Trim().ToLowerInvariant(), phone, req.Phone,
             string.IsNullOrWhiteSpace(req.Name) ? "Guest" : req.Name!,
-            req.Role, string.IsNullOrWhiteSpace(req.Gender) ? "unspecified" : req.Gender!, "{}");
+            req.Roles is { Count: > 0 } ? Guest.NormalizeRoles(req.Roles).FirstOrDefault() : req.Role,
+            string.IsNullOrWhiteSpace(req.Gender) ? "unspecified" : req.Gender!, "{}",
+            req.Roles is { Count: > 0 } ? Guest.NormalizeRoles(req.Roles) : null);
 
         var added = await MaterializeGuestsAsync(campaignId, new[] { parsed }, ct);
         await uow.SaveChangesAsync(ct);
@@ -178,7 +198,9 @@ public sealed class GuestService(
             guest.PhoneE164 = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV").E164;
         }
         if (req.Name is not null) guest.Name = req.Name;
-        if (req.Role is not null) guest.Role = req.Role;
+        // The list wins when it is sent; a caller that only knows the single field still works.
+        if (req.Roles is not null) guest.SetRoles(req.Roles);
+        else if (req.Role is not null) guest.SetRoles(new[] { req.Role });
         if (req.Gender is not null) guest.Gender = req.Gender;
 
         await uow.SaveChangesAsync(ct);
@@ -229,6 +251,7 @@ public sealed class GuestService(
             if (p.Email is not null && !emailSet.Add(p.Email)) continue;
             if (p.PhoneE164 is not null && !phoneSet.Add(p.PhoneE164)) continue;
 
+            var roles = Guest.NormalizeRoles(p.Roles ?? new[] { p.Role });
             await guests.AddAsync(new Guest
             {
                 Id = Guid.NewGuid(),
@@ -237,7 +260,8 @@ public sealed class GuestService(
                 PhoneE164 = p.PhoneE164,
                 PhoneRaw = p.PhoneRaw,
                 Name = p.Name,
-                Role = p.Role,
+                Role = roles.FirstOrDefault(),
+                Roles = roles,
                 Gender = p.Gender,
                 MetadataJson = p.MetadataJson,
                 CreatedAt = DateTimeOffset.UtcNow
