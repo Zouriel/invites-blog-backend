@@ -63,7 +63,6 @@ public sealed class ImportedDesignService(
     IRepository<Template> templates,
     ICampaignOwnershipService ownership,
     IStorageService storage,
-    IConfiguration config,
     IUnitOfWork uow) : IImportedDesignService
 {
     /// <summary>

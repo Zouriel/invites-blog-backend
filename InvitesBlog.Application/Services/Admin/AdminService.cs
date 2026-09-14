@@ -26,8 +26,7 @@ public sealed class AdminService(
     IRepository<AuditLog> auditLogs,
     IRepository<UserRole> userRoles,
     ICurrentUser currentUser,
-    IUnitOfWork uow,
-    IInviteeTokenIssuer tokenIssuer) : IAdminService
+    IUnitOfWork uow) : IAdminService
 {
     private static readonly TimeSpan AdminSessionLifetime = TimeSpan.FromHours(8);
 

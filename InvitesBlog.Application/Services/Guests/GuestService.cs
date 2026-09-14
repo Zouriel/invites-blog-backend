@@ -22,7 +22,6 @@ namespace InvitesBlog.Application.Services.Guests;
 /// hashed suppression list (§15.3) and dedupe on E.164 / lowercased email.
 /// </summary>
 public sealed class GuestService(
-    ICurrentUser currentUser,
     ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IGuestRepository guests,
@@ -251,7 +250,7 @@ public sealed class GuestService(
             if (p.Email is not null && !emailSet.Add(p.Email)) continue;
             if (p.PhoneE164 is not null && !phoneSet.Add(p.PhoneE164)) continue;
 
-            var roles = Guest.NormalizeRoles(p.Roles ?? new[] { p.Role });
+            var roles = Guest.NormalizeRoles(p.Roles ?? (p.Role is null ? Array.Empty<string>() : new[] { p.Role }));
             await guests.AddAsync(new Guest
             {
                 Id = Guid.NewGuid(),

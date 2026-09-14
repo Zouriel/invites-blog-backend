@@ -24,8 +24,7 @@ public sealed class PaymentService(
     IGuestRepository guests,
     IUnitOfWork unitOfWork,
     IPaymentProvider provider,
-    IConfiguration config,
-    ICurrentUser currentUser) : IPaymentService
+    IConfiguration config) : IPaymentService
 {
     private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";

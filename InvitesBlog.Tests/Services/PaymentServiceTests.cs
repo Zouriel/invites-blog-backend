@@ -27,7 +27,7 @@ public class PaymentServiceTests
 
     private PaymentService Sut() => new(
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
-        _campaigns, _payments, _guests, _uow, _provider, _config, _currentUser);
+        _campaigns, _payments, _guests, _uow, _provider, _config);
 
     private void Authorize(Campaign c)
     {

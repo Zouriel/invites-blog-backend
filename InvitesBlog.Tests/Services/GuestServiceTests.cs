@@ -34,7 +34,6 @@ public class GuestServiceTests
     private IValidator<ConfirmUploadRequest> _confirmV = TestData.PassingValidator<ConfirmUploadRequest>();
 
     private GuestService Sut() => new(
-        _currentUser,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters),
         _campaigns, _guests, _invites, _suppression, _uploads, _attempts, _uow,
         new GuestUploadParser(new PhoneNormalizer()), new PhoneNormalizer(), _confirmV);

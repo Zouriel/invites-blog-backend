@@ -25,7 +25,7 @@ public class AdminServiceTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
     private AdminService Sut() => new(
-        _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow, _tokenIssuer);
+        _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow);
 
     // ---------- granting and revoking a role ----------
 
