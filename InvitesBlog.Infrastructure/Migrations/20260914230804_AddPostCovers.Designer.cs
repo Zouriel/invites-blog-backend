@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260914230344_AddPostCovers")]
+    [Migration("20260914230804_AddPostCovers")]
     partial class AddPostCovers
     {
         /// <inheritdoc />
@@ -222,8 +222,10 @@ namespace InvitesBlog.Infrastructure.Migrations
 
                     b.PrimitiveCollection<List<Guid>>("PostCoverPhotoIds")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid[]")
-                        .HasColumnName("post_cover_photo_ids");
+                        .HasColumnName("post_cover_photo_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
 
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer")

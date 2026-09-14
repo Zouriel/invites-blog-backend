@@ -114,6 +114,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         b.Entity<Campaign>(e =>
         {
+            // Events made before cover photos existed start with none picked.
+            e.Property(x => x.PostCoverPhotoIds).HasDefaultValueSql("'{}'::uuid[]");
             e.ToTable("campaigns");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Status).HasDatabaseName("idx_campaigns_status");

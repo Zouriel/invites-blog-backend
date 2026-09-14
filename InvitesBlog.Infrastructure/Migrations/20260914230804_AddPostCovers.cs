@@ -16,7 +16,8 @@ namespace InvitesBlog.Infrastructure.Migrations
                 name: "post_cover_photo_ids",
                 table: "campaigns",
                 type: "uuid[]",
-                nullable: false);
+                nullable: false,
+                defaultValueSql: "'{}'::uuid[]");
         }
 
         /// <inheritdoc />

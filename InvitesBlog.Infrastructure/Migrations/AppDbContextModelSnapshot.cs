@@ -219,8 +219,10 @@ namespace InvitesBlog.Infrastructure.Migrations
 
                     b.PrimitiveCollection<List<Guid>>("PostCoverPhotoIds")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid[]")
-                        .HasColumnName("post_cover_photo_ids");
+                        .HasColumnName("post_cover_photo_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
 
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer")
