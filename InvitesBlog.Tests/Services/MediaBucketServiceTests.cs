@@ -910,4 +910,38 @@ public class MediaBucketServiceTests
         Assert.Equal(2, mine.Count);
         Assert.Equal(10 * PlanCatalog.Gb, mine.Single(b => b.Id == bucket.Id).AccountAllocatedBytes);
     }
+
+    // ----- Cancelled events -----
+
+    [Fact]
+    public async Task RemoveForCampaign_deletes_buckets_codes_and_photos()
+    {
+        var c = TestData.Campaign(status: CampaignStatus.Cancelled);
+        var bucket = Mine(used: 7_000_000);
+        bucket.CampaignId = c.Id;
+        var photo = new EventPhoto { Id = Guid.NewGuid(), BucketId = bucket.Id, Url = "u", OriginalUrl = "o", ThumbUrl = "t", ContentType = "image/jpeg" };
+        var code = new MediaBucketQr { Id = Guid.NewGuid(), BucketId = bucket.Id };
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket }.AsAsyncQueryable());
+        _photos.Query(Arg.Any<bool>()).Returns(new[] { photo }.AsAsyncQueryable());
+        _qrs.Query(Arg.Any<bool>()).Returns(new[] { code }.AsAsyncQueryable());
+
+        await Sut().RemoveForCampaignAsync(c.Id);
+
+        Assert.NotNull(photo.DeletedAt);
+        Assert.NotNull(c.MediaDeletedAt);
+        _buckets.Received(1).RemoveRange(Arg.Is<IEnumerable<MediaBucket>>(l => l.Single() == bucket));
+        _qrs.Received(1).RemoveRange(Arg.Is<IEnumerable<MediaBucketQr>>(l => l.Single() == code));
+        await _uow.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_cancelled_event_gets_no_new_bucket()
+    {
+        var c = TestData.Campaign(status: CampaignStatus.Cancelled);
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().ForCampaignAsync(c.Id));
+        Assert.Contains("cancelled", ex.Message);
+    }
 }

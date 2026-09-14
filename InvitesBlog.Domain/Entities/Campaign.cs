@@ -83,6 +83,9 @@ public sealed class Campaign
     public DateTimeOffset? EventEndAt { get; set; }
     public int PaidInviteCapacity { get; set; }
 
+    /// <summary>The organiser's words for the event's post in the feed. Null uses the invitation's own wording.</summary>
+    public string? PostCaption { get; set; }
+
     /// <summary>Premium for this one event until then. Null when it never had a pass.</summary>
     public DateTimeOffset? EventPassUntil { get; set; }
 

@@ -175,6 +175,9 @@ public sealed class InviteService(
         var isStatic = template?.Visibility == TemplateVisibility.Imported;
         if (!isStatic)
             return new StaticCameraInfo(campaign.Id, Guid.Empty, campaign.Title, false, false, false);
+        // A cancelled event's photo space is deleted with it; there is no camera to open.
+        if (campaign.Status == CampaignStatus.Cancelled)
+            return new StaticCameraInfo(campaign.Id, Guid.Empty, campaign.Title, true, false, true);
 
         var bucket = await bucketService.ForCampaignAsync(campaign.Id, ct);
         return new StaticCameraInfo(

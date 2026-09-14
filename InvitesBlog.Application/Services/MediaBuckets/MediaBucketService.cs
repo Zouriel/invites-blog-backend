@@ -123,6 +123,12 @@ public interface IMediaBucketService
     Task<MediaBucketDto> CreateForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
     /// <summary>
+    /// Deletes an event's buckets and everything in them. For a cancelled event: its photos go at once
+    /// rather than waiting out a plan, and the space they were given goes back to the account.
+    /// </summary>
+    Task RemoveForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
     /// Refuses an upload that would not fit, and is the ONLY place that decides that.
     /// </summary>
     /// <param name="incomingBytes">Everything the upload will write, derivatives included.</param>
@@ -431,8 +437,11 @@ public sealed class MediaBucketService(
         var eventPlan = await plans.ForCampaignAsync(eventId, ct);
         var windowDays = WindowFor(req.WindowDays, eventPlan.MaxWindowDays);
 
-        var campaignDate = (await campaigns.GetByIdAsync(eventId, ct))?.EventStartAt
-                           ?? throw new NotFoundException("That event no longer exists.");
+        var target = await campaigns.GetByIdAsync(eventId, ct)
+                     ?? throw new NotFoundException("That event no longer exists.");
+        if (target.Status == CampaignStatus.Cancelled)
+            throw new BusinessRuleException("This event was cancelled, so it has no photo space.", "event_cancelled");
+        var campaignDate = target.EventStartAt;
 
         // The event's DEFAULT bucket always takes the event's own date, so the invitation and the
         // bucket its camera posts to can never disagree about which night they belong to. A SECOND
@@ -613,6 +622,8 @@ public sealed class MediaBucketService(
 
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
+        if (campaign.Status == CampaignStatus.Cancelled)
+            throw new BusinessRuleException("This event was cancelled, so it has no photo space.", "event_cancelled");
 
         // Provisioned for whoever the CAMPAIGN belongs to, not for whoever happens to be calling.
         //
@@ -691,6 +702,27 @@ public sealed class MediaBucketService(
 
         var bucket = await ForCampaignAsync(campaignId, ct);
         return (await DescribeAsync([bucket], ct))[0];
+    }
+
+    public async Task RemoveForCampaignAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var eventBuckets = await buckets.Query(tracking: true).Where(b => b.CampaignId == campaignId).ToListAsync(ct);
+        var bucketIds = eventBuckets.Select(b => b.Id).ToList();
+
+        // Photos are marked deleted, the same way removing one by hand does, so nothing links to them.
+        var held = await photos.Query(tracking: true)
+            .Where(p => p.DeletedAt == null
+                        && (p.CampaignId == campaignId || (p.BucketId != null && bucketIds.Contains(p.BucketId.Value))))
+            .ToListAsync(ct);
+        foreach (var photo in held) photo.DeletedAt = now;
+
+        qrs.RemoveRange(await qrs.Query(tracking: true).Where(q => bucketIds.Contains(q.BucketId)).ToListAsync(ct));
+        // Members go with their bucket (cascade).
+        buckets.RemoveRange(eventBuckets);
+
+        if (await campaigns.GetByIdAsync(campaignId, ct) is { } campaign) campaign.MediaDeletedAt = now;
+        await uow.SaveChangesAsync(ct);
     }
 
     public async Task EnsureRoomAsync(Guid bucketId, long incomingBytes, CancellationToken ct = default)

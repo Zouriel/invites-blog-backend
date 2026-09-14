@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Application.Services.Campaigns;
@@ -15,7 +16,7 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/campaigns")]
 public sealed class CampaignsController(
-    ICampaignService campaigns, IImportedDesignService designs) : BaseApiController
+    ICampaignService campaigns, IImportedDesignService designs, IMediaBucketService buckets) : BaseApiController
 {
     // Creation is open to anonymous callers: a brand-new visitor spins up a draft and receives a
     // possession token that grants Inviter rights thereafter. The Public role does NOT hold
@@ -188,8 +189,13 @@ public sealed class CampaignsController(
 
     [HttpPost("{id:guid}/cancel")]
     [HasPermission(Permissions.Campaigns.Cancel)]
-    public async Task<IActionResult> Cancel(Guid id, CancellationToken ct) =>
-        Success(await campaigns.CancelAsync(id, ct));
+    public async Task<IActionResult> Cancel(Guid id, CancellationToken ct)
+    {
+        var result = await campaigns.CancelAsync(id, ct);
+        // Nothing is kept for an event that isn't happening: its photos go now, not when a plan runs out.
+        await buckets.RemoveForCampaignAsync(id, ct);
+        return Success(result);
+    }
 
     [HttpDelete("{id:guid}")]
     [HasPermission(Permissions.Campaigns.Delete)]

@@ -16,6 +16,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<CampaignCelebrant> CampaignCelebrants => Set<CampaignCelebrant>();
+    public DbSet<PostComment> PostComments => Set<PostComment>();
+    public DbSet<PostLike> PostLikes => Set<PostLike>();
+    public DbSet<CommentLike> CommentLikes => Set<CommentLike>();
     public DbSet<Invite> Invites => Set<Invite>();
     public DbSet<InviteTrustedIp> InviteTrustedIps => Set<InviteTrustedIp>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
@@ -160,6 +163,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.PhoneE164).HasDatabaseName("idx_campaign_celebrants_phone_e164");
             e.Property(x => x.Name).HasMaxLength(120);
             e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // The feed: comments, and likes on posts and on comments.
+        b.Entity<PostComment>(e =>
+        {
+            e.ToTable("post_comments");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.CampaignId, x.CreatedAt }).HasDatabaseName("idx_post_comments_campaign_created");
+            e.HasIndex(x => x.ParentId).HasDatabaseName("idx_post_comments_parent_id");
+            e.Property(x => x.Body).HasMaxLength(1000);
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PostLike>(e =>
+        {
+            e.ToTable("post_likes");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.CampaignId, x.UserId }).IsUnique().HasDatabaseName("ux_post_likes_campaign_user");
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CommentLike>(e =>
+        {
+            e.ToTable("comment_likes");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.CommentId, x.UserId }).IsUnique().HasDatabaseName("ux_comment_likes_comment_user");
+            e.HasOne<PostComment>().WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
         b.Entity<Invite>(e =>

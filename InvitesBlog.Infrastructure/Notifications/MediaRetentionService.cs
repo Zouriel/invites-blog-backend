@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using System.Net;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Plans;
@@ -60,7 +61,11 @@ public sealed class MediaRetentionService(
         var withBuckets = await db.MediaBuckets.Where(b => b.UsedBytes > 0).Select(b => b.CampaignId).Distinct().ToListAsync(ct);
         var withPhotos = await db.EventPhotos.Where(p => p.DeletedAt == null && p.CampaignId != null)
             .Select(p => p.CampaignId!.Value).Distinct().ToListAsync(ct);
-        var ids = withBuckets.Concat(withPhotos).Distinct().ToList();
+        // Events cancelled before their photos were deleted on cancel still have buckets to clear.
+        var cancelled = await db.MediaBuckets
+            .Where(b => db.Campaigns.Any(c => c.Id == b.CampaignId && c.Status == CampaignStatus.Cancelled))
+            .Select(b => b.CampaignId).Distinct().ToListAsync(ct);
+        var ids = withBuckets.Concat(withPhotos).Concat(cancelled).Distinct().ToList();
 
         foreach (var id in ids)
         {
@@ -80,7 +85,19 @@ public sealed class MediaRetentionService(
         AppDbContext db, IPlanService plans, IEmailSender email, Guid campaignId, DateTimeOffset now, CancellationToken ct)
     {
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, ct);
-        if (campaign is null || campaign.MediaDeletedAt is not null) return;
+        if (campaign is null) return;
+
+        if (campaign.Status == CampaignStatus.Cancelled)
+        {
+            await RemoveMediaAsync(db, campaignId, now, ct);
+            db.MediaBucketQrs.RemoveRange(db.MediaBucketQrs.Where(q => db.MediaBuckets.Any(b => b.Id == q.BucketId && b.CampaignId == campaignId)));
+            db.MediaBuckets.RemoveRange(db.MediaBuckets.Where(b => b.CampaignId == campaignId));
+            campaign.MediaDeletedAt ??= now;
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Removed the photos of cancelled event {CampaignId}.", campaignId);
+            return;
+        }
+        if (campaign.MediaDeletedAt is not null) return;
 
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         if (plan.CoveredUntil is not { } end || now < end)
