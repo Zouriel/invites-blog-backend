@@ -182,6 +182,11 @@ public sealed class ImportedDesignService(
         campaign.TemplateVersion = template.Version;
         campaign.TemplatePackageUrl = packageFolder;
         campaign.TemplateManifestJson = Manifest;
+        // An uploaded design has no roles. A host who picked a gallery design first and saved roles,
+        // then switched to their own picture, kept those roles, and the guest steps went on asking for
+        // them (a spreadsheet was refused for every row without one). Cleared with the switch.
+        campaign.RolesJson = "{\"roles\":[]}";
+        campaign.RulesJson = "{\"rules\":[]}";
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         campaigns.Update(campaign);
 
