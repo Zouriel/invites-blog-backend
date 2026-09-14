@@ -75,6 +75,12 @@ public sealed class MediaBucket
     public int UploadWindowDays { get; set; } = 1;
 
     /// <summary>
+    /// How much of its owner's subscription space this bucket is given, on Basic and Premium, where
+    /// the account's space is shared out bucket by bucket. Null takes the plan's starting size.
+    /// </summary>
+    public long? AllocatedBytes { get; set; }
+
+    /// <summary>
     /// Whether only named guests may look, rather than the whole guest list.
     ///
     /// <para><b>Why a flag as well as the member rows.</b> "No rows" cannot mean "nobody": every

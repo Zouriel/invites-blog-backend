@@ -88,6 +88,16 @@ public interface IMediaBucketService
     /// </summary>
     Task<MediaBucketDto> RenameAsync(
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets how much of the owner's Basic or Premium space a bucket gets. Refused below what it already
+    /// holds, above what the account has left, and on plans whose space isn't shared out.
+    /// </summary>
+    Task<MediaBucketDto> SetAllocationAsync(
+        Guid bucketId, SetBucketAllocationRequest req, CancellationToken ct = default);
+
+    /// <summary>The signed-in account's subscription space: total, given out and used.</summary>
+    Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default);
     /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
     Task<BucketAccessDto> AccessAsync(Guid bucketId, CancellationToken ct = default);
 
@@ -689,7 +699,18 @@ public sealed class MediaBucketService(
                      ?? throw new NotFoundException("That media bucket no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        // Space is per EVENT, shared by all of its buckets.
+        // On a subscription each bucket holds what its owner gave it.
+        if (plan.Allocatable)
+        {
+            var given = Allocation(bucket, plan);
+            if (bucket.UsedBytes + incomingBytes > given)
+                throw new BusinessRuleException(
+                    $"This bucket's {Size(given)} is full. Give it more space in Bucket settings.",
+                    "bucket_full");
+        }
+        else
+        {
+        // Otherwise space is per EVENT, shared by all of its buckets.
         var eventUsed = await buckets.Query()
             .Where(b => b.CampaignId == bucket.CampaignId)
             .SumAsync(b => b.UsedBytes, ct);
@@ -699,6 +720,7 @@ public sealed class MediaBucketService(
                     ? $"This event's {Size(plan.EventBytes)} is full."
                     : $"This event's {Size(plan.EventBytes)} is full. See the plans for more space.",
                 "bucket_full");
+        }
 
         // And a subscription's limit across all of the account's events.
         if (plan.AccountBytes is { } cap && plan.OwnerUserId is { } owner
@@ -706,6 +728,100 @@ public sealed class MediaBucketService(
             throw new BusinessRuleException(
                 $"This account's {Size(cap)} across all events is full. Remove some photos or move to a bigger plan.",
                 "account_full");
+    }
+
+    /// <summary>What a bucket holds on a subscription: its own size, or the plan's starting size.</summary>
+    private static long Allocation(MediaBucket bucket, EventPlan plan) =>
+        bucket.AllocatedBytes
+        ?? Math.Max(plan.DefaultBucketBytes, bucket.CreatedAt < PlanCatalog.IntroducedAt ? bucket.CapacityBytes : 0);
+
+    /// <summary>How much of an owner's subscription space their buckets are given, across every event it covers.</summary>
+    private async Task<long> AccountAllocatedAsync(Guid ownerId, CancellationToken ct)
+    {
+        var mine = await buckets.Query().Where(b => b.OwnerUserId == ownerId).ToListAsync(ct);
+        long total = 0;
+        foreach (var group in mine.GroupBy(b => b.CampaignId))
+        {
+            var plan = await plans.ForCampaignAsync(group.Key, ct);
+            if (!plan.Allocatable) continue;
+            total += group.Sum(b => Allocation(b, plan));
+        }
+        return total;
+    }
+
+    public async Task<MediaBucketDto> SetAllocationAsync(
+        Guid bucketId, SetBucketAllocationRequest req, CancellationToken ct = default)
+    {
+        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+        var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
+        if (!plan.Allocatable || plan.AccountBytes is not { } cap)
+            throw new BusinessRuleException(
+                plan.Kind == PlanKind.EventPass
+                    ? "This event has an event pass, so its 50 GB is shared by its buckets and can't be resized."
+                    : "Choosing each bucket's size comes with Basic or Premium.",
+                "allocation_needs_subscription");
+
+        if (double.IsNaN(req.Gb) || req.Gb < 0)
+            throw new BusinessRuleException("Choose a size of 0 GB or more.", "allocation_invalid");
+        var wanted = (long)Math.Round(req.Gb * PlanCatalog.Gb);
+
+        if (wanted < bucket.UsedBytes)
+            throw new BusinessRuleException(
+                $"This bucket already holds {Size(bucket.UsedBytes)}, so it can't be made smaller than that.",
+                "allocation_below_usage");
+
+        // No more than the plan's most per event, across the event's buckets.
+        var eventMax = PlanCatalog.EventMaxBytes(plan.Kind);
+        var siblings = await buckets.Query()
+            .Where(b => b.CampaignId == bucket.CampaignId && b.Id != bucket.Id)
+            .ToListAsync(ct);
+        var onThisEvent = siblings.Sum(b => Allocation(b, plan));
+        if (onThisEvent + wanted > eventMax)
+            throw new BusinessRuleException(
+                $"An event can have up to {Size(eventMax)} on your plan. This one has {Size(Math.Max(0, eventMax - onThisEvent))} left for this bucket.",
+                "allocation_over_event");
+
+        var owner = bucket.OwnerUserId;
+        var others = await AccountAllocatedAsync(owner, ct) - Allocation(bucket, plan);
+        if (others + wanted > cap)
+            throw new BusinessRuleException(
+                $"Your account has {Size(Math.Max(0, cap - others))} left to give. Make another bucket smaller first.",
+                "allocation_over_account");
+
+        bucket.AllocatedBytes = wanted;
+        bucket.UpdatedAt = DateTimeOffset.UtcNow;
+        buckets.Update(bucket);
+        await uow.SaveChangesAsync(ct);
+        return (await DescribeAsync([bucket], ct))[0];
+    }
+
+    public async Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default)
+    {
+        var me = RequireUser();
+        var account = await users.GetByIdAsync(me, ct);
+        var now = DateTimeOffset.UtcNow;
+        var tier = account is not null && PlanRules.IsActive(account.SubscriptionTier, account.SubscriptionEndsAt, now)
+            ? account.SubscriptionTier
+            : SubscriptionTier.None;
+        var kind = tier switch
+        {
+            SubscriptionTier.Premium => PlanKind.Premium,
+            SubscriptionTier.Basic => PlanKind.Basic,
+            _ => PlanKind.Free,
+        };
+        long? accountBytes = kind switch
+        {
+            PlanKind.Premium => PlanCatalog.PremiumAccountBytes,
+            PlanKind.Basic => PlanCatalog.BasicAccountBytes,
+            _ => null,
+        };
+
+        return new StorageSummaryDto(
+            tier.ToString(),
+            accountBytes,
+            accountBytes is null ? 0 : await AccountAllocatedAsync(me, ct),
+            await plans.AccountUsedBytesAsync(me, ct),
+            PlanCatalog.EventMaxBytes(kind));
     }
 
     private static string Size(long bytes) =>
@@ -966,23 +1082,35 @@ public sealed class MediaBucketService(
             .GroupBy(x => x.CampaignId)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.UsedBytes));
 
+        // How much each event's buckets are given, on a subscription.
+        var allocatedByEvent = (await buckets.Query().Where(b => campaignIds.Contains(b.CampaignId)).ToListAsync(ct))
+            .GroupBy(b => b.CampaignId)
+            .ToDictionary(g => g.Key, g => eventPlans[g.Key].Allocatable ? g.Sum(b => Allocation(b, eventPlans[g.Key])) : 0);
+
+        // And, on a subscription, how much of the owner's space all of their buckets are given.
+        var accountAllocated = new Dictionary<Guid, long>();
+        foreach (var owner in rows.Where(b => eventPlans[b.CampaignId].Allocatable).Select(b => b.OwnerUserId).Distinct())
+            accountAllocated[owner] = await AccountAllocatedAsync(owner, ct);
+
         var now = DateTimeOffset.UtcNow;
         return rows.Select(b =>
         {
             var plan = eventPlans[b.CampaignId];
-            var eventUsed = usedByEvent.GetValueOrDefault(b.CampaignId);
+            // On a subscription the bucket is its own space; otherwise it shares the event's.
+            var capacity = plan.Allocatable ? Allocation(b, plan) : plan.EventBytes;
+            var eventUsed = plan.Allocatable ? b.UsedBytes : usedByEvent.GetValueOrDefault(b.CampaignId);
             return new MediaBucketDto(
                 b.Id,
                 b.Name,
                 Title(b, events),
                 Cover(b, events),
                 plan.Kind.ToString(),
-                Math.Round(plan.EventBytes / (double)MediaBucketPlans.BytesPerGb, 1),
-                plan.EventBytes,
+                Math.Round(capacity / (double)MediaBucketPlans.BytesPerGb, 1),
+                capacity,
                 b.UsedBytes,
-                plan.EventBytes <= 0
-                    ? 0
-                    : (int)Math.Clamp(Math.Round(eventUsed * 100.0 / plan.EventBytes), 0, 100),
+                capacity <= 0
+                    ? (eventUsed > 0 ? 100 : 0)
+                    : (int)Math.Clamp(Math.Round(eventUsed * 100.0 / capacity), 0, 100),
                 counts.GetValueOrDefault(b.Id),
                 b.CampaignId,
                 Title(b, events),
@@ -996,7 +1124,12 @@ public sealed class MediaBucketService(
                 plan.MaxBuckets,
                 plan.MaxWindowDays,
                 plan.Phase.ToString(),
-                eventUsed);
+                eventUsed,
+                plan.Allocatable,
+                plan.Allocatable ? plan.AccountBytes : null,
+                accountAllocated.GetValueOrDefault(b.OwnerUserId),
+                PlanCatalog.EventMaxBytes(plan.Kind),
+                allocatedByEvent.GetValueOrDefault(b.CampaignId));
         }).ToList();
     }
 

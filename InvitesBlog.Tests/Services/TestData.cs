@@ -16,8 +16,16 @@ internal static class TestData
     public static InvitesBlog.Application.Plans.EventPlan Plan(
         long eventBytes = 10 * InvitesBlog.Application.Plans.PlanCatalog.Gb, int maxBuckets = 1, int maxWindowDays = 1,
         InvitesBlog.Application.Plans.MediaPhase phase = InvitesBlog.Application.Plans.MediaPhase.Active,
-        InvitesBlog.Application.Plans.PlanKind kind = InvitesBlog.Application.Plans.PlanKind.Free) =>
-        new(kind, eventBytes, null, maxBuckets, maxWindowDays, 10, false, null, phase, null);
+        InvitesBlog.Application.Plans.PlanKind kind = InvitesBlog.Application.Plans.PlanKind.Free,
+        long? accountBytes = null, Guid? owner = null) =>
+        new(kind, eventBytes, accountBytes, maxBuckets, maxWindowDays, 10, false, null, phase, owner,
+            kind is InvitesBlog.Application.Plans.PlanKind.Basic or InvitesBlog.Application.Plans.PlanKind.Premium,
+            kind switch
+            {
+                InvitesBlog.Application.Plans.PlanKind.Basic => InvitesBlog.Application.Plans.PlanCatalog.BasicBucketBytes,
+                InvitesBlog.Application.Plans.PlanKind.Premium => InvitesBlog.Application.Plans.PlanCatalog.PremiumBucketBytes,
+                _ => 0,
+            });
 
     /// <summary>A plan service that answers every event with <see cref="Plan"/>.</summary>
     public static InvitesBlog.Application.Plans.IPlanService FreePlans()

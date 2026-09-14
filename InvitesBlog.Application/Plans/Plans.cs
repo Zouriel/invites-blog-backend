@@ -45,6 +45,17 @@ public static class PlanCatalog
     public const long BasicAccountBytes = 20 * Gb;
     public const long PremiumAccountBytes = 200 * Gb;
 
+    /// <summary>What a new bucket starts with on a subscription, before its owner resizes it.</summary>
+    public const long BasicBucketBytes = 2 * Gb;
+    public const long PremiumBucketBytes = 10 * Gb;
+
+    /// <summary>The most one event can be given on a subscription, across its buckets.</summary>
+    public const long BasicEventMaxBytes = 10 * Gb;
+    public const long PremiumEventMaxBytes = LargeEventBytes;
+
+    public static long EventMaxBytes(PlanKind kind) =>
+        kind == PlanKind.Premium ? PremiumEventMaxBytes : kind == PlanKind.Basic ? BasicEventMaxBytes : 0;
+
     /// <summary>How long a free event is covered, counted from the event day.</summary>
     public const int FreeCoverDays = 90;
 
@@ -74,13 +85,14 @@ public static class PlanCatalog
             new PlanDto("Free", "Free", 0m, "Every event", null,
                 FreeEventBytes, null, 1, 1, FreeCoverDays, false, PricingCalculator.StandardBlockSize),
             new PlanDto("Basic", "Basic", BasicYearly, "per year", null,
-                BasicEventBytes, BasicAccountBytes, 1, 1, null, false, PricingCalculator.StandardBlockSize),
+                BasicEventBytes, BasicAccountBytes, 1, 1, null, false, PricingCalculator.StandardBlockSize,
+                true, BasicBucketBytes),
             new PlanDto("EventPass", "Event pass", EventPass, "once, for one event", null,
                 LargeEventBytes, null, MediaBucket.MaxPerCampaign, EventDayWindow.MaxWindowDays,
                 EventPassMonths * 30, true, PricingCalculator.StandardBlockSize),
             new PlanDto("Premium", "Premium", PremiumMonthly, "per month", PremiumYearly,
                 LargeEventBytes, PremiumAccountBytes, MediaBucket.MaxPerCampaign, EventDayWindow.MaxWindowDays,
-                null, false, PricingCalculator.DesignerBlockSize),
+                null, false, PricingCalculator.DesignerBlockSize, true, PremiumBucketBytes),
         ],
         new SendingPriceDto(
             PricingCalculator.MinimumPrice, PricingCalculator.IncludedInvites, PricingCalculator.PricePerBlock,
@@ -94,7 +106,10 @@ public static class PlanCatalog
 public sealed record PlanDto(
     string Kind, string Name, decimal Price, string Billing, decimal? YearlyPrice,
     long EventBytes, long? AccountBytes, int MaxBuckets, int MaxWindowDays, int? RetentionDays,
-    bool IncludesFirstSend, int InvitesPerDollar);
+    bool IncludesFirstSend, int InvitesPerDollar,
+    /// <summary>Whether each bucket's size can be set, sharing the account's space.</summary>
+    bool Allocatable = false,
+    long? StartingBucketBytes = null);
 
 public sealed record SendingPriceDto(
     decimal Minimum, int IncludedInvites, decimal PerBlock, int BlockSize, int PremiumBlockSize);
@@ -117,7 +132,13 @@ public sealed record EventPlan(
     bool PassCoversFirstSend,
     DateTimeOffset? CoveredUntil,
     MediaPhase Phase,
-    Guid? OwnerUserId);
+    Guid? OwnerUserId,
+    /// <summary>
+    /// On Basic and Premium the account's space is shared out bucket by bucket: each bucket holds
+    /// what it is given, and the gifts can't add up to more than the account has.
+    /// </summary>
+    bool Allocatable = false,
+    long DefaultBucketBytes = 0);
 
 /// <summary>The rules, with no database in them, so every branch can be tested directly.</summary>
 public static class PlanRules
@@ -183,7 +204,14 @@ public static class PlanRules
             pass,
             coveredUntil,
             PhaseOf(now, coveredUntil, mediaDeletedAt),
-            ownerUserId);
+            ownerUserId,
+            kind is PlanKind.Basic or PlanKind.Premium,
+            kind switch
+            {
+                PlanKind.Basic => PlanCatalog.BasicBucketBytes,
+                PlanKind.Premium => PlanCatalog.PremiumBucketBytes,
+                _ => 0,
+            });
     }
 
     public static MediaPhase PhaseOf(DateTimeOffset now, DateTimeOffset? coveredUntil, DateTimeOffset? deletedAt)

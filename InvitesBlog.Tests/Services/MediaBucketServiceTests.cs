@@ -825,4 +825,73 @@ public class MediaBucketServiceTests
         await Assert.ThrowsAsync<ForbiddenException>(
             () => Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: false)));
     }
+
+    // ---------- sharing out a subscription's space ----------
+
+    private MediaBucket OnPremium(long? allocated, long used = 0)
+    {
+        var bucket = Mine(used: used);
+        bucket.CreatedAt = PlanCatalog.IntroducedAt.AddDays(1);
+        bucket.AllocatedBytes = allocated;
+        Stored(bucket);
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(eventBytes: 50 * PlanCatalog.Gb, maxBuckets: 3, maxWindowDays: 5,
+                kind: PlanKind.Premium, accountBytes: 200 * PlanCatalog.Gb, owner: _me));
+        _plans.AccountUsedBytesAsync(_me, Arg.Any<CancellationToken>()).Returns(used);
+        return bucket;
+    }
+
+    [Fact]
+    public async Task On_premium_a_bucket_holds_what_it_was_given()
+    {
+        var bucket = OnPremium(allocated: 40 * PlanCatalog.Gb, used: 39 * PlanCatalog.Gb);
+
+        await Sut().EnsureRoomAsync(bucket.Id, PlanCatalog.Gb / 2);
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().EnsureRoomAsync(bucket.Id, 2 * PlanCatalog.Gb));
+        Assert.Equal("bucket_full", e.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_premium_bucket_can_be_given_up_to_50_gb()
+    {
+        var bucket = OnPremium(allocated: null);
+
+        var result = await Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(50));
+
+        Assert.Equal(50 * PlanCatalog.Gb, bucket.AllocatedBytes);
+        Assert.Equal(50 * PlanCatalog.Gb, result.CapacityBytes);
+        Assert.True(result.Allocatable);
+    }
+
+    [Fact]
+    public async Task An_event_cannot_be_given_more_than_its_plan_allows()
+    {
+        var bucket = OnPremium(allocated: null);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(51)));
+        Assert.Equal("allocation_over_event", e.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_bucket_cannot_be_made_smaller_than_what_it_holds()
+    {
+        var bucket = OnPremium(allocated: 20 * PlanCatalog.Gb, used: 12 * PlanCatalog.Gb);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(10)));
+        Assert.Equal("allocation_below_usage", e.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Free_events_cannot_resize_buckets()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(5)));
+        Assert.Equal("allocation_needs_subscription", e.ErrorCode);
+    }
 }

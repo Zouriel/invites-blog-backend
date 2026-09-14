@@ -48,7 +48,22 @@ public sealed record MediaBucketDto(
     /// <summary>Active, UploadsClosed, OrganiserOnly or Deleted. See MediaPhase.</summary>
     string Phase = "Active",
     /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
-    long EventUsedBytes = 0);
+    long EventUsedBytes = 0,
+    /// <summary>Whether this bucket's size can be set (Basic and Premium).</summary>
+    bool Allocatable = false,
+    /// <summary>The account's space on a subscription, and how much of it all its buckets are given.</summary>
+    long? AccountBytes = null,
+    long AccountAllocatedBytes = 0,
+    /// <summary>The most this bucket's event can be given, and how much its buckets are given now.</summary>
+    long EventMaxBytes = 0,
+    long EventAllocatedBytes = 0);
+
+/// <summary>An account's subscription space: how much it has, how much is given out, and how much is used.</summary>
+public sealed record StorageSummaryDto(
+    string Tier, long? AccountBytes, long AllocatedBytes, long UsedBytes, long EventMaxBytes);
+
+/// <summary>Sets how many GB of the account's subscription space one bucket gets.</summary>
+public sealed record SetBucketAllocationRequest(double Gb);
 
 /// <summary>
 /// Creating a bucket. <c>EventDate</c> is the night it is for and is required for a standalone one;
