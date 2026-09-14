@@ -48,5 +48,12 @@ public sealed record SetLikeRequest(bool Liked);
 
 public sealed record LikeStateDto(int LikeCount, bool LikedByMe);
 
+/// <summary>The photos picked to head an event's post, from its default bucket.</summary>
+/// <param name="BucketId">The default bucket they come from; null when the event has no bucket yet.</param>
+/// <param name="PhotoIds">In the order they show. Empty means the bucket's first photos.</param>
+public sealed record FeedCoversDto(Guid? BucketId, IReadOnlyList<Guid> PhotoIds, int Max);
+
+public sealed record SetFeedCoversRequest(IReadOnlyList<Guid> PhotoIds);
+
 /// <summary>An empty caption goes back to the text taken from the invitation.</summary>
 public sealed record SetCaptionRequest(string? Caption);

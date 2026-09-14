@@ -86,6 +86,12 @@ public sealed class Campaign
     /// <summary>The organiser's words for the event's post in the feed. Null uses the invitation's own wording.</summary>
     public string? PostCaption { get; set; }
 
+    /// <summary>
+    /// Photos from the default bucket the organiser picked to head the event's post, in order. Empty
+    /// uses the bucket's first photos.
+    /// </summary>
+    public List<Guid> PostCoverPhotoIds { get; set; } = [];
+
     /// <summary>Premium for this one event until then. Null when it never had a pass.</summary>
     public DateTimeOffset? EventPassUntil { get; set; }
 

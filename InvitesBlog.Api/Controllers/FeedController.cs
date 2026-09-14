@@ -46,6 +46,16 @@ public sealed class FeedController(IFeedService feed) : BaseApiController
     public async Task<IActionResult> LikeComment(Guid campaignId, Guid commentId, [FromBody] SetLikeRequest req, CancellationToken ct) =>
         Success(await feed.SetCommentLikeAsync(campaignId, commentId, req, ct));
 
+    [HttpGet("{campaignId:guid}/covers")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> Covers(Guid campaignId, CancellationToken ct) =>
+        Success(await feed.CoversAsync(campaignId, ct));
+
+    [HttpPut("{campaignId:guid}/covers")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> SetCovers(Guid campaignId, [FromBody] SetFeedCoversRequest req, CancellationToken ct) =>
+        Success(await feed.SetCoversAsync(campaignId, req, ct));
+
     [HttpPut("{campaignId:guid}/caption")]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> SetCaption(Guid campaignId, [FromBody] SetCaptionRequest req, CancellationToken ct) =>

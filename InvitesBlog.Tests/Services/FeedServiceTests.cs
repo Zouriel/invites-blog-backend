@@ -169,4 +169,63 @@ public class FeedServiceTests
         Assert.Equal("Join us", caption);
         Assert.Equal("Hulhumale Hall", venue);
     }
+
+    // ----- Cover photos -----
+
+    private (MediaBucket bucket, EventPhoto[] shots) WithPhotos(int count)
+    {
+        var bucket = new MediaBucket { Id = Guid.NewGuid(), CampaignId = _event.Id, CreatedAt = DateTimeOffset.UtcNow.AddDays(-1) };
+        var shots = Enumerable.Range(0, count).Select(n => new EventPhoto
+        {
+            Id = Guid.NewGuid(), CampaignId = _event.Id, BucketId = bucket.Id, Url = $"u{n}", ThumbUrl = $"t{n}",
+            OriginalUrl = $"o{n}", ContentType = "image/jpeg", CreatedAt = DateTimeOffset.UtcNow.AddMinutes(n),
+        }).ToArray();
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket }.AsAsyncQueryable());
+        _photos.Query(Arg.Any<bool>()).Returns(shots.AsAsyncQueryable());
+        return (bucket, shots);
+    }
+
+    [Fact]
+    public async Task The_organisers_chosen_cover_photos_head_the_post_in_their_order()
+    {
+        _event.CreatedByUserId = _me.Id;
+        var (_, shots) = WithPhotos(8);
+
+        await Sut().SetCoversAsync(_event.Id, new SetFeedCoversRequest([shots[7].Id, shots[3].Id]));
+        var post = Assert.Single((await Sut().FeedAsync(0, 10)).Items);
+
+        Assert.Equal(["u7", "u3"], post.Images.Select(i => i.Url));
+        Assert.False(post.ImagesAreCover);
+    }
+
+    [Fact]
+    public async Task Without_a_choice_the_post_shows_the_first_photos()
+    {
+        _event.CreatedByUserId = _me.Id;
+        WithPhotos(8);
+
+        var post = Assert.Single((await Sut().FeedAsync(0, 10)).Items);
+
+        Assert.Equal(["u0", "u1", "u2", "u3", "u4", "u5"], post.Images.Select(i => i.Url));
+    }
+
+    [Fact]
+    public async Task A_cover_photo_must_come_from_the_default_bucket()
+    {
+        _event.CreatedByUserId = _me.Id;
+        WithPhotos(2);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetCoversAsync(_event.Id, new SetFeedCoversRequest([Guid.NewGuid()])));
+        Assert.Equal("cover_not_in_bucket", e.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_guest_cannot_choose_cover_photos()
+    {
+        InvitedAsGuest(InviteStatus.Sent);
+
+        await Assert.ThrowsAsync<ForbiddenException>(
+            () => Sut().SetCoversAsync(_event.Id, new SetFeedCoversRequest([])));
+    }
 }

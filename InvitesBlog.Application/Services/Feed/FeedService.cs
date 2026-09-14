@@ -30,6 +30,8 @@ public interface IFeedService
     Task<LikeStateDto> SetPostLikeAsync(Guid campaignId, SetLikeRequest req, CancellationToken ct = default);
     Task<LikeStateDto> SetCommentLikeAsync(Guid campaignId, Guid commentId, SetLikeRequest req, CancellationToken ct = default);
     Task<FeedPostDto> SetCaptionAsync(Guid campaignId, SetCaptionRequest req, CancellationToken ct = default);
+    Task<FeedCoversDto> CoversAsync(Guid campaignId, CancellationToken ct = default);
+    Task<FeedCoversDto> SetCoversAsync(Guid campaignId, SetFeedCoversRequest req, CancellationToken ct = default);
 }
 
 public enum FeedRole
@@ -259,6 +261,66 @@ public sealed class FeedService(
         return await DescribeAsync(me, tracked, role, DateTimeOffset.UtcNow, ct);
     }
 
+    public async Task<FeedCoversDto> CoversAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var me = await MeAsync(ct);
+        var (campaign, role) = await RequireInvolvedAsync(me, campaignId, ct);
+        if (role < FeedRole.Manager)
+            throw new ForbiddenException("Only the event's organiser can choose its cover photos.");
+
+        var bucketId = await DefaultBucketAsync(campaignId, ct);
+        var ids = bucketId is { } b ? await LivePicksAsync(campaign.PostCoverPhotoIds, b, ct) : [];
+        return new FeedCoversDto(bucketId, ids, HeaderImages);
+    }
+
+    public async Task<FeedCoversDto> SetCoversAsync(Guid campaignId, SetFeedCoversRequest req, CancellationToken ct = default)
+    {
+        var me = await MeAsync(ct);
+        var (_, role) = await RequireInvolvedAsync(me, campaignId, ct);
+        if (role < FeedRole.Manager)
+            throw new ForbiddenException("Only the event's organiser can choose its cover photos.");
+
+        var wanted = (req.PhotoIds ?? []).Distinct().ToList();
+        if (wanted.Count > HeaderImages)
+            throw new BusinessRuleException($"Pick up to {HeaderImages} cover photos.", "too_many_covers");
+
+        var bucketId = await DefaultBucketAsync(campaignId, ct);
+        if (wanted.Count > 0)
+        {
+            if (bucketId is not { } b)
+                throw new BusinessRuleException("This event has no photos to choose from yet.", "no_bucket");
+            var live = await LivePicksAsync(wanted, b, ct);
+            if (live.Count != wanted.Count)
+                throw new BusinessRuleException("Some of those photos aren't in this event's main bucket any more.", "cover_not_in_bucket");
+        }
+
+        var tracked = await campaigns.GetByIdAsync(campaignId, ct)
+                      ?? throw new NotFoundException("That event no longer exists.");
+        tracked.PostCoverPhotoIds = wanted;
+        campaigns.Update(tracked);
+        await uow.SaveChangesAsync(ct);
+        return new FeedCoversDto(bucketId, wanted, HeaderImages);
+    }
+
+    /// <summary>The event's default bucket: the oldest one, which the invitation's camera posts to.</summary>
+    private Task<Guid?> DefaultBucketAsync(Guid campaignId, CancellationToken ct) =>
+        buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .Select(b => (Guid?)b.Id)
+            .FirstOrDefaultAsync(ct);
+
+    /// <summary>Those of the picked photos still in the bucket, in the order they were picked.</summary>
+    private async Task<List<Guid>> LivePicksAsync(IReadOnlyCollection<Guid> picks, Guid bucketId, CancellationToken ct)
+    {
+        if (picks.Count == 0) return [];
+        var found = await photos.Query()
+            .Where(p => p.BucketId == bucketId && p.DeletedAt == null && picks.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+        return picks.Where(found.Contains).ToList();
+    }
+
     // ---------- who is involved ----------
 
     /// <summary>Every event this account is involved in, with the closest way it is involved.</summary>
@@ -330,23 +392,32 @@ public sealed class FeedService(
     private async Task<FeedPostDto> DescribeAsync(
         AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct)
     {
-        var defaultBucket = await buckets.Query()
-            .Where(b => b.CampaignId == campaign.Id)
-            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
-            .Select(b => (Guid?)b.Id)
-            .FirstOrDefaultAsync(ct);
+        var defaultBucket = await DefaultBucketAsync(campaign.Id, ct);
 
         // The event's first photos, from the bucket the invitation's camera posts to, but only for
         // someone allowed to look into it. Everyone else sees the invitation's cover.
         var images = new List<FeedImageDto>();
         if (defaultBucket is { } bucketId && (role > FeedRole.Guest || await bucketService.MayViewAsync(bucketId, ct)))
         {
-            images = (await photos.Query()
+            // The organiser's picks first, in their order; the bucket's first photos when there are none.
+            var picks = campaign.PostCoverPhotoIds ?? [];
+            var chosen = picks.Count == 0
+                ? []
+                : (await photos.Query()
+                        .Where(p => p.BucketId == bucketId && p.DeletedAt == null && picks.Contains(p.Id))
+                        .Select(p => new { p.Id, p.Url, p.ThumbUrl, p.ContentType, p.CreatedAt })
+                        .ToListAsync(ct))
+                    .OrderBy(p => picks.IndexOf(p.Id))
+                    .ToList();
+            var shown = chosen.Count > 0
+                ? chosen
+                : await photos.Query()
                     .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
                     .OrderBy(p => p.CreatedAt)
                     .Take(HeaderImages)
-                    .Select(p => new { p.Url, p.ThumbUrl, p.ContentType })
-                    .ToListAsync(ct))
+                    .Select(p => new { p.Id, p.Url, p.ThumbUrl, p.ContentType, p.CreatedAt })
+                    .ToListAsync(ct);
+            images = shown
                 .Select(p => p.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
                     ? new FeedImageDto(p.ThumbUrl, true)
                     : new FeedImageDto(p.Url, false))
