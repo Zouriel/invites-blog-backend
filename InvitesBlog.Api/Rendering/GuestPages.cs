@@ -237,7 +237,7 @@ public static class GuestPages
 
     public static string RsvpDone(string status, string renderId, GuestPalette? palette = null) =>
         Shell("Thank you", $"""
-        <h1>{(status == "Going" ? "Wonderful — see you there" : "Thank you for letting us know")}</h1>
+        <h1>{(status == "Going" ? "Thanks, see you there" : "Thank you for letting us know")}</h1>
         <p>Your reply has been sent to the host.</p>
         <p><a href="/r/{E(renderId)}">Back to the invitation</a></p>
         """, palette);
@@ -262,8 +262,8 @@ public static class GuestPages
     {
         var tiles = photos.Count == 0
             ? """
-              <p class="empty">No photos yet. Be the first — whatever you shoot tonight lands here for
-                 everyone who was there.</p>
+              <p class="empty">No photos yet. Anything you take at the event will show up here for
+                 everyone who was invited.</p>
               """
             : $"""
                <div class="grid">
@@ -330,7 +330,7 @@ public static class GuestPages
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="robots" content="noindex, nofollow">
-            <title>{E(eventTitle)} — photos</title>
+            <title>Photos from {E(eventTitle)}</title>
             <style>{BoxCss(palette ?? GuestPalette.Fallback)}</style>
             </head><body>{body}</body></html>
             """;
@@ -351,7 +351,7 @@ public static class GuestPages
             <form method="post" action="{E(postAction)}">
               <button type="submit">Remove it</button>
             </form>
-            <p class="foot"><a href="{E(backTo)}">Keep it — back to the photos</a></p>
+            <p class="foot"><a href="{E(backTo)}">Keep it and go back to the photos</a></p>
             """, palette);
 
     public static string Cancelled(string? message) => Shell("Event cancelled", $"""

@@ -255,8 +255,8 @@ public static class GuestCameraPage
     public static string Render(
         string uploadPath, string backPath, string eventTitle, GuestPalette palette, string nonce,
         string backLabel = "Gallery",
-        string gateNote = "You can still see everything the night has collected — and add photos "
-                          + "straight from this phone's library there instead.",
+        string gateNote = "You can still look at the event's photos, and add some from this phone's "
+                          + "library there instead.",
         string gateAction = "See the photos",
         IReadOnlyDictionary<string, string>? fields = null) => $$"""
         <!doctype html>
@@ -265,7 +265,7 @@ public static class GuestCameraPage
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
         <meta name="robots" content="noindex, nofollow">
         <meta name="theme-color" content="#000000">
-        <title>Camera — {{E(eventTitle)}}</title>
+        <title>Camera for {{E(eventTitle)}}</title>
         <style>{{palette.Root}}
         {{Css}}</style>
         </head>
