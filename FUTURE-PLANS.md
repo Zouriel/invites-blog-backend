@@ -710,3 +710,29 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
 - **Uploads are still buffered whole in memory.** `IStorageService` takes a `byte[]`, so with a 256 MB
   video ceiling the practical limit is the server's RAM and whatever the proxy allows. Streaming
   straight to storage is the fix, and it means changing `IStorageService`.
+
+---
+
+## 6. Email delivery events (bounces and complaints) — *small, needs a secret*
+
+**Today.** Sending works: invitations, codes and notices all go out through Resend. What doesn't work
+is hearing back. Resend posts delivery events (bounced, complained, delivered) to
+`POST /api/delivery/resend/webhook`, and every one of them is rejected, because
+`Email__WebhookSecret` is set but **empty** in production. `ResendWebhookVerifier` fails closed on an
+empty secret, so nothing can forge an event, but nothing real gets through either.
+
+**Why it matters.** A hard bounce or a spam complaint never suppresses the address, so the next
+invitation goes to the same dead or unwilling inbox. Enough of that hurts the domain's sending
+reputation, which is the one thing every other email depends on. The dashboard's delivery status also
+never hears about a bounce.
+
+**To do.**
+- Copy the webhook's signing secret (`whsec_…`) from the Resend dashboard into `EMAIL_WEBHOOK_SECRET` in
+  the production `.env`, and redeploy the API.
+- Log a warning at startup when the secret is empty in Production, the way the Fake payment provider
+  now does, so this can't go quiet again.
+- Check a real bounce end to end: send to a known-bad address, confirm the event is accepted and the
+  address lands on the suppression list.
+
+**Trap.** Don't "fix" it by letting an empty secret skip verification. That would make the endpoint
+accept forged events, and a forged complaint is a way to stop someone's invitations being sent.
