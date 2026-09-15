@@ -156,11 +156,13 @@ public sealed class MediaRetentionService(
             .ToListAsync(ct);
         foreach (var photo in photos) photo.DeletedAt = now;
 
-        foreach (var bucket in await db.MediaBuckets.Where(b => b.CampaignId == campaignId).ToListAsync(ct))
-        {
-            bucket.UsedBytes = 0;
-            bucket.UpdatedAt = now;
-        }
+        // In the database directly: UsedBytes is ignored on a tracked save (see AppDbContext), so that
+        // no stale copy of it can overwrite an upload counted meanwhile. This commits ahead of the
+        // caller's SaveChanges; if that save then fails, the photos are still live and the next sweep
+        // finds this event again and runs the whole removal once more.
+        await db.MediaBuckets
+            .Where(b => b.CampaignId == campaignId)
+            .ExecuteUpdateAsync(s => s.SetProperty(b => b.UsedBytes, 0L).SetProperty(b => b.UpdatedAt, now), ct);
     }
 
     /// <summary>The organiser, and anyone the event is for who has full access.</summary>

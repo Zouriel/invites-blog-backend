@@ -80,6 +80,7 @@ public sealed class InvitesController(
     }
 
     // Requires Program.cs's ForwardedHeaders middleware to have already rewritten
-    // HttpContext.Connection.RemoteIpAddress from the Caddy hop's own IP to the real client IP.
-    private string? ClientIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
+    // HttpContext.Connection.RemoteIpAddress from the Caddy hop's own IP to the address Caddy saw, and
+    // ClientAddress to see past a Cloudflare edge to the visitor behind it.
+    private string? ClientIp() => RateLimiting.ClientAddress.Of(HttpContext)?.ToString();
 }

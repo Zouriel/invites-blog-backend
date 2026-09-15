@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Infrastructure.Security;
@@ -17,6 +18,13 @@ namespace InvitesBlog.Api.Authorization;
 ///   - anything else → the anonymous <c>Public</c> role.
 /// Permission claims come from <see cref="Roles.Definitions"/>. Resource ownership (this token →
 /// this campaign) is then enforced in the service layer; the policies gate the action type.
+///
+/// <para><b>401 versus 403.</b> A bearer token that was sent but authenticates nobody — expired,
+/// signed with an old key, a campaign token for a deleted draft — is still resolved to Public, so the
+/// open endpoints Public may use keep working for somebody holding a stale token. What changes is the
+/// refusal: a protected endpoint answers such a caller 401, not 403, because "we don't know who you
+/// are" is what tells the apps a session is over. Before, every expired session answered 403 with an
+/// empty body, and a user whose token had lapsed stayed "signed in" with every page failing.</para>
 /// </summary>
 public sealed class AppAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -30,10 +38,7 @@ public sealed class AppAuthenticationHandler(
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var header = Request.Headers.Authorization.ToString();
-        var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? header["Bearer ".Length..].Trim()
-            : null;
+        var token = PresentedToken();
 
         ClaimsIdentity identity;
 
@@ -69,6 +74,50 @@ public sealed class AppAuthenticationHandler(
 
         var principal = new ClaimsPrincipal(identity);
         return AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName));
+    }
+
+    /// <summary>
+    /// Refusal because nobody is authenticated. Written as the API's envelope, like every other error,
+    /// rather than the framework's empty body.
+    /// </summary>
+    protected override Task HandleChallengeAsync(AuthenticationProperties properties) =>
+        PresentedToken() is null
+            ? WriteAsync(StatusCodes.Status401Unauthorized, "Sign in to continue.", "Bearer")
+            : WriteAsync(StatusCodes.Status401Unauthorized, SessionOver, InvalidTokenChallenge);
+
+    /// <summary>
+    /// Refusal of an identity that lacks the permission. Except when a token was sent and did not
+    /// authenticate: that caller is Public only because their token failed, and the honest answer is
+    /// 401 — see the class remarks.
+    /// </summary>
+    protected override Task HandleForbiddenAsync(AuthenticationProperties properties)
+    {
+        var authenticated = Context.User.Identity?.IsAuthenticated == true;
+        if (!authenticated && PresentedToken() is not null)
+            return WriteAsync(StatusCodes.Status401Unauthorized, SessionOver, InvalidTokenChallenge);
+
+        return WriteAsync(StatusCodes.Status403Forbidden,
+            authenticated ? "You don't have permission to do that." : "Sign in to continue.", challenge: null);
+    }
+
+    private const string SessionOver = "Your session has expired. Please sign in again.";
+    private const string InvalidTokenChallenge = "Bearer error=\"invalid_token\"";
+
+    private async Task WriteAsync(int status, string message, string? challenge)
+    {
+        if (Response.HasStarted) return;
+        Response.StatusCode = status;
+        if (challenge is not null) Response.Headers.WWWAuthenticate = challenge;
+        await Response.WriteAsJsonAsync(ApiResponse<object?>.Fail(message));
+    }
+
+    /// <summary>The bearer token on the request, if one was sent.</summary>
+    private string? PresentedToken()
+    {
+        var header = Request.Headers.Authorization.ToString();
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
+        var token = header["Bearer ".Length..].Trim();
+        return token.Length == 0 ? null : token;
     }
 
     private static ClaimsIdentity BuildIdentity(string role, bool authenticated, IEnumerable<Claim>? extra = null) =>

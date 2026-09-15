@@ -67,6 +67,28 @@ public class CampaignServiceTests
         _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
     }
 
+    // ----- Images -----
+
+    /// <summary>
+    /// A cover or slot image is served on the app's own origin under the uploaded type, and anyone
+    /// with a possession token may upload one. SVG bytes are refused whatever they are labelled.
+    /// </summary>
+    [Theory]
+    [InlineData("image/svg+xml")]
+    [InlineData("image/png")]
+    public async Task A_campaign_image_that_is_really_an_svg_is_refused(string contentType)
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        var svg = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>");
+
+        var ex = await Assert.ThrowsAsync<InvitesBlog.Application.Exceptions.BusinessRuleException>(
+            () => Sut().AddImageAsync(c.Id, svg, contentType, "cover.png", slot: null));
+
+        Assert.Equal("unsupported_image", ex.ErrorCode);
+        await _storage.DidNotReceiveWithAnyArgs().PutAsync(default!, default!, default!, default);
+    }
+
     // ----- Create -----
 
     [Fact]

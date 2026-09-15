@@ -287,6 +287,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.ToTable("media_buckets");
             e.HasKey(x => x.Id);
+            // Written on INSERT only. Every later change goes through IMediaBucketUsageRepository as an
+            // atomic "used_bytes = used_bytes + n". Without this, any save of a tracked bucket — a
+            // rename, a resize, an access change, all of which call Update() and so mark every column
+            // modified — wrote back whatever figure it had loaded, erasing uploads counted meanwhile.
+            e.Property(x => x.UsedBytes).Metadata.SetAfterSaveBehavior(
+                Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Ignore);
             // The two ways a bucket is ever looked up: everything an account owns, and everything
             // belonging to a given event.
             e.HasIndex(x => x.OwnerUserId);

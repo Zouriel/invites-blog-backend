@@ -104,6 +104,14 @@ public interface IMediaBucketService
     /// <summary>Allows or stops some guests from seeing the bucket. See the implementation for the two states.</summary>
     Task<BucketAccessDto> SetAccessAsync(Guid bucketId, SetBucketAccessRequest req, CancellationToken ct = default);
     /// <summary>The buckets on an event that the CALLER may look into. Their own view, not the owner's.</summary>
+    /// <summary>
+    /// Which of the event's buckets <paramref name="guestId"/> may look into, answered from the guest
+    /// row rather than from the caller's proved contacts. The campaign photo box is reached by guests
+    /// who hold no account at all (the render cookie names the guest), so it cannot ask "who is
+    /// signed in"; the caller must already have established that the guest is on this event.
+    /// </summary>
+    Task<GuestBucketView> GuestViewAsync(Guid campaignId, Guid guestId, CancellationToken ct = default);
+
     Task<IReadOnlyList<MediaBucketDto>> VisibleForCampaignAsync(
         Guid campaignId, CancellationToken ct = default);
 
@@ -134,7 +142,20 @@ public interface IMediaBucketService
     /// <param name="incomingBytes">Everything the upload will write, derivatives included.</param>
     Task EnsureRoomAsync(Guid bucketId, long incomingBytes, CancellationToken ct = default);
 
-    /// <summary>Records what an upload actually wrote. Called after the objects are stored.</summary>
+    /// <summary>
+    /// <see cref="EnsureRoomAsync"/> and the claim on the space as ONE step: checks the upload fits and
+    /// counts <paramref name="bytes"/> against the bucket before a single object is written, holding a
+    /// lock that every other upload against the same space waits for. What an upload path calls —
+    /// checking and counting separately let parallel uploads all pass the check on the same figure.
+    /// Settle it afterwards with <see cref="CountUsageAsync"/>: the difference to what was really
+    /// stored, or the whole reservation back if the upload failed.
+    /// </summary>
+    Task ReserveRoomAsync(Guid bucketId, long bytes, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds <paramref name="bytes"/> to what the bucket holds, atomically — or, when negative, gives
+    /// some back (never below zero).
+    /// </summary>
     Task CountUsageAsync(Guid bucketId, long bytes, CancellationToken ct = default);
 
     /// <summary>
@@ -181,6 +202,20 @@ public interface IMediaBucketService
     Task CountContributionAsync(Guid qrId, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Which of an event's photographs one guest may see, by bucket.
+/// </summary>
+/// <param name="BucketIds">The event's buckets this guest is allowed to look into.</param>
+/// <param name="SeesUnbucketed">
+/// Whether they may see photographs that carry no bucket at all. Those predate buckets and belong to
+/// the event's DEFAULT bucket (its oldest), so they follow that bucket's audience — and an event with
+/// no bucket yet has nothing restricting them.
+/// </param>
+public sealed record GuestBucketView(IReadOnlySet<Guid> BucketIds, bool SeesUnbucketed)
+{
+    public bool MaySee(Guid? bucketId) => bucketId is { } id ? BucketIds.Contains(id) : SeesUnbucketed;
+}
+
 /// <summary>What a valid scanned code admits someone to.</summary>
 /// <param name="AllowAnonymous">Whether they may contribute without proving who they are.</param>
 /// <param name="CanUpload">
@@ -211,7 +246,8 @@ public sealed class MediaBucketService(
     IConfiguration config,
     IOptions<MediaBucketOptions> options,
     IUnitOfWork uow,
-    IPlanService plans) : IMediaBucketService
+    IPlanService plans,
+    IMediaBucketUsageRepository usage) : IMediaBucketService
 {
     private MediaBucketOptions Options => options.Value;
 
@@ -571,6 +607,31 @@ public sealed class MediaBucketService(
         return mine.Count == 0 ? [] : await DescribeAsync(mine, ct);
     }
 
+    public async Task<GuestBucketView> GuestViewAsync(
+        Guid campaignId, Guid guestId, CancellationToken ct = default)
+    {
+        // Oldest first, the same order ForCampaignAsync uses to name the DEFAULT bucket.
+        var rows = await buckets.Query()
+            .Where(b => b.CampaignId == campaignId)
+            .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
+            .Select(b => new { b.Id, b.IsRestricted })
+            .ToListAsync(ct);
+
+        // No bucket yet: nothing has been restricted, so the whole (unbucketed) box is theirs to see.
+        if (rows.Count == 0) return new GuestBucketView(new HashSet<Guid>(), SeesUnbucketed: true);
+
+        var admitted = (await members.Query()
+                .Where(m => m.CampaignId == campaignId && m.GuestId == guestId)
+                .Select(m => m.BucketId)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        // The same rule as MayViewAsync and VisibleForCampaignAsync: open unless restricted, and a
+        // restricted bucket admits only the guests named on it.
+        var visible = rows.Where(b => !b.IsRestricted || admitted.Contains(b.Id)).Select(b => b.Id).ToHashSet();
+        return new GuestBucketView(visible, SeesUnbucketed: visible.Contains(rows[0].Id));
+    }
+
     /// <summary>The caller's guest row on this event, matched on an identifier they have PROVED.</summary>
     private async Task<Guest?> GuestOnThisEventAsync(Guid campaignId, CancellationToken ct)
     {
@@ -735,7 +796,14 @@ public sealed class MediaBucketService(
         if (plan.Allocatable)
         {
             var given = Allocation(bucket, plan);
-            if (bucket.UsedBytes + incomingBytes > given)
+            // Read fresh rather than off the entity: GetByIdAsync may hand back a copy this request
+            // loaded before the reservation lock was granted, and that figure predates the uploads the
+            // lock was waiting on.
+            var usedNow = await buckets.Query()
+                .Where(b => b.Id == bucketId)
+                .Select(b => b.UsedBytes)
+                .FirstOrDefaultAsync(ct);
+            if (usedNow + incomingBytes > given)
                 throw new BusinessRuleException(
                     $"This bucket's {Size(given)} is full. Give it more space in Bucket settings.",
                     "bucket_full");
@@ -760,6 +828,20 @@ public sealed class MediaBucketService(
             throw new BusinessRuleException(
                 $"This account's {Size(cap)} across all events is full. Remove some photos or move to a bigger plan.",
                 "account_full");
+    }
+
+    public async Task ReserveRoomAsync(Guid bucketId, long bytes, CancellationToken ct = default)
+    {
+        var bucket = await buckets.GetByIdAsync(bucketId, ct)
+                     ?? throw new NotFoundException("That media bucket no longer exists.");
+        var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
+
+        // The lock is on whatever the check sums across. A subscriber's account limit spans all of
+        // their events, so every one of their uploads queues on the account; otherwise the space is
+        // the event's, shared by its buckets.
+        await usage.ReserveAsync(
+            plan.OwnerUserId ?? bucket.CampaignId, bucketId, bytes,
+            c => EnsureRoomAsync(bucketId, bytes, c), ct);
     }
 
     /// <summary>
@@ -910,16 +992,10 @@ public sealed class MediaBucketService(
             "bucket_closed");
     }
 
-    public async Task CountUsageAsync(Guid bucketId, long bytes, CancellationToken ct = default)
-    {
-        var bucket = await buckets.Query(tracking: true).FirstOrDefaultAsync(b => b.Id == bucketId, ct);
-        if (bucket is null) return;
-
-        bucket.UsedBytes += bytes;
-        bucket.UpdatedAt = DateTimeOffset.UtcNow;
-        buckets.Update(bucket);
-        await uow.SaveChangesAsync(ct);
-    }
+    // One UPDATE in the database. This used to load the bucket, add, and save the total back, so
+    // parallel uploads overwrote each other's increments and the bucket under-reported what it held.
+    public Task CountUsageAsync(Guid bucketId, long bytes, CancellationToken ct = default) =>
+        usage.AddAsync(bucketId, bytes, ct);
 
     // ---------- QR codes ----------
 

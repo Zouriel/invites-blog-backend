@@ -754,5 +754,6 @@ public sealed class GuestController(
 
     // Requires Program.cs's ForwardedHeaders middleware — without it every guest shares Caddy's IP
     // and the personal-link IP binding silently trusts everyone.
-    private string? ClientIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
+    // The visitor, not the Cloudflare edge in front of the proxy — see RateLimiting.ClientAddress.
+    private string? ClientIp() => RateLimiting.ClientAddress.Of(HttpContext)?.ToString();
 }

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Photos;
 using InvitesBlog.Application.Events;
 using InvitesBlog.Application.Exceptions;
@@ -140,16 +141,14 @@ public sealed class EventPhotoService(
         // Thirty days after a plan runs out, only the organiser can still look.
         if (!moderates && await bucketService.PhaseForCampaignAsync(campaignId, ct) >= MediaPhase.OrganiserOnly)
             throw new ForbiddenException("The photos from this event are only available to its organiser now.");
-        // The people the event is for look at it too, without moderating.
-        if (!moderates
-            && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
-            && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
-            throw new ForbiddenException("This photo box belongs to an event you're not on.");
+        var view = await ViewForAsync(campaignId, moderates, viewerGuestId, ct);
 
-        var live = await photos.Query()
-            .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
-            .OrderByDescending(p => p.CreatedAt)
-            .ToListAsync(ct);
+        var live = (await photos.Query()
+                .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync(ct))
+            .Where(p => view is null || view.MaySee(p.BucketId))
+            .ToList();
 
         // The same three questions StoreAsync asks, asked in the same order — cancelled, then the
         // night. This used to report only the cancellation, so an event six months past still offered
@@ -303,7 +302,15 @@ public sealed class EventPhotoService(
                     "That video arrived without a still to show for it.", "video_without_poster");
             if (content.Length > MaxVideoBytes)
                 throw new BusinessRuleException("That video is too long to upload.", "video_too_large");
+            if (!ImageSniffer.IsPhoto(poster, PosterType))
+                throw new BusinessRuleException(ImageSniffer.Refusal, ImageSniffer.RefusalCode);
         }
+        // Judged by the BYTES, on every door into a box — host, guest, QR contributor and bucket page
+        // all arrive here. What is stored is served back on the app's own origin under the type it was
+        // uploaded as, and an SVG there is a document that runs script, not a photograph. "image/*" was
+        // the whole check before, and it said yes to exactly that.
+        else if (!ImageSniffer.IsPhoto(content, contentType))
+            throw new BusinessRuleException(ImageSniffer.Refusal, ImageSniffer.RefusalCode);
 
         // Whether it is the night at all. Before the quota, because "this closed a week ago" is the
         // more useful answer than "this is full" when both are true.
@@ -322,8 +329,12 @@ public sealed class EventPhotoService(
         // The estimate is the raw upload — exact for a video, which is stored as it arrived, and
         // close for a photograph, whose three derivatives together land near the original. It only
         // has to be honest enough to refuse an upload that clearly does not fit; the real figure is
-        // counted below from what was actually stored.
-        await bucketService.EnsureRoomAsync(bucketId, content.Length, ct);
+        // settled below from what was actually stored.
+        //
+        // RESERVED, not merely checked: the estimate is counted against the bucket in the same step
+        // as the check, under a lock. Checking first and counting at the end let twenty parallel
+        // uploads all pass the check on the same figure and all be stored.
+        await bucketService.ReserveRoomAsync(bucketId, content.Length, ct);
 
         // NO SIZE CAP on a photograph, deliberately. Size limits belong on the images a TEMPLATE
         // renders, where a huge upload buys nothing a browser can show and costs every guest the
@@ -335,100 +346,111 @@ public sealed class EventPhotoService(
         // All three drop EXIF — which matters more here than anywhere else in the product, because
         // these are photographs OF other people's guests and the GPS tag in a camera roll would
         // otherwise publish where someone's wedding was to anyone who saves a picture of it.
-        var ext = Path.GetExtension(fileName);
-        if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
-
-        var id = Guid.NewGuid();
-        // Keyed by BUCKET, not by campaign: a standalone bucket has no campaign to key by, and the
-        // bucket is what owns the bytes and is charged for them either way.
-        var stem = $"buckets/{bucketId:N}/media/{id:N}";
-
-        string originalUrl, url, thumbUrl;
-        long sizeBytes;
-        int width, height;
-
-        // Every derivative is independent of every other one, so they are made and written TOGETHER
-        // rather than one after another.
-        //
-        // The wall time here is almost entirely the round trip to object storage, not the picture
-        // work: the same 12-megapixel photograph takes about 0.8s against storage on the same machine
-        // and about 8s against R2, and doing three PUTs in a row is three of those round trips spent
-        // for nothing. That whole time a contributor is standing at a party holding the phone it is
-        // uploading from, which is the worst place in this product to be slow.
-        async Task<Derivative> Write(Func<OptimizedImage> make, string key, string type)
+        EventPhoto photo;
+        try
         {
-            // Off the request thread: decoding and re-encoding a 12MP JPEG is real CPU, and holding
-            // it here would serialise the three anyway.
-            var image = await Task.Run(make, ct);
-            var stored = await storage.PutAsync(key, image.Content, type, ct);
-            return new Derivative(stored, image.Content.Length, image.Width, image.Height);
+            var ext = Path.GetExtension(fileName);
+            if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
+
+            var id = Guid.NewGuid();
+            // Keyed by BUCKET, not by campaign: a standalone bucket has no campaign to key by, and the
+            // bucket is what owns the bytes and is charged for them either way.
+            var stem = $"buckets/{bucketId:N}/media/{id:N}";
+
+            string originalUrl, url, thumbUrl;
+            long sizeBytes;
+            int width, height;
+
+            // Every derivative is independent of every other one, so they are made and written TOGETHER
+            // rather than one after another.
+            //
+            // The wall time here is almost entirely the round trip to object storage, not the picture
+            // work: the same 12-megapixel photograph takes about 0.8s against storage on the same machine
+            // and about 8s against R2, and doing three PUTs in a row is three of those round trips spent
+            // for nothing. That whole time a contributor is standing at a party holding the phone it is
+            // uploading from, which is the worst place in this product to be slow.
+            async Task<Derivative> Write(Func<OptimizedImage> make, string key, string type)
+            {
+                // Off the request thread: decoding and re-encoding a 12MP JPEG is real CPU, and holding
+                // it here would serialise the three anyway.
+                var image = await Task.Run(make, ct);
+                var stored = await storage.PutAsync(key, image.Content, type, ct);
+                return new Derivative(stored, image.Content.Length, image.Width, image.Height);
+            }
+
+            if (isVideo)
+            {
+                // ONE object, pointed at twice. There is no smaller viewing copy to make without
+                // transcoding, and storing the same file under two keys would double what a party's
+                // videos cost for nothing. The tile is the only derived thing a video has.
+                var clip = storage.PutAsync($"{stem}{ext}", content, contentType, ct);
+                var tile = Write(() => imageOptimizer.Optimize(poster!, PosterType, ThumbEdge),
+                    $"{stem}_t.jpg", PosterType);
+                // Never uploaded — it is read only for the dimensions the clip itself was shot at.
+                var still = Task.Run(() => imageOptimizer.Preserve(poster!, PosterType), ct);
+
+                await Task.WhenAll(clip, tile, still);
+
+                url = originalUrl = clip.Result;
+                thumbUrl = tile.Result.Url;
+
+                sizeBytes = content.Length + tile.Result.Bytes;
+                // The frame's size IS the video's — it was drawn from it — so this stays the dimensions
+                // of the thing itself rather than of the tile standing in for it.
+                width = still.Result.Width;
+                height = still.Result.Height;
+            }
+            else
+            {
+                var original = Write(() => imageOptimizer.Preserve(content, contentType),
+                    $"{stem}_o{ext}", contentType);
+                var view = Write(() => imageOptimizer.Optimize(content, contentType, ViewEdge),
+                    $"{stem}{ext}", contentType);
+                var thumb = Write(() => imageOptimizer.Optimize(content, contentType, ThumbEdge),
+                    $"{stem}_t{ext}", contentType);
+
+                await Task.WhenAll(original, view, thumb);
+
+                originalUrl = original.Result.Url;
+                url = view.Result.Url;
+                thumbUrl = thumb.Result.Url;
+
+                sizeBytes = original.Result.Bytes + view.Result.Bytes + thumb.Result.Bytes;
+                width = original.Result.Width;
+                height = original.Result.Height;
+            }
+
+            photo = new EventPhoto
+            {
+                Id = id,
+                CampaignId = campaignId,
+                BucketId = bucketId,
+                GuestId = guestId,
+                UploaderName = uploaderName,
+                OriginalUrl = originalUrl,
+                Url = url,
+                ThumbUrl = thumbUrl,
+                ContentType = contentType,
+                SizeBytes = sizeBytes,
+                // The shot's own dimensions, not the viewing copy's — this is what the photo IS.
+                Width = width,
+                Height = height,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            await photos.AddAsync(photo, ct);
+            await uow.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // Nothing was recorded, so the space reserved for it is given back. Not the request's
+            // token: a guest who gave up and closed the page must not keep the space they never used.
+            await bucketService.CountUsageAsync(bucketId, -content.Length, CancellationToken.None);
+            throw;
         }
 
-        if (isVideo)
-        {
-            // ONE object, pointed at twice. There is no smaller viewing copy to make without
-            // transcoding, and storing the same file under two keys would double what a party's
-            // videos cost for nothing. The tile is the only derived thing a video has.
-            var clip = storage.PutAsync($"{stem}{ext}", content, contentType, ct);
-            var tile = Write(() => imageOptimizer.Optimize(poster!, PosterType, ThumbEdge),
-                $"{stem}_t.jpg", PosterType);
-            // Never uploaded — it is read only for the dimensions the clip itself was shot at.
-            var still = Task.Run(() => imageOptimizer.Preserve(poster!, PosterType), ct);
-
-            await Task.WhenAll(clip, tile, still);
-
-            url = originalUrl = clip.Result;
-            thumbUrl = tile.Result.Url;
-
-            sizeBytes = content.Length + tile.Result.Bytes;
-            // The frame's size IS the video's — it was drawn from it — so this stays the dimensions
-            // of the thing itself rather than of the tile standing in for it.
-            width = still.Result.Width;
-            height = still.Result.Height;
-        }
-        else
-        {
-            var original = Write(() => imageOptimizer.Preserve(content, contentType),
-                $"{stem}_o{ext}", contentType);
-            var view = Write(() => imageOptimizer.Optimize(content, contentType, ViewEdge),
-                $"{stem}{ext}", contentType);
-            var thumb = Write(() => imageOptimizer.Optimize(content, contentType, ThumbEdge),
-                $"{stem}_t{ext}", contentType);
-
-            await Task.WhenAll(original, view, thumb);
-
-            originalUrl = original.Result.Url;
-            url = view.Result.Url;
-            thumbUrl = thumb.Result.Url;
-
-            sizeBytes = original.Result.Bytes + view.Result.Bytes + thumb.Result.Bytes;
-            width = original.Result.Width;
-            height = original.Result.Height;
-        }
-
-        var photo = new EventPhoto
-        {
-            Id = id,
-            CampaignId = campaignId,
-            BucketId = bucketId,
-            GuestId = guestId,
-            UploaderName = uploaderName,
-            OriginalUrl = originalUrl,
-            Url = url,
-            ThumbUrl = thumbUrl,
-            ContentType = contentType,
-            SizeBytes = sizeBytes,
-            // The shot's own dimensions, not the viewing copy's — this is what the photo IS.
-            Width = width,
-            Height = height,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        await photos.AddAsync(photo, ct);
-        await uow.SaveChangesAsync(ct);
-
-        // What was actually written, not what was estimated above.
-        await bucketService.CountUsageAsync(bucketId, photo.SizeBytes, ct);
+        // Settled to what was actually written, not what was estimated above.
+        await bucketService.CountUsageAsync(bucketId, photo.SizeBytes - content.Length, ct);
 
         return new EventPhotoDto(
             photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,
@@ -464,17 +486,19 @@ public sealed class EventPhotoService(
         if (!hosts && await bucketService.PhaseForCampaignAsync(campaignId, ct) >= MediaPhase.OrganiserOnly)
             throw new ForbiddenException("The photos from this event are only available to its organiser now.");
 
-        if (!hosts
-            && await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant
-            && !await IsGuestOfAsync(campaignId, viewerGuestId, ct))
-            throw new ForbiddenException("This photo box belongs to an event you're not on.");
+        var view = await ViewForAsync(campaignId, hosts, viewerGuestId, ct);
 
         var wanted = ids is { Count: > 0 } ? ids.ToHashSet() : null;
-        var chosen = await photos.Query()
-            .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
-            .Where(p => wanted == null || wanted.Contains(p.Id))
-            .OrderBy(p => p.CreatedAt)
-            .ToListAsync(ct);
+        // Filtered by bucket BEFORE the emptiness check, so a guest shut out of every bucket is told
+        // there is nothing to download rather than handed an empty zip — and so naming a hidden
+        // photo's id in ?ids= gets nothing either.
+        var chosen = (await photos.Query()
+                .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
+                .Where(p => wanted == null || wanted.Contains(p.Id))
+                .OrderBy(p => p.CreatedAt)
+                .ToListAsync(ct))
+            .Where(p => view is null || view.MaySee(p.BucketId))
+            .ToList();
 
         if (chosen.Count == 0)
             throw new BusinessRuleException("There are no photos to download.", "no_photos");
@@ -482,10 +506,22 @@ public sealed class EventPhotoService(
         // Everything that can refuse this request has now refused it, so the response may commit.
         var destination = begin(ArchiveName(campaign.Title));
 
-        // leaveOpen: the destination is the response body, and disposing that here would truncate it.
+        // ZipArchive never touches the response body directly. The body has buffering off, and Kestrel
+        // refuses synchronous writes to it — and ZipArchive writes synchronously in places no async API
+        // reaches: an entry's data descriptor on dispose (even through DisposeAsync, on an unseekable
+        // stream) and the central directory at the end. Every download used to fail with
+        // "Synchronous operations are disallowed" after the headers had gone, so it could only ever
+        // arrive as a truncated file.
+        //
+        // So the archive writes into a buffer, and the buffer is emptied into the body asynchronously
+        // after every entry. It still streams: what is held at once is one photograph, which the
+        // storage read below is holding anyway — never the archive.
+        //
+        // leaveOpen: the buffer is ours to drain after the archive's final write.
         // NoCompression because every entry is already a JPEG — deflating it again spends CPU per
         // megabyte to save almost nothing, and this runs while somebody waits.
-        using (var zip = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true))
+        var buffer = new DrainingStream(destination);
+        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
         {
             var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var index = 0;
@@ -502,10 +538,73 @@ public sealed class EventPhotoService(
 
                 var entry = zip.CreateEntry(EntryName(photo, index, key, used), CompressionLevel.NoCompression);
                 entry.LastWriteTime = photo.CreatedAt;
-                await using var into = entry.Open();
-                await into.WriteAsync(bytes, ct);
+                using (var into = entry.Open())
+                    into.Write(bytes);   // into the buffer; the descriptor lands there on dispose
+
+                await buffer.DrainAsync(ct);
             }
         }
+
+        // The central directory, written when the archive closed.
+        await buffer.DrainAsync(ct);
+    }
+
+    /// <summary>
+    /// A write-only stream that holds what it is given until <see cref="DrainAsync"/> hands it on.
+    ///
+    /// <para>Unseekable on purpose, like the response body it stands in front of: ZipArchive then
+    /// counts positions itself instead of seeking back to patch entry headers, which is what lets the
+    /// buffer be emptied between entries without the archive noticing.</para>
+    /// </summary>
+    private sealed class DrainingStream(Stream destination) : Stream
+    {
+        private readonly MemoryStream _pending = new();
+
+        public async Task DrainAsync(CancellationToken ct)
+        {
+            if (_pending.Length == 0) return;
+            await destination.WriteAsync(_pending.GetBuffer().AsMemory(0, (int)_pending.Length), ct);
+            await destination.FlushAsync(ct);
+            _pending.SetLength(0);
+        }
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Write(byte[] buffer, int offset, int count) => _pending.Write(buffer, offset, count);
+        public override void Write(ReadOnlySpan<byte> buffer) => _pending.Write(buffer);
+        public override void WriteByte(byte value) => _pending.WriteByte(value);
+        // Nothing to push synchronously: the bytes go on at the next drain.
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// The door to the box, and what the caller may see once through it: <c>null</c> for everything,
+    /// otherwise the buckets this guest is allowed into.
+    ///
+    /// <para>Moderators and the people the event is for see every photograph. A guest sees only the
+    /// buckets they may view — a bucket the organiser restricted, with this guest switched off, stays
+    /// shut here too. It used to be checked only at the bucket's own door, which left this campaign
+    /// door handing the same photographs to the same guest.</para>
+    /// </summary>
+    private async Task<GuestBucketView?> ViewForAsync(
+        Guid campaignId, bool moderates, Guid? viewerGuestId, CancellationToken ct)
+    {
+        // The people the event is for look at it too, without moderating.
+        if (moderates || await ownership.AccessAsync(campaignId, ct) >= CampaignAccess.Celebrant)
+            return null;
+
+        if (!await IsGuestOfAsync(campaignId, viewerGuestId, ct))
+            throw new ForbiddenException("This photo box belongs to an event you're not on.");
+
+        return await bucketService.GuestViewAsync(campaignId, viewerGuestId!.Value, ct);
     }
 
     /// <summary>
@@ -516,8 +615,14 @@ public sealed class EventPhotoService(
     private static string? StorageKeyOf(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
-        var start = url.IndexOf("campaigns/", StringComparison.Ordinal);
-        return start < 0 ? null : url[start..].Split('?')[0];
+        // Two roots, not one. Photos from before buckets live under campaigns/; everything uploaded
+        // since lives under buckets/{id}/media/. Looking only for campaigns/ skipped every photo
+        // uploaded into a bucket, so a download came back as a valid but EMPTY zip.
+        var starts = new[] { "buckets/", "campaigns/" }
+            .Select(root => url.IndexOf(root, StringComparison.Ordinal))
+            .Where(i => i >= 0)
+            .ToList();
+        return starts.Count == 0 ? null : url[starts.Min()..].Split('?')[0];
     }
 
     /// <summary>

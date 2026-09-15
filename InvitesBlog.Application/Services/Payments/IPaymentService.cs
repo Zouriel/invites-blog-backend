@@ -20,4 +20,11 @@ public interface IPaymentService
 
     /// <summary>Simulates provider success from the dev checkout page by running the real webhook path.</summary>
     Task<WebhookProcessResult> CompleteDevCheckoutAsync(string session, string payment, CancellationToken ct = default);
+
+    /// <summary>
+    /// A return address that is safe to send a browser to: a path on this site, or an address on one
+    /// of the app's own configured origins. Anything else — another host, a scheme-relative
+    /// <c>//host</c>, <c>javascript:</c> — comes back as <c>/</c>.
+    /// </summary>
+    string SafeReturnUrl(string? url);
 }

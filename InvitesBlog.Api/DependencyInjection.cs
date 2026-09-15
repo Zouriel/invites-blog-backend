@@ -13,7 +13,10 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInvitesBlogApi(this IServiceCollection services, IConfiguration config)
     {
-        services.AddControllers();
+        // Model-binding failures answer in the API's own envelope, not ProblemDetails — see
+        // InvalidModelStateResponse for why the two shapes cannot coexist.
+        services.AddControllers()
+            .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = Middleware.InvalidModelStateResponse.Create);
         services.AddOpenApi();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
@@ -60,18 +63,27 @@ public static class DependencyInjection
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            // The same envelope as every other refusal, so the apps can show why.
+            options.OnRejected = (context, ct) => new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
+                Application.Common.ApiResponse<object?>.Fail("Too many requests. Please wait a few minutes and try again."),
+                ct));
+
+            // Every policy is keyed on ClientAddress, never on RemoteIpAddress directly: behind
+            // Cloudflare the remote address is an edge server that can change from request to request,
+            // which gives every request its own quota. See ClientAddress.
             options.AddPolicy("otp", ctx => RateLimitPartition.GetFixedWindowLimiter(
-                ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+                RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10) }));
             // The open link is the one lookup an anonymous caller can aim at freely, and the code
             // behind it is short by design. 59 bits is far past guessable, but a limiter is what
             // turns "not worth trying" into "not possible to try at scale".
             options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
-                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
             options.AddPolicy("resend", ctx => RateLimitPartition.GetFixedWindowLimiter(
-                ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+                RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(60) }));
+            options.AddPolicy(RateLimiting.RateLimitPolicies.CreateEvent, RateLimiting.RateLimitPolicies.CreateEventPartition);
         });
 
         return services;

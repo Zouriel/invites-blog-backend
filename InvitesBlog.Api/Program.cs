@@ -18,6 +18,14 @@ builder.Services.AddHostedService<MediaRetentionService>();
 
 var app = builder.Build();
 
+// There is no real payment provider yet, so production runs on the Fake one on purpose. Said out loud
+// at every start so it is never mistaken for a working checkout: with it, "paid" means somebody
+// pressed a button. The dev checkout pages that press it are refused outside Development.
+if (app.Environment.IsProduction()
+    && app.Services.GetRequiredService<InvitesBlog.Application.Abstractions.IPaymentProvider>().Name == "Fake")
+    app.Logger.LogWarning(
+        "Payments are using the Fake provider in Production. No real payment is taken; replace it before charging anyone.");
+
 // Production: the API is never internet-reachable directly — only the shared Caddy container can
 // reach it, over an internal Docker network (see deploy/compose.prod.yml, no published port on the
 // api service). That makes Caddy the one trusted hop, so it's safe to accept whatever X-Forwarded-For
@@ -29,14 +37,19 @@ var forwardedHeaders = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
 };
-forwardedHeaders.KnownNetworks.Clear();
+// KnownIPNetworks replaces KnownNetworks, which is obsolete in .NET 10.
+forwardedHeaders.KnownIPNetworks.Clear();
 forwardedHeaders.KnownProxies.Clear();
+// This yields the address CADDY saw. When Cloudflare sits in front of Caddy that is an edge server,
+// not the visitor — anything keyed on the visitor must go through RateLimiting.ClientAddress.
 app.UseForwardedHeaders(forwardedHeaders);
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors();
-app.UseRateLimiter();
 app.UseAuthentication();
+// After authentication, so a limit can tell a signed-in account from an anonymous visitor (the
+// create-event policy gives accounts a larger allowance). The address-keyed policies are unaffected.
+app.UseRateLimiter();
 app.UseAuthorization();
 
 // Serve compiled template packages / assets locally at /assets (assets.invites.blog in prod).

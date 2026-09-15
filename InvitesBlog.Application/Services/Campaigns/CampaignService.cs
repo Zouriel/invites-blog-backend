@@ -563,6 +563,11 @@ public sealed class CampaignService(
             throw new Exceptions.BusinessRuleException("Images must be 20 MB or smaller.", "image_too_large");
         if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             throw new Exceptions.BusinessRuleException("Only image files can be uploaded here.", "not_an_image");
+        // By the bytes as well as the label. A campaign image is stored and served on the app's own
+        // origin under the uploaded type, and anyone holding a possession token can upload one — an SVG
+        // there is a script-bearing document, not a cover photo.
+        if (!Common.ImageSniffer.IsPhoto(content, contentType))
+            throw new Exceptions.BusinessRuleException(Common.ImageSniffer.Refusal, Common.ImageSniffer.RefusalCode);
 
         // Shrink before storing. A phone photo is routinely 4000px wide, and six of them in one
         // invitation is more bitmap than a browser will hold — which is what hung the page. The
@@ -637,7 +642,6 @@ public sealed class CampaignService(
         "image/gif" => ".gif",
         "image/webp" => ".webp",
         "image/avif" => ".avif",
-        "image/svg+xml" => ".svg",
         _ => ".img"
     };
 

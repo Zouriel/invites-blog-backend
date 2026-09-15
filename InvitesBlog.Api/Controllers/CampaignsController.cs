@@ -23,6 +23,7 @@ public sealed class CampaignsController(
     // Campaigns.Create, so this action is deliberately [AllowAnonymous] rather than permission-gated.
     [HttpPost]
     [AllowAnonymous]
+    [EnableRateLimiting(Api.RateLimiting.RateLimitPolicies.CreateEvent)]
     public async Task<IActionResult> Create([FromBody] CreateCampaignRequest req, CancellationToken ct) =>
         Created(await campaigns.CreateAsync(req, ct));
 
@@ -221,6 +222,7 @@ public sealed class CampaignsController(
     /// </summary>
     [HttpPost("bare")]
     [AllowAnonymous]
+    [EnableRateLimiting(Api.RateLimiting.RateLimitPolicies.CreateEvent)]
     public async Task<IActionResult> CreateBare(
         [FromBody] CreateBareCampaignRequest req, CancellationToken ct)
     {
@@ -244,6 +246,7 @@ public sealed class CampaignsController(
     /// </summary>
     [HttpPost("bring-your-own")]
     [AllowAnonymous]
+    [EnableRateLimiting(Api.RateLimiting.RateLimitPolicies.CreateEvent)]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<IActionResult> BringYourOwn(

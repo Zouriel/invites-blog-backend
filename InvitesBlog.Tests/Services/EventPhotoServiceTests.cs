@@ -34,6 +34,11 @@ public class EventPhotoServiceTests
                 CampaignId = ci.Arg<Guid>(),
                 CapacityBytes = long.MaxValue,
             });
+
+        // A guest may see every bucket unless a test shuts one. Bucket membership is
+        // MediaBucketServiceTests' subject; here it only has to be answered.
+        _buckets.GuestViewAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new GuestBucketView(new HashSet<Guid>(), SeesUnbucketed: true));
     }
 
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
@@ -143,7 +148,183 @@ public class EventPhotoServiceTests
         return (offered, new ZipArchive(buffer, ZipArchiveMode.Read), buffer);
     }
 
+    // ----- buckets a guest is shut out of --------------------------------------------------------
+
+    /// <summary>A guest who may see <paramref name="open"/> and nothing else, unbucketed photos included.</summary>
+    private void OnlySees(params Guid[] open) =>
+        _buckets.GuestViewAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new GuestBucketView(open.ToHashSet(), SeesUnbucketed: false));
+
+    private EventPhoto InBucket(Guid campaignId, Guid? bucketId)
+    {
+        var photo = Stored(campaignId);
+        photo.BucketId = bucketId;
+        return photo;
+    }
+
+    /// <summary>
+    /// The organiser switched this guest off for the after-party. The bucket's own door already said
+    /// no; the campaign's box must not hand the same photographs over anyway.
+    /// </summary>
+    [Fact]
+    public async Task A_guest_shut_out_of_a_bucket_sees_none_of_its_photos_but_still_sees_the_rest()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        Guid ceremony = Guid.NewGuid(), afterParty = Guid.NewGuid();
+        EventPhoto[] taken =
+        [
+            InBucket(campaign.Id, ceremony),
+            InBucket(campaign.Id, afterParty),
+            InBucket(campaign.Id, afterParty),
+            // Predates buckets, so it belongs to the default bucket's audience — shut here too.
+            InBucket(campaign.Id, null),
+        ];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        OnlySees(ceremony);
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.Single(box.Photos);
+        Assert.Equal(taken[0].Id, box.Photos[0].Id);
+        Assert.Equal(1, box.Count);
+    }
+
+    [Fact]
+    public async Task A_guest_allowed_into_a_bucket_sees_its_photos()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var afterParty = Guid.NewGuid();
+        EventPhoto[] taken = [InBucket(campaign.Id, afterParty), InBucket(campaign.Id, afterParty)];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        OnlySees(afterParty);
+
+        var box = await Sut().GetAsync(campaign.Id, guest.Id);
+
+        Assert.Equal(2, box.Photos.Count);
+    }
+
+    /// <summary>Keeping is the same question as looking: what cannot be seen cannot be downloaded.</summary>
+    [Fact]
+    public async Task A_guest_shut_out_of_a_bucket_cannot_download_its_photos()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        Guid ceremony = Guid.NewGuid(), afterParty = Guid.NewGuid();
+        EventPhoto[] taken = [InBucket(campaign.Id, ceremony), InBucket(campaign.Id, afterParty)];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        OnlySees(ceremony);
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+        Assert.Single(zip.Entries);
+
+        // And naming the hidden one outright gets nothing, rather than an empty zip or the photo.
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ArchiveAsync(campaign.Id, guest.Id, new[] { taken[1].Id }));
+    }
+
+    /// <summary>Restricting a bucket narrows what GUESTS see. The host moderates all of it.</summary>
+    [Fact]
+    public async Task The_host_still_sees_every_bucket()
+    {
+        var (campaign, _) = OnTheGuestList();
+        _currentUser.HasPermission(Permissions.Photos.Moderate).Returns(true);
+        _currentUser.CampaignId.Returns(campaign.Id);
+        Guid ceremony = Guid.NewGuid(), afterParty = Guid.NewGuid();
+        EventPhoto[] taken = [InBucket(campaign.Id, ceremony), InBucket(campaign.Id, afterParty), InBucket(campaign.Id, null)];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        OnlySees(ceremony);
+
+        var box = await Sut().GetAsync(campaign.Id, viewerGuestId: null);
+
+        Assert.Equal(3, box.Photos.Count);
+        await _buckets.DidNotReceiveWithAnyArgs().GuestViewAsync(default, default, default);
+    }
+
     // ----- keeping the photographs -------------------------------------------------------------
+
+    /// <summary>
+    /// What the response body actually is: write-only, unseekable, and refusing every synchronous
+    /// write — Kestrel with buffering off. The archive used to be written with the synchronous
+    /// ZipArchive, which passed against a MemoryStream and failed every real download.
+    /// </summary>
+    private sealed class ResponseBodyLike : Stream
+    {
+        private readonly MemoryStream _inner = new();
+        public byte[] ToArray() => _inner.ToArray();
+
+        private static InvalidOperationException Sync() =>
+            new("Synchronous operations are disallowed. Call WriteAsync or set AllowSynchronousIO to true instead.");
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() => throw Sync();
+        public override void Write(byte[] buffer, int offset, int count) => throw Sync();
+        public override void Write(ReadOnlySpan<byte> buffer) => throw Sync();
+        public override void WriteByte(byte value) => throw Sync();
+
+        public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+            _inner.WriteAsync(buffer, offset, count, ct);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) =>
+            _inner.WriteAsync(buffer, ct);
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Everything uploaded since buckets exist is stored under buckets/, not campaigns/. The archive
+    /// only recognised the old root, so every download of a current event was an empty zip.
+    /// </summary>
+    [Fact]
+    public async Task Photos_stored_in_a_bucket_are_packed()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var bucketId = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var key = $"buckets/{bucketId:N}/media/{id:N}_o.jpg";
+        _storage.GetAsync(key, Arg.Any<CancellationToken>()).Returns([9, 9, 9]);
+        EventPhoto[] taken =
+        [
+            new()
+            {
+                Id = id, CampaignId = campaign.Id, BucketId = bucketId,
+                OriginalUrl = $"http://localhost:8080/assets/{key}", Url = $"/assets/buckets/{bucketId:N}/media/{id:N}.jpg",
+                ThumbUrl = $"/assets/buckets/{bucketId:N}/media/{id:N}_t.jpg",
+                ContentType = "image/jpeg", CreatedAt = DateTimeOffset.UtcNow,
+            },
+            Stored(campaign.Id),
+        ];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        _buckets.GuestViewAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new GuestBucketView(new HashSet<Guid> { bucketId }, SeesUnbucketed: true));
+
+        var (_, zip, _) = await ArchiveAsync(campaign.Id, guest.Id);
+
+        Assert.Equal(2, zip.Entries.Count);
+    }
+
+    [Fact]
+    public async Task The_archive_streams_into_a_body_that_refuses_synchronous_writes()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        EventPhoto[] taken = [Stored(campaign.Id, bytes: [1, 2, 3]), Stored(campaign.Id, bytes: [4, 5, 6, 7])];
+        _photos.Query().Returns(taken.AsAsyncQueryable());
+        var body = new ResponseBodyLike();
+
+        await Sut().WriteArchiveAsync(campaign.Id, guest.Id, null, _ => body);
+
+        using var zip = new ZipArchive(new MemoryStream(body.ToArray()), ZipArchiveMode.Read);
+        Assert.Equal(2, zip.Entries.Count);
+        await using var first = await zip.Entries.OrderBy(e => e.FullName).First().OpenAsync();
+        using var read = new MemoryStream();
+        await first.CopyToAsync(read);
+        Assert.Equal(new byte[] { 1, 2, 3 }, read.ToArray());
+    }
 
     [Fact]
     public async Task A_guest_can_download_the_whole_box()
@@ -480,6 +661,111 @@ public class EventPhotoServiceTests
         // And it is kept at full size: the original is the shot, not a copy sized for a screen.
         Assert.Equal(3000, photo.Width);
         Assert.Equal(3000, photo.Height);
+    }
+
+    private const string Svg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"><script>alert(document.cookie)</script></svg>";
+
+    /// <summary>
+    /// Everything uploaded here is served back on the app's own origin. An SVG there is a document
+    /// that runs script with the session in reach, not a photograph.
+    /// </summary>
+    [Theory]
+    [InlineData("image/svg+xml")]
+    [InlineData("image/png")]      // the label lies: SVG bytes under a raster type
+    [InlineData("image/jpeg")]
+    public async Task An_svg_is_refused_whatever_it_is_labelled(string contentType)
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().AddAsync(
+            campaign.Id, guest.Id, System.Text.Encoding.UTF8.GetBytes(Svg), contentType, "x.png"));
+
+        Assert.Equal("unsupported_image", ex.ErrorCode);
+        await _storage.DidNotReceiveWithAnyArgs().PutAsync(default!, default!, default!, default);
+    }
+
+    /// <summary>And a real photograph labelled SVG is refused too — the label is what it is served as.</summary>
+    [Fact]
+    public async Task A_photo_labelled_as_svg_is_refused()
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().AddAsync(campaign.Id, guest.Id, Jpeg(64, 64), "image/svg+xml", "x.svg"));
+
+        Assert.Equal("unsupported_image", ex.ErrorCode);
+    }
+
+    /// <summary>The QR contributor's door has no identity to check, so the file check is all there is.</summary>
+    [Fact]
+    public async Task A_contributor_cannot_upload_an_svg_into_a_bucket()
+    {
+        OnTheGuestList();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().AddToBucketAsync(
+            Guid.NewGuid(), null, "Somebody", System.Text.Encoding.UTF8.GetBytes(Svg), "image/png", "x.png"));
+
+        Assert.Equal("unsupported_image", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_clip_whose_still_is_not_a_picture_is_refused()
+    {
+        var (campaign, guest) = OnTheGuestList();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().AddAsync(
+            campaign.Id, guest.Id, [.. Enumerable.Repeat((byte)7, 4096)], "video/mp4", "clip.mp4",
+            System.Text.Encoding.UTF8.GetBytes(Svg)));
+
+        Assert.Equal("unsupported_image", ex.ErrorCode);
+    }
+
+    // ----- the space an upload takes ------------------------------------------------------------
+
+    private MediaBucket OneBucket(Guid campaignId)
+    {
+        var bucket = new MediaBucket { Id = Guid.NewGuid(), CampaignId = campaignId, CapacityBytes = long.MaxValue };
+        _buckets.ForCampaignAsync(campaignId, Arg.Any<CancellationToken>()).Returns(bucket);
+        return bucket;
+    }
+
+    /// <summary>
+    /// Space is claimed BEFORE anything is written, and settled to what was really stored after — so
+    /// parallel uploads cannot all pass a check on the same figure, and the count still ends exact.
+    /// </summary>
+    [Fact]
+    public async Task An_upload_reserves_its_space_first_and_settles_to_what_was_stored()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var bucket = OneBucket(campaign.Id);
+        var content = Jpeg(640, 480);
+        EventPhoto? recorded = null;
+        await _photos.AddAsync(Arg.Do<EventPhoto>(p => recorded = p), Arg.Any<CancellationToken>());
+
+        await Sut().AddAsync(campaign.Id, guest.Id, content, "image/jpeg", "IMG_1.jpg");
+
+        await _buckets.Received(1).ReserveRoomAsync(bucket.Id, content.Length, Arg.Any<CancellationToken>());
+        await _buckets.DidNotReceiveWithAnyArgs().EnsureRoomAsync(default, default, default);
+        Assert.NotNull(recorded);
+        await _buckets.Received(1).CountUsageAsync(
+            bucket.Id, recorded!.SizeBytes - content.Length, Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>An upload that never made it gives its reservation back, or the bucket fills with nothing.</summary>
+    [Fact]
+    public async Task A_failed_upload_gives_back_the_space_it_reserved()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var bucket = OneBucket(campaign.Id);
+        var content = Jpeg(64, 64);
+        _storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string>>(_ => throw new IOException("storage is down"));
+
+        await Assert.ThrowsAsync<IOException>(
+            () => Sut().AddAsync(campaign.Id, guest.Id, content, "image/jpeg", "IMG_1.jpg"));
+
+        await _buckets.Received(1).CountUsageAsync(bucket.Id, -content.Length, Arg.Any<CancellationToken>());
     }
 
     [Fact]

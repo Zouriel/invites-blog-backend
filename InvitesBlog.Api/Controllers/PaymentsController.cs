@@ -15,7 +15,8 @@ namespace InvitesBlog.Api.Controllers;
 /// Infrastructure boundary (reading the raw webhook body and calling <see cref="DispatchService"/>,
 /// which the Application layer cannot reference).
 /// </summary>
-public sealed class PaymentsController(IPaymentService payments, DispatchService dispatch) : BaseApiController
+public sealed class PaymentsController(
+    IPaymentService payments, DispatchService dispatch, IWebHostEnvironment env) : BaseApiController
 {
     // POST /api/campaigns/{id}/checkout [campaign-token]
     [HttpPost("/api/campaigns/{id:guid}/checkout")]
@@ -50,22 +51,34 @@ public sealed class PaymentsController(IPaymentService payments, DispatchService
     }
 
     // ---- Dev fake-checkout page (only meaningful with the Fake provider) ----
+    //
+    // DEVELOPMENT ONLY, and answered as if the routes did not exist anywhere else. "Complete" signs
+    // its own payment.succeeded with the server's webhook secret, so on a live server it is a button
+    // that marks any pending payment paid and sends the invitations without anybody paying. The Fake
+    // provider being configured in production is not a reason to expose it: there is no real provider
+    // yet, and these pages are how a developer stands in for one on their own machine.
 
     [HttpGet("/api/dev/checkout")]
     [AllowAnonymous]
     public IActionResult DevCheckout(
         [FromQuery] string session, [FromQuery] string payment, [FromQuery] decimal amount,
-        [FromQuery] string success, [FromQuery] string cancel) =>
-        Content(payments.BuildDevCheckoutPage(session, payment, amount, success, cancel), "text/html");
+        [FromQuery] string success, [FromQuery] string cancel)
+    {
+        if (!env.IsDevelopment()) return NotFound();
+        return Content(payments.BuildDevCheckoutPage(session, payment, amount, success, cancel), "text/html");
+    }
 
     [HttpGet("/api/dev/checkout/complete")]
     [AllowAnonymous]
     public async Task<IActionResult> DevCheckoutComplete(
         [FromQuery] string session, [FromQuery] string payment, [FromQuery] string success, CancellationToken ct)
     {
+        if (!env.IsDevelopment()) return NotFound();
+
         var result = await payments.CompleteDevCheckoutAsync(session, payment, ct);
         if (result.DispatchCampaignId is Guid campaignId)
             await dispatch.DispatchCampaignAsync(campaignId, ct);
-        return Redirect(success);
+        // Never wherever the query string says: that is an open redirect off our own domain.
+        return Redirect(payments.SafeReturnUrl(success));
     }
 }

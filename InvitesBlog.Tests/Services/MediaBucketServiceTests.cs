@@ -69,7 +69,35 @@ public class MediaBucketServiceTests
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
-        Options.Create(new MediaBucketOptions()), _uow, _plans);
+        Options.Create(new MediaBucketOptions()), _uow, _plans, _usage);
+
+    /// <summary>
+    /// Stands in for the database's atomic update and lock. What these tests pin down is what the
+    /// service ASKS of it: the check run inside the reservation, under the right key, and every change
+    /// to usage sent as an increment rather than a figure saved back.
+    /// </summary>
+    private sealed class RecordingUsage : IMediaBucketUsageRepository
+    {
+        public List<(Guid Key, Guid Bucket, long Bytes)> Reserved { get; } = [];
+        public List<(Guid Bucket, long Bytes)> Added { get; } = [];
+
+        public async Task ReserveAsync(
+            Guid quotaKey, Guid bucketId, long bytes, Func<CancellationToken, Task> ensureRoom,
+            CancellationToken ct = default)
+        {
+            await ensureRoom(ct);   // throws to refuse, and then nothing below happens
+            Reserved.Add((quotaKey, bucketId, bytes));
+            Added.Add((bucketId, bytes));
+        }
+
+        public Task AddAsync(Guid bucketId, long bytes, CancellationToken ct = default)
+        {
+            Added.Add((bucketId, bytes));
+            return Task.CompletedTask;
+        }
+    }
+
+    private readonly RecordingUsage _usage = new();
 
     private MediaBucket Mine(long capacityGb = 10, long used = 0) => new()
     {
@@ -195,6 +223,165 @@ public class MediaBucketServiceTests
 
         Assert.All(already, p => Assert.Equal(bucket.Id, p.BucketId));
         Assert.Equal(1000, bucket.UsedBytes);
+    }
+
+    // ---------- counting usage under parallel uploads ----------
+
+    [Fact]
+    public async Task A_reservation_that_fits_is_counted_in_the_same_step_as_the_check()
+    {
+        var bucket = Mine(capacityGb: 10, used: 1 * MediaBucketPlans.BytesPerGb);
+        Stored(bucket);
+
+        await Sut().ReserveRoomAsync(bucket.Id, 1024);
+
+        // No subscriber behind this event, so the space — and the lock — is the event's.
+        Assert.Equal((bucket.CampaignId, bucket.Id, 1024L), Assert.Single(_usage.Reserved));
+    }
+
+    [Fact]
+    public async Task A_reservation_that_does_not_fit_is_refused_and_counts_nothing()
+    {
+        var bucket = Mine(capacityGb: 10, used: 10 * MediaBucketPlans.BytesPerGb);
+        Stored(bucket);
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().ReserveRoomAsync(bucket.Id, 1024));
+
+        Assert.Equal("bucket_full", e.ErrorCode);
+        Assert.Empty(_usage.Added);
+    }
+
+    /// <summary>
+    /// A subscriber's account limit spans every event they hold, so two uploads to two different
+    /// events of theirs must still queue on one lock, or both could take the account's last gigabyte.
+    /// </summary>
+    [Fact]
+    public async Task A_subscribers_uploads_queue_on_their_account_not_on_each_event()
+    {
+        var bucket = Mine();
+        Stored(bucket);
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(eventBytes: bucket.CapacityBytes, owner: _me));
+
+        await Sut().ReserveRoomAsync(bucket.Id, 1024);
+
+        Assert.Equal(_me, Assert.Single(_usage.Reserved).Key);
+    }
+
+    /// <summary>
+    /// The lost update itself: usage was loaded, added to and saved back, so parallel uploads each
+    /// wrote their own total over the others'. It must go to the database as an increment.
+    /// </summary>
+    [Fact]
+    public async Task Usage_is_counted_as_an_increment_not_a_total_saved_back()
+    {
+        var bucket = Mine(used: 500);
+        Stored(bucket);
+
+        await Sut().CountUsageAsync(bucket.Id, 250);
+
+        Assert.Equal((bucket.Id, 250L), Assert.Single(_usage.Added));
+        _buckets.DidNotReceiveWithAnyArgs().Update(default!);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+        Assert.Equal(500, bucket.UsedBytes);
+    }
+
+    /// <summary>
+    /// The room check must read the figure the database holds NOW. The entity this request loaded
+    /// before the lock was granted predates the uploads the lock was waiting on.
+    /// </summary>
+    [Fact]
+    public async Task The_room_check_reads_usage_fresh_rather_than_from_an_entity_already_loaded()
+    {
+        var plan = TestData.Plan(kind: InvitesBlog.Application.Plans.PlanKind.Premium, owner: _me,
+            accountBytes: 1000 * MediaBucketPlans.BytesPerGb);
+        var stale = Mine(capacityGb: 10, used: 0);
+        stale.AllocatedBytes = 10 * MediaBucketPlans.BytesPerGb;
+        Stored(stale);
+        _plans.ForCampaignAsync(stale.CampaignId, Arg.Any<CancellationToken>()).Returns(plan);
+
+        // What another upload has committed meanwhile.
+        var current = Mine(capacityGb: 10, used: 10 * MediaBucketPlans.BytesPerGb);
+        current.Id = stale.Id;
+        current.CampaignId = stale.CampaignId;
+        current.AllocatedBytes = stale.AllocatedBytes;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { current }.AsAsyncQueryable());
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnsureRoomAsync(stale.Id, 1024));
+        Assert.Equal("bucket_full", e.ErrorCode);
+    }
+
+    // ---------- which buckets a guest may look into ----------
+
+    private (Guid CampaignId, MediaBucket Default, MediaBucket Second) TwoBuckets()
+    {
+        var campaignId = Guid.NewGuid();
+        var first = Theirs();
+        first.CampaignId = campaignId;
+        first.CreatedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var second = Theirs();
+        second.CampaignId = campaignId;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { second, first }.AsAsyncQueryable());
+        return (campaignId, first, second);
+    }
+
+    [Fact]
+    public async Task A_guest_sees_every_bucket_nobody_restricted()
+    {
+        var (campaignId, first, second) = TwoBuckets();
+
+        var view = await Sut().GuestViewAsync(campaignId, Guid.NewGuid());
+
+        Assert.True(view.MaySee(first.Id));
+        Assert.True(view.MaySee(second.Id));
+        Assert.True(view.MaySee(null));
+    }
+
+    [Fact]
+    public async Task A_guest_switched_off_a_restricted_bucket_does_not_see_it()
+    {
+        var (campaignId, first, second) = TwoBuckets();
+        second.IsRestricted = true;
+        var guestId = Guid.NewGuid();
+        // Somebody else is on the list; this guest is not.
+        _members.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new MediaBucketMember { BucketId = second.Id, GuestId = Guid.NewGuid(), CampaignId = campaignId },
+        }.AsAsyncQueryable());
+
+        var view = await Sut().GuestViewAsync(campaignId, guestId);
+
+        Assert.True(view.MaySee(first.Id));
+        Assert.False(view.MaySee(second.Id));
+    }
+
+    [Fact]
+    public async Task A_guest_named_on_a_restricted_bucket_sees_it()
+    {
+        var (campaignId, _, second) = TwoBuckets();
+        second.IsRestricted = true;
+        var guestId = Guid.NewGuid();
+        _members.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new MediaBucketMember { BucketId = second.Id, GuestId = guestId, CampaignId = campaignId },
+        }.AsAsyncQueryable());
+
+        var view = await Sut().GuestViewAsync(campaignId, guestId);
+
+        Assert.True(view.MaySee(second.Id));
+    }
+
+    /// <summary>Photos from before buckets belong to the default bucket, so they follow its audience.</summary>
+    [Fact]
+    public async Task Unbucketed_photos_follow_the_default_buckets_audience()
+    {
+        var (campaignId, first, second) = TwoBuckets();
+        first.IsRestricted = true;
+
+        var view = await Sut().GuestViewAsync(campaignId, Guid.NewGuid());
+
+        Assert.False(view.MaySee(null));
+        Assert.True(view.MaySee(second.Id));
     }
 
     // ---------- an event's own bucket ----------
