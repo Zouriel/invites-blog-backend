@@ -496,9 +496,13 @@ public sealed class CampaignService(
     /// holding its id — it's in the owner's links — gets the same answer as for a template that
     /// doesn't exist.
     /// </summary>
+    /// <para>One a designer published for someone else is that person's alone — the designer included
+    /// out: matched on the email it was made for.</para>
     private bool CanUsePrivate(Template template) =>
         template.Visibility != TemplateVisibility.Private
-        || (currentUser.UserId is { } me && me == template.DesignerUserId)
+        || (template.AssignedEmail is null
+            ? currentUser.UserId is { } me && me == template.DesignerUserId
+            : template.AssignedEmail == (currentUser.Contact ?? "").Trim().ToLowerInvariant())
         || currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage);
 
     public async Task<CreateCampaignResponse> CreateBareAsync(

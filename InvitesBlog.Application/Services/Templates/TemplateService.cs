@@ -42,8 +42,10 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
         var t = await templates.GetActiveBySlugAsync(slug, ct)
                 ?? throw new TemplateNotFoundException(slug);
         // A privately published design is its owner's alone; to anyone else it doesn't exist.
+        // One made for someone is theirs too.
         if (t.Visibility == TemplateVisibility.Private
             && !(currentUser.UserId is { } me && me == t.DesignerUserId)
+            && !(t.AssignedEmail is not null && t.AssignedEmail == (currentUser.Contact ?? "").Trim().ToLowerInvariant())
             && !currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage))
             throw new TemplateNotFoundException(slug);
         return new TemplateDetailDto(t.Id, t.Name, t.Slug, t.Category, t.Description, t.Version,
@@ -56,7 +58,8 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
         var normalized = (email ?? "").Trim().ToLowerInvariant();
         if (normalized.Length == 0) return [];
         return await templates.Query()
-            .Where(t => t.IsActive && t.Visibility == TemplateVisibility.Dedicated && t.AssignedEmail == normalized)
+            .Where(t => t.IsActive && t.AssignedEmail == normalized
+                && (t.Visibility == TemplateVisibility.Dedicated || t.Visibility == TemplateVisibility.Private))
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => ToListItem(t))
             .ToListAsync(ct);

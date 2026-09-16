@@ -180,6 +180,28 @@ public class CampaignServiceTests
         await _campaigns.DidNotReceive().AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task A_template_made_for_someone_starts_events_only_for_that_person()
+    {
+        var template = TestData.Template();
+        template.Visibility = Domain.Entities.TemplateVisibility.Private;
+        template.DesignerUserId = Guid.NewGuid();
+        template.AssignedEmail = "leena@example.com";
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        // Not the designer who made it…
+        _currentUser.UserId.Returns(template.DesignerUserId);
+        _currentUser.Contact.Returns("maker@example.com");
+        await Assert.ThrowsAsync<TemplateNotAvailableException>(
+            () => Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event")));
+
+        // …only the person it was made for.
+        _currentUser.UserId.Returns(Guid.NewGuid());
+        _currentUser.Contact.Returns("Leena@Example.com");
+        await Sut().CreateAsync(new CreateCampaignRequest(template.Id, "My Event"));
+        await _campaigns.Received(1).AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>());
+    }
+
     // ----- Ownership enforcement (LoadOwnedAsync) -----
 
     [Fact]

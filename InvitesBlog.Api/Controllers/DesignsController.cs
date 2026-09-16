@@ -85,6 +85,7 @@ public sealed class DesignsController(IDesignService designs) : BaseApiControlle
         [FromForm] string? description,
         [FromForm] Guid? campaignId,
         [FromForm] int revision,
+        [FromForm] string? assignedEmail,
         IFormFile? poster,
         CancellationToken ct)
     {
@@ -97,7 +98,7 @@ public sealed class DesignsController(IDesignService designs) : BaseApiControlle
             posterBytes = buffer.ToArray();
         }
         return Success(await designs.PublishAsync(id, new PublishDesignRequest(
-            visibility, name, category, description, campaignId, revision, posterBytes, poster?.ContentType), ct));
+            visibility, name, category, description, campaignId, revision, posterBytes, poster?.ContentType, assignedEmail), ct));
     }
 
     [HttpPut("{id:guid}/visibility")]

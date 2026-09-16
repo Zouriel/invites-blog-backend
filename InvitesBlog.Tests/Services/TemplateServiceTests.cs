@@ -36,6 +36,25 @@ public class TemplateServiceTests
     }
 
     [Fact]
+    public async Task A_private_template_made_for_someone_is_theirs_to_see_and_nobody_elses()
+    {
+        var t = TestData.Template();
+        t.Visibility = TemplateVisibility.Private;
+        t.DesignerUserId = Guid.NewGuid();
+        t.AssignedEmail = "leena@example.com";
+        _templates.GetActiveBySlugAsync(t.Slug, Arg.Any<CancellationToken>()).Returns(t);
+        _templates.Query().Returns(new[] { t }.AsAsyncQueryable());
+
+        _user.Contact.Returns("Leena@example.com");
+        Assert.Equal(t.Id, (await Sut().GetBySlugAsync(t.Slug)).Id);
+        Assert.Single(await Sut().GetDedicatedForAsync("leena@example.com"));
+
+        _user.Contact.Returns("someone@example.com");
+        await Assert.ThrowsAsync<TemplateNotFoundException>(() => Sut().GetBySlugAsync(t.Slug));
+        Assert.Empty(await Sut().GetDedicatedForAsync("someone@example.com"));
+    }
+
+    [Fact]
     public async Task List_returns_only_active_and_applies_category_filter_and_paging()
     {
         var active1 = TestData.Template(); active1.Name = "Alpha"; active1.Category = "wedding";

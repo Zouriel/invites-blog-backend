@@ -10,6 +10,7 @@ using InvitesBlog.Application.Services.Designers;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace InvitesBlog.Application.Services.Designs;
 
@@ -61,6 +62,8 @@ public sealed class DesignService(
     IDesignEngine engine,
     ITemplatePackager packager,
     IStorageService storage,
+    IEmailSender email,
+    IConfiguration config,
     IUnitOfWork uow) : IDesignService
 {
     public const int PublicPublishesPerDay = 5;
@@ -265,9 +268,19 @@ public sealed class DesignService(
         var visibility = request.Visibility switch
         {
             "Public" => TemplateVisibility.Public,
-            "Private" => TemplateVisibility.Private,
+            "Private" or "Person" => TemplateVisibility.Private,
             _ => throw new BusinessRuleException("Choose who can use this template.", "visibility_required"),
         };
+        // "Person": private, and reserved for one other account — they use it, nobody else does.
+        string? assignedEmail = null;
+        if (request.Visibility == "Person")
+        {
+            assignedEmail = NormalizeEmail(request.AssignedEmail)
+                ?? throw new BusinessRuleException("Enter the email address of the person it's for.", "assigned_email_required");
+            var ownEmail = (await users.GetByIdAsync(me, ct))?.Email;
+            if (string.Equals(assignedEmail, NormalizeEmail(ownEmail), StringComparison.Ordinal))
+                throw new BusinessRuleException("That's your own email — choose Private to keep it for your events.", "assigned_email_self");
+        }
         var name = CleanName(request.Name);
         var description = (request.Description ?? string.Empty).Trim();
         if (description.Length > 500) description = description[..500];
@@ -340,7 +353,10 @@ public sealed class DesignService(
         template.ManifestJson = package.ManifestJson;
         template.PackageUrl = package.PackageUrl;
         template.SceneJson = design.SceneJson;
+        var previouslyAssigned = template.AssignedEmail;
         template.Visibility = effectiveVisibility;
+        // A commission keeps the email it was requested with; anything else is reserved only when asked.
+        if (effectiveVisibility != TemplateVisibility.Dedicated) template.AssignedEmail = assignedEmail;
         template.IsActive = true;
         if (posterUrl is not null) template.PreviewImageUrl = posterUrl;
         else if (string.IsNullOrWhiteSpace(template.PreviewImageUrl)
@@ -369,10 +385,11 @@ public sealed class DesignService(
         await uow.SaveChangesAsync(ct);
 
         // Attaching is the last step and allowed to fail on its own: the template is published either
-        // way, and an event that already has an invitation simply keeps it.
+        // way, and an event that already has an invitation simply keeps it. A template made for someone
+        // else is theirs to use, so it never becomes the designer's own event's invitation.
         Guid? attached = null;
         var campaignToAttach = request.CampaignId ?? design.CampaignId;
-        if (campaignToAttach is { } campaignId && await ownership.OwnsAsync(campaignId, ct))
+        if (assignedEmail is null && campaignToAttach is { } campaignId && await ownership.OwnsAsync(campaignId, ct))
         {
             var campaign = await campaigns.GetByIdAsync(campaignId, ct);
             if (campaign is not null && string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl))
@@ -380,6 +397,13 @@ public sealed class DesignService(
                 await campaignService.AttachTemplateAsync(campaignId, template.Id, ct);
                 attached = campaignId;
             }
+        }
+
+        // Tell the person when it's newly theirs; a new version for the same person doesn't need a second email.
+        if (assignedEmail is not null && !string.Equals(previouslyAssigned, assignedEmail, StringComparison.Ordinal))
+        {
+            try { await email.SendAsync(BuildMadeForYouEmail(assignedEmail, template.DesignerName ?? "A designer", template.Name), ct); }
+            catch { /* the template is published either way; it's in their templates when they sign in */ }
         }
 
         return new PublishResultDto(
@@ -400,6 +424,8 @@ public sealed class DesignService(
             throw new ForbiddenException("That isn't your template.", "not_your_template");
         if (template.Visibility == TemplateVisibility.Dedicated)
             throw new BusinessRuleException("A commissioned template is released through its request, not here.", "dedicated_template");
+        if (template.AssignedEmail is not null && request.Visibility == "Public")
+            throw new BusinessRuleException("This template was made for someone — it stays with them and out of the gallery.", "assigned_template");
 
         switch (request.Visibility)
         {
@@ -570,7 +596,8 @@ public sealed class DesignService(
                 t.Id, t.Name, t.Slug, t.Version, t.Visibility, t.IsActive, t.Category, t.Description,
                 StaticPreview(t.PreviewImageUrl), t.UnlistedByAdminAt is not null,
                 mine.Sum(u => u.Count),
-                mine.Where(u => u.TemplateVersion != t.Version).Sum(u => u.Count));
+                mine.Where(u => u.TemplateVersion != t.Version).Sum(u => u.Count),
+                t.Visibility == TemplateVisibility.Private ? t.AssignedEmail : null);
         });
     }
 
@@ -578,6 +605,28 @@ public sealed class DesignService(
         string.IsNullOrWhiteSpace(url) || url.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || url.EndsWith('/')
             ? null
             : url;
+
+    private static string? NormalizeEmail(string? value)
+    {
+        var e = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return e.Length is > 3 and <= 254 && System.Text.RegularExpressions.Regex.IsMatch(e, @"^[^@\s]+@[^@\s]+\.[^@\s]+$") ? e : null;
+    }
+
+    /// <summary>Tells someone a designer made a template for them, and where to find it.</summary>
+    private EmailMessage BuildMadeForYouEmail(string to, string designerName, string templateName)
+    {
+        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var link = $"{inviterBase}/my-templates?tab=requests";
+        var safeDesigner = System.Net.WebUtility.HtmlEncode(designerName);
+        var safeTpl = System.Net.WebUtility.HtmlEncode(templateName);
+        var html =
+            "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
+            "<p style=\"font-size:16px;line-height:1.6\">Hello,</p>" +
+            $"<p style=\"font-size:16px;line-height:1.6\"><strong>{safeDesigner}</strong> designed an invitation template just for you: <strong>{safeTpl}</strong>. Only you can use it.</p>" +
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See your template</a></p>" +
+            $"<p style=\"font-size:12px;color:#5a6b75;line-height:1.6\">Sign in with this email address to use it. Or paste this into your browser:<br><a href=\"{link}\" style=\"color:#1b3d59\">{link}</a><br>Sent via invites.blog</p></div>";
+        return new EmailMessage(To: to, Subject: $"{designerName} made an invitation for you", Html: html, Stream: EmailStream.System);
+    }
 
     private static string CleanName(string name)
     {

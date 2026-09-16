@@ -34,6 +34,7 @@ public class DesignServiceTests
     private readonly IStorageService _storage = Substitute.For<IStorageService>();
     private readonly ICampaignOwnershipService _ownership = Substitute.For<ICampaignOwnershipService>();
     private readonly ICampaignService _campaignService = Substitute.For<ICampaignService>();
+    private readonly IEmailSender _email = Substitute.For<IEmailSender>();
     private readonly Guid _me = Guid.NewGuid();
     private string? _publishedHtml;
 
@@ -75,12 +76,14 @@ public class DesignServiceTests
             engine,
             _packager,
             _storage,
+            _email,
+            new ConfigurationBuilder().Build(),
             new UnitOfWork(_db));
     }
 
     private static PublishDesignRequest Publish(int revision, string visibility = "Private", string? description = null,
-        string category = "Wedding", byte[]? poster = null) =>
-        new(visibility, "Ivory evening", category, description, null, revision, poster, poster is null ? null : "image/png");
+        string category = "Wedding", byte[]? poster = null, string? assignedEmail = null) =>
+        new(visibility, "Ivory evening", category, description, null, revision, poster, poster is null ? null : "image/png", assignedEmail);
 
     private async Task<DesignDto> NewDesignAsync(DesignService sut) =>
         await sut.CreateAsync(new CreateDesignRequest(null, "wedding", null, null, null));
@@ -100,6 +103,57 @@ public class DesignServiceTests
         Assert.Equal(_me, template.DesignerUserId);
         Assert.Equal(template.Id, result.TemplateId);
         Assert.Contains("animation-timeline", _publishedHtml);
+    }
+
+    [Fact]
+    public async Task Publishing_for_someone_reserves_it_for_their_email_and_tells_them_once()
+    {
+        var sut = Sut();
+        var design = await NewDesignAsync(sut);
+
+        var result = await sut.PublishAsync(design.Id, Publish(design.Revision, "Person", assignedEmail: "  Leena@Example.com "));
+        await sut.PublishAsync(design.Id, Publish(result.Design.Revision, "Person", assignedEmail: "leena@example.com"));
+
+        var template = await _db.Templates.SingleAsync();
+        Assert.Equal(TemplateVisibility.Private, template.Visibility);
+        Assert.Equal("leena@example.com", template.AssignedEmail);
+        Assert.Equal("1.0.1", template.Version);
+        Assert.Equal("leena@example.com", (await sut.GetAsync(design.Id)).Template!.AssignedEmail);
+        // A new version for the same person isn't news to them.
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "leena@example.com"), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(null, "assigned_email_required")]
+    [InlineData("not-an-email", "assigned_email_required")]
+    [InlineData("Maker@example.com", "assigned_email_self")]
+    public async Task Publishing_for_someone_needs_someone_elses_email(string? email, string code)
+    {
+        var sut = Sut();
+        var design = await NewDesignAsync(sut);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => sut.PublishAsync(design.Id, Publish(design.Revision, "Person", assignedEmail: email)));
+
+        Assert.Equal(code, ex.ErrorCode);
+        Assert.Empty(_db.Templates);
+    }
+
+    [Fact]
+    public async Task A_template_made_for_someone_stays_out_of_the_gallery_and_private_clears_the_reservation()
+    {
+        var sut = Sut();
+        var design = await NewDesignAsync(sut);
+        var result = await sut.PublishAsync(design.Id, Publish(design.Revision, "Person", "A warm gold wedding invitation.", assignedEmail: "leena@example.com"));
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => sut.SetVisibilityAsync(design.Id, new SetDesignVisibilityRequest("Public")));
+        Assert.Equal("assigned_template", ex.ErrorCode);
+
+        await sut.PublishAsync(design.Id, Publish(result.Design.Revision));
+        var template = await _db.Templates.SingleAsync();
+        Assert.Null(template.AssignedEmail);
+        Assert.Equal(TemplateVisibility.Private, template.Visibility);
     }
 
     [Fact]
