@@ -110,6 +110,13 @@ public sealed class MediaBucketsController(
         Guid bucketId, [FromBody] SetBucketAllocationRequest req, CancellationToken ct) =>
         Success(await buckets.SetAllocationAsync(bucketId, req, ct));
 
+    /// <summary>How many days a bucket collects for, within what the event's plan allows.</summary>
+    [HttpPut("{bucketId:guid}/window")]
+    [HasPermission(Permissions.Buckets.Manage)]
+    public async Task<IActionResult> SetWindow(
+        Guid bucketId, [FromBody] SetBucketWindowRequest req, CancellationToken ct) =>
+        Success(await buckets.SetWindowAsync(bucketId, req, ct));
+
     [HttpPut("{bucketId:guid}/name")]
     [HasPermission(Permissions.Buckets.Manage)]
     public async Task<IActionResult> Rename(

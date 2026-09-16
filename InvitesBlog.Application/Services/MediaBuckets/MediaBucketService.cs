@@ -96,6 +96,13 @@ public interface IMediaBucketService
     Task<MediaBucketDto> SetAllocationAsync(
         Guid bucketId, SetBucketAllocationRequest req, CancellationToken ct = default);
 
+    /// <summary>
+    /// Changes how many days a bucket collects for. Up to what the event's plan allows now — so a
+    /// bucket made on the free night can be stretched after moving to Premium or a pass — or up to
+    /// what it already has, since a window already given is never taken away by a plan ending.
+    /// </summary>
+    Task<MediaBucketDto> SetWindowAsync(Guid bucketId, SetBucketWindowRequest req, CancellationToken ct = default);
+
     /// <summary>The signed-in account's subscription space: total, given out and used.</summary>
     Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default);
     /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
@@ -663,6 +670,29 @@ public sealed class MediaBucketService(
         return (await DescribeAsync([bucket], ct))[0];
     }
 
+    public async Task<MediaBucketDto> SetWindowAsync(
+        Guid bucketId, SetBucketWindowRequest req, CancellationToken ct = default)
+    {
+        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+        var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
+        var most = Math.Min(EventDayWindow.MaxWindowDays, Math.Max(plan.MaxWindowDays, bucket.UploadWindowDays));
+
+        if (req.Days < 1)
+            throw new BusinessRuleException("A bucket collects for at least the one night.", "window_invalid");
+        if (req.Days > most)
+            throw new BusinessRuleException(
+                most <= 1
+                    ? "Collecting for more than one night comes with Premium or an event pass."
+                    : $"This event can collect for up to {most} days.",
+                "window_needs_plan");
+
+        bucket.UploadWindowDays = req.Days;
+        bucket.UpdatedAt = DateTimeOffset.UtcNow;
+        buckets.Update(bucket);
+        await uow.SaveChangesAsync(ct);
+        return (await DescribeAsync([bucket], ct))[0];
+    }
+
     public async Task<int> WindowForCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
         var days = await buckets.Query()
@@ -1080,15 +1110,33 @@ public sealed class MediaBucketService(
 
         // A full or closed bucket still ADMITS — the page has to open in order to say why nothing can
         // be added. Refusing at the door would show a scanner a dead link and tell them nothing.
-        var room = bucket.UsedBytes < bucket.CapacityBytes;
-        var open = EventDayWindow.IsOpen(bucket.EventDate, DateTimeOffset.UtcNow, bucket.UploadWindowDays);
+        var campaign = await campaigns.GetByIdAsync(bucket.CampaignId, ct);
+        var night = campaign?.EventStartAt ?? bucket.EventDate;
+        var open = EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays);
+
+        // Space and cover come from the event's plan, exactly as the upload itself checks them. The
+        // bucket's own CapacityBytes is a leftover from per-bucket sizes and is 0 on every bucket made
+        // since, so reading it here turned every table code into "full".
+        var room = false;
+        if (campaign is not null && (await plans.ForCampaignAsync(campaign.Id, ct)).Phase == MediaPhase.Active)
+        {
+            try
+            {
+                await EnsureRoomAsync(bucket.Id, 1, ct);
+                room = true;
+            }
+            catch (BusinessRuleException)
+            {
+                // Full: still admitted, told so on the page.
+            }
+        }
 
         // The name a scanner is shown is the EVENT's — the bucket has none of its own. This is what
         // somebody standing at a party reads to know they are adding to the right night.
-        var title = (await campaigns.GetByIdAsync(bucket.CampaignId, ct))?.Title ?? "Media bucket";
+        var title = campaign?.Title ?? "Media bucket";
 
         return new MediaBucketQrAdmission(
-            code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, bucket.EventDate);
+            code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night);
     }
 
     public async Task<MediaBucket?> GetBucketForContributionAsync(

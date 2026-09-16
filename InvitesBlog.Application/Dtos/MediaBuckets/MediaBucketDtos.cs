@@ -92,6 +92,9 @@ public sealed record SetBucketAccessRequest(IReadOnlyList<Guid> GuestIds, bool A
 
 /// <summary>Renaming a bucket. Blank falls back to the default rather than leaving a gap.</summary>
 public sealed record RenameMediaBucketRequest(string Name);
+
+/// <param name="Days">How many days it collects for, 1 to the plan's most.</param>
+public sealed record SetBucketWindowRequest(int Days);
 /// <summary>
 /// A QR code as the dashboard shows it.
 ///

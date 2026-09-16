@@ -585,6 +585,69 @@ public class MediaBucketServiceTests
         Assert.False(admission!.CanUpload);
     }
 
+    [Fact]
+    public async Task A_bucket_made_on_the_free_night_can_be_stretched_after_upgrading()
+    {
+        var bucket = Mine(capacityGb: 0);
+        bucket.UploadWindowDays = 1;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket }.AsAsyncQueryable());
+        _buckets.GetByIdAsync(bucket.Id, Arg.Any<CancellationToken>()).Returns(bucket);
+
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>()).Returns(TestData.Plan(maxWindowDays: 1));
+        var free = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().SetWindowAsync(bucket.Id, new SetBucketWindowRequest(3)));
+        Assert.Equal("window_needs_plan", free.ErrorCode);
+
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(maxWindowDays: 5, maxBuckets: 3, kind: InvitesBlog.Application.Plans.PlanKind.Premium, accountBytes: 200 * InvitesBlog.Application.Plans.PlanCatalog.Gb));
+        await Sut().SetWindowAsync(bucket.Id, new SetBucketWindowRequest(5));
+        Assert.Equal(5, bucket.UploadWindowDays);
+
+        // The plan ending doesn't take the window back, and it can still be shortened.
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>()).Returns(TestData.Plan(maxWindowDays: 1));
+        await Sut().SetWindowAsync(bucket.Id, new SetBucketWindowRequest(3));
+        Assert.Equal(3, bucket.UploadWindowDays);
+    }
+
+    /// <summary>
+    /// Buckets made under the plans carry no size of their own (CapacityBytes 0): the space is the
+    /// event's plan. A table code on an empty one has to say it can take photos.
+    /// </summary>
+    [Fact]
+    public async Task A_code_on_a_plan_bucket_with_room_can_take_uploads()
+    {
+        var bucket = Mine(capacityGb: 0);
+        Stored(bucket);
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(eventBytes: 500 * 1024L * 1024));
+        _campaigns.GetByIdAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = bucket.CampaignId, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
+        const string token = "a-printed-token";
+        _qrs.Query(Arg.Any<bool>()).Returns(new[] { Code(bucket.Id, token, anonymous: true) }.AsAsyncQueryable());
+
+        var admission = await Sut().AdmitAsync(token);
+
+        Assert.True(admission!.CanUpload);
+        Assert.Equal("Garden party", admission.BucketTitle);
+    }
+
+    [Fact]
+    public async Task A_code_on_an_event_whose_plan_ended_admits_but_cannot_take_uploads()
+    {
+        var bucket = Mine(capacityGb: 0);
+        Stored(bucket);
+        var ended = TestData.Plan(eventBytes: 500 * 1024L * 1024) with { Phase = InvitesBlog.Application.Plans.MediaPhase.UploadsClosed };
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>()).Returns(ended);
+        _campaigns.GetByIdAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = bucket.CampaignId, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
+        const string token = "a-printed-token";
+        _qrs.Query(Arg.Any<bool>()).Returns(new[] { Code(bucket.Id, token, anonymous: true) }.AsAsyncQueryable());
+
+        var admission = await Sut().AdmitAsync(token);
+
+        Assert.NotNull(admission);
+        Assert.False(admission!.CanUpload);
+    }
+
     /// <summary>
     /// The token must not be reconstructible from what is stored — which is exactly why the rendered
     /// image is kept instead, and why a later read can still show the host their code.

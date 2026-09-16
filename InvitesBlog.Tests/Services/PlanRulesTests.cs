@@ -90,6 +90,32 @@ public class PlanRulesTests
         Assert.Equal(MediaPhase.OrganiserOnly, plan.Phase);
     }
 
+    /// <summary>
+    /// The promise behind a subscription: a free event's photos, even ones already in their lapse,
+    /// are kept for as long as the host stays subscribed, and the lapse only starts over when the
+    /// subscription ends — with the full 90 days from then.
+    /// </summary>
+    [Fact]
+    public void A_free_events_photos_are_kept_while_its_host_is_subscribed_and_get_the_full_lapse_after()
+    {
+        // Free: covered to day 90, and by day 150 only the organiser can look.
+        Assert.Equal(MediaPhase.OrganiserOnly, Evaluate(now: Night.AddDays(150)).Phase);
+
+        // Subscribes (no end date) on day 150: covered again, for as long as it lasts.
+        var subscribed = Evaluate(SubscriptionTier.Basic, endsAt: null, now: Night.AddDays(900));
+        Assert.Equal(PlanKind.Basic, subscribed.Kind);
+        Assert.Null(subscribed.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, subscribed.Phase);
+        Assert.True(subscribed.EventBytes >= 500 * PlanCatalog.Mb);
+
+        // Ends on day 1000: the 90 days count from then, not from the event.
+        var ended = Night.AddDays(1000);
+        Assert.Equal(ended, Evaluate(SubscriptionTier.None, endsAt: ended, now: ended.AddDays(1)).CoveredUntil);
+        Assert.Equal(MediaPhase.UploadsClosed, Evaluate(SubscriptionTier.None, endsAt: ended, now: ended.AddDays(1)).Phase);
+        Assert.Equal(MediaPhase.OrganiserOnly, Evaluate(SubscriptionTier.None, endsAt: ended, now: ended.AddDays(89)).Phase);
+        Assert.Equal(MediaPhase.Deleted, Evaluate(SubscriptionTier.None, endsAt: ended, now: ended.AddDays(90)).Phase);
+    }
+
     [Theory]
     [InlineData(0, MediaPhase.UploadsClosed)]
     [InlineData(29, MediaPhase.UploadsClosed)]
