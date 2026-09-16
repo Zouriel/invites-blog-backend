@@ -41,6 +41,12 @@ public sealed class AppUser
     /// account's events stopped being covered, which the photo retention counts from.
     /// </summary>
     public DateTimeOffset? SubscriptionEndsAt { get; set; }
+
+    /// <summary>
+    /// When an admin removed one of this account's gallery templates for abuse. From then on the
+    /// designer still publishes privately, but can't put anything in the public gallery.
+    /// </summary>
+    public DateTimeOffset? PublicPublishingRevokedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

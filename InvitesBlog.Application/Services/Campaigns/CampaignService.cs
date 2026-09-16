@@ -64,6 +64,8 @@ public sealed class CampaignService(
         // no longer start a campaign (matches the disabled card shown in the gallery).
         if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
             throw new TemplateNotAvailableException();
+        if (!CanUsePrivate(template))
+            throw new TemplateNotAvailableException();
 
         var rawToken = TokenService.GenerateToken();
         var now = DateTimeOffset.UtcNow;
@@ -468,6 +470,8 @@ public sealed class CampaignService(
 
         if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
             throw new TemplateNotAvailableException();
+        if (!CanUsePrivate(template))
+            throw new TemplateNotAvailableException();
 
         // Frozen exactly as ordinary creation freezes it — the version's structure, the package it
         // serves, and the designer's fee — so an event that gains its invitation later is pinned the
@@ -486,6 +490,16 @@ public sealed class CampaignService(
 
         return await GetSummaryAsync(campaignId, ct);
     }
+
+    /// <summary>
+    /// A template published privately from the designer serves its owner's events only. Anyone else
+    /// holding its id — it's in the owner's links — gets the same answer as for a template that
+    /// doesn't exist.
+    /// </summary>
+    private bool CanUsePrivate(Template template) =>
+        template.Visibility != TemplateVisibility.Private
+        || (currentUser.UserId is { } me && me == template.DesignerUserId)
+        || currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage);
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default)

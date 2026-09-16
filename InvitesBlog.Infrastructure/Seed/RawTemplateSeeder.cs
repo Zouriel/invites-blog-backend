@@ -88,6 +88,16 @@ public sealed class RawTemplateSeeder(
             // The previous version's package stays in storage, and campaigns pinned to it keep
             // serving it via the package URL they froze at creation.
             var existing = await db.Templates.FirstOrDefaultAsync(t => t.Slug == meta.Slug, ct);
+            if (existing is not null && IsDesignerManaged(existing))
+            {
+                // Once someone has re-published this template from the visual designer, the designer
+                // owns its current version. Rewinding the row to the repo's HTML on every boot would
+                // silently undo that edit; the repo's package is still republished above, so campaigns
+                // pinned to it keep rendering.
+                logger.LogInformation("Raw template {Slug} is managed in the designer (@{Version}); row left as is.",
+                    meta.Slug, existing.Version);
+                continue;
+            }
             if (existing is not null)
             {
                 var superseded = existing.Version != meta.Version;
@@ -154,6 +164,11 @@ public sealed class RawTemplateSeeder(
 
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>A row whose scene came from the visual designer (schema 2), rather than the repo.</summary>
+    public static bool IsDesignerManaged(Template template) =>
+        template.SceneJson.Contains("\"schema\":2", StringComparison.Ordinal)
+        || template.SceneJson.Contains("\"schema\": 2", StringComparison.Ordinal);
 
     /// <summary>Reads an embedded binary resource (a poster), or null when the template ships none.</summary>
     private static async Task<byte[]?> ReadBytesAsync(Assembly asm, string resource, CancellationToken ct)

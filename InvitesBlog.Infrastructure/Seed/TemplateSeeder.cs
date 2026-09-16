@@ -44,8 +44,10 @@ public sealed class TemplateSeeder(
             foreach (var w in published.Compiled.Warnings)
                 logger.LogWarning("Seed {Slug}: {Warning}", scene.Slug, w);
 
+            // By slug alone: a template later re-published from the designer has moved to a newer
+            // version, and matching on the seed's version would add a second card for it.
             var existing = await db.Templates
-                .FirstOrDefaultAsync(t => t.Slug == scene.Slug && t.Version == scene.Version, ct);
+                .FirstOrDefaultAsync(t => t.Slug == scene.Slug, ct);
             if (existing is not null)
             {
                 logger.LogInformation("Template {Slug}@{Version} package refreshed.", scene.Slug, scene.Version);

@@ -12,6 +12,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Template> Templates => Set<Template>();
     public DbSet<TemplateType> TemplateTypes => Set<TemplateType>();
     public DbSet<CustomTemplate> CustomTemplates => Set<CustomTemplate>();
+    public DbSet<TemplateDesign> TemplateDesigns => Set<TemplateDesign>();
+    public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
+    public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
@@ -80,6 +83,42 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.AssignedDesignerUserId).HasDatabaseName("idx_inquiries_assigned_designer");
             // A designer also needs to find the requests that ASKED FOR THEM but aren't theirs yet.
             e.HasIndex(x => x.RequestedDesignerUserId).HasDatabaseName("idx_inquiries_requested_designer");
+        });
+
+        b.Entity<TemplateDesign>(e =>
+        {
+            e.ToTable("template_designs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SceneJson).HasColumnType("jsonb");
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasIndex(x => new { x.OwnerUserId, x.UpdatedAt }).HasDatabaseName("idx_template_designs_owner_updated");
+            e.HasIndex(x => x.TemplateId).HasDatabaseName("idx_template_designs_template_id");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TemplateDesignPublish>(e =>
+        {
+            e.ToTable("template_design_publishes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Version).HasMaxLength(32);
+            e.Property(x => x.Visibility).HasMaxLength(16);
+            // The public-publish rate limit counts one account's recent publishes.
+            e.HasIndex(x => new { x.UserId, x.PublishedAt }).HasDatabaseName("idx_template_design_publishes_user_time");
+            e.HasIndex(x => x.DesignId).HasDatabaseName("idx_template_design_publishes_design_id");
+            e.HasOne<TemplateDesign>().WithMany().HasForeignKey(x => x.DesignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TemplateReport>(e =>
+        {
+            e.ToTable("template_reports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Reason).HasMaxLength(32);
+            e.Property(x => x.Details).HasMaxLength(1000);
+            e.Property(x => x.Resolution).HasMaxLength(16);
+            e.Property(x => x.ResolutionNote).HasMaxLength(1000);
+            // The admin queue: open reports, oldest first.
+            e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_template_reports_queue");
+            e.HasIndex(x => x.TemplateId).HasDatabaseName("idx_template_reports_template_id");
         });
 
         b.Entity<TemplateType>(e =>

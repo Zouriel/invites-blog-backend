@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace InvitesBlog.Application.Services.Templates;
 
 /// <summary>Template gallery business logic (spec §Services). Coordinates the repository + filter.</summary>
-public sealed class TemplateService(ITemplateRepository templates) : ITemplateService
+public sealed class TemplateService(ITemplateRepository templates, Abstractions.ICurrentUser currentUser) : ITemplateService
 {
     public async Task<PagedResult<TemplateListItemDto>> ListAsync(TemplateFilter filter, CancellationToken ct = default)
     {
@@ -41,6 +41,11 @@ public sealed class TemplateService(ITemplateRepository templates) : ITemplateSe
     {
         var t = await templates.GetActiveBySlugAsync(slug, ct)
                 ?? throw new TemplateNotFoundException(slug);
+        // A privately published design is its owner's alone; to anyone else it doesn't exist.
+        if (t.Visibility == TemplateVisibility.Private
+            && !(currentUser.UserId is { } me && me == t.DesignerUserId)
+            && !currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage))
+            throw new TemplateNotFoundException(slug);
         return new TemplateDetailDto(t.Id, t.Name, t.Slug, t.Category, t.Description, t.Version,
             t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.ManifestJson,
             t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);

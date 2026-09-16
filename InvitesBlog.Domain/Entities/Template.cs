@@ -48,6 +48,12 @@ public sealed class Template
     public bool RequesterConsentToPublish { get; set; }
     public bool DesignerConsentToPublish { get; set; }
 
+    /// <summary>
+    /// Set when an admin takes a template out of the gallery after a report. The owner keeps using it
+    /// privately, but can't list it again — only an admin can.
+    /// </summary>
+    public DateTimeOffset? UnlistedByAdminAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -68,6 +74,14 @@ public static class TemplateVisibility
     /// data rather than a rule each new listing has to remember.</para>
     /// </summary>
     public const string Imported = "Imported";
+
+    /// <summary>
+    /// Built in the designer and published for the owner's own events only. Like
+    /// <see cref="Imported"/> it is invisible to every gallery read, which ask for Public or Dedicated;
+    /// unlike it, the owner (<see cref="Template.DesignerUserId"/>) can start any number of events
+    /// from it, and nobody else can start one at all.
+    /// </summary>
+    public const string Private = "Private";
 }
 
 /// <summary>

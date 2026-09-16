@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<TemplatePackagePublisher>();
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();
+        services.AddScoped<IDesignEngine, DesignEngine>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();
         services.AddScoped<TemplateManifestRefresher>();

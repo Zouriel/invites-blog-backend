@@ -8,7 +8,7 @@ public sealed record TemplateStructure(
     IReadOnlyList<string> ThemeKeys);
 
 /// <summary>A published template package: where it lives and the manifest derived from it.</summary>
-public sealed record TemplatePackage(string PackageUrl, string ManifestJson, TemplateStructure Structure);
+public sealed record TemplatePackage(string PackageUrl, string ManifestJson, TemplateStructure Structure, string? PosterUrl = null);
 
 /// <summary>
 /// Scans, describes and publishes single-file templates (§template packaging). The Application layer
@@ -36,5 +36,9 @@ public interface ITemplatePackager
     /// <c>submissions/{id}</c>; only approval publishes to the live <c>templates/{slug}@{version}</c>.
     /// </summary>
     Task<TemplatePackage> PublishAsync(
-        string basePath, string slug, string version, string html, CancellationToken ct = default);
+        string basePath, string slug, string version, string html, CancellationToken ct = default,
+        byte[]? poster = null);
+
+    /// <summary>The stored package document for a template version, or null when storage doesn't have it.</summary>
+    Task<string?> ReadPackageAsync(string slug, string version, CancellationToken ct = default);
 }

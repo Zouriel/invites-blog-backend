@@ -96,6 +96,12 @@ public enum OtpPurpose
 /// The review status machine a designer submission walks. Numeric values are pinned: the column is
 /// persisted as an int, so members may be appended but never reordered.
 /// </summary>
+public enum TemplateReportStatus
+{
+    Open = 0,
+    Resolved = 1
+}
+
 public enum CustomTemplateStatus
 {
     /// <summary>Saved by the designer, not yet submitted for review.</summary>

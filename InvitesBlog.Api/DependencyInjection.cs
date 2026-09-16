@@ -84,6 +84,17 @@ public static class DependencyInjection
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(60) }));
             options.AddPolicy(RateLimiting.RateLimitPolicies.CreateEvent, RateLimiting.RateLimitPolicies.CreateEventPartition);
+            // The designer previews on every edit (debounced in the editor); this only stops a runaway client.
+            options.AddPolicy("design-preview", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) }));
+            options.AddPolicy("design-assets", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 40, Window = TimeSpan.FromMinutes(10) }));
+            // Reporting is anonymous; a limiter keeps one address from flooding the admin queue.
+            options.AddPolicy("template-report", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromHours(1) }));
         });
 
         return services;

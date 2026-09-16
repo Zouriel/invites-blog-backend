@@ -13,6 +13,14 @@ public static class Permissions
         public const string Manage = "templates.manage";   // admin create/publish/unpublish
     }
 
+    /// <summary>The visual template designer. Anyone signed in can build templates in it.</summary>
+    public static class Designs
+    {
+        public const string Manage = "designs.manage";
+        /// <summary>Handle reports, and unlist or remove gallery templates.</summary>
+        public const string Moderate = "designs.moderate";
+    }
+
     public static class Designer
     {
         public const string Manage = "designer.manage";
@@ -114,6 +122,8 @@ public static class Permissions
         (Templates.Read, "templates", "Browse active templates"),
         (Templates.Manage, "templates", "Create and publish platform templates"),
         (Designer.Manage, "designer", "Create and submit custom templates"),
+        (Designs.Manage, "designs", "Build and publish templates in the designer"),
+        (Designs.Moderate, "designs", "Handle template reports; unlist or remove gallery templates"),
         (Designer.Review, "designer", "Review community template submissions"),
         (Campaigns.Create, "campaigns", "Create a campaign"),
         (Campaigns.Read, "campaigns", "Read a campaign"),
@@ -180,7 +190,7 @@ public static class Roles
         // invitations too, and their account page would 403 without them.
         [Designer] = new[]
         {
-            Permissions.Templates.Read, Permissions.Designer.Manage,
+            Permissions.Templates.Read, Permissions.Designer.Manage, Permissions.Designs.Manage,
             Permissions.Dashboard.Read, Permissions.Campaigns.Read, Permissions.Inbox.Read,
             Permissions.Photos.Read, Permissions.Buckets.Read,
         },
@@ -197,6 +207,7 @@ public static class Roles
         [Customer] = new[]
         {
             Permissions.Templates.Read, Permissions.Dashboard.Read, Permissions.Inbox.Read,
+            Permissions.Designs.Manage,
             Permissions.Campaigns.Create, Permissions.Campaigns.Read, Permissions.Campaigns.Write,
             Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write,

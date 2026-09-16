@@ -11,7 +11,8 @@ namespace InvitesBlog.Tests.Services;
 public class TemplateServiceTests
 {
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
-    private TemplateService Sut() => new(_templates);
+    private readonly InvitesBlog.Application.Abstractions.ICurrentUser _user = Substitute.For<InvitesBlog.Application.Abstractions.ICurrentUser>();
+    private TemplateService Sut() => new(_templates, _user);
 
     [Fact]
     public async Task GetBySlug_unknown_throws_TemplateNotFound()
