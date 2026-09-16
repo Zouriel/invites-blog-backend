@@ -167,10 +167,10 @@ public static class DesignImportScript
 
     // Filled boxes: backgrounds, borders, background pictures — on elements and on their ::before/::after.
     function backgroundItem(el, cs, pseudo) {
-      var svgUrl = /url\(["']?(data:image\/svg\+xml[^"')]+)/.exec(cs.backgroundImage);
-      if (!svgUrl) return false;
+      var uri = svgDataUrl(cs.backgroundImage);
+      if (!uri) return false;
       var tileW = parseFloat((cs.backgroundSize || '').split(' ')[0]), tileH = parseFloat((cs.backgroundSize || '').split(' ')[1]);
-      found.push({ kind: 'bgsvg', el: el, pseudo: pseudo, uri: svgUrl[1], repeat: cs.backgroundRepeat, tileW: tileW, tileH: tileH });
+      found.push({ kind: 'bgsvg', el: el, pseudo: pseudo, uri: uri, repeat: cs.backgroundRepeat, tileW: tileW, tileH: tileH });
       return true;
     }
     document.querySelectorAll('body *').forEach(function (el) {
@@ -399,10 +399,20 @@ public static class DesignImportScript
     return hex(cs.color);
   }
 
+  // A computed background-image is serialised as url("…") with inner quotes escaped, so an SVG that
+  // uses quotes of either kind (xmlns='…') has to be read to the closing quote, not to the first one.
+  function svgDataUrl(value) {
+    var m = /url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^"')\s][^)\s]*))\s*\)/.exec(value || '');
+    if (!m) return null;
+    var raw = m[1] != null ? m[1] : m[2] != null ? m[2] : m[3];
+    raw = raw.replace(/\\(.)/g, '$1');
+    return /^data:image\/svg\+xml/.test(raw) ? raw : null;
+  }
+
   function validSvg(markup) {
     try {
       var doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
-      return !doc.getElementsByTagName('parsererror').length && doc.documentElement && doc.documentElement.localName === 'svg';
+      return !doc.getElementsByTagNameNS('*', 'parsererror').length && doc.documentElement && doc.documentElement.localName === 'svg';
     } catch (e) { return false; }
   }
 
