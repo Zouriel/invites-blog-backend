@@ -30,5 +30,7 @@
     <EmbeddedResource Include="RawTemplates\**\*.json" />
     <!-- A template may ship poster.webp: the still the gallery shows instead of rendering it. -->
     <EmbeddedResource Include="RawTemplates\**\*.webp" />
+    <!-- The visual designer's self-hosted fonts (SIL OFL Latin subsets), published by DesignFontSeeder. -->
+    <EmbeddedResource Include="Fonts\*.woff2" />
   </ItemGroup>
 </Project>

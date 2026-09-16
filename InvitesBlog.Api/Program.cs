@@ -86,6 +86,7 @@ using (var scope = app.Services.CreateScope())
         await services.GetRequiredService<TemplateManifestRefresher>().RefreshAsync();
         await services.GetRequiredService<TemplateTypeSeeder>().SeedAsync();
         await services.GetRequiredService<RbacSeeder>().SeedAsync();
+        await services.GetRequiredService<DesignFontSeeder>().SeedAsync();
     }
     catch (Exception ex)
     {

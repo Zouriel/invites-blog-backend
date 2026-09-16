@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<TemplateManifestRefresher>();
         services.AddScoped<TemplateInjectorRefresher>();
         services.AddScoped<TemplateTypeSeeder>();
+        services.AddScoped<DesignFontSeeder>();
         services.AddScoped<Rendering.InviteRenderService>();
         services.AddScoped<IInviteRenderer>(sp => sp.GetRequiredService<Rendering.InviteRenderService>());
 
