@@ -15,6 +15,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateDesign> TemplateDesigns => Set<TemplateDesign>();
     public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
     public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
+    public DbSet<FeatureTester> FeatureTesters => Set<FeatureTester>();
+    public DbSet<FeatureRelease> FeatureReleases => Set<FeatureRelease>();
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
@@ -119,6 +121,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // The admin queue: open reports, oldest first.
             e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_template_reports_queue");
             e.HasIndex(x => x.TemplateId).HasDatabaseName("idx_template_reports_template_id");
+        });
+
+        b.Entity<FeatureTester>(e =>
+        {
+            e.ToTable("feature_testers");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).HasMaxLength(254);
+            e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_feature_testers_email");
+            e.Property(x => x.Features).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Note).HasMaxLength(300);
+        });
+
+        b.Entity<FeatureRelease>(e =>
+        {
+            e.ToTable("feature_releases");
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(64);
         });
 
         b.Entity<TemplateType>(e =>

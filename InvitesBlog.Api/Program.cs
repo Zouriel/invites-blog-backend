@@ -61,6 +61,10 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = "/assets",
     OnPrepareResponse = ctx =>
     {
+        // Invitations render on an opaque origin (sandboxed), and fonts are fetched in CORS mode, so
+        // the designer's fonts need this even on the same host. Production sets it in Caddy.
+        if (ctx.File.Name.EndsWith(".woff2"))
+            ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = "*";
         if (ctx.File.Name.EndsWith(".html"))
             ctx.Context.Response.Headers["Content-Security-Policy"] =
                 "default-src 'none'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'";

@@ -13,6 +13,7 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/designs")]
 [HasPermission(Permissions.Designs.Manage)]
+[RequiresFeature(Domain.Entities.Features.TemplateDesigner)]
 public sealed class DesignsController(IDesignService designs) : BaseApiController
 {
     [HttpGet("catalog")]
