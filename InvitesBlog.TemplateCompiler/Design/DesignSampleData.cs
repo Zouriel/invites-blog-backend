@@ -44,7 +44,7 @@ public static class DesignSampleData
 
         var photos = new JsonArray();
         if (!empty)
-            for (var i = 0; i < 4; i++) photos.Add(Placeholder(i));
+            for (var i = 0; i < 6; i++) photos.Add(Placeholder(i, i + 1));
 
         // Every image slot the scene declares gets a placeholder, so a layout is judged with pictures in it.
         foreach (var (el, _, _) in scene.Walk())
@@ -52,7 +52,8 @@ public static class DesignSampleData
             if (el.Type != "slot" || el.Slot is null || empty) continue;
             var key = el.Slot.Path.StartsWith("event.", StringComparison.Ordinal) ? el.Slot.Path[6..] : null;
             if (key is null || key.Contains('.')) continue;
-            eventObj[key] = el.Slot.Multiple ? photos.DeepClone() : Placeholder(key.Length);
+            // A gallery, or one photo out of it: either way the preview gets the whole numbered set.
+            eventObj[key] = el.Slot.Multiple || el.Slot.Index is > 0 ? photos.DeepClone() : Placeholder(key.Length);
         }
 
         foreach (var field in scene.Fields)
@@ -119,11 +120,11 @@ public static class DesignSampleData
     }
 
     /// <summary>A soft gradient card that reads as "a photo goes here" — inline, so the preview needs no network.</summary>
-    public static string Placeholder(int seed)
+    public static string Placeholder(int seed, int? number = null)
     {
         string[][] pairs = [["#b3d5f1", "#1b3d59"], ["#f3eed8", "#6a97c0"], ["#d4eef8", "#152026"], ["#6a97c0", "#f3eed8"]];
         var p = pairs[Math.Abs(seed) % pairs.Length];
-        var svg = $"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{p[0]}"/><stop offset="1" stop-color="{p[1]}"/></linearGradient></defs><rect width="400" height="400" fill="url(#g)"/><circle cx="140" cy="150" r="42" fill="#ffffff" fill-opacity=".45"/><path d="M0 330 L120 220 L220 300 L300 240 L400 320 L400 400 L0 400Z" fill="#ffffff" fill-opacity=".35"/></svg>""";
+        var svg = $"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{p[0]}"/><stop offset="1" stop-color="{p[1]}"/></linearGradient></defs><rect width="400" height="400" fill="url(#g)"/><circle cx="140" cy="150" r="42" fill="#ffffff" fill-opacity=".45"/><path d="M0 330 L120 220 L220 300 L300 240 L400 320 L400 400 L0 400Z" fill="#ffffff" fill-opacity=".35"/>{(number is { } k ? $"<text x=\"200\" y=\"250\" font-family=\"Georgia,serif\" font-size=\"150\" text-anchor=\"middle\" fill=\"#ffffff\" fill-opacity=\".85\">{k}</text>" : "")}</svg>""";
         return "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
     }
 }

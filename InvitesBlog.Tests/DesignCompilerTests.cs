@@ -115,6 +115,48 @@ public class DesignCompilerTests
     }
 
     [Fact]
+    public void A_keyframe_lift_animates_z_index_on_the_box_alongside_the_pin()
+    {
+        var scene = Minimal();
+        var el = scene.Elements[0];
+        el.Pinned = true;
+        el.Track = new DesignTrack { Start = 100, End = 700 };
+        el.Keyframes = [new() { T = 0 }, new() { T = 0.5, Scale = 1.2, Lift = 30 }, new() { T = 1, Lift = 0 }];
+
+        var html = DesignCompiler.Compile(scene);
+
+        // Both animations on the outer box, each with its own timeline and range.
+        Assert.Matches(@"\.e0\{[^}]*animation:p0 1s linear both,z0 1s linear both;animation-timeline:scroll\(root\),scroll\(root\)", html);
+        Assert.Contains("@keyframes z0{0%{z-index:0}50%{z-index:30}100%{z-index:0}}", html);
+        Assert.Equal([0, 30, 0], DesignCompiler.ResolveFrames(el).Select(f => f.Lift));
+    }
+
+    [Fact]
+    public void A_photo_out_of_the_gallery_binds_its_place_and_the_host_is_asked_for_one_gallery()
+    {
+        var scene = Minimal();
+        for (var i = 1; i <= 3; i++)
+            scene.Elements.Add(new DesignElement
+            {
+                Id = "p" + i, Type = "slot", X = 0, Y = 0, W = 100, H = 120,
+                Slot = new DesignSlot { Path = "event.gallery", Label = "Party photos", Index = i },
+            });
+
+        var html = DesignCompiler.Compile(scene);
+        var manifest = new RawTemplatePackager(Substitute.For<IStorageService>()).BuildManifest("fan", "1.0.0", html);
+        var gallery = Assert.Single(manifest.ImageSlots, s => s.Key.StartsWith("event.gallery", StringComparison.Ordinal));
+        Assert.Equal("event.gallery", gallery.Key);
+        Assert.True(gallery.Multiple);
+
+        // Two photos uploaded: the first two prints show them, the third hides.
+        var data = DesignSampleData.Build(scene, DesignSampleData.Filled);
+        data["event"]!["gallery"] = new JsonArray("https://cdn.test/a.jpg", "https://cdn.test/b.jpg");
+        var doc = new HtmlParser().ParseDocument(ServerBinder.Bind(html, data));
+        Assert.Equal("https://cdn.test/b.jpg", doc.QuerySelector("[data-src='event.gallery.1']")!.GetAttribute("src"));
+        Assert.Contains("display:none", doc.QuerySelector("[data-src='event.gallery.2']")!.Closest(".e")!.GetAttribute("style"));
+    }
+
+    [Fact]
     public void Bound_elements_are_always_optional_and_carry_field_hints()
     {
         var scene = Minimal();

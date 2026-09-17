@@ -286,16 +286,31 @@ public static class DesignCompiler
         if (boundAnything) body.Append(" data-optional");
         body.Append("><div class=\"a\">").Append(inner).Append("</div></div>");
 
-        // Box
+        // Box. Pinning and coming to the front both animate the box itself (the motion is on .a inside
+        // it): a transform on .a can't lift the element above its siblings, only z-index on the box can.
+        var frames = animated && track.End > track.Start ? ResolveFrames(el) : [];
+        var lifts = frames.Any(f => f.Lift > 0);
         css.Append(cls).Append("{left:").Append(DesignCss.U(el.X)).Append(";top:").Append(DesignCss.U(el.Y))
             .Append(";width:").Append(DesignCss.U(Math.Max(1, el.W))).Append(";height:")
             .Append(DesignCss.U(Math.Max(1, el.H))).Append(';');
-        if (el.Pinned && track.End > track.Start)
+        var boxAnimations = new List<string>();
+        if (el.Pinned && track.End > track.Start) boxAnimations.Add($"p{n}");
+        if (lifts) boxAnimations.Add($"z{n}");
+        if (boxAnimations.Count > 0)
         {
-            css.Append("animation:p").Append(n).Append(" 1s linear both;animation-timeline:scroll(root);animation-range:")
-                .Append(DesignCss.U(track.Start)).Append(' ').Append(DesignCss.U(track.End)).Append(';');
+            var range = DesignCss.U(track.Start) + " " + DesignCss.U(track.End);
+            css.Append("animation:").Append(string.Join(',', boxAnimations.Select(a => a + " 1s linear both")))
+                .Append(";animation-timeline:").Append(string.Join(',', boxAnimations.Select(_ => "scroll(root)")))
+                .Append(";animation-range:").Append(string.Join(',', boxAnimations.Select(_ => range))).Append(';');
         }
         css.Append('}');
+        if (lifts)
+        {
+            css.Append("@keyframes z").Append(n).Append('{');
+            foreach (var frame in frames)
+                css.Append(DesignCss.Num(frame.T * 100)).Append("%{z-index:").Append(frame.Lift).Append('}');
+            css.Append('}');
+        }
         if (el.Pinned && track.End > track.Start)
         {
             css.Append("@keyframes p").Append(n).Append("{from{transform:translateY(0px)}to{transform:translateY(")
@@ -482,6 +497,11 @@ public static class DesignCompiler
     {
         var slot = el.Slot ?? new DesignSlot();
         var path = SlotPath(slot.Path);
+        // One photo of a gallery: the binder reads "event.gallery.2" as the third item, and the
+        // packager folds the path back into the one gallery the host fills.
+        // A lone element on the gallery is its first photo unless told otherwise.
+        var index = slot.Index ?? (!slot.Multiple && path == "event.gallery" ? 1 : null);
+        if (!slot.Multiple && index is >= 1 and <= DesignCatalog.MaxGalleryIndex) path += "." + (index.Value - 1);
         inner.Append("<img data-src=\"").Append(Attr(path)).Append("\" data-slot-label=\"")
             .Append(Attr(string.IsNullOrWhiteSpace(slot.Label) ? "Photo" : Truncate(slot.Label.Trim(), 60))).Append('"');
         if (slot.Multiple)
@@ -594,7 +614,7 @@ public static class DesignCompiler
         return parts.Count == 0 ? "none" : string.Join(' ', parts);
     }
 
-    public sealed record ResolvedFrame(double T, double X, double Y, double Rotate, double Scale, double Opacity, string? Easing);
+    public sealed record ResolvedFrame(double T, double X, double Y, double Rotate, double Scale, double Opacity, string? Easing, int Lift = 0);
 
     /// <summary>
     /// The keyframes with every property filled in. A property a keyframe doesn't set carries over from
@@ -611,8 +631,10 @@ public static class DesignCompiler
             .ToList();
         var result = new List<ResolvedFrame>();
         double x = el.X, y = el.Y, rotate = el.Rotate, scale = el.Scale, opacity = DesignCss.Clamp(el.Opacity, 0, 1);
+        var lift = 0;
         foreach (var k in frames)
         {
+            lift = Math.Clamp(k.Lift ?? lift, 0, DesignCatalog.MaxLift);
             x = k.X ?? x;
             y = k.Y ?? y;
             rotate = k.Rotate ?? rotate;
@@ -621,7 +643,7 @@ public static class DesignCompiler
             var t = DesignCss.Clamp(k.T, 0, 1);
             // Two keyframes at one position: the later wins, as it does when you drop one on another.
             if (result.Count > 0 && Math.Abs(result[^1].T - t) < 0.00001) result.RemoveAt(result.Count - 1);
-            result.Add(new ResolvedFrame(t, x, y, rotate, scale, opacity, DesignCss.Easing(k.Easing)));
+            result.Add(new ResolvedFrame(t, x, y, rotate, scale, opacity, DesignCss.Easing(k.Easing), lift));
         }
         if (result.Count == 0) return result;
         if (result[0].T > 0) result.Insert(0, result[0] with { T = 0, Easing = null });

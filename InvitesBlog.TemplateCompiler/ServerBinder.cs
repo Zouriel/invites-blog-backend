@@ -385,6 +385,16 @@ public static class ServerBinder
         JsonNode? node = root;
         foreach (var segment in path.Split('.'))
         {
+            // A number steps into a list — "event.gallery.2" is the gallery's third photo, exactly as
+            // the in-page injector reads it.
+            if (node is JsonArray list)
+            {
+                if (!int.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var i)
+                    || i >= list.Count || list[i] is null)
+                    return null;
+                node = list[i];
+                continue;
+            }
             if (node is not JsonObject obj || !obj.TryGetPropertyValue(segment, out node) || node is null)
                 return null;
         }

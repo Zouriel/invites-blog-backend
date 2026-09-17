@@ -207,6 +207,11 @@ public sealed class DesignKeyframe
     [JsonPropertyName("rotate")] public double? Rotate { get; set; }
     [JsonPropertyName("scale")] public double? Scale { get; set; }
     [JsonPropertyName("opacity")] public double? Opacity { get; set; }
+    /// <summary>
+    /// How far in front of its neighbours it comes, 0–99. Animated like the rest, so a print swinging
+    /// up passes over the ones beside it and drops back behind them after.
+    /// </summary>
+    [JsonPropertyName("lift")] public int? Lift { get; set; }
     /// <summary>Easing of the segment that STARTS at this keyframe. CSS ignores it on the last one.</summary>
     [JsonPropertyName("easing")] public string? Easing { get; set; }
     /// <summary>enter | exit when a preset created it.</summary>
@@ -288,6 +293,11 @@ public sealed class DesignSlot
     [JsonPropertyName("gap")] public double Gap { get; set; } = 8;
     /// <summary>Width ÷ height of each gallery print.</summary>
     [JsonPropertyName("aspect")] public double Aspect { get; set; } = 1;
+    /// <summary>
+    /// One photo out of a gallery: 1 is its first. The host still fills one gallery; each element shows
+    /// the photo at its place, and hides when the gallery has fewer.
+    /// </summary>
+    [JsonPropertyName("index")] public int? Index { get; set; }
 }
 
 /// <summary>An RSVP button, or a link to a platform page (camera, photos, map) or a URL field.</summary>

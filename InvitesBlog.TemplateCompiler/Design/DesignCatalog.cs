@@ -16,6 +16,10 @@ public static class DesignCatalog
     public const double MinSectionHeight = 200;
     public const double MaxSectionHeight = 6000;
     public const int MaxKeyframes = 24;
+    /// <summary>The most a keyframe can bring an element to the front.</summary>
+    public const int MaxLift = 99;
+    /// <summary>The furthest photo into a gallery an element can show.</summary>
+    public const int MaxGalleryIndex = 50;
     public const int MaxTextLength = 4000;
     public const int MaxSvgBytes = 200 * 1024;
     public const int MaxImageBytes = 400 * 1024;

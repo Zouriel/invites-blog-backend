@@ -32,6 +32,9 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
 
     // An image slot = any element carrying data-src. We capture the whole opening tag so we can also
     // read an optional data-slot-label off the same element.
+    [GeneratedRegex(@"^(.+)\.(\d{1,3})$")]
+    private static partial Regex GalleryItemRegex();
+
     [GeneratedRegex("""<[a-zA-Z][^>]*?\bdata-src\b[^>]*>""", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ImageTagRegex();
 
@@ -259,10 +262,15 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
             var key = (src.Groups[1].Success ? src.Groups[1].Value : src.Groups[2].Value).Trim();
             if (string.IsNullOrWhiteSpace(key)) continue;
 
+            // "event.gallery.2" is one photo OUT OF the gallery: the host is asked for the gallery once,
+            // and every element showing a photo of it reads its own place in the list.
+            var itemOf = GalleryItemRegex().Match(key);
+            if (itemOf.Success) key = itemOf.Groups[1].Value;
+
             occurrences.Add(new SlotOccurrence(
                 key,
                 Attr(tag.Value, SlotLabelRegex()),
-                ParseBool(Attr(tag.Value, MultipleRegex())),
+                itemOf.Success ? true : ParseBool(Attr(tag.Value, MultipleRegex())),
                 ParseCount(Attr(tag.Value, MinImagesRegex())),
                 ParseCount(Attr(tag.Value, MaxImagesRegex())),
                 Slugify(Attr(tag.Value, RoleScopeRegex()))));
