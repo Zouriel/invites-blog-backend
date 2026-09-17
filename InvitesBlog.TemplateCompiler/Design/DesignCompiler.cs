@@ -818,9 +818,9 @@ public static class DesignCompiler
     /// </summary>
     private const string EditorScript = """
         (function(){function u(){return Math.min(window.innerWidth||390,480)/390;}
-        var own=false;window.scrollTo(0,__SCROLL__*u());
-        addEventListener('message',function(e){var m=e.data||{};if(m.type==='ib:scroll'){own=true;window.scrollTo(0,(+m.y||0)*u());}});
-        var f=0;addEventListener('scroll',function(){if(f)return;f=requestAnimationFrame(function(){f=0;if(own){own=false;return;}parent.postMessage({type:'ib:scrolled',y:window.pageYOffset/u()},'*');});},{passive:true});
+        var want=null;window.scrollTo(0,__SCROLL__*u());
+        addEventListener('message',function(e){var m=e.data||{};if(m.type==='ib:scroll'){want=(+m.y||0)*u();window.scrollTo(0,want);}});
+        var f=0;addEventListener('scroll',function(){if(f)return;f=requestAnimationFrame(function(){f=0;var y=window.pageYOffset,ours=want!==null&&Math.abs(y-want)<1.5;want=null;if(ours)return;parent.postMessage({type:'ib:scrolled',y:y/u()},'*');});},{passive:true});
         parent.postMessage({type:'ib:ready',y:window.pageYOffset/u()},'*');})();
         """;
 }
