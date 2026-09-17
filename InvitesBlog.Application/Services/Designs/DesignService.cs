@@ -573,7 +573,11 @@ public sealed class DesignService(
             ? PublicPublishesPerDay
             : Math.Max(0, PublicPublishesPerDay - await PublicPublishesTodayAsync(me, ct));
 
-        using var doc = JsonDocument.Parse(design.SceneJson);
+        // Normalised on the way out too, so a design saved by an older editor opens already converted.
+        string sceneJson;
+        try { sceneJson = engine.Normalize(design.SceneJson); }
+        catch (BusinessRuleException) { sceneJson = design.SceneJson; }
+        using var doc = JsonDocument.Parse(sceneJson);
         return new DesignDto(
             design.Id, design.Name, doc.RootElement.Clone(), design.Revision, design.PublishedRevision,
             design.UpdatedAt, design.CampaignId, info, history, blocked, left);

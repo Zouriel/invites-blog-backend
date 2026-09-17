@@ -14,16 +14,20 @@ namespace InvitesBlog.TemplateCompiler.Design;
 /// the viewport-height remapping the template guide warns about cannot happen.</para>
 ///
 /// <para><b>Scroll.</b> A track's <c>start</c>/<c>end</c> are scroll offsets in the same units —
-/// "how far the reader has scrolled", from 0 to <see cref="DesignCanvas.ScrollRange"/>. They are
+/// "how far the reader has scrolled", from 0 to <see cref="ScrollRange"/>. They are
 /// emitted as length-based <c>animation-range</c>s, so a taller or shorter phone changes where the
 /// page ENDS, never where an animation happens.</para>
+///
+/// <para><b>Length.</b> There are no screens: the page ends where its last element does — the moment
+/// its bottom reaches the bottom of the reference phone, counting how long a pinned element holds.
+/// Place something further down and the page grows to it.</para>
 ///
 /// <para>Deliberately unrelated to the older section-based <see cref="Scene"/> used by the seeded
 /// platform templates; the <see cref="Schema"/> number tells the two apart.</para>
 /// </summary>
 public sealed class DesignScene
 {
-    public const int CurrentSchema = 2;
+    public const int CurrentSchema = 3;
 
     [JsonPropertyName("schema")] public int Schema { get; set; } = CurrentSchema;
     [JsonPropertyName("canvas")] public DesignCanvas Canvas { get; set; } = new();
@@ -59,8 +63,10 @@ public sealed class DesignScene
             throw new DesignSceneException("The design is empty.");
         try
         {
-            return JsonSerializer.Deserialize<DesignScene>(json, Json)
-                   ?? throw new DesignSceneException("The design is empty.");
+            var scene = JsonSerializer.Deserialize<DesignScene>(json, Json)
+                        ?? throw new DesignSceneException("The design is empty.");
+            DesignSceneUpgrade.Apply(scene);
+            return scene;
         }
         catch (JsonException e)
         {
@@ -69,6 +75,27 @@ public sealed class DesignScene
     }
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);
+
+    /// <summary>How tall the page is: its last element's end, never less than one reference screen.</summary>
+    public double PageHeight() => ScrollRange() + DesignCanvas.ReferenceViewport;
+
+    /// <summary>
+    /// How far the reference phone scrolls: until the lowest element's bottom meets the bottom of the
+    /// screen. A pinned element counts where it lets go, since it has travelled down with the reader.
+    /// </summary>
+    public double ScrollRange()
+    {
+        double bottom = 0;
+        foreach (var el in Elements)
+        {
+            if (!double.IsFinite(el.Y) || !double.IsFinite(el.H)) continue;
+            var end = el.Y + Math.Max(0, el.H);
+            if (el.Pinned && el.Track is { } t && double.IsFinite(t.Start) && double.IsFinite(t.End) && t.End > t.Start)
+                end += t.End - Math.Max(0, t.Start);
+            bottom = Math.Max(bottom, end);
+        }
+        return Math.Min(DesignCatalog.MaxPageHeight, Math.Max(0, bottom - DesignCanvas.ReferenceViewport));
+    }
 
     /// <summary>Every element, depth-first, with the group it sits in.</summary>
     public IEnumerable<(DesignElement Element, DesignElement? Parent, int Depth)> Walk()
@@ -95,14 +122,13 @@ public sealed class DesignCanvas
     /// <summary>The phone the timeline is authored against. The page's scroll range is measured with it.</summary>
     public const double ReferenceViewport = 844;
 
-    [JsonPropertyName("sections")] public List<DesignSection> Sections { get; set; } = new();
-
-    [JsonIgnore] public double PageHeight => Sections.Sum(s => s.Height);
-
-    /// <summary>How far the reference phone can scroll: the page minus one screen.</summary>
-    [JsonIgnore] public double ScrollRange => Math.Max(0, PageHeight - ReferenceViewport);
+    /// <summary>Schema 2 only: the screens a page used to be made of. Read, converted, never written.</summary>
+    [JsonPropertyName("sections")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<DesignSection>? Sections { get; set; }
 }
 
+/// <summary>Schema 2's screen. Only read, to convert older designs.</summary>
 public sealed class DesignSection
 {
     [JsonPropertyName("id")] public string Id { get; set; } = default!;
@@ -164,7 +190,7 @@ public sealed class DesignElement
     [JsonPropertyName("scale")] public double Scale { get; set; } = 1;
     [JsonPropertyName("opacity")] public double Opacity { get; set; } = 1;
 
-    /// <summary>The scroll range this element's motion plays over. Null means the whole page.</summary>
+    /// <summary>The scroll range this element's motion plays over, or holds pinned for. Null means the whole page.</summary>
     [JsonPropertyName("track")] public DesignTrack? Track { get; set; }
     [JsonPropertyName("keyframes")] public List<DesignKeyframe> Keyframes { get; set; } = new();
     /// <summary>Preset ids that were applied; their keyframes carry the matching <see cref="DesignKeyframe.Preset"/> tag.</summary>

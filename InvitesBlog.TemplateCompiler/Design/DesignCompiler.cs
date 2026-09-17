@@ -49,7 +49,6 @@ public static class DesignCompiler
         EmitSymbols(ctx, body);
 
         body.Append("<main class=\"ib-page\">");
-        EmitSections(ctx, body, css);
         foreach (var element in scene.Elements)
             EmitElement(ctx, element, body, css);
         body.Append("</main><div class=\"ib-tail\"></div>");
@@ -176,7 +175,10 @@ public static class DesignCompiler
         css.Append("body{margin:0;color:").Append(text)
             .Append(";-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-font-smoothing:antialiased}");
         css.Append(".ib-page{position:relative;display:block;margin:0 auto;overflow:hidden;width:")
-            .Append(DesignCss.U(DesignCanvas.Width)).Append(";height:").Append(DesignCss.U(ctx.Scene.Canvas.PageHeight)).Append('}');
+            .Append(DesignCss.U(DesignCanvas.Width)).Append(";height:").Append(DesignCss.U(ctx.Scene.PageHeight())).Append('}');
+        // The editor can scroll one screen past the end, where the next thing gets added.
+        if (ctx.Options.EditorPreview)
+            css.Append(".ib-page{margin-bottom:").Append(DesignCss.U(DesignCanvas.ReferenceViewport)).Append('}');
         // Keeps the authored scroll range reachable on a phone taller (in canvas units) than the
         // reference one. lvh, not vh/dvh: it doesn't move while the URL bar does.
         css.Append(".ib-tail{height:max(0px, calc(100lvh - ")
@@ -209,23 +211,6 @@ public static class DesignCompiler
                 .Append(clean.InnerMarkup).Append("</symbol>");
         }
         body.Append("</svg>");
-    }
-
-    private static void EmitSections(Context ctx, StringBuilder body, StringBuilder css)
-    {
-        double top = 0;
-        foreach (var section in ctx.Scene.Canvas.Sections)
-        {
-            var color = DesignCss.Color(section.Background, ctx.ThemeKeys);
-            if (color is not null)
-            {
-                var n = ctx.Next++;
-                body.Append("<div class=\"ib-sec e").Append(n).Append("\"></div>");
-                css.Append(".e").Append(n).Append("{top:").Append(DesignCss.U(top)).Append(";height:")
-                    .Append(DesignCss.U(section.Height)).Append(";background:").Append(color).Append('}');
-            }
-            top += section.Height;
-        }
     }
 
     // ----- Elements ----------------------------------------------------------------------------------
@@ -721,13 +706,16 @@ public static class DesignCompiler
         return result;
     }
 
-    /// <summary>The element's track, clamped to the page; the whole page when it has none.</summary>
+    /// <summary>
+    /// The element's track; the whole page when it has none. Not clamped to the page's end: the page's
+    /// length follows its content, and motion keeps its timing while it does — what runs past the end
+    /// simply isn't reached.
+    /// </summary>
     public static DesignTrack TrackOf(DesignScene scene, DesignElement el)
     {
-        var range = Math.Max(1, scene.Canvas.ScrollRange);
-        if (el.Track is null) return new DesignTrack { Start = 0, End = range };
-        var start = DesignCss.Clamp(el.Track.Start, 0, range);
-        var end = DesignCss.Clamp(el.Track.End, 0, range);
+        if (el.Track is null) return new DesignTrack { Start = 0, End = Math.Max(1, scene.ScrollRange()) };
+        var start = DesignCss.Clamp(el.Track.Start, 0, DesignCatalog.MaxPageHeight);
+        var end = DesignCss.Clamp(el.Track.End, 0, DesignCatalog.MaxPageHeight);
         return new DesignTrack { Start = start, End = end };
     }
 

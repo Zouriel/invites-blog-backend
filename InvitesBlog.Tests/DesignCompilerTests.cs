@@ -31,6 +31,14 @@ public class DesignCompilerTests
 
     [Theory]
     [MemberData(nameof(Starters))]
+    public void Every_starter_passes_check_with_no_warnings_about_the_page(string id)
+    {
+        var scene = DesignStarters.Create(id)!;
+        Assert.DoesNotContain(DesignValidator.Validate(scene), i => i.Code is "track_unreachable" or "off_page" or "page_too_long");
+    }
+
+    [Theory]
+    [MemberData(nameof(Starters))]
     public void Every_starter_is_accepted_by_the_platform_packager(string id)
     {
         var scene = DesignStarters.Create(id)!;
@@ -245,6 +253,95 @@ public class DesignCompilerTests
         Assert.Contains("display:none", dateBox.GetAttribute("style"));
     }
 
+    // ----- Page length: no screens, the page ends where its content does ------------------------------
+
+    [Fact]
+    public void The_page_ends_where_its_lowest_element_does()
+    {
+        var scene = Minimal();
+        scene.Elements.Add(new DesignElement { Id = "low", Type = "shape", X = 0, Y = 2000, W = 100, H = 150, Shape = new DesignShape { Kind = "rect", Fill = "#000000" } });
+
+        Assert.Equal(2150 - DesignCanvas.ReferenceViewport, scene.ScrollRange());
+        Assert.Contains($"height:calc({2150} * var(--u))", DesignCompiler.Compile(scene));
+    }
+
+    [Fact]
+    public void A_short_page_is_still_one_screen_long()
+    {
+        var scene = Minimal();
+        scene.Elements.RemoveAll(e => e.Type == "rsvp");
+        Assert.Equal(0, scene.ScrollRange());
+        Assert.Equal(DesignCanvas.ReferenceViewport, scene.PageHeight());
+    }
+
+    [Fact]
+    public void A_pinned_element_lengthens_the_page_by_how_long_it_holds()
+    {
+        var scene = Minimal();
+        scene.Elements.Add(new DesignElement
+        {
+            Id = "held", Type = "shape", X = 0, Y = 600, W = 100, H = 244, Pinned = true, Track = new DesignTrack { Start = 100, End = 2100 },
+            Shape = new DesignShape { Kind = "rect", Fill = "#000000" },
+        });
+
+        Assert.Equal(2000, scene.ScrollRange());
+    }
+
+    [Fact]
+    public void Motion_keeps_its_timing_past_the_end_of_the_page()
+    {
+        var scene = Minimal();
+        scene.Elements[0].Track = new DesignTrack { Start = 0, End = 3000 };
+        scene.Elements[0].Keyframes = [new() { T = 0, Opacity = 0 }, new() { T = 1, Opacity = 1 }];
+
+        var track = DesignCompiler.TrackOf(scene, scene.Elements[0]);
+
+        Assert.Equal(3000, track.End);
+        Assert.Contains("animation-range:0px calc(3000 * var(--u))", DesignCompiler.Compile(scene));
+    }
+
+    [Fact]
+    public void The_editor_preview_scrolls_one_screen_past_the_end()
+    {
+        var html = DesignCompiler.Compile(Minimal(), new DesignCompileOptions { EditorPreview = true });
+        Assert.Contains($".ib-page{{margin-bottom:calc({DesignCanvas.ReferenceViewport} * var(--u))}}", html);
+        Assert.DoesNotContain("margin-bottom", DesignCompiler.Compile(Minimal()));
+    }
+
+    [Fact]
+    public void A_page_longer_than_the_limit_is_an_error()
+    {
+        var scene = Minimal();
+        scene.Elements[0].Y = DesignCatalog.MaxPageHeight + 10;
+        Assert.Contains(DesignValidator.Validate(scene), i => i.Code == "page_too_long");
+    }
+
+    [Fact]
+    public void A_screens_design_from_the_older_editor_is_converted_without_changing_how_it_plays()
+    {
+        const string json = """
+        {"schema":2,"canvas":{"sections":[{"id":"s1","name":"Screen 1","height":844},{"id":"s2","name":"Screen 2","height":844,"background":"theme:accent"},{"id":"s3","name":"Screen 3","height":844}]},
+         "theme":[{"key":"accent","label":"Accent","value":"#b08d57"},{"key":"bg","label":"Background","value":"#ffffff"},{"key":"text","label":"Text","value":"#111111"}],
+         "elements":[
+           {"id":"late","type":"shape","x":0,"y":1700,"w":100,"h":100,"track":{"start":900,"end":5000},"keyframes":[{"t":0,"opacity":0},{"t":1}],"shape":{"kind":"rect","fill":"#000000"}},
+           {"id":"whole","type":"shape","x":0,"y":100,"w":100,"h":100,"keyframes":[{"t":0,"rotate":0},{"t":1,"rotate":90}],"shape":{"kind":"rect","fill":"#000000"}}
+         ]}
+        """;
+
+        var scene = DesignScene.Parse(json);
+
+        Assert.Equal(DesignScene.CurrentSchema, scene.Schema);
+        Assert.Null(scene.Canvas.Sections);
+        Assert.DoesNotContain("sections", scene.ToJson());
+        // The coloured screen is now a box at the back, where the screen was.
+        var ground = scene.Elements[0];
+        Assert.Equal(("shape", 844d, 844d, 390d, "theme:accent"), (ground.Type, ground.Y, ground.H, ground.W, ground.Shape!.Fill));
+        // Tracks keep the timing the old page gave them.
+        Assert.Equal((900d, 1688d), (scene.Elements[1].Track!.Start, scene.Elements[1].Track!.End));
+        Assert.Equal((0d, 1688d), (scene.Elements[2].Track!.Start, scene.Elements[2].Track!.End));
+        Assert.DoesNotContain(DesignValidator.Validate(scene), i => i.Code is "schema" or "track" or "element_id" or "element_duplicate");
+    }
+
     // ----- Injection: the reason a designed template can skip human review -------------------------
 
     [Theory]
@@ -256,7 +353,6 @@ public class DesignCompilerTests
         var scene = Minimal();
         scene.Theme.Add(new DesignThemeEntry { Key = "extra", Label = "Extra", Value = hostile });
         scene.Elements[0].Text!.Style.Color = hostile;
-        scene.Canvas.Sections[0].Background = hostile;
 
         var html = DesignCompiler.Compile(scene);
 

@@ -12,9 +12,8 @@ public static class DesignCatalog
 
     public const int MaxElements = 300;
     public const int MaxDepth = 3;
-    public const int MaxSections = 30;
-    public const double MinSectionHeight = 200;
-    public const double MaxSectionHeight = 6000;
+    /// <summary>The longest a page can scroll, in canvas units — about a hundred phone screens.</summary>
+    public const double MaxPageHeight = 84_400;
     public const int MaxKeyframes = 24;
     /// <summary>The most a keyframe can bring an element to the front.</summary>
     public const int MaxLift = 99;

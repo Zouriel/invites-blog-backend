@@ -34,7 +34,7 @@ public static class DesignStarters
 
     private static DesignScene Blank()
     {
-        var s = Scene(3, "#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
+        var s = Scene("#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
         var y = 0.0;
         s.Elements.Add(Text("title", 30, 300, 330, 90, [Var("event.title")], Heading(40)));
         s.Elements.Add(Text("subtitle", 30, 400, 330, 40, [Var("event.subtitle")], Body(18, italic: true)));
@@ -53,10 +53,9 @@ public static class DesignStarters
 
     private static DesignScene Wedding()
     {
-        var s = Scene(4, "#b08d57", "#fbf7f0", "#3a3129", "cormorant-garamond", "lora");
+        var s = Scene("#b08d57", "#fbf7f0", "#3a3129", "cormorant-garamond", "lora");
         s.Fonts = ["cormorant-garamond", "lora", "playfair-display", "great-vibes"];
         s.Theme.Add(new DesignThemeEntry { Key = "script-font", Label = "Script font", Value = "great-vibes" });
-        s.Canvas.Sections[1].Background = "theme:accent";
 
         // Hero: the photo holds while the names rise over it.
         var photo = Slot("cover", 0, 0, 390, 844, "event.coverImage", "Cover photo");
@@ -72,8 +71,11 @@ public static class DesignStarters
         s.Elements.Add(Text("sub", 20, 660, 350, 36, [Var("event.subtitle")], Body(17, italic: true)));
         s.Elements.Add(Shape("rule1", 145, 712, 100, 2, "line", stroke: "theme:accent"));
 
-        // Section 2: date card on the accent ground.
+        // Second screen: date card on the accent ground.
         var y = 844.0;
+        var ground = Shape("ground", 0, y, 390, 844, "rect", "theme:accent");
+        ground.Name = "Accent background";
+        s.Elements.Insert(0, ground);
         s.Elements.Add(Text("save", 30, y + 180, 330, 30, [Lit("Together with their families")], Body(14, color: "theme:bg", uppercase: true, spacing: 0.2)));
         s.Elements.Add(Text("date", 30, y + 300, 330, 60, [Var("event.date")], Heading(34, color: "theme:bg")));
         s.Elements.Add(Text("time", 30, y + 370, 330, 30, [Lit("at "), Var("event.time")], Body(18, color: "theme:bg")));
@@ -85,7 +87,7 @@ public static class DesignStarters
         ring.Keyframes = [new() { T = 0, Scale = 0.6, Opacity = 0 }, new() { T = 0.5, Scale = 1.6, Opacity = 0.5 }, new() { T = 1, Scale = 2.4, Opacity = 0 }];
         s.Elements.Add(ring);
 
-        // Section 3: venue + dress colours.
+        // Third: venue + dress colours.
         y = 1688;
         s.Elements.Add(Text("where", 30, y + 120, 330, 30, [Lit("Where")], Body(14, color: "theme:accent", uppercase: true, spacing: 0.25)));
         s.Elements.Add(Text("venue", 30, y + 160, 330, 50, [Var("event.venue.name")], Heading(32)));
@@ -94,20 +96,20 @@ public static class DesignStarters
         s.Elements.Add(Text("wear", 30, y + 420, 330, 30, [Lit("What to wear")], Body(14, color: "theme:accent", uppercase: true, spacing: 0.25)));
         s.Elements.Add(Dress("dress", 30, y + 460, 330, 140));
 
-        // Section 4: the ask.
+        // Last: the ask.
         y = 2532;
         s.Elements.Add(Text("dear", 30, y + 160, 330, 90, [Lit("Dear "), Var("guest.name"), Lit(",\nwe would be honoured by your presence.")], Body(20, italic: true)));
         s.Elements.Add(Rsvp("rsvp", 85, y + 290, 220, 54));
         s.Elements.Add(Link("camera", 85, y + 360, 220, 44, "camera.link", "Share your photos"));
         s.Elements.Add(Text("tag", 30, y + 460, 330, 30, [Var("event.hashtag")], Body(15, color: "theme:accent")));
 
-        foreach (var el in s.Elements.Where(e => e.Id is not ("cover" or "ring" or "veil"))) FadeUp(s, el);
+        foreach (var el in s.Elements.Where(e => e.Id is not ("cover" or "ring" or "veil" or "ground"))) FadeUp(s, el);
         return s;
     }
 
     private static DesignScene Birthday()
     {
-        var s = Scene(3, "#ff5d73", "#1d1a3a", "#fdf6ff", "poppins", "poppins");
+        var s = Scene("#ff5d73", "#1d1a3a", "#fdf6ff", "poppins", "poppins");
         s.Fonts = ["poppins", "montserrat", "dancing-script"];
         s.Theme.Add(new DesignThemeEntry { Key = "pop", Label = "Pop colour", Value = "#ffd166" });
         s.Theme.Add(new DesignThemeEntry { Key = "cool", Label = "Cool colour", Value = "#4cc9f0" });
@@ -161,7 +163,7 @@ public static class DesignStarters
 
     private static DesignScene SaveTheDate()
     {
-        var s = Scene(2, "#1b3d59", "#f3eed8", "#152026", "italiana", "josefin-sans");
+        var s = Scene("#1b3d59", "#f3eed8", "#152026", "italiana", "josefin-sans");
         s.Fonts = ["italiana", "josefin-sans", "cinzel"];
         s.Elements.Add(Text("kicker", 30, 170, 330, 30, [Lit("Save the date")], Body(15, uppercase: true, spacing: 0.35, color: "theme:accent")));
         s.Elements.Add(Text("title", 20, 230, 350, 120, [Var("event.title")], Heading(54)));
@@ -177,14 +179,8 @@ public static class DesignStarters
 
     // ----- Builders ----------------------------------------------------------------------------------
 
-    private static DesignScene Scene(int sections, string accent, string bg, string text, string headingFont, string bodyFont) => new()
+    private static DesignScene Scene(string accent, string bg, string text, string headingFont, string bodyFont) => new()
     {
-        Canvas = new DesignCanvas
-        {
-            Sections = Enumerable.Range(1, sections)
-                .Select(i => new DesignSection { Id = $"sec{i}", Name = $"Screen {i}", Height = DesignCanvas.ReferenceViewport })
-                .ToList(),
-        },
         Theme =
         [
             new() { Key = "accent", Label = "Accent", Value = accent },
@@ -255,7 +251,9 @@ public static class DesignStarters
         if (el.Keyframes.Count > 0) return;
         // What's on the opening screen is there when the invitation opens; only what's below it rises in.
         if (el.Y + el.H * 0.5 < DesignCanvas.ReferenceViewport * 0.9) return;
-        var start = Math.Max(0, el.Y - DesignCanvas.ReferenceViewport * 0.95);
+        // Early enough that the fade (the first 15% of the track) is over by the time the element's
+        // bottom reaches the bottom of the screen — the last thing on a page can't wait for more scroll.
+        var start = Math.Max(0, Math.Min(el.Y - DesignCanvas.ReferenceViewport * 0.95, el.Y + el.H - DesignCanvas.ReferenceViewport - 210));
         el.Track = new DesignTrack { Start = start, End = start + 1400 };
         DesignPresets.Apply(el, DesignCatalog.EnterPresets.First(p => p.Id == preset), "enter");
     }

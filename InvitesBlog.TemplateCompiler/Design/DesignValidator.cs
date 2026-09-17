@@ -39,17 +39,10 @@ public static partial class DesignValidator
         if (scene.Schema != DesignScene.CurrentSchema)
             Error("schema", "This design was made with a different version of the editor.");
 
-        // ----- Canvas -----
-        var sections = scene.Canvas.Sections;
-        if (sections.Count == 0) Error("no_sections", "Add at least one section to the page.");
-        if (sections.Count > DesignCatalog.MaxSections) Error("too_many_sections", $"A page can have at most {DesignCatalog.MaxSections} sections.");
-        foreach (var s in sections)
-        {
-            if (!double.IsFinite(s.Height) || s.Height < DesignCatalog.MinSectionHeight || s.Height > DesignCatalog.MaxSectionHeight)
-                Error("section_height", $"“{s.Name}” must be between {DesignCatalog.MinSectionHeight} and {DesignCatalog.MaxSectionHeight} tall.");
-            if (s.Background is not null && DesignCss.Color(s.Background, ThemeKeys(scene)) is null)
-                Error("section_color", $"“{s.Name}” has a background colour that isn't valid.");
-        }
+        // ----- Page -----
+        var lowest = scene.Elements.Where(e => double.IsFinite(e.Y) && double.IsFinite(e.H)).Select(e => e.Y + e.H).DefaultIfEmpty(0).Max();
+        if (lowest > DesignCatalog.MaxPageHeight)
+            Error("page_too_long", $"The page runs longer than {DesignCatalog.MaxPageHeight / DesignCanvas.ReferenceViewport:0} screens — bring things closer together.");
 
         // ----- Theme -----
         var themeKeys = ThemeKeys(scene);
@@ -124,8 +117,8 @@ public static partial class DesignValidator
         var all = scene.Walk().ToList();
         if (all.Count > DesignCatalog.MaxElements) Error("too_many_elements", $"A design can have at most {DesignCatalog.MaxElements} elements.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        var range = scene.Canvas.ScrollRange;
-        var page = scene.Canvas.PageHeight;
+        var range = scene.ScrollRange();
+        var page = scene.PageHeight();
         var animated = 0;
         var rsvp = 0;
         var dress = 0;
