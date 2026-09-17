@@ -422,6 +422,11 @@ public static class DesignCompiler
 
         inner.Append("<svg class=\"s\" viewBox=\"0 0 ").Append(DesignCss.Num(w)).Append(' ').Append(DesignCss.Num(h))
             .Append("\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
+        if (shape.Kind == "path" && shape.Path is { } drawn)
+        {
+            EmitPath(inner, drawn, fill, stroke, sw, DesignCss.Color(shape.Fill, ctx.ThemeKeys));
+            return;
+        }
         switch (shape.Kind)
         {
             case "ellipse":
@@ -455,6 +460,71 @@ public static class DesignCompiler
                 break;
         }
         inner.Append("</svg>");
+    }
+
+    /// <summary>
+    /// A drawn outline, in its own viewBox so it stretches with the element. Closed contours share one
+    /// path (filled, non-zero, so overlapping parts read as one shape); open ones are lines.
+    /// </summary>
+    private static void EmitPath(StringBuilder inner, DesignPath path, string fill, string? stroke, double strokeWidth, string? fillColor)
+    {
+        var pw = DesignCss.Clamp(path.Width, 1, 10000);
+        var ph = DesignCss.Clamp(path.Height, 1, 10000);
+        // Nested in the element's own <svg>, in the path's space, so it stretches with the element's box.
+        inner.Append("<svg viewBox=\"0 0 ").Append(DesignCss.Num(pw)).Append(' ').Append(DesignCss.Num(ph))
+            .Append("\" preserveAspectRatio=\"none\" width=\"100%\" height=\"100%\" overflow=\"visible\">");
+        var closed = PathD(path.Contours.Where(c => c.Closed));
+        var open = PathD(path.Contours.Where(c => !c.Closed));
+        if (closed.Length > 0)
+        {
+            inner.Append("<path d=\"").Append(closed).Append("\" fill-rule=\"nonzero\" style=\"fill:").Append(fill);
+            if (strokeWidth > 0 && stroke is not null)
+                inner.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(strokeWidth)).Append(";stroke-linejoin:round");
+            inner.Append("\"/>");
+        }
+        if (open.Length > 0)
+        {
+            var lineColor = stroke ?? fillColor ?? "currentColor";
+            var lineWidth = strokeWidth > 0 ? strokeWidth : 2;
+            inner.Append("<path d=\"").Append(open).Append("\" style=\"fill:none;stroke:").Append(lineColor)
+                .Append(";stroke-width:").Append(DesignCss.Num(lineWidth)).Append(";stroke-linecap:round;stroke-linejoin:round\"/>");
+        }
+        inner.Append("</svg></svg>");
+    }
+
+    /// <summary>The SVG path data for contours. Only numbers are written, so nothing but geometry can come out.</summary>
+    public static string PathD(IEnumerable<DesignContour> contours)
+    {
+        var d = new StringBuilder();
+        foreach (var c in contours.Take(DesignCatalog.MaxPathContours))
+        {
+            var pts = c.Points.Where(p => Finite(p.X, p.Y) && (p.In is null || Finite(p.In.X, p.In.Y)) && (p.Out is null || Finite(p.Out.X, p.Out.Y)))
+                .Take(DesignCatalog.MaxPathPoints).ToList();
+            if (pts.Count < 2) continue;
+            d.Append('M').Append(DesignCss.Num(pts[0].X)).Append(' ').Append(DesignCss.Num(pts[0].Y));
+            var count = c.Closed ? pts.Count : pts.Count - 1;
+            for (var i = 0; i < count; i++)
+            {
+                var a = pts[i];
+                var b = pts[(i + 1) % pts.Count];
+                if (a.Out is null && b.In is null)
+                {
+                    d.Append('L').Append(DesignCss.Num(b.X)).Append(' ').Append(DesignCss.Num(b.Y));
+                }
+                else
+                {
+                    var c1x = a.Out?.X ?? a.X; var c1y = a.Out?.Y ?? a.Y;
+                    var c2x = b.In?.X ?? b.X; var c2y = b.In?.Y ?? b.Y;
+                    d.Append('C').Append(DesignCss.Num(c1x)).Append(' ').Append(DesignCss.Num(c1y)).Append(' ')
+                        .Append(DesignCss.Num(c2x)).Append(' ').Append(DesignCss.Num(c2y)).Append(' ')
+                        .Append(DesignCss.Num(b.X)).Append(' ').Append(DesignCss.Num(b.Y));
+                }
+            }
+            if (c.Closed) d.Append('Z');
+        }
+        return d.ToString();
+
+        static bool Finite(double x, double y) => double.IsFinite(x) && double.IsFinite(y);
     }
 
     private static void EmitSvg(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)

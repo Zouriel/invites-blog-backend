@@ -157,6 +157,61 @@ public class DesignCompilerTests
     }
 
     [Fact]
+    public void A_drawn_shape_compiles_to_path_data_in_its_own_stretchable_space_and_passes_check()
+    {
+        var scene = Minimal();
+        scene.Elements.Add(new DesignElement
+        {
+            Id = "door", Type = "shape", X = 40, Y = 60, W = 120, H = 200,
+            Shape = new DesignShape
+            {
+                Kind = "path", Fill = "theme:accent",
+                Path = new DesignPath
+                {
+                    Width = 120, Height = 200,
+                    Contours =
+                    [
+                        new DesignContour
+                        {
+                            Closed = true,
+                            Points =
+                            [
+                                new() { X = 0, Y = 200 },
+                                new() { X = 0, Y = 60, Out = new DesignXY { X = 0, Y = 27 } },
+                                new() { X = 60, Y = 0, In = new DesignXY { X = 27, Y = 0 }, Out = new DesignXY { X = 93, Y = 0 } },
+                                new() { X = 120, Y = 60, In = new DesignXY { X = 120, Y = 27 } },
+                                new() { X = 120, Y = 200 },
+                            ],
+                        },
+                        new DesignContour { Closed = false, Points = [new() { X = 60, Y = 60 }, new() { X = 60, Y = 200 }] },
+                    ],
+                },
+            },
+        });
+
+        var html = DesignCompiler.Compile(scene);
+        var issues = DesignValidator.Validate(scene).Concat(DesignValidator.CheckCompiled(html)).ToList();
+
+        Assert.Contains("viewBox=\"0 0 120 200\"", html);
+        Assert.Contains("d=\"M0 200L0 60C0 27 27 0 60 0C93 0 120 27 120 60L120 200L0 200Z\"", html);
+        Assert.Contains("d=\"M60 60L60 200\"", html);
+        Assert.DoesNotContain(issues, i => i.Severity == DesignIssue.Error);
+    }
+
+    [Fact]
+    public void A_drawn_shape_with_nothing_or_too_much_in_it_fails_check()
+    {
+        var empty = Minimal();
+        empty.Elements.Add(new DesignElement { Id = "s", Type = "shape", W = 10, H = 10, Shape = new DesignShape { Kind = "path", Path = new DesignPath() } });
+        Assert.Contains(DesignValidator.Validate(empty), i => i.Code == "shape_path" && i.Severity == DesignIssue.Error);
+
+        var huge = Minimal();
+        var points = Enumerable.Range(0, DesignCatalog.MaxPathPoints + 1).Select(i => new DesignPathPoint { X = i, Y = i }).ToList();
+        huge.Elements.Add(new DesignElement { Id = "s", Type = "shape", W = 10, H = 10, Shape = new DesignShape { Kind = "path", Path = new DesignPath { Contours = [new DesignContour { Points = points }] } } });
+        Assert.Contains(DesignValidator.Validate(huge), i => i.Code == "shape_path" && i.Severity == DesignIssue.Error);
+    }
+
+    [Fact]
     public void Bound_elements_are_always_optional_and_carry_field_hints()
     {
         var scene = Minimal();

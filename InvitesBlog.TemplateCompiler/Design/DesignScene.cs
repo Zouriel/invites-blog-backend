@@ -253,13 +253,48 @@ public sealed class DesignText
 
 public sealed class DesignShape
 {
-    /// <summary>rect | ellipse | line | polygon.</summary>
+    /// <summary>rect | ellipse | line | polygon | path.</summary>
     [JsonPropertyName("kind")] public string Kind { get; set; } = "rect";
+    /// <summary>The outline of a <c>path</c> shape, drawn in the shape editor.</summary>
+    [JsonPropertyName("path")] public DesignPath? Path { get; set; }
     [JsonPropertyName("sides")] public int Sides { get; set; } = 6;
     [JsonPropertyName("fill")] public string? Fill { get; set; }
     [JsonPropertyName("stroke")] public string? Stroke { get; set; }
     [JsonPropertyName("strokeWidth")] public double StrokeWidth { get; set; }
     [JsonPropertyName("radius")] public double Radius { get; set; }
+}
+
+/// <summary>
+/// A drawn outline: contours of points with optional Bézier handles, in a space of <see cref="Width"/> ×
+/// <see cref="Height"/> units that is stretched onto the element's box.
+/// </summary>
+public sealed class DesignPath
+{
+    [JsonPropertyName("width")] public double Width { get; set; } = 100;
+    [JsonPropertyName("height")] public double Height { get; set; } = 100;
+    [JsonPropertyName("contours")] public List<DesignContour> Contours { get; set; } = new();
+}
+
+public sealed class DesignContour
+{
+    [JsonPropertyName("closed")] public bool Closed { get; set; } = true;
+    [JsonPropertyName("points")] public List<DesignPathPoint> Points { get; set; } = new();
+}
+
+public sealed class DesignPathPoint
+{
+    [JsonPropertyName("x")] public double X { get; set; }
+    [JsonPropertyName("y")] public double Y { get; set; }
+    /// <summary>Curve handle toward the previous point; absolute, in path units.</summary>
+    [JsonPropertyName("in")] public DesignXY? In { get; set; }
+    /// <summary>Curve handle toward the next point.</summary>
+    [JsonPropertyName("out")] public DesignXY? Out { get; set; }
+}
+
+public sealed class DesignXY
+{
+    [JsonPropertyName("x")] public double X { get; set; }
+    [JsonPropertyName("y")] public double Y { get; set; }
 }
 
 public sealed class DesignSvg

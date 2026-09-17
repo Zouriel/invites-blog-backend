@@ -197,7 +197,18 @@ public static partial class DesignValidator
                     break;
                 case "shape":
                     var shape = el.Shape ?? new DesignShape();
-                    if (shape.Kind is not ("rect" or "ellipse" or "line" or "polygon")) Error("shape_kind", $"“{label}” is an unknown shape.", el.Id);
+                    if (shape.Kind is not ("rect" or "ellipse" or "line" or "polygon" or "path")) Error("shape_kind", $"“{label}” is an unknown shape.", el.Id);
+                    if (shape.Kind == "path")
+                    {
+                        var contours = shape.Path?.Contours ?? [];
+                        var total = contours.Sum(c => c.Points.Count);
+                        if (contours.Count == 0 || total < 2)
+                            Error("shape_path", $"“{label}” is a drawn shape with nothing drawn.", el.Id);
+                        else if (contours.Count > DesignCatalog.MaxPathContours || total > DesignCatalog.MaxPathPoints)
+                            Error("shape_path", $"“{label}” has too many points — merge or simplify it.", el.Id);
+                        else if (contours.SelectMany(c => c.Points).Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y)))
+                            Error("shape_path", $"“{label}” has a point that isn't a number.", el.Id);
+                    }
                     CheckColor(shape.Fill, label, el.Id!, themeKeys, Error, Warn);
                     CheckColor(shape.Stroke, label, el.Id!, themeKeys, Error, Warn);
                     break;

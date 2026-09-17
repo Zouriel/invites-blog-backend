@@ -18,6 +18,9 @@ public static class DesignCatalog
     public const int MaxKeyframes = 24;
     /// <summary>The most a keyframe can bring an element to the front.</summary>
     public const int MaxLift = 99;
+    /// <summary>Limits on a drawn shape, so one element can't bloat the page.</summary>
+    public const int MaxPathContours = 200;
+    public const int MaxPathPoints = 2000;
     /// <summary>The furthest photo into a gallery an element can show.</summary>
     public const int MaxGalleryIndex = 50;
     public const int MaxTextLength = 4000;
