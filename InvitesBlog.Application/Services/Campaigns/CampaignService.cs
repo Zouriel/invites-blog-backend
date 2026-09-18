@@ -3,6 +3,9 @@ using System.Text.Json.Nodes;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
+using InvitesBlog.Application.Delivery;
+using InvitesBlog.Application.Designs;
 using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Campaigns;
@@ -41,6 +44,7 @@ public sealed class CampaignService(
     IRepository<Refund> refunds,
     IUnitOfWork uow,
     IEmailSender email,
+    IEnumerable<IInviteDeliveryProvider> deliveryProviders,
     IStorageService storage,
     IPaymentProvider paymentProvider,
     PhoneNormalizer phones,
@@ -75,9 +79,9 @@ public sealed class CampaignService(
             TemplateId = template.Id,
             TemplateVersion = template.Version,
             // Freeze the version's structure here — everything downstream reads this snapshot, so
-            // re-reviewing or editing the template later cannot change what this campaign renders.
+            // republishing or editing the template later cannot change what this campaign renders.
             TemplateManifestJson = string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson,
-            // …and the package the pinned version serves, so an approved edit can't re-serve new markup.
+            // …and the package the pinned version serves, so a later publish can't re-serve new markup.
             TemplatePackageUrl = template.PackageUrl,
             AccessTokenHash = TokenService.Hash(rawToken),
             Title = req.Title,
@@ -264,7 +268,7 @@ public sealed class CampaignService(
         // finishing, and arrived again every time they touched the host-details step.
         if (currentUser.UserId is not null) return;
 
-        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var inviterBase = config.InviterBase();
         var resumeLink = $"{inviterBase}/create/{campaign.Id}/editor?resume={accessToken}";
         await email.SendAsync(new Application.Abstractions.EmailMessage(
             To: normEmail,
@@ -302,7 +306,7 @@ public sealed class CampaignService(
         if (guestList.Count == 0 && campaign.OpenLinkCode is null)
             throw new CampaignHasNoGuestsException();
 
-        var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
+        var inviteeBase = config.InviteeBase();
 
         // The open link WINS as the thing we hand back, because it is the one the host is actually
         // going to share. /e/{id} still exists behind it for a campaign that has a guest list, but
@@ -311,7 +315,7 @@ public sealed class CampaignService(
         var shareLink = campaign.OpenLinkCode is { } code
             ? OpenLinkUrl(code)
             : $"{inviteeBase}/e/{id}";
-        var (channels, messageTemplate) = DeliverySettings(campaign.DeliverySettingsJson);
+        var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
 
         // NOTE: this says Dispatched even when the email channel is off and nothing is sent. It is
         // not the harmless bookkeeping it looks like — CancelAsync reads it to decide whether a
@@ -323,14 +327,18 @@ public sealed class CampaignService(
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
         var emailed = 0;
-        if (channels.Contains("email"))
+        if (settings.Uses("email"))
         {
+            // The same provider — and so the same email, §15.2 removal link included — that resends
+            // and "add and send now" go through (DispatchService). This path used to build its own
+            // HTML, which left the very first invitation a guest received without that link.
+            var emailChannel = deliveryProviders.First(p =>
+                p.Channel.Equals("email", StringComparison.OrdinalIgnoreCase));
+            var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
+
             foreach (var g in guestList)
             {
                 if (string.IsNullOrWhiteSpace(g.Email)) continue;
-                var name = string.IsNullOrWhiteSpace(g.Name) ? "there" : g.Name.Trim();
-                var message = (messageTemplate ?? "You're warmly invited! Tap below to open your invitation.")
-                    .Replace("{{name}}", name).Replace("{{guest.name}}", name);
 
                 // Emailed links are per-guest tokenized: clicking opens the invite directly — the raw
                 // token IS the key, no OTP. (The SHARE button link, by contrast, is the gated /e/{id}.)
@@ -360,50 +368,15 @@ public sealed class CampaignService(
                         invite.Status = InviteStatus.Sent;
                 }
 
-                var personalLink = $"{inviteeBase}/i/{rawToken}";
-                await email.SendAsync(BuildShareEmail(g.Email, name, campaign.Title, message, personalLink), ct);
+                var letter = InviteLetter.For(
+                    campaign, g, invite.Id, settings, inviteeBase, rawToken, inviter?.Name, inviter?.Email);
+                await emailChannel.SendAsync(letter.To("email", g.Email), ct);
                 emailed++;
             }
         }
 
         await uow.SaveChangesAsync(ct);
         return new FinalizeResponse(shareLink, guestList.Count, emailed);
-    }
-
-    private static (HashSet<string> Channels, string? MessageTemplate) DeliverySettings(string json)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        string? message = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
-            var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                if (root.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Array)
-                    foreach (var c in ch.EnumerateArray())
-                        if (c.ValueKind == JsonValueKind.String && c.GetString() is { } s) set.Add(s);
-                if (root.TryGetProperty("messageTemplate", out var mt) && mt.ValueKind == JsonValueKind.String)
-                    message = mt.GetString();
-            }
-        }
-        catch (JsonException) { /* fall through to defaults */ }
-        return (set, message);
-    }
-
-    private static Application.Abstractions.EmailMessage BuildShareEmail(string to, string guestName, string eventTitle, string message, string link)
-    {
-        var name = System.Net.WebUtility.HtmlEncode(guestName);
-        var body = System.Net.WebUtility.HtmlEncode(message);
-        var html =
-            "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#2a1420\">" +
-            $"<p style=\"font-size:16px;line-height:1.6\">Dear {name},</p>" +
-            $"<p style=\"font-size:16px;line-height:1.6\">{body}</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open your invitation</a></p>" +
-            $"<p style=\"font-size:12px;color:#8a5c72;line-height:1.6\">This is your personal invitation link — open it anytime:<br><a href=\"{link}\" style=\"color:#b9748f\">{link}</a><br>Sent via invites.blog</p></div>";
-        return new Application.Abstractions.EmailMessage(
-            To: to, Subject: $"You're invited — {(string.IsNullOrWhiteSpace(eventTitle) ? "invites.blog" : eventTitle)}",
-            Html: html, Stream: Application.Abstractions.EmailStream.Invites);
     }
 
     public async Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default)
@@ -518,23 +491,8 @@ public sealed class CampaignService(
 
         // A placeholder to pin. Marked Imported, which every gallery read already fails to match, so
         // it is invisible everywhere a template would otherwise be listed.
-        var placeholder = new Template
-        {
-            Id = Guid.NewGuid(),
-            Name = title.Trim(),
-            Slug = $"bare-{Guid.NewGuid():N}",
-            Description = "A campaign with no invitation.",
-            Category = "Imported",
-            Version = "1.0.0",
-            PackageUrl = string.Empty,
-            PreviewImageUrl = string.Empty,
-            ManifestJson = """{"fields":[],"images":[],"blocks":[],"theme":{}}""",
-            SceneJson = "{}",
-            Visibility = TemplateVisibility.Imported,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
+        var placeholder = ImportedTemplate.Create(
+            title.Trim(), $"bare-{Guid.NewGuid():N}", "A campaign with no invitation.");
 
         await templates.AddAsync(placeholder, ct);
         await uow.SaveChangesAsync(ct);
@@ -602,7 +560,7 @@ public sealed class CampaignService(
         var stored = optimized.Content;
 
         var ext = System.IO.Path.GetExtension(fileName);
-        if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
+        if (string.IsNullOrWhiteSpace(ext)) ext = MediaFileTypes.ExtensionFor(contentType);
         var key = $"campaigns/{campaign.Id:N}/images/{Guid.NewGuid():N}{ext}";
         var url = await storage.PutAsync(key, stored, contentType, ct);
 
@@ -654,16 +612,6 @@ public sealed class CampaignService(
         return false;
     }
 
-    private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
-    {
-        "image/jpeg" => ".jpg",
-        "image/png" => ".png",
-        "image/gif" => ".gif",
-        "image/webp" => ".webp",
-        "image/avif" => ".avif",
-        _ => ".img"
-    };
-
     public async Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);
@@ -685,7 +633,7 @@ public sealed class CampaignService(
             // The manifest served to the wizard is the campaign's frozen snapshot, never the live template's.
             template is null ? null : new CampaignSummaryTemplateDto(
                 template.Name, template.Slug, SnapshotPackageUrl(campaign, template),
-                SnapshotManifest(campaign, template), template.PreviewImageUrl),
+                SnapshotManifest(campaign, template), TemplatePoster.OrNull(template.PreviewImageUrl)),
             price,
             template?.Visibility == TemplateVisibility.Imported,
             campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
@@ -707,17 +655,6 @@ public sealed class CampaignService(
         string.IsNullOrWhiteSpace(campaign.TemplateManifestJson) || campaign.TemplateManifestJson.Trim() is "{}"
             ? template.ManifestJson
             : campaign.TemplateManifestJson;
-
-    public async Task<PriceBreakdown> GetPricingAsync(Guid id, int? inviteCount, CancellationToken ct = default)
-    {
-        var campaign = await LoadOwnedAsync(id, ct);
-        var count = inviteCount ?? await guests.CountByCampaignAsync(id, ct);
-        var plan = await plans.ForCampaignAsync(id, ct);
-        return PricingCalculator.CalculateInitial(
-            count, campaign.HasDesignerDiscount,
-            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
-            minimumCovered: plan.PassCoversFirstSend);
-    }
 
     public async Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default)
     {
@@ -791,7 +728,7 @@ public sealed class CampaignService(
                 campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity,
                 campaign.RolesJson,
                 InvitesBlog.Application.Campaigns.CampaignCover.Read(campaign.CustomContentJson),
-                (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl,
+                TemplatePoster.OrNull((await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl),
                 !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl),
                 campaign.OpenLinkCode is { } dashOpenCode ? OpenLinkUrl(dashOpenCode) : null,
                 await IsImportedAsync(campaign, ct),
@@ -973,7 +910,7 @@ public sealed class CampaignService(
     private string GatedLinkUrl(Guid campaignId) => $"{InviteeBase}/e/{campaignId}";
 
     private string InviteeBase =>
-        (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
+        config.InviteeBase();
 
     /// <summary>
     /// Whether this event's design was brought by the customer rather than taken from the gallery.

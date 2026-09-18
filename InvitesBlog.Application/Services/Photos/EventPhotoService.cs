@@ -350,7 +350,7 @@ public sealed class EventPhotoService(
         try
         {
             var ext = Path.GetExtension(fileName);
-            if (string.IsNullOrWhiteSpace(ext)) ext = ExtensionFor(contentType);
+            if (string.IsNullOrWhiteSpace(ext)) ext = MediaFileTypes.ExtensionFor(contentType);
 
             var id = Guid.NewGuid();
             // Keyed by BUCKET, not by campaign: a standalone bucket has no campaign to key by, and the
@@ -698,18 +698,4 @@ public sealed class EventPhotoService(
 
     /// <summary>What a poster frame is, whatever the video around it turned out to be.</summary>
     private const string PosterType = "image/jpeg";
-
-    private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
-    {
-        "image/jpeg" => ".jpg",
-        "image/png" => ".png",
-        "image/gif" => ".gif",
-        "image/webp" => ".webp",
-        "image/avif" => ".avif",
-        "image/heic" => ".heic",
-        "video/mp4" => ".mp4",
-        "video/quicktime" => ".mov",
-        "video/webm" => ".webm",
-        _ => contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? ".mp4" : ".img"
-    };
 }

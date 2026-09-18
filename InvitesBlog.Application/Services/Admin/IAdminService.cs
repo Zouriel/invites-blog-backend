@@ -4,7 +4,7 @@ using InvitesBlog.Application.Filters.Admin;
 
 namespace InvitesBlog.Application.Services.Admin;
 
-/// <summary>Admin surface: user/role/permission inspection, suppression + audit review, admin login.</summary>
+/// <summary>Admin surface: user/role/permission inspection and role grants, suppression + audit review.</summary>
 public interface IAdminService
 {
     Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default);

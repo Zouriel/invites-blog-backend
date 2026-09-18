@@ -58,9 +58,6 @@ public static class ImportedDesignPackage
     public static bool IsStandaloneMedia(string fileName) =>
         StandaloneMedia.Contains(Path.GetExtension(fileName));
 
-    public static bool IsZip(string fileName) =>
-        string.Equals(Path.GetExtension(fileName), ".zip", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>One file lifted out of an upload, with the path it will be stored under.</summary>
     /// <param name="Path">Normalised, relative, and guaranteed not to escape the design's folder.</param>
     public sealed record Entry(string Path, byte[] Content)

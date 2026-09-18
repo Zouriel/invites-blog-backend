@@ -79,7 +79,6 @@ public static class DependencyInjection
         services.AddScoped<TemplateTypeSeeder>();
         services.AddScoped<DesignFontSeeder>();
         services.AddScoped<Rendering.InviteRenderService>();
-        services.AddScoped<IInviteRenderer>(sp => sp.GetRequiredService<Rendering.InviteRenderService>());
 
         // Email — Resend at launch (provider guide), Console for dev when no key is configured.
         var emailProvider = config["Email:Provider"] ?? "Console";
@@ -107,12 +106,6 @@ public static class DependencyInjection
         // Drawing a QR is pure computation over a string — no state, no connection, nothing to scope.
         services.AddSingleton<IQrCodeRenderer, QrCodes.QrCoderRenderer>();
 
-        // What a media bucket costs and how big it is. Bound rather than hardcoded so a price can
-        // change without a deploy; MediaBucketOptions carries the shipped defaults, so an absent
-        // section is a working price list rather than a free product.
-        services.Configure<Application.MediaBuckets.MediaBucketOptions>(
-            config.GetSection(Application.MediaBuckets.MediaBucketOptions.Section));
-
         // OTP senders (email + sms), resolved by channel. Only channels in Otp:Channels are enabled.
         // SMS goes through MsgOwl once Sms:MsgOwl:ApiKey is set; without a key we fall back to the
         // console sender so local development still shows the code instead of failing.
@@ -130,19 +123,12 @@ public static class DependencyInjection
             services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
         }
 
-        // Delivery: email only for now. The current mechanism shares a single OTP-gated campaign link
-        // (/e/{id}); guests open it and verify their email, and the "email" channel just mails that link.
+        // Delivery: email only. Each guest is mailed their own tokenized /i/{token} link; the first
+        // send (CampaignService.FinalizeAsync) and resends (DispatchService) both go through this one
+        // provider, so every invitation email is the same email.
         services.AddScoped<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
 
-        // --- Viber (Infobip) disabled for now ---------------------------------------------------------
-        // Re-enable by restoring the InfobipViberSender + InfobipReportHandler registrations below and
-        // the /api/delivery/infobip/webhook endpoint in DeliveryController.
-        // if (!string.IsNullOrWhiteSpace(config["Infobip:ApiKey"])) { services.AddHttpClient<InfobipViberSender>(...); ... }
-        // services.AddScoped<Application.Services.Delivery.IInfobipReportHandler, InfobipReportHandler>();
-        // ----------------------------------------------------------------------------------------------
-
         services.AddScoped<DispatchService>();
-        services.AddScoped<IInviteDispatcher>(sp => sp.GetRequiredService<DispatchService>());
 
         // Payments
         services.AddSingleton<IPaymentProvider, FakePaymentProvider>();

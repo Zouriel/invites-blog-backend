@@ -93,8 +93,9 @@ public enum OtpPurpose
 }
 
 /// <summary>
-/// The review status machine a designer submission walks. Numeric values are pinned: the column is
-/// persisted as an int, so members may be appended but never reordered.
+/// Where a report against a published template stands: open until an admin handles it (dismisses it,
+/// or unlists / removes the template). Numeric values are pinned: the column is persisted as an int,
+/// so members may be appended but never reordered.
 /// </summary>
 public enum TemplateReportStatus
 {

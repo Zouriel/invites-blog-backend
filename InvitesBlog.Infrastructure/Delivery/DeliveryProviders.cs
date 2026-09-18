@@ -3,7 +3,12 @@ using Microsoft.Extensions.Logging;
 
 namespace InvitesBlog.Infrastructure.Delivery;
 
-/// <summary>Email delivery channel — MVP priority 1 (§4.8.1). Renders the delivery message as HTML.</summary>
+/// <summary>
+/// Email delivery channel — MVP priority 1 (§4.8.1). Renders the delivery message as HTML. This is
+/// THE invitation email: the first send, resends and "add and send now" all come through here with
+/// an <see cref="Application.Delivery.InviteLetter"/>, so the §15.2 footer (with the guest's own
+/// "Remove my data" link) is on every one of them.
+/// </summary>
 public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDeliveryProvider
 {
     public string Channel => "email";
@@ -11,7 +16,10 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
     public async Task<DeliveryResult> SendAsync(InviteDeliveryMessage m, CancellationToken ct)
     {
         var subject = m.Subject ?? $"You're invited by {m.InviterName}";
+        // Every sender now composes an InviteLetter, which always carries the guest's own removal
+        // link; the privacy page is only a last resort for a message built some other way.
         var removal = m.RemovalLink ?? "https://invites.blog/privacy";
+        var removalHref = System.Net.WebUtility.HtmlEncode(removal);
         var text = System.Net.WebUtility.HtmlEncode(m.MessageText);
         var host = System.Net.WebUtility.HtmlEncode(m.InviterName);
         var link = System.Net.WebUtility.HtmlEncode(m.InviteLink);
@@ -28,11 +36,11 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
                   $"<tr><td style=\"padding:12px 40px 0;text-align:center;\">" +
                     $"<p style=\"font-family:{sans};font-size:16px;line-height:1.65;color:#e7ddca;margin:14px 0 0;\">{text}</p></td></tr>" +
                   $"<tr><td style=\"padding:30px 40px 34px;text-align:center;\">" +
-                    $"<a href=\"{m.InviteLink}\" style=\"display:inline-block;background:#d8b25a;color:#14100c;font-family:{sans};font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:999px;\">Open your invitation</a>" +
-                    $"<p style=\"font-family:{sans};font-size:12px;color:#9c8f78;margin:20px 0 0;line-height:1.6;\">Or open this link:<br><a href=\"{m.InviteLink}\" style=\"color:#b9a88a;word-break:break-all;\">{link}</a></p></td></tr>" +
+                    $"<a href=\"{link}\" style=\"display:inline-block;background:#d8b25a;color:#14100c;font-family:{sans};font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:999px;\">Open your invitation</a>" +
+                    $"<p style=\"font-family:{sans};font-size:12px;color:#9c8f78;margin:20px 0 0;line-height:1.6;\">Or open this link:<br><a href=\"{link}\" style=\"color:#b9a88a;word-break:break-all;\">{link}</a></p></td></tr>" +
                   $"<tr><td style=\"padding:18px 40px;border-top:1px solid #3a2f1e;text-align:center;font-family:{sans};font-size:12px;color:#8a7d68;line-height:1.7;\">" +
                     $"Sent via invites.blog on behalf of {host}<br>" +
-                    $"<a href=\"https://invites.blog/privacy\" style=\"color:#8a7d68;\">Privacy</a> &middot; <a href=\"{removal}\" style=\"color:#8a7d68;\">Remove my data</a></td></tr>" +
+                    $"<a href=\"https://invites.blog/privacy\" style=\"color:#8a7d68;\">Privacy</a> &middot; <a href=\"{removalHref}\" style=\"color:#8a7d68;\">Remove my data</a></td></tr>" +
                 $"</table></td></tr></table></div>"; // §15.2 footer
 
         var tags = new List<KeyValuePair<string, string>> { new("kind", "invite") };

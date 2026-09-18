@@ -203,7 +203,7 @@ contained risk into a small one.
 - `OtpService.VerifyAsync` — stops minting the identity JWT for the campaign-link flow; issues the
   scoped cookie instead. `RefreshToken` should go with it rather than being carried forward.
 - `InviteService.IdentifiersAsync` — currently resolves an identity from *either* an account or a bare
-  contact claim. The bare-contact branch stays for `GetMyInviteAsync` (that IS auth 3) and goes for
+  contact claim. The bare-contact branch stays for `ResolveMyInviteIdAsync` (that IS auth 3) and goes for
   `GetInboxAsync`.
 - `Roles.Invitee` — loses `Inbox.Read`. The account roles already carry it, so the inbox needs no new
   permission.
@@ -550,12 +550,13 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
   so nothing that worked before costs anything now.
 - **`EventPhoto.CampaignId` is nullable too**, for the same reason. An empty guid standing in for "no
   event" would be a value every campaign query had to know to skip; null already matches none of them.
-- **Capacity is frozen at purchase.** `CapacityBytes` is copied from the tier rather than read live,
-  exactly as `Campaign.DesignerFee` is: repricing or renaming a tier must not silently resize a bucket
-  already sold. Shrinking below what is stored is refused outright — there is no honest way to choose
+- **Capacity is frozen at purchase.** `CapacityBytes` is copied from the tier rather than read live:
+  repricing or renaming a tier must not silently resize a bucket already sold. Shrinking below what is stored is refused outright — there is no honest way to choose
   which of somebody's photographs to stop keeping.
 - **Prices are configuration** (`MediaBuckets:Prices`), shipped defaults in code so a missing section
-  is a working price list rather than a free product. 10/20/30/50 GB, six-month term.
+  is a working price list rather than a free product. 10/20/30/50 GB, six-month term. *(Superseded on
+  2026-09-15 by the plans in `PlanCatalog`; the per-bucket tier prices were never sold, and their
+  options class and `MediaBuckets` config section have since been removed.)*
 - **The quota is checked before a byte is written**, and `UsedBytes` is maintained rather than summed —
   a bucket is thousands of rows and the check runs on every single upload. It does NOT go down on a
   soft delete: the stored objects outlive the row, so crediting the space back would sell room that is

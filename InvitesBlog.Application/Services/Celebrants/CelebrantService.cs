@@ -7,6 +7,7 @@ using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.Celebrants;
 
@@ -148,7 +149,7 @@ public sealed class CelebrantService(
         // Via /login?next= because the mail asks them to sign in and /dashboard/:campaignId has no
         // guard of its own: the login page forwards an already-signed-in reader straight through and
         // carries `next` into signup, so the deep link survives either path.
-        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var inviterBase = config.InviterBase();
         var link = $"{inviterBase}/login?next={Uri.EscapeDataString($"/dashboard/{campaignId}")}";
         var name = System.Net.WebUtility.HtmlEncode(celebrant.Name);
         var title = System.Net.WebUtility.HtmlEncode(campaign.Title);

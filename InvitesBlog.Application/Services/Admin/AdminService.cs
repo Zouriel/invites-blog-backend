@@ -16,8 +16,9 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Application.Services.Admin;
 
 /// <summary>
-/// Admin business logic (full-RBAC). Read-only inspection of users/roles/permissions plus paged
-/// suppression + audit review, and password-verified admin login that issues a role-aware JWT.
+/// Admin business logic (full-RBAC): inspecting users/roles/permissions, granting and revoking the
+/// grantable roles, and paged suppression + audit review. Admins sign in like everyone else
+/// (AccountService, POST /api/auth/login) — there is no separate admin login.
 /// </summary>
 public sealed class AdminService(
     IRepository<AppUser> users,
@@ -30,8 +31,6 @@ public sealed class AdminService(
     IUnitOfWork uow,
     ICampaignRepository campaigns) : IAdminService
 {
-    private static readonly TimeSpan AdminSessionLifetime = TimeSpan.FromHours(8);
-
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
         var query = users.Query();

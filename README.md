@@ -9,7 +9,8 @@ the blocks that apply to them — and replies without creating anything. On the 
 add to, and visible to the people who were invited.
 
 This repo is the ASP.NET Core / .NET 10 backend: REST API, domain and business logic, EF Core
-persistence, the template compiler, the server-rendered guest path, and the worker.
+persistence, the template compiler, the server-rendered guest path, and the background jobs (photo
+digests and media retention), which run inside the API host.
 
 ## What it does
 
@@ -25,8 +26,8 @@ RSVPs land live on the host's dashboard. A guest who would rather use an account
 email code, Google or Microsoft, and find every invitation ever sent to their address — including
 ones sent before they signed up.
 
-**Media buckets.** The place a night's photographs and clips end up — and a product of its own, sold
-by the gigabyte. Guests open a camera from their invitation — front and rear, colour grades, tap to
+**Media buckets.** The place a night's photographs and clips end up — and a product of its own,
+sized by the event's plan. Guests open a camera from their invitation — front and rear, colour grades, tap to
 focus, an exposure bias for a dark room — and every shot queues to a store that survives a locked
 phone or a dead connection. Photos and **video** both, from the camera or straight off a camera roll.
 Nothing is capped per file: the shot as taken is kept, alongside a screen-sized copy and a grid tile.
@@ -36,8 +37,9 @@ moderates.
 
 A bucket owns a **size** and a **term** and nothing else: its name, its cover, its date and its guest
 list are the event's, shared with the invitation. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
-no event attached. Sizes are 10, 20, 30 and 50 GB on a six-month term; every event still gets a free
-one, so nothing that worked before costs anything now.
+no event attached. How much an event's buckets may hold, and for how long, comes from its plan
+(`PlanCatalog`: Free, Basic, Event pass, Premium); every event gets the Free plan, so nothing that
+worked before costs anything now.
 
 A bucket is an occasion rather than a drive, so it only **takes** anything on its night: open from
 the start of that day in Malé until 24 hours after the event begins. That is the same window that
@@ -80,7 +82,8 @@ published for the customer in the designer.
 
 **Privacy.** EXIF, IPTC and XMP are stripped from every uploaded image — these are photographs of
 other people's guests, and a GPS tag would publish where a wedding was. There is a suppression list,
-per-guest data removal by token, and a retention job that deletes a campaign's data on a timer.
+per-guest data removal by token (the link is in every invitation email), and a media retention job
+that removes an event's photos 90 days after its plan's cover ends, with notices along the way.
 
 ## Companion repos
 
@@ -93,7 +96,7 @@ per-guest data removal by token, and a retention job that deletes a campaign's d
 - **.NET 10** / ASP.NET Core (controller-based API)
 - **EF Core 10** on **PostgreSQL 17**
 - Layered architecture with **Scrutor** auto-DI
-- **xUnit** test suite (**138 tests**)
+- **xUnit** test suite (**883 tests**)
 - Full **RBAC** — every protected endpoint gates on `[HasPermission("…")]`
 - Every endpoint returns a standard envelope: `{ success, message, data, errors }`
 
@@ -108,7 +111,6 @@ InvitesBlog.Infrastructure/    # EF Core (Migrations/Persistence), storage, deli
 InvitesBlog.Api/               # Controllers, middleware, authorization, DI wiring
 InvitesBlog.TemplateCompiler/  # Template packaging + the trusted injector (SceneCompiler,
                                #   TemplateInjector, TemplateManifest)
-InvitesBlog.Worker/            # Background retention job (auto-delete after retention window)
 InvitesBlog.Tests/             # xUnit (pricing, tokens, phones, rules, compiler, services)
 ```
 
@@ -135,13 +137,13 @@ see [`.env.example`](./.env.example).
 ## Tests
 
 ```bash
-dotnet test          # 138 tests
+dotnet test          # 883 tests
 ```
 
 ## How it fits together
 
 1. Browse the seeded template gallery → create a campaign (you get a 256-bit access token; **only
-   its hash is stored** — no account).
+   its hash is stored** — no account needed, though a signed-in creator owns it from the start).
 2. Build the invite in a **dynamic, manifest-driven builder**: the API exposes the chosen
    template's manifest so the frontend renders exactly the fields that template declares — one
    input per `data-var`/`data-href`, one image-upload slot per `<img data-src>`.
@@ -149,16 +151,16 @@ dotnet test          # 138 tests
    "resume your invite" magic-link email).
 4. Upload guests from Excel (E.164 normalization, validation, duplicate + role/gender
    distribution) or add them manually.
-5. Checkout — pricing is `$5` min incl. 50 invites, then `$1/10` (designer discount `$1/20`) —
-   settled via an **idempotent** payment webhook, then dispatched.
-6. Dispatch mints a per-guest secure token (hash stored only), renders the personalized message,
-   and sends by email.
-7. Invitee opens `/i/:token` → the API resolves the token, **resolves personalization rules
-   server-side**, and returns the render payload; the invitee app injects it into a sandboxed
-   `allow-scripts` iframe under a strict CSP. Guest content is bound as **text, never markup**.
-8. RSVP with zero login; optional **email OTP** unlocks the inbox; a magic-link dashboard shows the
-   delivery/RSVP report.
-9. Guest "remove my data" anonymizes the guest and adds a **hashed suppression entry** honored on
+5. Finish — the host gets the link to share, and if they chose email, every guest is mailed their
+   own link: a per-guest secure token (hash stored only) and the personalized message. That first
+   email, a resend and "add and send now" are the same email, with the guest's data-removal link.
+   Sending isn't charged yet (see *Not yet real*).
+6. Invitee opens `/i/:token` → the server admits the token, **resolves personalization rules
+   server-side**, and renders the invitation as one top-level document under
+   `sandbox; default-src 'none'`. Guest content is bound as **text, never markup**.
+7. RSVP with zero login; optional **email OTP** unlocks the inbox; the host's dashboard (signed in,
+   or from an older emailed dashboard link) shows the delivery/RSVP report.
+8. Guest "remove my data" anonymizes the guest and adds a **hashed suppression entry** honored on
    all future uploads.
 
 ## What's new / highlights
@@ -186,11 +188,9 @@ dotnet test          # 138 tests
   poster frame drawn in the browser — pulling a frame out of an encoded clip needs a decoder the API
   does not have, and the browser is holding one already.
 - **Media buckets as a product** — `MediaBucket` owns the storage and only the storage: a size
-  chosen from 10/20/30/50 GB on a six-month term, and a quota enforced before a single object is
-  written. Its name, cover, date and guest list are the campaign's, because every bucket has one —
-  a bucket bought on its own is a campaign with no invitation, not a loose object. Tier prices live
-  in configuration (`MediaBuckets:Prices`), and `CapacityBytes` is frozen onto the bucket at purchase
-  so repricing a tier can never resize one already sold.
+  within what the event's plan allows (`PlanCatalog`), and a quota enforced before a single object
+  is written. Its name, cover, date and guest list are the campaign's, because every bucket has one —
+  a bucket bought on its own is a campaign with no invitation, not a loose object.
 - **QR contribution codes** — `MediaBucketQr`: a printed code that authorizes adding to one bucket
   and nothing else. The token is stored as a SHA-256 hash and the rendered PNG alongside it, so the
   dashboard can always show the code without the database ever holding a working one. Each code
@@ -203,22 +203,25 @@ dotnet test          # 138 tests
 
 Worth knowing before reading the pricing code:
 
-- **Media buckets are not billed.** Choosing a size grants it outright and starts the six-month
-  term; nothing is charged. The price list is real and comes from configuration, and when checkout
-  arrives it slots in front of `ChooseTierAsync` rather than replacing it.
+- **Media buckets are not billed.** The plans and their limits are real (`PlanCatalog`), and resizing
+  a bucket within them (`SetAllocationAsync`) grants the space outright; nothing is charged.
 - **Payments are not live.** `PricingCalculator` is complete and tested — $5 minimum, 50 invites
-  included, $1 per block beyond, a per-use designer fee — but the only registered `IPaymentProvider`
-  is `FakePaymentProvider`. No real money has moved through this.
+  included, $1 per block of 10 beyond (20 on the designer/Premium rate) — but the only registered
+  `IPaymentProvider` is `FakePaymentProvider`, and sending invitations is not charged at all today.
+  No real money has moved through this.
 - **Delivery is email only.** The landing page's Telegram and WhatsApp are marked "coming soon"
   and there is no provider behind either.
-- **Retention cleanup does not run.** There is no background job deleting guest data after a
-  campaign's retention period. Background work that must run is registered in the API host.
+- **Guest-data retention cleanup does not run.** There is no background job deleting guest data
+  after a campaign's retention period (photographs have one — `MediaRetentionService`). Background
+  work that must run is registered in the API host.
 
 ## Security & privacy
 
-- **No accounts.** Inviters hold a possession token + magic links; invitees use the link itself,
-  with optional OTP. Only token **hashes** are stored.
-- **Sandboxed templates.** Compiled templates run in a `sandbox="allow-scripts"` iframe under a
-  strict CSP; guest content is bound as text; rules are resolved server-side.
-- **Data protection.** Tokenized self-service removal, hashed suppression list, and a
-  retention auto-delete worker.
+- **Accounts are optional.** Inviters can work from a possession token and invitees from their own
+  link, with OTP from an unfamiliar network; signing in adds history and cross-device access. Only
+  token **hashes** are stored.
+- **Sandboxed templates.** The guest path serves a template as one top-level document under a
+  `sandbox` CSP (an opaque origin), with the credential in an HttpOnly cookie rather than the URL;
+  guest content is bound as text; rules are resolved server-side.
+- **Data protection.** Tokenized self-service removal (linked from every invitation email), a hashed
+  suppression list, and media retention that removes an event's photos after its plan lapses.

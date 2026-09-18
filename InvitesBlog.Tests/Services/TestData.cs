@@ -125,21 +125,6 @@ internal static class TestData
         CreatedAt = DateTimeOffset.UtcNow
     };
 
-    public static AppUser AdminUser(string email = "admin@test.com", string password = "correct-horse", bool isActive = true, bool isAdmin = true)
-    {
-        var role = new Role { Id = Guid.NewGuid(), Name = isAdmin ? InvitesBlog.Domain.Authorization.Roles.Admin : "Inviter", Description = "" };
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            Email = email,
-            DisplayName = "Test Admin",
-            PasswordHash = InvitesBlog.Application.Security.PasswordHasher.Hash(password),
-            IsActive = isActive
-        };
-        user.UserRoles.Add(new UserRole { UserId = user.Id, User = user, RoleId = role.Id, Role = role });
-        return user;
-    }
-
     // A validator stub that always passes (no failures).
     public static IValidator<T> PassingValidator<T>()
     {

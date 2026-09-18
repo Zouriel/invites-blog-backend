@@ -15,6 +15,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.Invites;
 
@@ -79,7 +80,7 @@ public sealed class InviteService(
             await uow.SaveChangesAsync(ct);
         }
 
-        var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
+        var inviteeBase = config.InviteeBase();
         var link = $"{inviteeBase}/i/{token}";
         var payload = render(campaign, template, guest, invite, link,
             inviter?.Name, inviter?.PhoneE164, inviter?.Email,
@@ -364,7 +365,9 @@ public sealed class InviteService(
         var campaign = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new InviteNotFoundException();
         if (campaign.Status == CampaignStatus.Cancelled) throw new InviteNotFoundException();
 
-        // Guest-list-only, matched on the VERIFIED identifier — the same rule GetMyInviteAsync uses.
+        // Guest-list-only, matched on the VERIFIED identifier. Phone counts as well as email — the
+        // sign-in code can be sent to either, and a guest list of phone numbers would otherwise lock
+        // everyone out of the shared link.
         var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
         var guest = guestList.FirstOrDefault(g => Owns(g, email, phone))
             ?? throw new InviteNotFoundException();
@@ -394,67 +397,6 @@ public sealed class InviteService(
         await uow.SaveChangesAsync(ct);
 
         return invite.Id;
-    }
-
-    public async Task<object> GetMyInviteAsync(Guid campaignId, InviteRenderer render, CancellationToken ct = default)
-    {
-        var (email, phone) = await IdentifiersAsync(ct);
-        if (email is null && phone is null) throw new UnauthorizedException();
-
-        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
-            ?? throw new InviteNotFoundException();
-        if (campaign.Status == CampaignStatus.Cancelled)
-            return new InviteCancelledResponse(true, "This event has been cancelled.");
-
-        // Match the VERIFIED identifier to a guest on this campaign (guest-list-only access). Phone
-        // counts as well as email — the sign-in code can be sent to either, and a guest list of phone
-        // numbers would otherwise lock everyone out of the shared link.
-        var guestList = await guests.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
-        var guest = guestList.FirstOrDefault(g => Owns(g, email, phone))
-            ?? throw new InviteNotFoundException(); // they aren't on the guest list
-
-        // Get-or-create this guest's invite (lazy — created on first authenticated view).
-        var invite = await invites.GetByGuestIdAsync(guest.Id, ct);
-        if (invite is null)
-        {
-            invite = new Invite
-            {
-                Id = Guid.NewGuid(),
-                CampaignId = campaignId,
-                GuestId = guest.Id,
-                // token_hash is NOT NULL; viewing no longer uses it (access is by OTP match), but keep it random.
-                TokenHash = TokenService.Hash(TokenService.GenerateToken()),
-                Status = InviteStatus.Sent,
-                RsvpStatus = RsvpStatus.NoResponse,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            await invites.AddAsync(invite, ct);
-        }
-
-        var template = await templates.GetByIdAsync(campaign.TemplateId, ct)
-            ?? throw new InviteNotFoundException();
-        var inviter = campaign.InviterId is null
-            ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
-
-        if (invite.ViewedAt is null)
-        {
-            invite.ViewedAt = DateTimeOffset.UtcNow;
-            if (invite.Status != InviteStatus.Viewed) invite.Status = InviteStatus.Viewed;
-        }
-
-        // The template's own "Respond now" button gets `{link}/rsvp`, so the base has to be a place
-        // where BOTH the invitation and its RSVP actually resolve. /e/{campaignId} had no /rsvp
-        // sibling, so that button landed on the invitee site's home page — the "empty page" it
-        // appeared to open. Addressing the invite by ID gives it a route that exists.
-        var inviteeBase = (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
-        var link = $"{inviteeBase}/invites/{invite.Id}";
-        var payload = render(campaign, template, guest, invite, link, inviter?.Name,
-            inviter?.PhoneE164, inviter?.Email,
-            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
-        await uow.SaveChangesAsync(ct);
-
-        return new MyInviteResponse(payload.PackageUrl, payload.Data, payload.CampaignStatus,
-            invite.Id, invite.RsvpStatus.ToString(), RsvpQuestions.Parse(campaign.RsvpQuestionsJson));
     }
 
     /// <summary>Shared RSVP write path for the token and authenticated flows.</summary>
@@ -543,7 +485,7 @@ public sealed class InviteService(
                     // The host's own cover first: a template preview is a marketing poster rendered
                     // from demo content, so leading with it showed a stranger's name on the tile.
                     Application.Campaigns.CampaignCover.Read(c.CustomContentJson)
-                        ?? previews.GetValueOrDefault(c.TemplateId),
+                        ?? TemplatePoster.OrNull(previews.GetValueOrDefault(c.TemplateId)),
                     photoCounts.GetValueOrDefault(c.Id));
             })
             .OfType<InboxCardResponse>()

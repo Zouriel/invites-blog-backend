@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Infrastructure.Notifications;
 
@@ -136,7 +137,7 @@ public sealed class PhotoDigestService(
         var title = string.IsNullOrWhiteSpace(campaign.Title) ? "the event" : campaign.Title;
         var subject = count == 1 ? $"A new photo from {title}" : $"{count} new photos from {title}";
 
-        var guestLink = $"{Base("Urls:InviteeBase", "https://me.invites.blog")}/e/{campaign.Id}";
+        var guestLink = $"{config.InviteeBase()}/e/{campaign.Id}";
         var sentCount = 0;
 
         foreach (var address in recipients)
@@ -149,7 +150,7 @@ public sealed class PhotoDigestService(
         var inviter = campaign.InviterId is { } id ? await db.Inviters.FindAsync([id], ct) : null;
         if (!string.IsNullOrWhiteSpace(inviter?.Email))
         {
-            var hostLink = $"{Base("Urls:InviterBase", "https://invites.blog")}/dashboard/{campaign.Id}";
+            var hostLink = $"{config.InviterBase()}/dashboard/{campaign.Id}";
             var result = await email.SendAsync(inviter.Email!, subject, Body(title, count, hostLink), ct);
             if (result.Success) sentCount++;
         }
@@ -171,9 +172,6 @@ public sealed class PhotoDigestService(
 
     private static string TokenHashOf(string email) =>
         Application.Security.TokenService.HashContact(email);
-
-    private string Base(string key, string fallback) =>
-        (config[key] ?? fallback).TrimEnd('/');
 
     private static string Body(string title, int count, string link) =>
         EmailLayout.Wrap(

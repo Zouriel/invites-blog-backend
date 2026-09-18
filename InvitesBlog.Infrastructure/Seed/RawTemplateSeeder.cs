@@ -5,6 +5,7 @@ using InvitesBlog.Infrastructure.Persistence;
 using InvitesBlog.Infrastructure.Templates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Infrastructure.Seed;
 
@@ -117,8 +118,7 @@ public sealed class RawTemplateSeeder(
                 // URL still pointing at index.html, which is a page, not an image.
                 if (published.PosterUrl is { Length: > 0 })
                     existing.PreviewImageUrl = published.PosterUrl;
-                else if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
-                         || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
+                else if (TemplatePoster.OrNull(existing.PreviewImageUrl) is null)
                     existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
                 // Re-apply the declared visibility only while the row is STILL dedicated. Moving it on
                 // is an admin's decision, so a restart must never quietly reverse one — or re-privatize a

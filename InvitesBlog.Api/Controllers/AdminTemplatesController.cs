@@ -2,6 +2,7 @@ using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Filters.Templates;
+using InvitesBlog.Application.Services.Designers;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +18,7 @@ namespace InvitesBlog.Api.Controllers;
 public sealed class AdminTemplatesController(
     ITemplateRepository templates,
     ICampaignRepository campaigns,
-    IUnitOfWork uow) : BaseApiController
+    IMyTemplatesService removal) : BaseApiController
 {
     /// <summary>An admin management row — every template (incl. inactive/dedicated) plus how many
     /// campaigns already use it, so the admin knows whether a delete will hard-delete or deactivate.</summary>
@@ -73,46 +74,26 @@ public sealed class AdminTemplatesController(
             var count = await campaigns.CountAsync(c => c.TemplateId == t.Id, ct);
             items.Add(new AdminTemplateDto(t.Id, t.Name, t.Slug, t.Category, t.Version, t.PackageUrl,
                 t.Visibility, t.IsActive, t.AssignedEmail, count,
-                Poster(t.PreviewImageUrl), t.DesignerUserId is null ? null : t.DesignerName, t.CreatedAt, t.UpdatedAt,
+                TemplatePoster.OrNull(t.PreviewImageUrl), t.DesignerUserId is null ? null : t.DesignerName, t.CreatedAt, t.UpdatedAt,
                 t.UnlistedByAdminAt));
         }
         return Paged(PagedResult<AdminTemplateDto>.Create(items, total, filter));
     }
 
     /// <summary>
-    /// DELETE /api/admin/templates/{id} — removes a template. If any campaign already uses it, the row
-    /// is DEACTIVATED (hidden from the gallery) instead of hard-deleted, so invites already created from
-    /// it keep rendering their stored package. Unused templates are hard-deleted.
+    /// DELETE /api/admin/templates/{id} — removes a template. The rule is the one "My designs" uses —
+    /// literally the same method (<see cref="IMyTemplatesService.DeleteAsync"/>), which lets an admin
+    /// act on any template: a template any campaign already uses, or one made for a customer
+    /// (Dedicated with an AssignedEmail — it's how they reach their invitation, even before a campaign
+    /// exists), is DEACTIVATED (hidden from the gallery) instead of hard-deleted. Anything else is
+    /// hard-deleted. This endpoint used to carry its own copy, which hard-deleted the made-for-someone
+    /// case the other copy protected.
     /// </summary>
     [HttpDelete("{id:guid}")]
     [HasPermission(Permissions.Templates.Manage)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
-        var entity = await templates.GetByIdAsync(id, ct);
-        if (entity is null)
-            return NotFound(Application.Common.ApiResponse<object?>.Fail("Template not found."));
-
-        var campaignCount = await campaigns.CountAsync(c => c.TemplateId == id, ct);
-        if (campaignCount > 0)
-        {
-            entity.IsActive = false;
-            templates.Update(entity);
-            await uow.SaveChangesAsync(ct);
-            return Success(new DeleteResultDto(false, true, campaignCount),
-                $"“{entity.Name}” is used by {campaignCount} campaign(s), so it was deactivated (hidden from the gallery) rather than deleted.");
-        }
-
-        templates.Remove(entity);
-        await uow.SaveChangesAsync(ct);
-        return Success(new DeleteResultDto(true, false, 0), $"“{entity.Name}” was deleted.");
+        var result = await removal.DeleteAsync(id, ct);
+        return Success(new DeleteResultDto(result.Deleted, result.Unlisted, result.CampaignCount), result.Message);
     }
-
-    /// <summary>
-    /// Older templates store a pointer to their live page here instead of an image; those have no
-    /// poster, and the card shows the page itself.
-    /// </summary>
-    private static string? Poster(string? url) =>
-        string.IsNullOrWhiteSpace(url) || url.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || url.EndsWith('/')
-            ? null
-            : url;
 }

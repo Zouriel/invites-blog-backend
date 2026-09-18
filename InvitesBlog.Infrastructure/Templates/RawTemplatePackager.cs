@@ -16,10 +16,12 @@ public sealed record RawPublishedPackage(
 
 /// <summary>
 /// Publishes a template — a SINGLE self-contained <c>index.html</c> that inlines its own CSS
-/// (<c>&lt;style&gt;</c>). Separate stylesheets are rejected (§ single-file rule) and so is ALL author
-/// JavaScript, for every author including admins (§ HTML/CSS-only). The trusted
-/// <see cref="TemplateInjector"/> is inlined, so the served file is one document whose only script is
-/// ours. The manifest is auto-derived by scanning the tags
+/// (<c>&lt;style&gt;</c>). Separate stylesheets and externally-sourced scripts are rejected
+/// (§ single-file rule); inline script is allowed (see <see cref="EnsureSelfContainedAndSafe"/>). The
+/// trusted <see cref="TemplateInjector"/> is inlined alongside it, so the served file is one document.
+/// The only two things published through here are the platform's own committed templates (the
+/// seeder) and what the designer compiles from a stored scene — never HTML a user handed us. The
+/// manifest is auto-derived by scanning the tags
 /// (<c>data-var/href/src</c> → variables, <c>data-block</c> → content blocks).
 /// </summary>
 public sealed partial class RawTemplatePackager(IStorageService storage)
@@ -102,7 +104,8 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     private static partial Regex StylesheetLinkRegex();
 
     // A template may carry its own <script>, but it must be IN the file. An external script could be
-    // swapped for something else after a human approved it, which would make the review meaningless.
+    // swapped for something else after the template was published, so what runs would no longer be
+    // what was committed or compiled.
     [GeneratedRegex("""<script\b[^>]*\bsrc\s*=""", RegexOptions.IgnoreCase)]
     private static partial Regex ExternalScriptRegex();
 
@@ -184,10 +187,10 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         };
     }
 
-    /// <summary>The hard ceiling a submission may not exceed. The recommended budget is much lower.</summary>
+    /// <summary>The hard ceiling a template may not exceed. The recommended budget is much lower.</summary>
     public const int MaxTemplateBytes = 800 * 1024;
 
-    /// <summary>The soft budget shown to designers — over this is a warning, not a rejection.</summary>
+    /// <summary>The soft budget named in the too-large error — exceeding it alone is not a rejection.</summary>
     public const int RecommendedTemplateBytes = 300 * 1024;
 
     /// <summary>
@@ -195,9 +198,11 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
     /// <para>
     /// It deliberately does NOT reject JavaScript. Templates may script themselves: the motion is the
     /// product, and the automatic ban was pushing authors into CSS contortions for animation that JS
-    /// does plainly. What replaces it is not a weaker check but a different KIND of check — a person
-    /// reads the template before it can reach anyone. A regex cannot tell a scroll driver from an
-    /// exfiltration script; a reviewer can.
+    /// does plainly. It can afford to, because nothing published through here is arbitrary HTML from
+    /// a stranger: it is either one of the platform's own templates, committed to this repository and
+    /// reviewed like any other source file, or the designer's output, compiled on the server from a
+    /// stored scene. (A customer's own imported design never comes through here — see
+    /// ImportedDesignService, which keeps that document off every browser origin.)
     /// </para>
     /// <para>
     /// The containment that makes that safe is the frame, not this scan: every surface that renders a
@@ -228,13 +233,13 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
                 "A template must be one self-contained file — inline your CSS in a <style> tag (no <link rel=\"stylesheet\"> / separate .css).",
                 "template_not_self_contained");
 
-        // Scripts are allowed, but only the ones a reviewer can actually see. A src= points somewhere
-        // else, and whatever is there today can be something else tomorrow — the approval would be of
-        // a file that no longer runs.
+        // Scripts are allowed, but only the ones in the file itself. A src= points somewhere else, and
+        // whatever is there today can be something else tomorrow — what was committed or compiled
+        // would no longer be what runs.
         if (ExternalScriptRegex().IsMatch(html))
             throw new BusinessRuleException(
                 "A template's JavaScript must be inline in the file — <script src=\"…\"> isn't allowed, "
-                + "because what a reviewer approves has to be what actually runs.",
+                + "because everything a template runs has to be in the file itself.",
                 "template_external_script_not_allowed");
     }
 

@@ -78,10 +78,6 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     public async Task<IActionResult> Refresh(CancellationToken ct) =>
         Success(await accounts.RefreshAsync(ct));
 
-    [HttpGet("me")]
-    [HasPermission(Permissions.Templates.Read)]
-    public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));
-
     /// <summary>
     /// The account's light/dark preference. Stored on the account, not in the browser, so it follows
     /// the person rather than the device they happened to set it on.

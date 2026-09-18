@@ -11,7 +11,8 @@ namespace InvitesBlog.Infrastructure.Seed;
 /// <summary>
 /// Seeds permissions, roles, role-permission assignments, and the initial admin account from the
 /// static definitions (spec §Roles and Permission Seeders). Idempotent — safe to run every startup;
-/// new permissions added in code are picked up here so endpoints keep permission coverage.
+/// new permissions added in code are picked up here so endpoints keep permission coverage, and ones
+/// taken OUT of code are deleted here, so the admin Permissions screen never lists ghosts.
 /// </summary>
 public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<RbacSeeder> logger)
 {
@@ -47,12 +48,27 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
 
     private async Task SeedPermissionsAsync(CancellationToken ct)
     {
-        var existing = await db.Permissions.Select(p => p.Name).ToListAsync(ct);
-        var existingSet = existing.ToHashSet();
+        var existing = await db.Permissions.ToListAsync(ct);
+        var existingSet = existing.Select(p => p.Name).ToHashSet();
         foreach (var (name, group, description) in Permissions.All)
         {
             if (existingSet.Contains(name)) continue;
             db.Permissions.Add(new Permission { Id = Guid.NewGuid(), Name = name, Group = group, Description = description });
+        }
+
+        // A permission removed from code is checked by nothing and granted by nothing, but its row
+        // would sit in the table forever — listed on the admin Permissions screen, still attached to
+        // whichever roles had it. Delete it, and every role's hold on it, so the screen shows what is real.
+        var inCode = Permissions.All.Select(p => p.Name).ToHashSet();
+        var ghosts = existing.Where(p => !inCode.Contains(p.Name)).ToList();
+        if (ghosts.Count > 0)
+        {
+            var ghostIds = ghosts.Select(p => p.Id).ToList();
+            db.RolePermissions.RemoveRange(
+                await db.RolePermissions.Where(rp => ghostIds.Contains(rp.PermissionId)).ToListAsync(ct));
+            db.Permissions.RemoveRange(ghosts);
+            logger.LogInformation("Removed {Count} permission(s) no longer defined in code: {Names}.",
+                ghosts.Count, string.Join(", ", ghosts.Select(p => p.Name)));
         }
         await db.SaveChangesAsync(ct);
     }

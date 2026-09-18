@@ -1,14 +1,7 @@
 namespace InvitesBlog.Application.Abstractions;
 
-/// <summary>What a template declares, flattened to plain strings for the layers above.</summary>
-public sealed record TemplateStructure(
-    IReadOnlyList<string> Fields,
-    IReadOnlyList<string> ImageSlots,
-    IReadOnlyList<string> Roles,
-    IReadOnlyList<string> ThemeKeys);
-
 /// <summary>A published template package: where it lives and the manifest derived from it.</summary>
-public sealed record TemplatePackage(string PackageUrl, string ManifestJson, TemplateStructure Structure, string? PosterUrl = null);
+public sealed record TemplatePackage(string PackageUrl, string ManifestJson);
 
 /// <summary>
 /// Publishes and reads single-file template packages (§template packaging). The designer's publish
@@ -21,9 +14,13 @@ public interface ITemplatePackager
     /// Runs the safety scan, then writes the package under <paramref name="basePath"/> (the live
     /// <c>templates/{slug}@{version}</c>).
     /// </summary>
+    /// <remarks>
+    /// No poster here: the designer's poster is sniffed and stored by <c>DesignService</c> itself, so
+    /// only the first-party seeder (which ships posters alongside its templates) passes one, and it
+    /// talks to the packager directly.
+    /// </remarks>
     Task<TemplatePackage> PublishAsync(
-        string basePath, string slug, string version, string html, CancellationToken ct = default,
-        byte[]? poster = null);
+        string basePath, string slug, string version, string html, CancellationToken ct = default);
 
     /// <summary>The stored package document for a template version, or null when storage doesn't have it.</summary>
     Task<string?> ReadPackageAsync(string slug, string version, CancellationToken ct = default);

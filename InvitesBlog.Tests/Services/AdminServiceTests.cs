@@ -18,7 +18,6 @@ public class AdminServiceTests
     private readonly IRepository<Permission> _permissions = Substitute.For<IRepository<Permission>>();
     private readonly ISuppressionRepository _suppression = Substitute.For<ISuppressionRepository>();
     private readonly IRepository<AuditLog> _auditLogs = Substitute.For<IRepository<AuditLog>>();
-    private readonly IInviteeTokenIssuer _tokenIssuer = Substitute.For<IInviteeTokenIssuer>();
     private readonly IRepository<UserRole> _userRoles = Substitute.For<IRepository<UserRole>>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();

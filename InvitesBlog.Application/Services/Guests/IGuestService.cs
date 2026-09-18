@@ -2,13 +2,11 @@ using InvitesBlog.Application.Dtos.Guests;
 
 namespace InvitesBlog.Application.Services.Guests;
 
-/// <summary>§10.4 Guest upload + post-payment add/fix/resend business logic.</summary>
+/// <summary>§10.4 Guest upload + add/fix/resend business logic.</summary>
 public interface IGuestService
 {
     Task<GuestUploadSummaryDto> UploadAsync(
         Guid campaignId, Stream fileStream, string fileName, string defaultCountry, CancellationToken ct = default);
-
-    Task<byte[]> ExportErrorsCsvAsync(Guid campaignId, Guid uploadId, CancellationToken ct = default);
 
     Task<ConfirmUploadResultDto> ConfirmUploadAsync(Guid campaignId, ConfirmUploadRequest req, CancellationToken ct = default);
 

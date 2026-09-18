@@ -2,7 +2,6 @@ using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Feed;
 using InvitesBlog.Application.Exceptions;
-using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.Feed;
 using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Domain.Entities;
@@ -28,7 +27,6 @@ public class FeedServiceTests
     private readonly IRepository<PostComment> _comments = Substitute.For<IRepository<PostComment>>();
     private readonly IRepository<PostLike> _postLikes = Substitute.For<IRepository<PostLike>>();
     private readonly IRepository<CommentLike> _commentLikes = Substitute.For<IRepository<CommentLike>>();
-    private readonly ICampaignOwnershipService _ownership = Substitute.For<ICampaignOwnershipService>();
     private readonly IMediaBucketService _bucketService = Substitute.For<IMediaBucketService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
@@ -58,7 +56,7 @@ public class FeedServiceTests
 
     private FeedService Sut() => new(
         _currentUser, _users, _campaigns, _inviters, _celebrants, _guests, _invites, _photos, _buckets,
-        _templates, _comments, _postLikes, _commentLikes, _ownership, _bucketService, _uow);
+        _templates, _comments, _postLikes, _commentLikes, _bucketService, _uow);
 
     private void InvitedAsGuest(InviteStatus status)
     {

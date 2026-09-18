@@ -351,31 +351,31 @@ public class InviteServiceTests
         Assert.Contains(_trustedIpRows, r => r.IpAddress == Ip4);
     }
 
-    // ----- GetMyInvite (shared /e/{id} link, guest-list-only) -----
+    // ----- ResolveMyInviteId (signed-in handoff, guest-list-only) -----
 
     [Fact]
-    public async Task GetMyInvite_matched_email_renders_personalized_invite()
+    public async Task ResolveMyInviteId_matched_email_creates_the_invite_and_marks_it_viewed()
     {
         var campaign = TestData.Campaign();
         var guest = TestData.Guest(campaign.Id, email: "guest@test.com");
-        var template = TestData.Template();
         _currentUser.Contact.Returns("guest@test.com");
         _currentUser.ContactType.Returns("email");
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
         _guests.ListByCampaignAsync(campaign.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { guest });
         _invites.GetByGuestIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns((Invite?)null); // created lazily
-        _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
+        Invite? created = null;
+        await _invites.AddAsync(Arg.Do<Invite>(i => created = i), Arg.Any<CancellationToken>());
 
-        var res = await Sut().GetMyInviteAsync(campaign.Id, Renderer);
+        var id = await Sut().ResolveMyInviteIdAsync(campaign.Id);
 
-        var view = Assert.IsType<MyInviteResponse>(res);
-        Assert.Equal(template.PackageUrl, view.PackageUrl);
-        await _invites.Received(1).AddAsync(Arg.Any<Invite>(), Arg.Any<CancellationToken>());
+        Assert.NotNull(created);
+        Assert.Equal(created!.Id, id);
+        Assert.NotNull(created.ViewedAt);
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task GetMyInvite_email_not_on_guest_list_is_refused()
+    public async Task ResolveMyInviteId_email_not_on_guest_list_is_refused()
     {
         var campaign = TestData.Campaign();
         var guest = TestData.Guest(campaign.Id, email: "someone@test.com");
@@ -384,7 +384,7 @@ public class InviteServiceTests
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
         _guests.ListByCampaignAsync(campaign.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { guest });
 
-        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().GetMyInviteAsync(campaign.Id, Renderer));
+        await Assert.ThrowsAsync<InviteNotFoundException>(() => Sut().ResolveMyInviteIdAsync(campaign.Id));
     }
 
     [Fact]

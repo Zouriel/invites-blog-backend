@@ -7,6 +7,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Rendering;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Api.Controllers;
 
@@ -41,18 +42,14 @@ public sealed class InvitesController(
     public async Task<IActionResult> Inbox(CancellationToken ct) =>
         Success(await invites.GetInboxAsync(ct));
 
-    // The signed-in caller's own invitation to a campaign, if their verified email or phone is on the
-    // guest list. Lives under /api/me/ rather than /api/campaigns/ on purpose: everything under
-    // /api/campaigns/{id} carries the campaign POSSESSION token (the inviter's key), and an invitation
-    // you RECEIVED is authorised by your account instead. Sharing the prefix meant the wrong bearer.
-    [HttpGet("/api/me/invitations/{campaignId:guid}")]
-    [HasPermission(Permissions.Inbox.Read)]
-    public async Task<IActionResult> MyInvite(Guid campaignId, CancellationToken ct) =>
-        Success(await invites.GetMyInviteAsync(campaignId, Render, ct));
-
     /// <summary>
-    /// Hands the signed-in caller over to their server-rendered invitation. Returns the URL to
-    /// navigate to; the render host redeems the one-hop admission in it and turns it into a cookie.
+    /// Hands the signed-in caller over to their server-rendered invitation, if their verified email
+    /// or phone is on the guest list. Returns the URL to navigate to; the render host redeems the
+    /// one-hop admission in it and turns it into a cookie.
+    ///
+    /// Lives under /api/me/ rather than /api/campaigns/ on purpose: everything under
+    /// /api/campaigns/{id} carries the campaign POSSESSION token (the inviter's key), and an
+    /// invitation you RECEIVED is authorised by your account instead.
     ///
     /// A handoff rather than a cookie set directly, because the app holding the session and the app
     /// rendering the invitation are different origins, and a cookie's Domain may name the setting
@@ -64,7 +61,7 @@ public sealed class InvitesController(
     public async Task<IActionResult> RenderLink(Guid campaignId, CancellationToken ct)
     {
         var inviteId = await invites.ResolveMyInviteIdAsync(campaignId, ct);
-        var renderBase = (config["Urls:InviteeBase"] ?? "https://me.invites.blog").TrimEnd('/');
+        var renderBase = config.InviteeBase();
         return Success(new { url = $"{renderBase}/h/{tickets.IssueHandoff(inviteId, DateTimeOffset.UtcNow)}" });
     }
 

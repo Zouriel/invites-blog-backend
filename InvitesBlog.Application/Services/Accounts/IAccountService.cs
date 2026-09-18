@@ -34,8 +34,6 @@ public interface IAccountService
     /// </summary>
     Task<AuthResultDto> SignUpAsync(SignUpRequest request, CancellationToken ct = default);
 
-    Task<AccountDto> MeAsync(CancellationToken ct = default);
-
     /// <summary>
     /// Sets the account's light/dark preference. On the account rather than in the browser so it
     /// follows the person to whatever they next sign in on.

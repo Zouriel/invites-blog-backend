@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace InvitesBlog.Api.Controllers;
 
 /// <summary>
-/// §10.4 Guest upload + post-payment add/fix/resend. Thin controller — delegates business logic to
+/// §10.4 Guest upload + add/fix/resend. Thin controller — delegates business logic to
 /// <see cref="IGuestService"/>. The actual invite send is performed by the Infrastructure
 /// <see cref="DispatchService"/> (which the Application layer cannot reference).
 /// </summary>
@@ -26,22 +26,13 @@ public sealed class GuestsController(IGuestService guests, DispatchService dispa
         return Success(summary);
     }
 
-    // GET /api/campaigns/{id}/guests/upload/{uploadId}/errors.csv — downloadable report (§4.4.6)
-    [HttpGet("upload/{uploadId:guid}/errors.csv")]
-    [HasPermission(Permissions.Guests.Read)]
-    public async Task<IActionResult> ErrorsCsv(Guid id, Guid uploadId, CancellationToken ct)
-    {
-        var csv = await guests.ExportErrorsCsvAsync(id, uploadId, ct);
-        return File(csv, "text/csv", "guests.csv");
-    }
-
     // POST /api/campaigns/{id}/guests/confirm-upload — materialize guests, honoring suppression (§15.3)
     [HttpPost("confirm-upload")]
     [HasPermission(Permissions.Guests.Upload)]
     public async Task<IActionResult> ConfirmUpload(Guid id, [FromBody] ConfirmUploadRequest req, CancellationToken ct) =>
         Success(await guests.ConfirmUploadAsync(id, req, ct));
 
-    // POST /api/campaigns/{id}/guests — manual add after payment; consumes prepaid capacity first (§4.7.4)
+    // POST /api/campaigns/{id}/guests — manual add; sent straight away once the invitations are out (§4.7.4)
     [HttpPost]
     [HasPermission(Permissions.Guests.Write)]
     public async Task<IActionResult> Add(Guid id, [FromBody] AddGuestRequest req, CancellationToken ct)

@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
 using InvitesBlog.Application.Plans;
+using InvitesBlog.Application.Common;
 namespace InvitesBlog.Application.Services.Accounts;
 
 /// <summary>
@@ -62,8 +63,10 @@ public sealed class AccountService(
 
     /// <summary>
     /// Creates a designer account. This is the ONLY self-service way to gain a role beyond Customer,
-    /// and it grants exactly one — publishing still goes through admin review, so a new designer can
-    /// submit work and nothing else.
+    /// and it grants exactly one: the right to build and publish templates in the designer. There is
+    /// no review queue behind that — what keeps publishing in check is the designer's own rules
+    /// (server-side compile and Check, a daily public-publish limit, reports and admin unlisting;
+    /// see DesignService).
     /// <para>
     /// If an account already exists for the email — a customer who has been receiving invitations,
     /// say — it gains the Designer role instead of being refused or duplicated. A password is only
@@ -227,9 +230,6 @@ public sealed class AccountService(
 
         return await IssueAsync(user, ct);
     }
-
-    public async Task<AccountDto> MeAsync(CancellationToken ct = default) =>
-        await ToDtoAsync(await CurrentAsync(ct), ct);
 
     /// <summary>
     /// Turns the account already signed in into a creator's as well. Signing up a second time with
@@ -427,7 +427,7 @@ public sealed class AccountService(
                 // The host's own cover first. A template preview is a marketing poster rendered from
                 // the template's demo content, so leading with it put a stranger's name on somebody's
                 // event — it identifies the design, never the occasion.
-                InvitesBlog.Application.Campaigns.CampaignCover.Read(c.CustomContentJson) ?? template?.PreviewImageUrl,
+                InvitesBlog.Application.Campaigns.CampaignCover.Read(c.CustomContentJson) ?? TemplatePoster.OrNull(template?.PreviewImageUrl),
                 photoCounts.GetValueOrDefault(c.Id),
                 // No pinned package means no invitation to render: the campaign exists for its media
                 // bucket. A design the customer brought themselves DOES have one, so this separates

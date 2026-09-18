@@ -10,6 +10,7 @@ using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.Feed;
 
@@ -56,7 +57,6 @@ public sealed class FeedService(
     IRepository<PostComment> comments,
     IRepository<PostLike> postLikes,
     IRepository<CommentLike> commentLikes,
-    ICampaignOwnershipService ownership,
     IMediaBucketService bucketService,
     IUnitOfWork uow) : IFeedService
 {
@@ -427,10 +427,10 @@ public sealed class FeedService(
         var cover = images.Count == 0;
         if (cover)
         {
-            var url = CampaignCover.Read(campaign.CustomContentJson)
-                      ?? (await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl;
             // Older templates point their preview at the design's page, which is not a picture.
-            if (!string.IsNullOrWhiteSpace(url) && !url.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            var url = CampaignCover.Read(campaign.CustomContentJson)
+                      ?? TemplatePoster.OrNull((await templates.GetByIdAsync(campaign.TemplateId, ct))?.PreviewImageUrl);
+            if (!string.IsNullOrWhiteSpace(url))
                 images.Add(new FeedImageDto(url, false));
         }
 

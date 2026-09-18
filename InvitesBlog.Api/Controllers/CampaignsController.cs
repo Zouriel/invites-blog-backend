@@ -166,11 +166,6 @@ public sealed class CampaignsController(
     public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>
         Success(await campaigns.GetSummaryAsync(id, ct));
 
-    [HttpGet("{id:guid}/pricing")]
-    [HasPermission(Permissions.Campaigns.Read)]
-    public async Task<IActionResult> GetPricing(Guid id, [FromQuery] int? inviteCount, CancellationToken ct) =>
-        Success(await campaigns.GetPricingAsync(id, inviteCount, ct));
-
     // Magic-link dashboard (§13.3). Public role holds Dashboard.Read; the ?token= is validated
     // (hashed + matched) in the service. Mapped explicitly off the campaigns route prefix.
     [HttpGet("/api/dashboard/{id:guid}")]

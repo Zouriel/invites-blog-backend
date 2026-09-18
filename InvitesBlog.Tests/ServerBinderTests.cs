@@ -17,8 +17,6 @@ namespace InvitesBlog.Tests;
 /// </summary>
 public class ServerBinderTests
 {
-    private static readonly string[] Slugs = ["aurora-vows", "a-love-story", "gilded-hour"];
-
     /// <summary>The raw committed template, read from the embedded resource the seeder publishes.</summary>
     private static string RawHtml(string slug)
     {

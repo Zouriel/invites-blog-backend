@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Api;
 
@@ -56,8 +57,8 @@ public static class DependencyInjection
         // is talking cross-origin and drops a Set-Cookie it was not told to expect.
         services.AddCors(o => o.AddDefaultPolicy(p => p
             .WithOrigins(
-                config["Urls:InviterBase"] ?? "http://localhost:4200",
-                config["Urls:InviteeBase"] ?? "http://localhost:4201")
+                config.InviterBase(),
+                config.InviteeBase())
             .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
         services.AddRateLimiter(options =>
@@ -80,9 +81,6 @@ public static class DependencyInjection
             options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
-            options.AddPolicy("resend", ctx => RateLimitPartition.GetFixedWindowLimiter(
-                RateLimiting.ClientAddress.PartitionKey(ctx),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(60) }));
             options.AddPolicy(RateLimiting.RateLimitPolicies.CreateEvent, RateLimiting.RateLimitPolicies.CreateEventPartition);
             // The designer previews on every edit (debounced in the editor); this only stops a runaway client.
             options.AddPolicy("design-preview", ctx => RateLimitPartition.GetFixedWindowLimiter(

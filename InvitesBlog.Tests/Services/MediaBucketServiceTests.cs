@@ -12,7 +12,6 @@ using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
@@ -69,7 +68,7 @@ public class MediaBucketServiceTests
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
-        Options.Create(new MediaBucketOptions()), _uow, _plans, _usage);
+        _uow, _plans, _usage);
 
     /// <summary>
     /// Stands in for the database's atomic update and lock. What these tests pin down is what the
@@ -1143,22 +1142,6 @@ public class MediaBucketServiceTests
         var e = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(5)));
         Assert.Equal("allocation_needs_subscription", e.ErrorCode);
-    }
-
-    /// <summary>A bucket whose event was deleted must not stop its owner's other buckets from loading.</summary>
-    [Fact]
-    public async Task A_bucket_left_by_a_deleted_event_does_not_break_the_others()
-    {
-        var bucket = OnPremium(allocated: 10 * PlanCatalog.Gb);
-        var orphan = Mine();
-        _buckets.Query(Arg.Any<bool>()).Returns(new[] { bucket, orphan }.AsAsyncQueryable());
-        _plans.ForCampaignAsync(orphan.CampaignId, Arg.Any<CancellationToken>())
-            .Returns<EventPlan>(_ => throw new NotFoundException("That event no longer exists."));
-
-        var mine = await Sut().MineAsync();
-
-        Assert.Equal(2, mine.Count);
-        Assert.Equal(10 * PlanCatalog.Gb, mine.Single(b => b.Id == bucket.Id).AccountAllocatedBytes);
     }
 
     // ----- Cancelled events -----

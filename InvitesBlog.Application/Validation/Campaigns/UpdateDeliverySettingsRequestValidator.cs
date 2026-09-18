@@ -6,8 +6,9 @@ namespace InvitesBlog.Application.Validation.Campaigns;
 
 public sealed class UpdateDeliverySettingsRequestValidator : AbstractValidator<UpdateDeliverySettingsRequest>
 {
-    // Current mechanism: a single OTP-gated share link (/e/{id}). "share" = give the inviter the link;
-    // "email" = also mail that link to guests. Viber/whatsapp/telegram/sms are disabled for now.
+    // "share" = give the inviter the link to pass on (the open link, or the OTP-gated /e/{id});
+    // "email" = also mail every guest their own /i/{token} link. Viber/whatsapp/telegram/sms are
+    // disabled for now. Read back by Delivery.DeliverySettings, for every send.
     private static readonly HashSet<string> Allowed =
         new(StringComparer.OrdinalIgnoreCase) { "email", "share" };
 

@@ -24,15 +24,6 @@ namespace InvitesBlog.Api.Controllers;
 public sealed class MediaBucketsController(
     IMediaBucketService buckets, IEventPhotoService photos) : BaseApiController
 {
-    [HttpGet]
-    [HasPermission(Permissions.Buckets.Read)]
-    public async Task<IActionResult> Mine(CancellationToken ct) =>
-        Success(await buckets.MineAsync(ct));
-
-    /// <summary>
-    /// One bucket. The VIEW door — a member the owner let in gets the bucket itself, because the
-    /// alternative is a page that can list photographs but not say whose night they are.
-    /// </summary>
     /// <summary>
     /// The bucket belonging to an event, created on the spot if that event predates buckets.
     ///
@@ -55,6 +46,10 @@ public sealed class MediaBucketsController(
     public async Task<IActionResult> CreateForCampaign(Guid campaignId, CancellationToken ct) =>
         Created(await buckets.CreateForCampaignAsync(campaignId, ct));
 
+    /// <summary>
+    /// One bucket. The VIEW door — a member the owner let in gets the bucket itself, because the
+    /// alternative is a page that can list photographs but not say whose night they are.
+    /// </summary>
     [HttpGet("{bucketId:guid}")]
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Get(Guid bucketId, CancellationToken ct) =>

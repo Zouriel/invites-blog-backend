@@ -14,7 +14,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Options;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.MediaBuckets;
 
@@ -29,9 +29,6 @@ namespace InvitesBlog.Application.Services.MediaBuckets;
 /// </summary>
 public interface IMediaBucketService
 {
-    /// <summary>Every bucket this account owns, newest first.</summary>
-    Task<IReadOnlyList<MediaBucketDto>> MineAsync(CancellationToken ct = default);
-
     /// <summary>
     /// The bucket, for someone who may LOOK at it rather than manage it — the owner, or somebody the
     /// owner put on its list. Throws if the caller is neither.
@@ -251,35 +248,20 @@ public sealed class MediaBucketService(
     IQrCodeRenderer qr,
     PhoneNormalizer phones,
     IConfiguration config,
-    IOptions<MediaBucketOptions> options,
     IUnitOfWork uow,
     IPlanService plans,
     IMediaBucketUsageRepository usage) : IMediaBucketService
 {
-    private MediaBucketOptions Options => options.Value;
-
     /// <summary>
     /// Where a scanned code lands. The printed code has to carry an ABSOLUTE URL — it is read by a
     /// phone camera with no page around it to resolve a relative path against — so this is the one
     /// place in the product that deliberately bakes a hostname into what it stores. Getting it wrong
     /// is expensive in a way nothing else here is: the cards are already printed.
     /// </summary>
-    private string ContributeBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+    private string ContributeBase => config.InviterBase();
 
     /// <summary>Enough of the token to tell two codes apart in a list, and nowhere near enough to use.</summary>
     private const int HintLength = 6;
-
-    public async Task<IReadOnlyList<MediaBucketDto>> MineAsync(CancellationToken ct = default)
-    {
-        var userId = RequireUser();
-
-        var mine = await buckets.Query()
-            .Where(b => b.OwnerUserId == userId)
-            .OrderByDescending(b => b.CreatedAt)
-            .ToListAsync(ct);
-
-        return await DescribeAsync(mine, ct);
-    }
 
     public async Task<MediaBucketDto> GetAsync(Guid bucketId, CancellationToken ct = default)
     {
@@ -1358,7 +1340,4 @@ public sealed class MediaBucketService(
         code.RevokedAt is not null,
         code.LastUsedAt,
         code.CreatedAt);
-
-    private static MediaBucketTier? ParseTier(string? raw) =>
-        Enum.TryParse<MediaBucketTier>(raw, ignoreCase: true, out var tier) ? tier : null;
 }

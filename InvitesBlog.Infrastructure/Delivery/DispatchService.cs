@@ -1,6 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Common;
+using InvitesBlog.Application.Delivery;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -10,15 +10,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace InvitesBlog.Infrastructure.Delivery;
-
-public sealed class DeliverySettings
-{
-    // Current mechanism: default to a shareable OTP-gated link (/e/{id}); "email" also mails it to guests.
-    [JsonPropertyName("channels")] public List<string> Channels { get; set; } = new() { "share" };
-    [JsonPropertyName("fallbackChannel")] public string? FallbackChannel { get; set; }
-    [JsonPropertyName("messageTemplate")] public string MessageTemplate { get; set; } =
-        "You have a new invite from {{inviter.name}}. Open it here: {{invite.link}}";
-}
 
 /// <summary>
 /// Turns a paid campaign into sent invites (§13.1). For each guest: mint a secure token, render the
@@ -30,11 +21,8 @@ public sealed class DispatchService(
     AppDbContext db,
     IEnumerable<IInviteDeliveryProvider> providers,
     IConfiguration config,
-    ILogger<DispatchService> logger) : IInviteDispatcher
+    ILogger<DispatchService> logger)
 {
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private string InviteeBase => (config["Urls:InviteeBase"] ?? "http://localhost:4201").TrimEnd('/');
 
     public async Task DispatchCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
@@ -42,9 +30,7 @@ public sealed class DispatchService(
         if (campaign is null) return;
         var inviter = campaign.InviterId is null
             ? null : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
-        var inviterName = inviter?.Name ?? "your host";
-
-        var settings = Deserialize(campaign.DeliverySettingsJson);
+        var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
         var guests = await db.Guests
             .Where(g => g.CampaignId == campaignId && !g.OptedOut)
             .ToListAsync(ct);
@@ -63,7 +49,7 @@ public sealed class DispatchService(
                 continue; // already delivered — never double-send
             }
 
-            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviterName, inviter?.Email, ct);
+            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
             if (ok) sent++;
             else if (HasAnyContact(guest, settings)) failed++;
             else notSent++;   // §product rule: no phone (Viber) and no email — recorded, not a failure
@@ -109,13 +95,17 @@ public sealed class DispatchService(
         if (campaign is null) return false;
         var inviter = campaign.InviterId is null ? null
             : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
-        var settings = Deserialize(campaign.DeliverySettingsJson);
-        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name ?? "your host", inviter?.Email, ct);
+        var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
+        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
     }
 
-    /// <summary>Mint token, build message, deliver with fallback, update the invite. Shared by dispatch + resend.</summary>
+    /// <summary>
+    /// Mint token, compose the <see cref="InviteLetter"/>, deliver with fallback, update the invite.
+    /// Shared by dispatch + resend — and the letter is the same one the first send
+    /// (<c>CampaignService.FinalizeAsync</c>) composes, so every path mails the same email.
+    /// </summary>
     private async Task<bool> DeliverToGuestAsync(
-        Campaign campaign, Guest guest, DeliverySettings settings, string inviterName, string? inviterEmail, CancellationToken ct)
+        Campaign campaign, Guest guest, DeliverySettings settings, string? inviterName, string? inviterEmail, CancellationToken ct)
     {
         var invite = await db.Invites.FirstOrDefaultAsync(i => i.GuestId == guest.Id, ct);
         var rawToken = TokenService.GenerateToken();
@@ -135,18 +125,10 @@ public sealed class DispatchService(
         }
         invite.TokenHash = TokenService.Hash(rawToken);
 
-        var link = $"{InviteeBase}/i/{rawToken}";
-        var removalLink = $"{InviteeBase}/privacy/remove/{rawToken}";
-        // Personalize the delivery message. {{name}} / {{guest.name}} → this guest; {{inviter.name}} → host.
-        var guestName = string.IsNullOrWhiteSpace(guest.Name) ? "there" : guest.Name.Trim();
-        var messageText = settings.MessageTemplate
-            .Replace("{{name}}", guestName)
-            .Replace("{{guest.name}}", guestName)
-            .Replace("{{inviter.name}}", inviterName)
-            .Replace("{{invite.link}}", link);
+        var letter = InviteLetter.For(
+            campaign, guest, invite.Id, settings, config.InviteeBase(), rawToken, inviterName, inviterEmail);
 
-        var ok = await TryDeliverAsync(invite, campaign.Id, guest, settings,
-            inviterName, inviterEmail, link, removalLink, messageText, ct);
+        var ok = await TryDeliverAsync(invite, guest, settings, letter, ct);
         // Distinguish "not sent — no deliverable contact" from a provider failure (§product rule).
         invite.Status = ok
             ? InviteStatus.Sent
@@ -161,8 +143,7 @@ public sealed class DispatchService(
 
     /// <summary>Try the configured channels in order, then the fallback, per §13.2.</summary>
     private async Task<bool> TryDeliverAsync(
-        Invite invite, Guid campaignId, Guest guest, DeliverySettings settings,
-        string inviterName, string? inviterEmail, string link, string removalLink, string messageText, CancellationToken ct)
+        Invite invite, Guest guest, DeliverySettings settings, InviteLetter letter, CancellationToken ct)
     {
         var order = new List<string>(settings.Channels);
         if (settings.FallbackChannel is not null && !order.Contains(settings.FallbackChannel))
@@ -180,9 +161,7 @@ public sealed class DispatchService(
             if (provider is null) continue;
 
             anyAddressable = true;
-            var result = await provider.SendAsync(
-                new InviteDeliveryMessage(channel, address, inviterName, link, messageText,
-                    CampaignId: campaignId, InviteId: invite.Id, InviterEmail: inviterEmail, RemovalLink: removalLink), ct);
+            var result = await provider.SendAsync(letter.To(channel, address), ct);
 
             db.DeliveryAttempts.Add(new DeliveryAttempt
             {
@@ -228,11 +207,4 @@ public sealed class DispatchService(
         "direct" => "direct-link",
         _ => null
     };
-
-    private static DeliverySettings Deserialize(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json) || json == "{}") return new DeliverySettings();
-        try { return JsonSerializer.Deserialize<DeliverySettings>(json, JsonOpts) ?? new DeliverySettings(); }
-        catch (JsonException) { return new DeliverySettings(); }
-    }
 }

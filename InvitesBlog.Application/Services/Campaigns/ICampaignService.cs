@@ -1,5 +1,4 @@
 using InvitesBlog.Application.Dtos.Campaigns;
-using InvitesBlog.Application.Pricing;
 
 namespace InvitesBlog.Application.Services.Campaigns;
 
@@ -65,12 +64,14 @@ public interface ICampaignService
         Guid id, UpdateRsvpQuestionsRequest req, CancellationToken ct = default);
     Task UpdateInviterAsync(Guid id, UpdateInviterRequest req, string? accessToken, CancellationToken ct = default);
     Task UpdateDeliverySettingsAsync(Guid id, UpdateDeliverySettingsRequest req, CancellationToken ct = default);
-    /// <summary>Finalize the campaign (no payment): returns the shareable /e/{id} link and emails it if chosen.</summary>
+    /// <summary>
+    /// Finalize the campaign (no payment): returns the link to share (the open link when there is one,
+    /// else the gated /e/{id}) and, when the email channel is on, emails each guest their own /i/{token} link.
+    /// </summary>
     Task<FinalizeResponse> FinalizeAsync(Guid id, CancellationToken ct = default);
     Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default);
     Task<CampaignImageDto> AddImageAsync(Guid id, byte[] content, string contentType, string fileName, string? slot, CancellationToken ct = default);
     Task<CampaignSummaryDto> GetSummaryAsync(Guid id, CancellationToken ct = default);
-    Task<PriceBreakdown> GetPricingAsync(Guid id, int? inviteCount, CancellationToken ct = default);
     Task<DashboardResponse> GetDashboardAsync(Guid id, string? token, CancellationToken ct = default);
     /// <summary>
     /// Produces this event's public link and returns the whole URL.

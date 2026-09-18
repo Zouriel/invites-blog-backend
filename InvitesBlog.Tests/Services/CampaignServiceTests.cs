@@ -57,7 +57,11 @@ public class CampaignServiceTests
 
     private CampaignService Sut() => new(
         _currentUser, _imageOptimizer, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
-        _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email, _storage, _provider,
+        _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email,
+        // The REAL email channel over the substituted sender: what the first send mails is exactly
+        // what these tests are about, and a stub provider would let the email itself drift.
+        new IInviteDeliveryProvider[] { new InvitesBlog.Infrastructure.Delivery.EmailInviteDeliveryProvider(_email) },
+        _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
         TestData.FreePlans());
 
@@ -334,15 +338,6 @@ public class CampaignServiceTests
         Assert.Equal(12, dto.GuestCount);
         Assert.NotNull(dto.Price);
         Assert.Equal(template.Name, dto.Template!.Name);
-    }
-
-    [Fact]
-    public async Task GetPricing_uses_supplied_count()
-    {
-        var c = TestData.Campaign();
-        Own(c);
-        var price = await Sut().GetPricingAsync(c.Id, inviteCount: 70);
-        Assert.NotNull(price);
     }
 
     // ----- RSVP questions -----
@@ -763,6 +758,41 @@ public class CampaignServiceTests
             Arg.Is<EmailMessage>(m => m.Html.Contains("/i/")), Arg.Any<CancellationToken>());
         await _email.DidNotReceive().SendAsync(
             Arg.Is<EmailMessage>(m => m.Html.Contains("/e/")), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// The FIRST invitation email is the same email a resend sends — same provider, same letter —
+    /// so it carries the guest's own §15.2 "Remove my data" link. It used to be built by separate
+    /// code that had no such link at all.
+    /// </summary>
+    [Fact]
+    public async Task Finalize_first_send_email_carries_the_guests_removal_link()
+    {
+        var c = TestData.Campaign();
+        c.DeliverySettingsJson = "{\"channels\":[\"email\"],\"messageTemplate\":\"Hi {{name}}, from {{inviter.name}}\"}";
+        var inviter = new Inviter { Id = Guid.NewGuid(), Name = "Aisha", Email = "aisha@test.com" };
+        c.InviterId = inviter.Id;
+        Own(c);
+        _inviters.GetByIdAsync(inviter.Id, Arg.Any<CancellationToken>()).Returns(inviter);
+        var g = TestData.Guest(c.Id, email: "a@test.com");
+        g.Name = "Ahmed";
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { g });
+        _invites.GetByGuestIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        Assert.Equal(1, res.Emailed);
+        await _email.Received(1).SendAsync(
+            Arg.Is<EmailMessage>(m =>
+                m.To == "a@test.com"
+                && m.Html.Contains("https://me.example.com/privacy/remove/")
+                && m.Html.Contains("Remove my data")
+                && m.Headers != null && m.Headers["List-Unsubscribe"].StartsWith("<https://me.example.com/privacy/remove/")
+                // One parser: the first send fills the same placeholders a resend does.
+                && m.Html.Contains("Hi Ahmed, from Aisha")
+                && m.ReplyTo == "aisha@test.com"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -140,8 +140,8 @@ public sealed class MediaBucket
     /// <summary>
     /// How many bytes this bucket may hold, FROZEN from the tier when it was bought.
     /// <para>
-    /// Frozen for the same reason <see cref="Campaign.DesignerFee"/> is: read live from the tier
-    /// table, changing what 20 GB means would silently resize every bucket already sold — upwards is
+    /// Frozen because, read live from the tier table, changing what 20 GB means would silently
+    /// resize every bucket already sold — upwards is
     /// a giveaway and downwards puts somebody over their limit for photographs they already
     /// uploaded. What someone bought is what they keep for the term they bought it for.
     /// </para>

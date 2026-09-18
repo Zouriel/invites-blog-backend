@@ -11,15 +11,24 @@ using InvitesBlog.TemplateCompiler;
 
 namespace InvitesBlog.Infrastructure.Rendering;
 
+/// <summary>The sandbox payload for one invite: package URL + the JSON injected into the iframe (§5.3).</summary>
+public sealed record InviteRenderPayload(string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus);
+
 /// <summary>
 /// Builds the single JSON payload injected into the sandboxed template (§5.3). Personalization
 /// rules are resolved here — server-side — and only the resolved content-block list ships, so the
 /// template never evaluates rules. Guest content is data, never markup.
 /// </summary>
-public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration config) : IInviteRenderer
+public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration config)
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+    /// <param name="bucketWindowDays">
+    /// How many days the event's default media bucket collects for. Threaded in rather than looked
+    /// up here so the camera offered ON the invitation and the bucket behind it answer from one
+    /// number — offering a camera that leads to a bucket refusing every photograph taken with it is
+    /// the exact failure EventDayWindow exists to prevent. Defaults to the ordinary single night.
+    /// </param>
     public InviteRenderPayload Build(Campaign campaign, Template template, Guest guest, Invite invite, string inviteLink, string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays = 1)
     {
         var content = ParseObject(campaign.CustomContentJson);

@@ -5,6 +5,7 @@ using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.Designs;
 
@@ -211,8 +212,7 @@ public sealed class TemplateReportService(
         return rows.Select(r =>
         {
             byId.TryGetValue(r.TemplateId, out var t);
-            var preview = t?.PreviewImageUrl;
-            if (preview is not null && (preview.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || preview.EndsWith('/'))) preview = null;
+            var preview = TemplatePoster.OrNull(t?.PreviewImageUrl);
             return new TemplateReportDto(
                 r.Id, r.TemplateId, t?.Name ?? "(deleted template)", t?.Slug ?? string.Empty, preview,
                 t?.Visibility ?? string.Empty, t?.IsActive ?? false, t?.DesignerName, t?.DesignerUserId,

@@ -124,4 +124,49 @@ public class MyTemplatesServiceTests
         Assert.True(result.Deleted);
         _templates.Received(1).Remove(t);
     }
+
+    // ----- The admin screen's delete -----
+
+    /// <summary>
+    /// The admin screen's delete used to be its own copy of this rule, and hard-deleted a template
+    /// made for a customer that no campaign used yet — the very case "My designs" protects. It now
+    /// calls the same method, so it unlists instead.
+    /// </summary>
+    [Fact]
+    public async Task The_admin_delete_unlists_a_template_made_for_a_customer()
+    {
+        AsAdmin();
+        var t = Template();
+        t.Visibility = TemplateVisibility.Dedicated;
+        t.AssignedEmail = "a@test.com";
+        Existing(t);
+        var controller = new InvitesBlog.Api.Controllers.AdminTemplatesController(_templates, _campaigns, Sut());
+
+        var response = await controller.Delete(t.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(response);
+        var body = Assert.IsType<InvitesBlog.Application.Common.ApiResponse<
+            InvitesBlog.Api.Controllers.AdminTemplatesController.DeleteResultDto>>(ok.Value);
+        Assert.False(body.Data!.Deleted);
+        Assert.True(body.Data.Deactivated);
+        Assert.False(t.IsActive);
+        _templates.DidNotReceive().Remove(Arg.Any<Template>());
+    }
+
+    [Fact]
+    public async Task The_admin_delete_still_hard_deletes_an_unused_template()
+    {
+        AsAdmin();
+        var t = Template(designerId: Guid.NewGuid());
+        Existing(t);
+        var controller = new InvitesBlog.Api.Controllers.AdminTemplatesController(_templates, _campaigns, Sut());
+
+        var response = await controller.Delete(t.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(response);
+        var body = Assert.IsType<InvitesBlog.Application.Common.ApiResponse<
+            InvitesBlog.Api.Controllers.AdminTemplatesController.DeleteResultDto>>(ok.Value);
+        Assert.True(body.Data!.Deleted);
+        _templates.Received(1).Remove(t);
+    }
 }

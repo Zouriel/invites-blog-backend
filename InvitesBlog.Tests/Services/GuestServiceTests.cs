@@ -94,33 +94,6 @@ public class GuestServiceTests
         await _uploads.Received(1).AddAsync(Arg.Any<UploadedGuestFile>(), Arg.Any<CancellationToken>());
     }
 
-    // ----- ExportErrorsCsv -----
-
-    [Fact]
-    public async Task ExportErrors_unknown_upload_throws()
-    {
-        var c = Own();
-        _uploads.FirstOrDefaultAsync(Arg.Any<System.Linq.Expressions.Expression<Func<UploadedGuestFile, bool>>>(), Arg.Any<CancellationToken>())
-            .Returns((UploadedGuestFile?)null);
-        await Assert.ThrowsAsync<UploadNotFoundException>(() => Sut().ExportErrorsCsvAsync(c.Id, Guid.NewGuid()));
-    }
-
-    [Fact]
-    public async Task ExportErrors_success_returns_csv()
-    {
-        var c = Own();
-        var parsed = new List<ParsedGuest> { new("a@test.com", "+9607777777", "+9607777777", "Alice", "guest", "female", "{}") };
-        var upload = new UploadedGuestFile { Id = Guid.NewGuid(), CampaignId = c.Id, ResultJson = JsonSerializer.Serialize(parsed) };
-        _uploads.FirstOrDefaultAsync(Arg.Any<System.Linq.Expressions.Expression<Func<UploadedGuestFile, bool>>>(), Arg.Any<CancellationToken>())
-            .Returns(upload);
-
-        var bytes = await Sut().ExportErrorsCsvAsync(c.Id, upload.Id);
-
-        var csv = Encoding.UTF8.GetString(bytes);
-        Assert.Contains("email,phone,name,role,gender", csv);
-        Assert.Contains("a@test.com", csv);
-    }
-
     // ----- ConfirmUpload -----
 
     [Fact]
@@ -181,7 +154,7 @@ public class GuestServiceTests
     }
 
     [Fact]
-    public async Task AddGuest_success_materializes_and_reports_capacity()
+    public async Task AddGuest_success_materializes_and_reports_count()
     {
         var c = Own(paidCapacity: 100);
         _guests.CountByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(1);
@@ -190,15 +163,31 @@ public class GuestServiceTests
 
         Assert.Equal(1, outcome.Response.Added);
         Assert.Equal(1, outcome.Response.GuestCount);
-        Assert.False(outcome.Response.NeedsTopUp);
         Assert.Null(outcome.DispatchGuestId); // Draft campaign → not dispatched immediately
         await _guests.Received(1).AddAsync(Arg.Any<Guest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
+    public async Task AddGuest_already_dispatched_sends_now_even_with_no_paid_capacity()
+    {
+        // Sending isn't charged: a new event never gets PaidInviteCapacity (only the payments
+        // webhook raises it), and "add and send now" must still send — like the first send and
+        // resends, which have no capacity check either.
+        var c = Own(status: CampaignStatus.Dispatched, paidCapacity: 0);
+        _guests.CountByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(5);
+        var added = TestData.Guest(c.Id);
+        _guests.Query().Returns(new[] { added }.AsAsyncQueryable());
+
+        var outcome = await Sut().AddGuestAsync(c.Id, new AddGuestRequest("now@test.com", null, "Now", null, null, null));
+
+        Assert.Equal(1, outcome.Response.Added);
+        Assert.Equal(added.Id, outcome.DispatchGuestId);
+    }
+
+    [Fact]
     public async Task AddGuest_sendNow_false_skips_immediate_dispatch_even_when_already_sending()
     {
-        // Same "already dispatched, within capacity" situation that would otherwise auto-send —
+        // Same "already dispatched" situation that would otherwise auto-send —
         // SendNow: false is the explicit "add for later" choice and must override it.
         var c = Own(status: CampaignStatus.Dispatched, paidCapacity: 100);
         _guests.CountByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(1);

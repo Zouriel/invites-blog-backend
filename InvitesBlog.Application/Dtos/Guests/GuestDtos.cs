@@ -43,13 +43,14 @@ public sealed record GuestUploadSummaryDto(
 /// <summary>Result of materializing an upload's guests.</summary>
 public sealed record ConfirmUploadResultDto(int Added, int Suppressed);
 
-/// <summary>Result of a manual guest add, including prepaid-capacity accounting (§4.7.4).</summary>
+/// <summary>Result of a manual guest add (§4.7.4). Sending isn't charged, so there is no
+/// capacity/top-up accounting here any more.</summary>
 public sealed record AddGuestResultDto(
-    int Added, int GuestCount, int PaidCapacity, bool NeedsTopUp,
+    int Added, int GuestCount,
     /// <summary>True only once the controller has actually attempted (and the provider accepted)
     /// an immediate send — see <see cref="AddGuestOutcome"/>. False means the guest was added but
-    /// not sent, whether because SendNow was false, capacity/status didn't allow it, or the send
-    /// itself failed.</summary>
+    /// not sent, whether because SendNow was false, the invitations haven't gone out yet, or the
+    /// send itself failed.</summary>
     bool Sent = false);
 
 /// <summary>Result of a free resend.</summary>
@@ -57,8 +58,8 @@ public sealed record ResendResultDto(bool Sent);
 
 /// <summary>
 /// Service-to-controller outcome for a manual add. Carries the response payload plus, when the
-/// campaign is already dispatched and the new guest fits within paid capacity, the id of the guest
-/// the controller should dispatch immediately (§4.7.4). Not serialized — the controller returns
+/// campaign is already dispatched, the id of the guest the controller should dispatch
+/// immediately (§4.7.4). Not serialized — the controller returns
 /// only <see cref="Response"/>.
 /// </summary>
 public sealed record AddGuestOutcome(AddGuestResultDto Response, Guid? DispatchGuestId);

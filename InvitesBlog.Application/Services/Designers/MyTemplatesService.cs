@@ -5,6 +5,7 @@ using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Application.Services.Designers;
 
@@ -42,7 +43,7 @@ public sealed class MyTemplatesService(
 
         var list = rows.Select(t => new MyTemplateRowDto(
             t.Id, t.Name, t.Slug, t.Category, t.Version, t.Visibility, t.IsActive,
-            StaticPreview(t.PreviewImageUrl), t.DesignerName, t.DesignerUserId,
+            TemplatePoster.OrNull(t.PreviewImageUrl), t.DesignerName, t.DesignerUserId,
             usage.GetValueOrDefault(t.Id),
             t.UpdatedAt)).ToList();
 
@@ -95,13 +96,4 @@ public sealed class MyTemplatesService(
     }
 
     private bool IsAdmin() => currentUser.HasPermission(Permissions.Templates.Manage);
-
-    /// <summary>
-    /// Older templates store a pointer to their live page here instead of a real image; the table
-    /// shows a placeholder rather than trying to load a whole invitation as a thumbnail.
-    /// </summary>
-    private static string? StaticPreview(string? url) =>
-        string.IsNullOrWhiteSpace(url) || url.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || url.EndsWith('/')
-            ? null
-            : url;
 }

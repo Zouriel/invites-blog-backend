@@ -18,7 +18,7 @@ namespace InvitesBlog.Application.Services.Designs;
 /// <para><b>What this deliberately does not do.</b> An imported design is never made dynamic. We do
 /// not find its text, we do not guess which words are a name, and nothing inside the artwork changes
 /// from one guest to the next — every guest sees the identical picture the customer uploaded. What is
-/// still personal is everything around it: the email or Viber message greets each guest by name, the
+/// still personal is everything around it: the invitation email greets each guest by name, the
 /// invitation is theirs alone behind their own token, and the RSVP and the media bucket are wrapped
 /// around it exactly as they are around a template.</para>
 ///
@@ -81,23 +81,8 @@ public sealed class ImportedDesignService(
         // A placeholder row so the normal create path has something to pin. Its package is empty
         // until the import below writes one, which is the same order the gallery path uses — a
         // template exists before a campaign points at it.
-        var placeholder = new Template
-        {
-            Id = Guid.NewGuid(),
-            Name = title.Trim(),
-            Slug = $"imported-pending-{Guid.NewGuid():N}",
-            Description = ImportedDescription,
-            Category = "Imported",
-            Version = "1.0.0",
-            PackageUrl = string.Empty,
-            PreviewImageUrl = string.Empty,
-            ManifestJson = Manifest,
-            SceneJson = "{}",
-            Visibility = TemplateVisibility.Imported,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
+        var placeholder = ImportedTemplate.Create(
+            title.Trim(), $"imported-pending-{Guid.NewGuid():N}", ImportedDescription);
         await templates.AddAsync(placeholder, ct);
         await uow.SaveChangesAsync(ct);
 
@@ -181,7 +166,7 @@ public sealed class ImportedDesignService(
         campaign.TemplateId = template.Id;
         campaign.TemplateVersion = template.Version;
         campaign.TemplatePackageUrl = packageFolder;
-        campaign.TemplateManifestJson = Manifest;
+        campaign.TemplateManifestJson = ImportedTemplate.EmptyManifest;
         // An uploaded design has no roles. A host who picked a gallery design first and saved roles,
         // then switched to their own picture, kept those roles, and the guest steps went on asking for
         // them (a spreadsheet was refused for every row without one). Cleared with the switch.
@@ -220,41 +205,19 @@ public sealed class ImportedDesignService(
         {
             existing.PackageUrl = packageFolder;
             existing.PreviewImageUrl = previewUrl ?? string.Empty;
-            existing.ManifestJson = Manifest;
+            existing.ManifestJson = ImportedTemplate.EmptyManifest;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
             templates.Update(existing);
             return existing;
         }
 
-        var template = new Template
-        {
-            Id = Guid.NewGuid(),
-            Name = campaign.Title,
-            Slug = slug,
-            Description = ImportedDescription,
-            Category = "Imported",
-            Version = "1.0.0",
-            PackageUrl = packageFolder,
-            // A zip need contain no image at all, so there is genuinely nothing to preview for some
-            // designs. The column is NOT NULL; empty is the honest value for "there isn't one".
-            PreviewImageUrl = previewUrl ?? string.Empty,
-            ManifestJson = Manifest,
-            SceneJson = "{}",
-            Visibility = TemplateVisibility.Imported,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
+        // A zip need contain no image at all, so for some designs there is no preview (empty).
+        var template = ImportedTemplate.Create(campaign.Title, slug, ImportedDescription, packageFolder, previewUrl);
 
         await templates.AddAsync(template, ct);
         return template;
     }
 
-    /// <summary>
-    /// An imported design declares no fields, and that is the whole point: the builder renders
-    /// exactly what a template says it has, so an empty manifest is what makes the content step
-    /// disappear for a design nobody can edit.
-    /// </summary>
     /// <summary>
     /// Never shown anywhere — an imported row is invisible to every gallery read — but the column is
     /// NOT NULL, and a row that cannot be written is a 500 at the end of somebody's upload.
@@ -263,8 +226,6 @@ public sealed class ImportedDesignService(
 
     /// <summary>One campaign, one imported template row. The id is in the slug so it cannot collide.</summary>
     private static string SlugFor(Guid campaignId) => $"imported-{campaignId:N}";
-
-    private const string Manifest = """{"fields":[],"images":[],"blocks":[],"theme":{}}""";
 
     private static bool IsVideo(string ext) => ext is ".mp4" or ".webm";
 

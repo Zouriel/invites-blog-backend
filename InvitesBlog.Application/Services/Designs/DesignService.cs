@@ -326,9 +326,9 @@ public sealed class DesignService(
                 throw new BusinessRuleException("The preview image has to be a PNG, JPEG or WebP.", "poster_invalid");
             if (poster.Length > MaxPosterBytes)
                 throw new BusinessRuleException("The preview image is too large — keep it under 2MB.", "poster_too_large");
-            var ext = sniffed switch { "image/png" => "png", "image/jpeg" => "jpg", _ => "webp" };
             var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(poster))[..8].ToLowerInvariant();
-            posterUrl = await storage.PutAsync($"templates/{slug}@{version}/poster.{hash}.{ext}", poster, sniffed, ct);
+            posterUrl = await storage.PutAsync(
+                $"templates/{slug}@{version}/poster.{hash}{MediaFileTypes.ExtensionFor(sniffed)}", poster, sniffed, ct);
         }
 
         var owner = await users.GetByIdAsync(me, ct);
@@ -358,10 +358,11 @@ public sealed class DesignService(
         // A dedicated template keeps the email it was made for; anything else is reserved only when asked.
         if (effectiveVisibility != TemplateVisibility.Dedicated) template.AssignedEmail = assignedEmail;
         template.IsActive = true;
+        // A new poster wins; without one, a real poster from an earlier version is kept. Anything else
+        // is stored as "no poster" (empty — the column is non-null), never the live page as a
+        // stand-in: that is a page, not an image, and every reader goes through TemplatePoster.OrNull.
         if (posterUrl is not null) template.PreviewImageUrl = posterUrl;
-        else if (string.IsNullOrWhiteSpace(template.PreviewImageUrl)
-                 || template.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase))
-            template.PreviewImageUrl = $"{package.PackageUrl}index.html";
+        else if (TemplatePoster.OrNull(template.PreviewImageUrl) is null) template.PreviewImageUrl = string.Empty;
         template.UpdatedAt = now;
 
         design.Name = name;
@@ -598,17 +599,12 @@ public sealed class DesignService(
             var mine = usage.Where(u => u.TemplateId == t.Id).ToList();
             return new DesignTemplateDto(
                 t.Id, t.Name, t.Slug, t.Version, t.Visibility, t.IsActive, t.Category, t.Description,
-                StaticPreview(t.PreviewImageUrl), t.UnlistedByAdminAt is not null,
+                TemplatePoster.OrNull(t.PreviewImageUrl), t.UnlistedByAdminAt is not null,
                 mine.Sum(u => u.Count),
                 mine.Where(u => u.TemplateVersion != t.Version).Sum(u => u.Count),
                 t.Visibility == TemplateVisibility.Private ? t.AssignedEmail : null);
         });
     }
-
-    private static string? StaticPreview(string? url) =>
-        string.IsNullOrWhiteSpace(url) || url.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || url.EndsWith('/')
-            ? null
-            : url;
 
     private static string? NormalizeEmail(string? value)
     {
@@ -619,7 +615,7 @@ public sealed class DesignService(
     /// <summary>Tells someone a designer made a template for them, and where to find it.</summary>
     private EmailMessage BuildMadeForYouEmail(string to, string designerName, string templateName)
     {
-        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var inviterBase = config.InviterBase();
         var link = $"{inviterBase}/my-templates?tab=requests";
         var safeDesigner = System.Net.WebUtility.HtmlEncode(designerName);
         var safeTpl = System.Net.WebUtility.HtmlEncode(templateName);

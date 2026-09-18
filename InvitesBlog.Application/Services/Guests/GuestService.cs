@@ -76,23 +76,6 @@ public sealed class GuestService(
             result.CanContinue);
     }
 
-    public async Task<byte[]> ExportErrorsCsvAsync(Guid campaignId, Guid uploadId, CancellationToken ct = default)
-    {
-        await EnsureCampaignAsync(campaignId, ct);
-
-        var upload = await uploads.FirstOrDefaultAsync(u => u.Id == uploadId && u.CampaignId == campaignId, ct)
-                     ?? throw new UploadNotFoundException(uploadId);
-
-        // The accepted guest list is stored; export it as a convenience report (§4.4.6).
-        var parsed = JsonSerializer.Deserialize<List<ParsedGuest>>(upload.ResultJson) ?? new();
-        var sb = new StringBuilder("email,phone,name,role,gender\r\n");
-        foreach (var g in parsed)
-            sb.Append(Csv(g.Email)).Append(',').Append(Csv(g.PhoneE164)).Append(',')
-              .Append(Csv(g.Name)).Append(',').Append(Csv(string.Join("; ", g.Roles ?? (g.Role is null ? Array.Empty<string>() : new[] { g.Role })))).Append(',')
-              .Append(Csv(g.Gender)).Append("\r\n");
-        return Encoding.UTF8.GetBytes(sb.ToString());
-    }
-
     /// <summary>The role names saved on the Roles step. Empty for a campaign that has none.</summary>
     private static IReadOnlyList<string> DefinedRoles(string? rolesJson)
     {
@@ -109,16 +92,6 @@ public sealed class GuestService(
         {
             return Array.Empty<string>();
         }
-    }
-
-    /// <summary>RFC-4180 quoting + neutralizes spreadsheet formula injection (=/+/-/@ leading values).</summary>
-    private static string Csv(string? field)
-    {
-        var s = field ?? "";
-        if (s.Length > 0 && (s[0] is '=' or '+' or '-' or '@')) s = "'" + s;
-        if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0)
-            s = "\"" + s.Replace("\"", "\"\"") + "\"";
-        return s;
     }
 
     public async Task<ConfirmUploadResultDto> ConfirmUploadAsync(
@@ -160,13 +133,15 @@ public sealed class GuestService(
         await uow.SaveChangesAsync(ct);
 
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
-        var withinCapacity = guestCount <= campaign.PaidInviteCapacity;
 
-        // If already dispatched and capacity allows, send this new guest immediately — unless the
-        // caller explicitly asked to add it for a later send instead (SendNow: false).
+        // If the invitations have already gone out, send this new guest immediately — unless the
+        // caller explicitly asked to add it for a later send instead (SendNow: false). Sending is
+        // not charged, so there is no capacity check here: the first send (FinalizeAsync) and
+        // resends don't have one either, and PaidInviteCapacity is only ever raised by the
+        // payments webhook, so gating on it meant a new event's "add and send now" never sent.
         var shouldSend = req.SendNow ?? true;
         Guid? dispatchGuestId = null;
-        if (added == 1 && withinCapacity && shouldSend &&
+        if (added == 1 && shouldSend &&
             campaign.Status is CampaignStatus.Dispatched or CampaignStatus.PartiallyDispatched)
         {
             var latest = await guests.Query()
@@ -176,8 +151,7 @@ public sealed class GuestService(
             dispatchGuestId = latest.Id;
         }
 
-        var response = new AddGuestResultDto(
-            added, guestCount, campaign.PaidInviteCapacity, guestCount > campaign.PaidInviteCapacity);
+        var response = new AddGuestResultDto(added, guestCount);
         return new AddGuestOutcome(response, dispatchGuestId);
     }
 

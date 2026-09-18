@@ -31,8 +31,6 @@ public sealed class DeliveryController(ResendWebhookVerifier verifier, IDelivery
         return Success(new { received = true });
     }
 
-    // --- Infobip (Viber) delivery-report webhook disabled for now (Viber is off). ---
-
     private static (string Type, string? EmailId, IReadOnlyList<string> Recipients) Parse(string body)
     {
         using var doc = JsonDocument.Parse(body);

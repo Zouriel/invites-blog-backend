@@ -23,14 +23,6 @@ public sealed record InviteViewResponse(
     Guid InviteId = default);
 
 /// <summary>
-/// The rendered invite for an OTP-authenticated guest opening the shared campaign link
-/// (<c>/e/{campaignId}</c>). Carries the invite id + current RSVP so the client can RSVP.
-/// </summary>
-public sealed record MyInviteResponse(
-    string PackageUrl, JsonObject Data, string CampaignStatus, Guid InviteId, string RsvpStatus,
-    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
-
-/// <summary>
 /// A reauth code was sent for a personal invite link opened from an untrusted IP.
 /// <paramref name="Channel"/> ("email" or "sms") lets the UI say where to look without exposing the
 /// actual address — same privacy posture as the rest of the OTP flow.

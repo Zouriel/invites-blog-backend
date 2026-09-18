@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using InvitesBlog.Application.Common;
 
 namespace InvitesBlog.Infrastructure.Notifications;
 
@@ -188,7 +189,7 @@ public sealed class MediaRetentionService(
 
     private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset end)
     {
-        var baseUrl = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var baseUrl = config.InviterBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
         var pricing = $"{baseUrl}/pricing";
         var title = WebUtility.HtmlEncode(campaign.Title);

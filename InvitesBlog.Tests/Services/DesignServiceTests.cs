@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Common;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
@@ -42,11 +43,11 @@ public class DesignServiceTests
     {
         _currentUser.UserId.Returns(_me);
         _currentUser.IsAuthenticated.Returns(true);
-        _packager.PublishAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>(), Arg.Any<byte[]?>())
+        _packager.PublishAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
                 _publishedHtml = ci.ArgAt<string>(3);
-                return new TemplatePackage($"/assets/{ci.ArgAt<string>(0)}/", "{}", new TemplateStructure([], [], [], []));
+                return new TemplatePackage($"/assets/{ci.ArgAt<string>(0)}/", "{}");
             });
         _storage.PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => "/assets/" + ci.ArgAt<string>(0));
@@ -104,6 +105,35 @@ public class DesignServiceTests
         Assert.Equal(template.Id, result.TemplateId);
         Assert.Contains("animation-timeline", _publishedHtml);
     }
+
+    /// <summary>
+    /// Without a poster the template stores "no poster" — never its own live page as a stand-in,
+    /// which is a page and not an image — and nothing hands that empty value out as a picture.
+    /// </summary>
+    [Fact]
+    public async Task Publishing_without_a_poster_stores_no_poster_rather_than_the_page()
+    {
+        var sut = Sut();
+        var design = await NewDesignAsync(sut);
+
+        await sut.PublishAsync(design.Id, Publish(design.Revision));
+
+        var template = await _db.Templates.SingleAsync();
+        Assert.Equal(string.Empty, template.PreviewImageUrl);
+        Assert.Null(TemplatePoster.OrNull(template.PreviewImageUrl));
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("/assets/templates/x@1.0.0/index.html", null)]
+    [InlineData("/assets/templates/x@1.0.0/INDEX.HTML", null)]
+    [InlineData("/assets/templates/x@1.0.0/", null)]
+    [InlineData("/assets/templates/x@1.0.0/poster.ab12cd34.webp", "/assets/templates/x@1.0.0/poster.ab12cd34.webp")]
+    [InlineData("https://cdn.test/preview.png", "https://cdn.test/preview.png")]
+    public void A_poster_is_only_ever_an_image(string? stored, string? expected) =>
+        Assert.Equal(expected, TemplatePoster.OrNull(stored));
 
     [Fact]
     public async Task Publishing_for_someone_reserves_it_for_their_email_and_tells_them_once()

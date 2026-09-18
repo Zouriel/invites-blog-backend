@@ -1,5 +1,12 @@
 namespace InvitesBlog.Application.Abstractions;
 
+/// <summary>What a template declares, flattened to plain strings for the layers above.</summary>
+public sealed record TemplateStructure(
+    IReadOnlyList<string> Fields,
+    IReadOnlyList<string> ImageSlots,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<string> ThemeKeys);
+
 public sealed record DesignIssueDto(string Severity, string Code, string Message, string? ElementId);
 
 /// <param name="Sample">filled | empty | roles — the invitation the page is bound with.</param>

@@ -10,15 +10,12 @@ namespace InvitesBlog.Tests;
 /// <summary>
 /// The committed raw templates are the platform's own work. They must satisfy every rule we hold
 /// every published template to — self-contained, within budget, no inline handlers or javascript: URLs,
-/// and declaring a real theming surface — with ONE deliberate exception: they may carry their own
-/// script, because they ship in this repository and are reviewed like any other source file. That
-/// exception is first-party only, and the test below pins it shut for everything else.
+/// and declaring a real theming surface. They may carry their own inline script (so may any
+/// template — see the tests below), but never one pulled from somewhere else.
 /// These run against the embedded resource, so a regression can't reach production unnoticed.
 /// </summary>
 public class RawTemplateContractTests
 {
-    private static readonly string[] Slugs = ["aurora-vows", "a-love-story", "gilded-hour"];
-
     private static string Html(string slug)
     {
         var asm = typeof(RawTemplatePackager).Assembly;
@@ -43,13 +40,13 @@ public class RawTemplateContractTests
         RawTemplatePackager.EnsureSelfContainedAndSafe(Html(slug));
 
     /// <summary>
-    /// Scripts are allowed now, wherever they come from. The scan is no longer the thing standing
-    /// between a stranger's JavaScript and a reader — a human review is, and the frame it runs in has
-    /// an opaque origin. What the scan still refuses is anything the file does not contain, because
-    /// that is what makes the review mean something.
+    /// Inline scripts are allowed. Nothing published through the packager is a stranger's HTML — it
+    /// is a committed first-party template or the designer's server-side compile — and the frame it
+    /// renders in has an opaque origin. What the scan still refuses is anything the file does not
+    /// contain, because then what runs is no longer what was published.
     /// </summary>
     [Fact]
-    public void A_submission_may_carry_its_own_script()
+    public void A_template_may_carry_its_own_script()
     {
         var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
                  + "<body><h1 data-var=\"event.title\">T</h1><script>document.title='x'</script></body></html>";
@@ -58,7 +55,7 @@ public class RawTemplateContractTests
     }
 
     [Fact]
-    public void A_submission_may_not_pull_its_script_from_somewhere_else()
+    public void A_template_may_not_pull_its_script_from_somewhere_else()
     {
         var html = "<!doctype html><html><head><style>body{color:#000}</style></head>"
                  + "<body><script src=\"https://cdn.example/x.js\"></script></body></html>";
