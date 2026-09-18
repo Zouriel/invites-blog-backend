@@ -137,7 +137,19 @@ public sealed class CelebrantService(
     {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
-        var link = $"{(config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/')}/inbox?tab=mine";
+        // The event itself, not the inbox. The button says "Open the event", so it had better open
+        // it — pointing at /inbox made the reader hunt for their own event in a list.
+        //
+        // The dashboard is the celebrant's page: GetDashboardAsync admits anyone at
+        // CampaignAccess.Celebrant or better and hides guests' contact details below Manager. NOT
+        // /invitation/{id} — that one resolves the caller against the GUEST LIST, and a celebrant is
+        // not necessarily a guest, so it would have failed for exactly the people this email goes to.
+        //
+        // Via /login?next= because the mail asks them to sign in and /dashboard/:campaignId has no
+        // guard of its own: the login page forwards an already-signed-in reader straight through and
+        // carries `next` into signup, so the deep link survives either path.
+        var inviterBase = (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+        var link = $"{inviterBase}/login?next={Uri.EscapeDataString($"/dashboard/{campaignId}")}";
         var name = System.Net.WebUtility.HtmlEncode(celebrant.Name);
         var title = System.Net.WebUtility.HtmlEncode(campaign.Title);
 

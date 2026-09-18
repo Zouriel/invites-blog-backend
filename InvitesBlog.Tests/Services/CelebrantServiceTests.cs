@@ -56,6 +56,27 @@ public class CelebrantServiceTests
             Arg.Is<EmailMessage>(m => m.To == "amira@test.com"), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// The button in that email says "Open the event", and for a long time it went to /inbox — so the
+    /// reader was handed a list to hunt through instead of the thing they were told they'd get.
+    /// It must deep-link to the event, and to the DASHBOARD specifically: that is the page
+    /// CampaignAccess.Celebrant admits them to. /invitation/{id} resolves the caller against the
+    /// guest list, and a celebrant need not be a guest at all.
+    /// </summary>
+    [Fact]
+    public async Task The_heads_up_links_to_the_event_and_not_to_the_inbox()
+    {
+        EmailMessage? sent = null;
+        await _email.SendAsync(
+            Arg.Do<EmailMessage>(m => sent = m), Arg.Any<CancellationToken>());
+
+        await Sut().AddAsync(_campaign.Id, new AddCelebrantRequest("Amira", "amira@test.com", null, Notify: true));
+
+        Assert.NotNull(sent);
+        Assert.DoesNotContain("/inbox", sent!.Html);
+        Assert.Contains($"/dashboard/{_campaign.Id}", Uri.UnescapeDataString(sent.Html));
+    }
+
     [Fact]
     public async Task Adding_yourself_changes_nothing()
     {

@@ -65,6 +65,16 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<TemplateListItemDto>> GetMineAsync(CancellationToken ct = default)
+    {
+        if (currentUser.UserId is not { } me) return [];
+        return await templates.Query()
+            .Where(t => t.IsActive && t.DesignerUserId == me)
+            .OrderByDescending(t => t.CreatedAt)
+            .Select(t => ToListItem(t))
+            .ToListAsync(ct);
+    }
+
     private static TemplateListItemDto ToListItem(Template t) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description,
         t.PreviewImageUrl, t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.Version,

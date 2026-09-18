@@ -19,6 +19,13 @@ public sealed class TemplatesController(ITemplateService templates, ICurrentUser
     public async Task<IActionResult> MyDedicated(CancellationToken ct) =>
         Success(await templates.GetDedicatedForAsync(currentUser.Contact ?? "", ct));
 
+    /// <summary>Templates the caller published themselves — private ones included, so the event
+    /// picker can offer somebody their own design without making them publish it to the world.</summary>
+    [HttpGet("/api/me/templates")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> Mine(CancellationToken ct) =>
+        Success(await templates.GetMineAsync(ct));
+
     [HttpGet]
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> List([FromQuery] TemplateFilter filter, CancellationToken ct) =>

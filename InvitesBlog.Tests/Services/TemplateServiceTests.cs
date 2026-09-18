@@ -54,6 +54,46 @@ public class TemplateServiceTests
         Assert.Empty(await Sut().GetDedicatedForAsync("someone@example.com"));
     }
 
+    /// <summary>
+    /// The gallery lists Public templates only, so a design published Private used to be unreachable
+    /// from event creation and its author had to publish it to the world to use their own work.
+    /// </summary>
+    [Fact]
+    public async Task GetMine_returns_the_callers_own_templates_whatever_their_visibility()
+    {
+        var me = Guid.NewGuid();
+        var minePrivate = TestData.Template();
+        minePrivate.Visibility = TemplateVisibility.Private;
+        minePrivate.DesignerUserId = me;
+        var minePublic = TestData.Template();
+        minePublic.Visibility = TemplateVisibility.Public;
+        minePublic.DesignerUserId = me;
+        var mineRetired = TestData.Template(active: false);
+        mineRetired.DesignerUserId = me;
+        var somebodyElses = TestData.Template();
+        somebodyElses.DesignerUserId = Guid.NewGuid();
+        _templates.Query().Returns(
+            new[] { minePrivate, minePublic, mineRetired, somebodyElses }.AsAsyncQueryable());
+
+        _user.UserId.Returns(me);
+        var mine = await Sut().GetMineAsync();
+
+        Assert.Equal(2, mine.Count);
+        Assert.Contains(mine, t => t.Id == minePrivate.Id);
+        Assert.Contains(mine, t => t.Id == minePublic.Id);
+        Assert.DoesNotContain(mine, t => t.Id == mineRetired.Id);
+        Assert.DoesNotContain(mine, t => t.Id == somebodyElses.Id);
+    }
+
+    [Fact]
+    public async Task GetMine_is_empty_for_a_caller_with_no_account()
+    {
+        _templates.Query().Returns(new[] { TestData.Template() }.AsAsyncQueryable());
+        _user.UserId.Returns((Guid?)null);
+
+        Assert.Empty(await Sut().GetMineAsync());
+    }
+
     [Fact]
     public async Task List_returns_only_active_and_applies_category_filter_and_paging()
     {
