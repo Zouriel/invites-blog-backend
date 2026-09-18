@@ -9,9 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace InvitesBlog.Application.Services.Designers;
 
 /// <summary>
-/// One screen, scoped by role: an admin manages every template on the platform, a designer manages
-/// the ones they authored. Ownership is checked on every mutation rather than inferred from which
-/// endpoint was called, so a designer can never reach someone else's template by guessing an id.
+/// "My designs": the templates this person published. Ownership is checked on every mutation rather
+/// than inferred from which endpoint was called, so a designer can never reach someone else's template
+/// by guessing an id (an admin may still act on any template).
 /// </summary>
 public sealed class MyTemplatesService(
     ICurrentUser currentUser,
@@ -21,16 +21,15 @@ public sealed class MyTemplatesService(
 {
     public async Task<MyTemplatesPageDto> ListAsync(CancellationToken ct = default)
     {
-        var isAdmin = IsAdmin();
         var me = currentUser.UserId ?? throw new UnauthorizedException();
 
-        var query = templates.Query();
-        if (!isAdmin) query = query.Where(t => t.DesignerUserId == me);
-
-        var rows = await query.OrderByDescending(t => t.UpdatedAt).ToListAsync(ct);
-        if (rows.Count == 0)
-            return new MyTemplatesPageDto(isAdmin ? "system" : "mine",
-                isAdmin ? "System templates" : "My templates", []);
+        // Only what this person published — an admin too. The platform's whole catalogue is the admin
+        // screen's (System templates), not something to wade through under "My designs".
+        var rows = await templates.Query()
+            .Where(t => t.DesignerUserId == me)
+            .OrderByDescending(t => t.UpdatedAt)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return new MyTemplatesPageDto([]);
 
         var ids = rows.Select(t => t.Id).ToList();
 
@@ -47,10 +46,7 @@ public sealed class MyTemplatesService(
             usage.GetValueOrDefault(t.Id),
             t.UpdatedAt)).ToList();
 
-        return new MyTemplatesPageDto(
-            isAdmin ? "system" : "mine",
-            isAdmin ? "System templates" : "My templates",
-            list);
+        return new MyTemplatesPageDto(list);
     }
 
     public async Task<DeleteTemplateResultDto> DeleteAsync(Guid templateId, CancellationToken ct = default)

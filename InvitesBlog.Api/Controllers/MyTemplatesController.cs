@@ -6,8 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace InvitesBlog.Api.Controllers;
 
 /// <summary>
-/// The templates the signed-in person manages. Gated on <c>designer.manage</c>, which admins hold
-/// too — the service then scopes the list by role: everything for an admin, their own for a designer.
+/// The templates the signed-in person published. Gated on <c>designer.manage</c>, which admins hold
+/// too; everyone's list is their own (the full catalogue is on the admin screen).
 /// </summary>
 [Route("api/my-templates")]
 [HasPermission(Permissions.Designer.Manage)]

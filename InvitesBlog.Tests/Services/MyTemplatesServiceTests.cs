@@ -60,6 +60,21 @@ public class MyTemplatesServiceTests
         await Assert.ThrowsAsync<ForbiddenException>(() => Sut().DeleteAsync(theirs.Id));
     }
 
+    [Fact]
+    public async Task Everyone_lists_only_what_they_published_admins_included()
+    {
+        AsAdmin();
+        var mine = Template(_designerId);
+        var someoneElses = Template(designerId: Guid.NewGuid());
+        var platform = Template();
+        _templates.Query(Arg.Any<bool>()).Returns(new[] { mine, someoneElses, platform }.AsAsyncQueryable());
+        _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
+
+        var page = await Sut().ListAsync();
+
+        Assert.Equal([mine.Id], page.Templates.Select(t => t.Id));
+    }
+
     // ----- Delete -----
 
     [Fact]

@@ -26,10 +26,8 @@ public sealed record MyTemplateRowDto(
     int CampaignCount,
     DateTimeOffset UpdatedAt);
 
-/// <summary>The table plus the context the screen needs to title and explain itself.</summary>
-/// <param name="Scope">"system" when an admin is looking at everything, "mine" for a designer's own.</param>
-public sealed record MyTemplatesPageDto(
-    string Scope, string Title, IReadOnlyList<MyTemplateRowDto> Templates);
+/// <summary>The templates the signed-in person published (admins included: the full catalogue is the admin screen's).</summary>
+public sealed record MyTemplatesPageDto(IReadOnlyList<MyTemplateRowDto> Templates);
 
 /// <summary>What a delete actually did — unlisting is not the same as removing.</summary>
 public sealed record DeleteTemplateResultDto(bool Deleted, bool Unlisted, int CampaignCount, string Message);
