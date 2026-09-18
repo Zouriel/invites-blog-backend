@@ -316,6 +316,12 @@ public sealed class CampaignService(
             : $"{inviteeBase}/e/{id}";
         var (channels, messageTemplate) = DeliverySettings(campaign.DeliverySettingsJson);
 
+        // NOTE: this says Dispatched even when the email channel is off and nothing is sent. It is
+        // not the harmless bookkeeping it looks like — CancelAsync reads it to decide whether a
+        // refund is automatic, and GuestService reads it to decide whether a newly added guest is
+        // emailed on the spot — so narrowing it is a deliberate change, not a tidy-up. The dashboard
+        // already declines to repeat the word back to the host and recomputes "Sent"/"Not sent yet"
+        // from the guests themselves.
         campaign.Status = CampaignStatus.Dispatched;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 

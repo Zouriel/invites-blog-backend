@@ -18,7 +18,10 @@ public sealed class UpdateDeliverySettingsRequestValidator : AbstractValidator<U
         RuleFor(x => x.DeliverySettingsJson)
             .Must(BeValidJson).WithMessage("Delivery settings must be valid JSON.")
             .Must(HaveOnlyAllowedChannels)
-            .WithMessage("Delivery channels must be one of: viber, email, direct.");
+            // Name the channels that are actually allowed. This used to say "viber, email, direct",
+            // two of which have never been accepted, so the one message a caller gets when they get
+            // this wrong sent them looking for channels that do not exist.
+            .WithMessage("Delivery channels must be one of: email, share.");
     }
 
     private static bool BeValidJson(string json)

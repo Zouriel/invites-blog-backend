@@ -715,6 +715,30 @@ public class CampaignServiceTests
         Assert.Null(c.OpenLinkCode);
     }
 
+    /// <summary>
+    /// The shape of a real production incident: a host with a guest list who never ticked the email
+    /// box finished the flow, got a success screen, and had emailed nobody. The service is right to
+    /// send nothing — the bug was in the step that set the channels — but the response must report
+    /// it honestly so the screen can say so.
+    /// </summary>
+    [Fact]
+    public async Task Finalize_without_the_email_channel_sends_nothing_and_says_so()
+    {
+        var c = TestData.Campaign();
+        c.DeliverySettingsJson = "{\"channels\":[\"share\"]}";
+        Own(c);
+        var g = TestData.Guest(c.Id, email: "a@test.com");
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { g });
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        Assert.Equal(0, res.Emailed);
+        Assert.Equal(1, res.GuestCount);
+        await _email.DidNotReceive().SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
+        await _invites.DidNotReceive().AddAsync(Arg.Any<Invite>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Finalize_email_channel_emails_each_guest_a_per_guest_tokenized_link()
     {
