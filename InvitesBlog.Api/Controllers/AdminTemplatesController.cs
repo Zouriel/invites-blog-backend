@@ -35,7 +35,10 @@ public sealed class AdminTemplatesController(
     [HasPermission(Permissions.Templates.Manage)]
     public async Task<IActionResult> List([FromQuery] AdminTemplateFilter filter, CancellationToken ct)
     {
-        var query = templates.Query();
+        // Templates only. An Imported row is one event's own design (or an event with nothing to render,
+        // just its photos) — it belongs to that event, isn't a template anyone can pick, and has no
+        // package worth previewing here.
+        var query = templates.Query().Where(t => t.Visibility != TemplateVisibility.Imported);
 
         query = filter.Status?.Trim().ToLowerInvariant() switch
         {
