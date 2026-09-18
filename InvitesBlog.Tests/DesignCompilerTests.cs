@@ -305,11 +305,25 @@ public class DesignCompilerTests
             Shape = new DesignShape { Kind = "rect", Fill = "#000000" },
         });
 
-        Assert.Equal(2000, scene.ScrollRange());
+        // It lets go at 2100: the page runs on to there, past where its bottom meets the screen's (2000).
+        Assert.Equal(2100, scene.ScrollRange());
     }
 
     [Fact]
-    public void Motion_keeps_its_timing_past_the_end_of_the_page()
+    public void The_page_runs_on_until_the_last_motion_has_played()
+    {
+        var scene = Minimal();
+        var bottom = scene.ScrollRange();
+        var last = scene.Elements[^1];
+        // An exit that ends past where the content stops: the page keeps scrolling until it has played.
+        last.Track = new DesignTrack { Start = bottom, End = bottom + 600 };
+        last.Keyframes = [new() { T = 0.85 }, new() { T = 1, Opacity = 0 }];
+        Assert.Equal(bottom + 600, scene.ScrollRange());
+        Assert.Equal(bottom + 600 + DesignCanvas.ReferenceViewport, scene.PageHeight());
+    }
+
+    [Fact]
+    public void Motion_keeps_its_timing_as_set()
     {
         var scene = Minimal();
         scene.Elements[0].Track = new DesignTrack { Start = 0, End = 3000 };

@@ -19,8 +19,8 @@ namespace InvitesBlog.TemplateCompiler.Design;
 /// page ENDS, never where an animation happens.</para>
 ///
 /// <para><b>Length.</b> There are no screens: the page ends where its last element does — the moment
-/// its bottom reaches the bottom of the reference phone, counting how long a pinned element holds.
-/// Place something further down and the page grows to it.</para>
+/// its bottom reaches the bottom of the reference phone, counting how long a pinned element holds and
+/// where the last motion track ends. Place something further down and the page grows to it.</para>
 ///
 /// <para>Deliberately unrelated to the older section-based <see cref="Scene"/> used by the seeded
 /// platform templates; the <see cref="Schema"/> number tells the two apart.</para>
@@ -82,6 +82,8 @@ public sealed class DesignScene
     /// <summary>
     /// How far the reference phone scrolls: until the lowest element's bottom meets the bottom of the
     /// screen. A pinned element counts where it lets go, since it has travelled down with the reader.
+    /// And on to where the last motion track ends, so an element's exit plays before the page stops —
+    /// the page ends where its last element's bar on the editor's timeline does.
     /// </summary>
     public double ScrollRange()
     {
@@ -94,7 +96,11 @@ public sealed class DesignScene
                 end += t.End - Math.Max(0, t.Start);
             bottom = Math.Max(bottom, end);
         }
-        return Math.Min(DesignCatalog.MaxPageHeight, Math.Max(0, bottom - DesignCanvas.ReferenceViewport));
+        double motion = 0;
+        foreach (var (el, _, _) in Walk())
+            if (el.Track is { } t && double.IsFinite(t.Start) && double.IsFinite(t.End) && t.End > t.Start)
+                motion = Math.Max(motion, t.End);
+        return Math.Min(DesignCatalog.MaxPageHeight, Math.Max(Math.Max(0, bottom - DesignCanvas.ReferenceViewport), motion));
     }
 
     /// <summary>Every element, depth-first, with the group it sits in.</summary>
