@@ -10,4 +10,6 @@ public sealed class AdminTemplateFilter : PaginationRequest
 {
     public string? Category { get; set; }
     public string? Status { get; set; }
+    /// <summary><c>public</c> for gallery templates only; anything else (or unset) lists every visibility.</summary>
+    public string? Visibility { get; set; }
 }

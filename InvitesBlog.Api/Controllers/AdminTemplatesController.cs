@@ -21,9 +21,13 @@ public sealed class AdminTemplatesController(
 {
     /// <summary>An admin management row — every template (incl. inactive/dedicated) plus how many
     /// campaigns already use it, so the admin knows whether a delete will hard-delete or deactivate.</summary>
+    /// <param name="PreviewImageUrl">The gallery poster, or null when there's none (the card then shows the live page).</param>
+    /// <param name="DesignerName">Who published it; null for the platform's own templates.</param>
     public sealed record AdminTemplateDto(
         Guid Id, string Name, string Slug, string Category, string Version, string PackageUrl,
-        string Visibility, bool IsActive, string? AssignedEmail, int CampaignCount);
+        string Visibility, bool IsActive, string? AssignedEmail, int CampaignCount,
+        string? PreviewImageUrl, string? DesignerName, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+        DateTimeOffset? UnlistedByAdminAt);
 
     public sealed record DeleteResultDto(bool Deleted, bool Deactivated, int CampaignCount);
 
@@ -46,6 +50,8 @@ public sealed class AdminTemplatesController(
             "all" => query,
             _ => query.Where(t => t.IsActive), // default: active only
         };
+        if (string.Equals(filter.Visibility?.Trim(), "public", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(t => t.Visibility == TemplateVisibility.Public);
         if (!string.IsNullOrWhiteSpace(filter.Category))
             query = query.Where(t => t.Category == filter.Category);
         if (!string.IsNullOrWhiteSpace(filter.Search))
@@ -56,7 +62,8 @@ public sealed class AdminTemplatesController(
 
         var total = await query.CountAsync(ct);
         var page = await query
-            .OrderByDescending(t => t.CreatedAt)
+            // Latest first: whatever was published or changed most recently leads.
+            .OrderByDescending(t => t.UpdatedAt).ThenByDescending(t => t.CreatedAt)
             .Skip(filter.Skip).Take(filter.PageSize)
             .ToListAsync(ct);
 
@@ -65,7 +72,9 @@ public sealed class AdminTemplatesController(
         {
             var count = await campaigns.CountAsync(c => c.TemplateId == t.Id, ct);
             items.Add(new AdminTemplateDto(t.Id, t.Name, t.Slug, t.Category, t.Version, t.PackageUrl,
-                t.Visibility, t.IsActive, t.AssignedEmail, count));
+                t.Visibility, t.IsActive, t.AssignedEmail, count,
+                Poster(t.PreviewImageUrl), t.DesignerUserId is null ? null : t.DesignerName, t.CreatedAt, t.UpdatedAt,
+                t.UnlistedByAdminAt));
         }
         return Paged(PagedResult<AdminTemplateDto>.Create(items, total, filter));
     }
@@ -97,4 +106,13 @@ public sealed class AdminTemplatesController(
         await uow.SaveChangesAsync(ct);
         return Success(new DeleteResultDto(true, false, 0), $"“{entity.Name}” was deleted.");
     }
+
+    /// <summary>
+    /// Older templates store a pointer to their live page here instead of an image; those have no
+    /// poster, and the card shows the page itself.
+    /// </summary>
+    private static string? Poster(string? url) =>
+        string.IsNullOrWhiteSpace(url) || url.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || url.EndsWith('/')
+            ? null
+            : url;
 }

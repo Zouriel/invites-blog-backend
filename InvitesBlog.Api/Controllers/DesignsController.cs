@@ -145,6 +145,22 @@ public sealed class TemplateReportsController(ITemplateReportService reports) : 
         return SuccessMessage("The admin hold is lifted.");
     }
 
+    [HttpPost("admin/templates/{templateId:guid}/unpublish")]
+    [HasPermission(Permissions.Designs.Moderate)]
+    public async Task<IActionResult> Unpublish(Guid templateId, CancellationToken ct)
+    {
+        await reports.UnpublishAsync(templateId, ct);
+        return SuccessMessage("Taken out of the gallery. Only its creator can use it now.");
+    }
+
+    [HttpPost("admin/templates/{templateId:guid}/republish")]
+    [HasPermission(Permissions.Designs.Moderate)]
+    public async Task<IActionResult> Republish(Guid templateId, CancellationToken ct)
+    {
+        await reports.RepublishAsync(templateId, ct);
+        return SuccessMessage("Back in the gallery.");
+    }
+
     [HttpPost("admin/users/{userId:guid}/public-publishing")]
     [HasPermission(Permissions.Designs.Moderate)]
     public async Task<IActionResult> RestorePublishing(Guid userId, CancellationToken ct)

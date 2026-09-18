@@ -101,6 +101,10 @@ public sealed class RawTemplateSeeder(
             if (existing is not null)
             {
                 var superseded = existing.Version != meta.Version;
+                // What the row said before, so "updated" means the template changed — not that the
+                // server restarted.
+                var before = (existing.Name, existing.Category, existing.Description, existing.Version,
+                    existing.ManifestJson, existing.PackageUrl, existing.PreviewImageUrl, existing.Visibility, existing.IsActive);
                 existing.Name = meta.Name;
                 existing.Category = meta.Category;
                 existing.Description = meta.Description ?? existing.Description;
@@ -116,17 +120,18 @@ public sealed class RawTemplateSeeder(
                 else if (existing.PreviewImageUrl.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
                          || string.IsNullOrWhiteSpace(existing.PreviewImageUrl))
                     existing.PreviewImageUrl = $"{published.PackageUrl}index.html";
-                // Re-apply the declared visibility only while the row is STILL dedicated. Dedicated to
-                // Public is a one-way door owned by the consent flow (TemplateReleaseService) and by
-                // admin, so a restart must never quietly reverse a release — or re-privatize a template
-                // the gallery is already showing.
+                // Re-apply the declared visibility only while the row is STILL dedicated. Moving it on
+                // is an admin's decision, so a restart must never quietly reverse one — or re-privatize a
+                // template the gallery is already showing.
                 if (existing.Visibility == TemplateVisibility.Dedicated)
                 {
                     existing.Visibility = isDedicated ? TemplateVisibility.Dedicated : TemplateVisibility.Public;
                     existing.AssignedEmail = isDedicated ? assignedEmail : null;
                 }
                 existing.IsActive = true;
-                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                var after = (existing.Name, existing.Category, existing.Description, existing.Version,
+                    existing.ManifestJson, existing.PackageUrl, existing.PreviewImageUrl, existing.Visibility, existing.IsActive);
+                if (after != before) existing.UpdatedAt = DateTimeOffset.UtcNow;
                 logger.LogInformation(
                     superseded
                         ? "Raw template {Slug} superseded to @{Version} (package + manifest)."

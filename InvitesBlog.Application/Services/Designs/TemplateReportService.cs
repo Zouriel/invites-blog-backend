@@ -15,6 +15,16 @@ public interface ITemplateReportService
     Task<TemplateReportDto> ResolveAsync(Guid reportId, ResolveReportRequest request, CancellationToken ct = default);
     Task RestorePublishingAsync(Guid userId, CancellationToken ct = default);
     Task RelistAsync(Guid templateId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Takes a public template out of the gallery without a report: it becomes private to its creator
+    /// (a template made for someone was never public), and the creator can't list it again until an
+    /// admin puts it back. Invitations already made with it are untouched.
+    /// </summary>
+    Task UnpublishAsync(Guid templateId, CancellationToken ct = default);
+
+    /// <summary>Undoes <see cref="UnpublishAsync"/>: back in the gallery, the hold lifted.</summary>
+    Task RepublishAsync(Guid templateId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -156,6 +166,32 @@ public sealed class TemplateReportService(
         var template = await templates.Query(tracking: true).FirstOrDefaultAsync(t => t.Id == templateId, ct)
                        ?? throw new NotFoundException("That template doesn't exist.", "template_not_found");
         // Clears the admin hold only. Whether it goes back in the gallery is still the owner's call.
+        template.UnlistedByAdminAt = null;
+        template.IsActive = true;
+        template.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task UnpublishAsync(Guid templateId, CancellationToken ct = default)
+    {
+        var template = await templates.Query(tracking: true).FirstOrDefaultAsync(t => t.Id == templateId, ct)
+                       ?? throw new NotFoundException("That template doesn't exist.", "template_not_found");
+        if (template.Visibility != TemplateVisibility.Public)
+            throw new BusinessRuleException("Only a template in the gallery can be unpublished.", "not_public");
+        var now = DateTimeOffset.UtcNow;
+        template.Visibility = TemplateVisibility.Private;
+        template.UnlistedByAdminAt = now;
+        template.UpdatedAt = now;
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task RepublishAsync(Guid templateId, CancellationToken ct = default)
+    {
+        var template = await templates.Query(tracking: true).FirstOrDefaultAsync(t => t.Id == templateId, ct)
+                       ?? throw new NotFoundException("That template doesn't exist.", "template_not_found");
+        if (template.Visibility != TemplateVisibility.Private || template.AssignedEmail is not null)
+            throw new BusinessRuleException("Only a template an admin unpublished can go back in the gallery here.", "not_unpublished");
+        template.Visibility = TemplateVisibility.Public;
         template.UnlistedByAdminAt = null;
         template.IsActive = true;
         template.UpdatedAt = DateTimeOffset.UtcNow;

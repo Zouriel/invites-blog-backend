@@ -106,4 +106,26 @@ public class TemplateReportServiceTests
         Assert.True(template.IsActive);
         Assert.Null((await _db.Users.AsNoTracking().SingleAsync(u => u.Id == _ownerId)).PublicPublishingRevokedAt);
     }
+
+    [Fact]
+    public async Task An_admin_unpublishes_a_gallery_template_and_can_put_it_back()
+    {
+        await Sut().UnpublishAsync(_template.Id);
+        var unpublished = await _db.Templates.AsNoTracking().SingleAsync();
+        Assert.Equal(TemplateVisibility.Private, unpublished.Visibility);
+        Assert.NotNull(unpublished.UnlistedByAdminAt); // the creator can't list it again themselves
+        Assert.True(unpublished.IsActive);              // still theirs to use
+
+        await Sut().RepublishAsync(_template.Id);
+        var back = await _db.Templates.AsNoTracking().SingleAsync();
+        Assert.Equal(TemplateVisibility.Public, back.Visibility);
+        Assert.Null(back.UnlistedByAdminAt);
+    }
+
+    [Fact]
+    public async Task Only_a_gallery_template_can_be_unpublished()
+    {
+        await Sut().UnpublishAsync(_template.Id);
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().UnpublishAsync(_template.Id));
+    }
 }
