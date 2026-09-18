@@ -74,7 +74,7 @@ public sealed record DesignPreviewDto(
     TemplateStructure Structure,
     bool CanPublish);
 
-/// <param name="Visibility">Private, Person or Public. A dedicated (commissioned) template stays dedicated.</param>
+/// <param name="Visibility">Private, Person or Public. A dedicated template (made for one customer) stays dedicated.</param>
 /// <param name="Category">A template type name.</param>
 /// <param name="Revision">The revision the person reviewed; a newer save since then is refused.</param>
 public sealed record PublishDesignRequest(

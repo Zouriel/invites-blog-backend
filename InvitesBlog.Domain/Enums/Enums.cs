@@ -102,20 +102,6 @@ public enum TemplateReportStatus
     Resolved = 1
 }
 
-public enum CustomTemplateStatus
-{
-    /// <summary>Saved by the designer, not yet submitted for review.</summary>
-    Draft = 0,
-    Submitted = 1,
-    InReview = 2,
-    /// <summary>Approved AND promoted into a live gallery <c>Template</c>.</summary>
-    Published = 3,
-    Rejected = 4,
-    Delisted = 5,
-    /// <summary>Passed review; promotion into a <c>Template</c> row is the next step.</summary>
-    Approved = 6
-}
-
 /// <summary>
 /// What size of media bucket someone is on. The GB figure is the NAME of the tier, not the number
 /// the system enforces — <see cref="Entities.MediaBucket.CapacityBytes"/> is frozen from it at

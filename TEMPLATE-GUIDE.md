@@ -1,7 +1,8 @@
 # Making an invites.blog template
 
-> This file is published at **/template-guide.md** and kept word-for-word in step with
-> `TEMPLATE-GUIDE.md` in the backend repo. The same guide is shown in the app at **/template-guide**.
+> For the invites.blog team: how the platform's own hand-written templates in
+> `InvitesBlog.Infrastructure/RawTemplates/` are built. Everyone else makes templates in the
+> template designer (`/design/new`), which compiles to the same format.
 
 **Contents**
 
@@ -12,7 +13,7 @@
 5. Theming
 6. Motion and JavaScript
 7. The manifest
-8. Packaging and uploading
+8. Packaging and adding a template
 9. Checklist and common mistakes
 
 ---
@@ -137,7 +138,7 @@ The builder works without these. They make it nicer for the inviter.
 | `time` | a time picker (shown to guests as e.g. "10:00 PM") |
 | `url` | a link box |
 | `color` | a colour picker |
-| `select` | a dropdown of your `data-options`. An upload without `data-options` is rejected. |
+| `select` | a dropdown of your `data-options`. A `select` without `data-options` is rejected. |
 | `image` | an upload slot (you'd normally use `data-src` instead) |
 
 If you don't set a type, the builder guesses from the last part of the path:
@@ -413,7 +414,7 @@ Write for both. See *Common mistakes* for what that means in practice.
 
 ## 7. The manifest
 
-You never write the manifest by hand. When a template is uploaded, the platform reads your tags and
+You never write the manifest by hand. When a template is published, the platform reads your tags and
 saves a `manifest.json` next to it. The builder, the Roles step and the Theming step are all built
 from it.
 
@@ -427,21 +428,21 @@ from it.
 | `roleDefinitions` | per role: `slug`, `label`, `themeKeys`, and the `fields` and `imageSlots` scoped to it |
 | `theme` | every `--ib-*` property (`keys`: `key`, `cssVar`, `label`, `type`, `default`), the `ib-fonts` list, and the three required colours |
 
-The **Check** button on the submission form, and the admin upload response, show what was detected.
-It's the quickest way to confirm your tags are right.
+`RawTemplateContractTests` build every committed template's manifest, so a tag the platform can't
+read fails there rather than in front of a customer.
 
 **Versions are frozen.** Every invitation keeps the exact package and manifest it was created with. An
 edit publishes a new version and never changes invitations that already exist.
 
 ---
 
-## 8. Packaging and uploading
+## 8. Packaging and adding a template
 
 ### The rules every template follows
 
 - **One self-contained file.** Inline your CSS in `<style>` and your JavaScript in `<script>`.
-  - `<link rel="stylesheet">` and `<script src="…">` are **rejected**. What a reviewer approves has to
-    be what actually runs, and a file fetched from elsewhere can change after approval.
+  - `<link rel="stylesheet">` and `<script src="…">` are **rejected**. What's published has to be
+    what actually runs, and a file fetched from elsewhere can change afterwards.
 - **Embed images and fonts as `data:` URIs.** The guest page is served with a strict content policy.
   - Scripts and styles must be inline.
   - Images and fonts load only from the platform itself or from `data:` URIs.
@@ -452,32 +453,9 @@ edit publishes a new version and never changes invitations that already exist.
 - **Sandboxed.** Your page runs on an opaque origin. It cannot read cookies, `localStorage` or the app's
   session. Links with `target="_blank"` (a map, say) still open.
 
-### Three ways to add a template
+### Adding one to the repo
 
-**Option A: submit it as a designer.** This is the way for community creators.
-
-1. Make a creator account at `/signup`, or turn an existing account into one under
-   **My account → Creator**.
-2. Open `/designer` and upload two files:
-   - `index.html`, your template.
-   - A preview image. It's **required**, and it's the card people see in the gallery.
-3. **The automatic check runs straight away.** It rejects:
-   - an external stylesheet or `<script src>`;
-   - a file over 800 KB;
-   - a `select` with no `data-options`, or `data-options` that isn't valid JSON.
-
-   Use **Check** first to try it without submitting. It lists every field, image slot, role and theme
-   key it found.
-4. **A person reviews it.** A reviewer reads your markup and either approves it or rejects it with a
-   reason, shown on your submissions list. Reviewers use a different permission from designers, so
-   nobody approves their own work.
-5. **On approval it's published** in the gallery at version `1.0.0`.
-
-To change a published template, submit the change. It goes through review again, approval bumps the
-version, and **the old version stays exactly as it was**.
-
-**Option B: commit it to the repo.** This is for the invites.blog team. Add a folder
-`InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` in `invites-blog-backend`:
+Add a folder `InvitesBlog.Infrastructure/RawTemplates/<your-slug>/` in `invites-blog-backend`:
 
 ```
 index.html     # the whole template
@@ -514,31 +492,11 @@ git -C /opt/apps/invites-blog-backend pull && \
 cd /opt/apps/invites-blog-deploy && docker compose -f compose.prod.yml up -d --build api
 ```
 
-**Option C: upload it through the admin API.**
-
-```bash
-# One sign-in for everyone; admin rights come from the account's roles.
-TOKEN=$(curl -s -X POST https://invites.blog/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@invites.blog","password":"YOUR_ADMIN_PASSWORD"}' \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["token"])')
-
-curl -s -X POST https://invites.blog/api/admin/templates \
-  -H "Authorization: Bearer $TOKEN" \
-  -F name="Aurora Vows" -F slug="aurora-vows" -F version="1.0.0" \
-  -F category="Wedding" -F description="A warm gold-on-ink wedding invite." \
-  -F index=@index.html
-```
-
-- The response lists the `variables`, `fields`, `imageSlots` and `contentBlocks` it found.
-- Uploading the same slug and version again updates it in place.
-- Add `-F visibility=Dedicated -F assignedEmail=someone@example.com` to reserve it for one person.
-
 ---
 
 ## 9. Checklist and common mistakes
 
-### Before you submit
+### Before you commit
 
 - [ ] One file. No `<link rel="stylesheet">`, no `<script src>`.
 - [ ] Images and fonts embedded as `data:` URIs.
@@ -551,7 +509,7 @@ curl -s -X POST https://invites.blog/api/admin/templates \
 - [ ] Content every guest needs is outside any `data-block`.
 - [ ] Tested with fields empty, with a guest with no role, and with a guest with two roles.
 - [ ] Tested in the builder preview while editing, and on a phone.
-- [ ] **Check** passes and lists the fields you expect.
+- [ ] `RawTemplateContractTests` pass for it.
 
 ### Common mistakes
 

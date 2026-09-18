@@ -1,11 +1,9 @@
 using FluentValidation;
-using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Inquiries;
 using InvitesBlog.Application.Filters.Inquiries;
 using InvitesBlog.Application.Services.Inquiries;
 using InvitesBlog.Domain.Entities;
-using Microsoft.Extensions.Configuration;
 using NSubstitute;
 using Xunit;
 
@@ -13,17 +11,11 @@ namespace InvitesBlog.Tests.Services;
 
 public class InquiryServiceTests
 {
-    private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IRepository<Inquiry> _inquiries = Substitute.For<IRepository<Inquiry>>();
-    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
-    private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
-    private readonly IEmailSender _email = Substitute.For<IEmailSender>();
-    private readonly IConfiguration _config = Substitute.For<IConfiguration>();
     private IValidator<SubmitInquiryRequest> _submitV = TestData.PassingValidator<SubmitInquiryRequest>();
 
-    private InquiryService Sut() =>
-        new(_currentUser, _inquiries, _users, _templates, _uow, _email, _config, _submitV);
+    private InquiryService Sut() => new(_inquiries, _uow, _submitV);
 
     private static Inquiry Inquiry(bool attended = false) => new()
     {
@@ -56,7 +48,6 @@ public class InquiryServiceTests
         Assert.NotNull(captured);
         Assert.Equal("omar@test.com", captured!.Email); // lowercased
         Assert.False(captured.HasAttended);
-        Assert.False(captured.TemplateIssued);
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -76,17 +67,16 @@ public class InquiryServiceTests
     }
 
     [Fact]
-    public async Task List_status_attended_unissued_filters_to_met_but_unissued()
+    public async Task List_status_attended_filters_to_the_ones_already_met()
     {
-        var newOne = Inquiry();                                              // unattended
-        var attendedUnissued = Inquiry(attended: true);                     // attended, not issued
-        var issued = Inquiry(attended: true); issued.TemplateIssued = true; // attended + issued
-        _inquiries.Query().Returns(new[] { newOne, attendedUnissued, issued }.AsAsyncQueryable());
+        var newOne = Inquiry();
+        var attended = Inquiry(attended: true);
+        _inquiries.Query().Returns(new[] { newOne, attended }.AsAsyncQueryable());
 
-        var page = await Sut().ListAsync(new InquiryFilter { Status = "attended-unissued" });
+        var page = await Sut().ListAsync(new InquiryFilter { Status = "attended" });
 
         Assert.Equal(1, page.TotalCount);
-        Assert.Equal(attendedUnissued.Id, page.Items[0].Id);
+        Assert.Equal(attended.Id, page.Items[0].Id);
     }
 
     [Fact]
@@ -128,98 +118,5 @@ public class InquiryServiceTests
         Assert.Equal("Blush & gold", i.Colors);
         Assert.Equal("pinterest.com/x", i.References);
         Assert.Null(i.Notes);
-    }
-
-    [Fact]
-    public async Task Issue_creates_dedicated_template_flips_flag_and_emails()
-    {
-        var i = Inquiry();
-        _inquiries.GetByIdAsync(i.Id, Arg.Any<CancellationToken>()).Returns(i);
-        _templates.FirstOrDefaultAsync(Arg.Any<System.Linq.Expressions.Expression<Func<Template, bool>>>(), Arg.Any<CancellationToken>())
-            .Returns((Template?)null);
-        _config["Urls:InviterBase"].Returns("https://invites.blog");
-        Template? added = null;
-        await _templates.AddAsync(Arg.Do<Template>(t => added = t), Arg.Any<CancellationToken>());
-
-        var res = await Sut().IssueTemplateAsync(i.Id,
-            new IssueTemplateData("Aisha & Omar", "aisha-omar", "1.0.0", "Wedding", "desc", "{}", "/assets/x/"));
-
-        Assert.True(i.TemplateIssued);
-        Assert.NotNull(i.TemplateIssuedAt);
-        Assert.True(i.HasAttended); // issuing implies attended
-        Assert.NotNull(i.AttendedAt);
-        Assert.NotNull(added);
-        Assert.Equal(TemplateVisibility.Dedicated, added!.Visibility);
-        Assert.Equal("aisha@test.com", added.AssignedEmail); // reserved for the inquiry's email
-        Assert.Equal(added.Id, i.IssuedTemplateId);
-        Assert.True(res.Emailed);
-        await _email.Received(1).SendAsync(
-            Arg.Is<EmailMessage>(m => m.To == "aisha@test.com" && m.Html.Contains("/request-template")),
-            Arg.Any<CancellationToken>());
-    }
-    // ----- Requesting a designer by name -----
-
-    [Fact]
-    public async Task Submit_keeps_the_designer_the_customer_asked_for()
-    {
-        var designerId = Guid.NewGuid();
-        Inquiry? added = null;
-        await _inquiries.AddAsync(Arg.Do<Inquiry>(i => added = i), Arg.Any<CancellationToken>());
-
-        await Sut().SubmitAsync(new SubmitInquiryRequest(
-            "Aisha", "aisha@test.com", "Wedding", "Red curtains please", designerId));
-
-        Assert.NotNull(added);
-        Assert.Equal(designerId, added!.RequestedDesignerUserId);
-    }
-
-    /// <summary>
-    /// Being asked for by name must reach the designer. Otherwise a customer picks someone and that
-    /// someone never hears about it — but it stays flagged unassigned until an admin agrees terms.
-    /// </summary>
-    [Fact]
-    public async Task Commissions_include_requests_that_named_this_designer()
-    {
-        var me = Guid.NewGuid();
-        var assigned = Inquiry();
-        assigned.AssignedDesignerUserId = me;
-        var requested = Inquiry();
-        requested.RequestedDesignerUserId = me;
-        var other = Inquiry();
-        other.AssignedDesignerUserId = Guid.NewGuid();
-
-        _currentUser.UserId.Returns(me);
-        _inquiries.Query(Arg.Any<bool>()).Returns(new[] { assigned, requested, other }.AsAsyncQueryable());
-
-        var list = await Sut().ListCommissionsForDesignerAsync();
-
-        Assert.Equal(2, list.Count);
-        Assert.True(list.Single(c => c.InquiryId == assigned.Id).Assigned);
-        Assert.False(list.Single(c => c.InquiryId == requested.Id).Assigned);
-        Assert.True(list.Single(c => c.InquiryId == requested.Id).RequestedMe);
-    }
-
-    [Fact]
-    public async Task Public_designers_lists_only_active_authors_with_published_work()
-    {
-        var published = Guid.NewGuid();
-        var inactive = Guid.NewGuid();
-        _templates.Query(Arg.Any<bool>()).Returns(new[]
-        {
-            new Template { Id = Guid.NewGuid(), Name = "A", Slug = "a", IsActive = true, DesignerUserId = published },
-            new Template { Id = Guid.NewGuid(), Name = "B", Slug = "b", IsActive = true, DesignerUserId = inactive },
-            new Template { Id = Guid.NewGuid(), Name = "C", Slug = "c", IsActive = false, DesignerUserId = published },
-        }.AsAsyncQueryable());
-        _users.Query(Arg.Any<bool>()).Returns(new[]
-        {
-            new AppUser { Id = published, DisplayName = "Mira", Email = "mira@test.com", IsActive = true },
-            new AppUser { Id = inactive, DisplayName = "Gone", Email = "gone@test.com", IsActive = false },
-        }.AsAsyncQueryable());
-
-        var list = await Sut().ListPublicDesignersAsync();
-
-        var only = Assert.Single(list);
-        Assert.Equal("Mira", only.DisplayName);
-        Assert.Equal(1, only.PublishedTemplates);   // the inactive template does not count
     }
 }

@@ -9,10 +9,10 @@ namespace InvitesBlog.Tests;
 
 /// <summary>
 /// The committed raw templates are the platform's own work. They must satisfy every rule we hold
-/// community designers to — self-contained, within budget, no inline handlers or javascript: URLs,
+/// every published template to — self-contained, within budget, no inline handlers or javascript: URLs,
 /// and declaring a real theming surface — with ONE deliberate exception: they may carry their own
 /// script, because they ship in this repository and are reviewed like any other source file. That
-/// exception is first-party only, and the test below pins it shut for submissions.
+/// exception is first-party only, and the test below pins it shut for everything else.
 /// These run against the embedded resource, so a regression can't reach production unnoticed.
 /// </summary>
 public class RawTemplateContractTests

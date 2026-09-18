@@ -313,7 +313,7 @@ public sealed class DesignService(
                 .ToList());
 
         var slug = template?.Slug ?? Slugify(name);
-        var version = template is null ? "1.0.0" : TemplateReviewService.NextVersion(template.Version);
+        var version = template is null ? "1.0.0" : TemplateVersion.Next(template.Version);
 
         // The published document is compiled from the stored scene just now, never from anything the browser sent.
         var package = await packager.PublishAsync($"templates/{slug}@{version}", slug, version, build.Html, ct);
@@ -355,7 +355,7 @@ public sealed class DesignService(
         template.SceneJson = design.SceneJson;
         var previouslyAssigned = template.AssignedEmail;
         template.Visibility = effectiveVisibility;
-        // A commission keeps the email it was requested with; anything else is reserved only when asked.
+        // A dedicated template keeps the email it was made for; anything else is reserved only when asked.
         if (effectiveVisibility != TemplateVisibility.Dedicated) template.AssignedEmail = assignedEmail;
         template.IsActive = true;
         if (posterUrl is not null) template.PreviewImageUrl = posterUrl;
@@ -423,7 +423,7 @@ public sealed class DesignService(
         if (!CanEdit(template))
             throw new ForbiddenException("That isn't your template.", "not_your_template");
         if (template.Visibility == TemplateVisibility.Dedicated)
-            throw new BusinessRuleException("A commissioned template is released through its request, not here.", "dedicated_template");
+            throw new BusinessRuleException("This template was made for one customer — it stays with them and out of the gallery.", "dedicated_template");
         if (template.AssignedEmail is not null && request.Visibility == "Public")
             throw new BusinessRuleException("This template was made for someone — it stays with them and out of the gallery.", "assigned_template");
 

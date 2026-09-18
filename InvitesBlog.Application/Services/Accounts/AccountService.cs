@@ -456,16 +456,7 @@ public sealed class AccountService(
             .ToListAsync(ct);
         if (mine.Count == 0) return [];
 
-        var issuedIds = mine.Select(i => i.IssuedTemplateId).OfType<Guid>().Distinct().ToList();
-        var slugs = issuedIds.Count == 0
-            ? new Dictionary<Guid, string>()
-            : await templates.Query().Where(t => issuedIds.Contains(t.Id))
-                .ToDictionaryAsync(t => t.Id, t => t.Slug, ct);
-
-        return mine.Select(i => new MyRequestDto(
-            i.Id, i.Occasion, i.Message, i.HasAttended, i.TemplateIssued, i.IssuedTemplateId,
-            i.IssuedTemplateId is { } id ? slugs.GetValueOrDefault(id) : null,
-            i.CreatedAt)).ToList();
+        return mine.Select(i => new MyRequestDto(i.Id, i.Occasion, i.Message, i.HasAttended, i.CreatedAt)).ToList();
     }
 
     /// <summary>

@@ -1,10 +1,6 @@
 namespace InvitesBlog.Application.Pricing;
 
-/// <summary>
-/// A fully itemized price breakdown, safe to show at checkout. <see cref="DesignerFee"/> is the
-/// community designer's per-use fee and is deliberately its own visible line — never folded into
-/// <see cref="MinimumPrice"/> — so an inviter can always see what they're paying the designer.
-/// </summary>
+/// <summary>A fully itemized price breakdown, safe to show at checkout.</summary>
 public sealed record PriceBreakdown(
     int InviteCount,
     int IncludedInvites,
@@ -15,9 +11,7 @@ public sealed record PriceBreakdown(
     decimal ExtraCost,
     decimal Total,
     bool HasDesignerDiscount,
-    string Currency = "USD",
-    decimal DesignerFee = 0m,
-    string? DesignerName = null);
+    string Currency = "USD");
 
 /// <summary>
 /// Implements the pricing model from spec §4.7.1–§4.7.2 and the top-up rules from §4.7.4:
@@ -37,15 +31,11 @@ public static class PricingCalculator
     public static int BlockSize(bool hasDesignerDiscount) =>
         hasDesignerDiscount ? DesignerBlockSize : StandardBlockSize;
 
-    /// <summary>
-    /// Price for the initial campaign payment (§4.7.2), plus the template's per-use designer fee when
-    /// it has one (§6 community templates). The fee is charged once per campaign, like the minimum.
-    /// </summary>
+    /// <summary>Price for the initial campaign payment (§4.7.2).</summary>
     /// <param name="premiumRate">Premium subscribers get extra invitations at the discounted block size.</param>
     /// <param name="minimumCovered">An event pass includes the first 50, so the minimum isn't charged.</param>
     public static PriceBreakdown CalculateInitial(
-        int inviteCount, bool hasDesignerDiscount, decimal designerFee = 0m, string? designerName = null,
-        bool premiumRate = false, bool minimumCovered = false)
+        int inviteCount, bool hasDesignerDiscount, bool premiumRate = false, bool minimumCovered = false)
     {
         if (inviteCount < 0)
             throw new ArgumentOutOfRangeException(nameof(inviteCount));
@@ -55,8 +45,7 @@ public static class PricingCalculator
         var extraInvites = Math.Max(0, inviteCount - IncludedInvites);
         var extraBlocks = (int)Math.Ceiling(extraInvites / (double)blockSize);
         var extraCost = extraBlocks * PricePerBlock;
-        var fee = Math.Max(0m, designerFee);
-        var total = minimum + extraCost + fee;
+        var total = minimum + extraCost;
 
         return new PriceBreakdown(
             InviteCount: inviteCount,
@@ -67,9 +56,7 @@ public static class PricingCalculator
             MinimumPrice: minimum,
             ExtraCost: extraCost,
             Total: total,
-            HasDesignerDiscount: hasDesignerDiscount,
-            DesignerFee: fee,
-            DesignerName: fee > 0m ? designerName : null);
+            HasDesignerDiscount: hasDesignerDiscount);
     }
 
     /// <summary>

@@ -32,22 +32,6 @@ public sealed class Template
     /// <summary>The designer account that authored it (§community templates); null for platform templates.</summary>
     public Guid? DesignerUserId { get; set; }
 
-    /// <summary>Lowercased email that commissioned this template, when it came from a paid commission.</summary>
-    public string? RequestedByEmail { get; set; }
-    /// <summary>The requester's account, when they have one.</summary>
-    public Guid? RequestedByUserId { get; set; }
-
-    /// <summary>One-time fee for a bespoke commission. Null for spontaneous public submissions.</summary>
-    public decimal? CommissionPrice { get; set; }
-    /// <summary>Per-use designer fee charged whenever an inviter starts a campaign from this public
-    /// template. Surfaced as its own checkout line item — never folded into the base price.</summary>
-    public decimal? UsagePrice { get; set; }
-
-    /// <summary>A commissioned (<see cref="TemplateVisibility.Dedicated"/>) template may only be released
-    /// into the public gallery once BOTH the requester and the designer have consented.</summary>
-    public bool RequesterConsentToPublish { get; set; }
-    public bool DesignerConsentToPublish { get; set; }
-
     /// <summary>
     /// Set when an admin takes a template out of the gallery after a report. The owner keeps using it
     /// privately, but can't list it again — only an admin can.
@@ -82,45 +66,4 @@ public static class TemplateVisibility
     /// from it, and nobody else can start one at all.
     /// </summary>
     public const string Private = "Private";
-}
-
-/// <summary>
-/// A designer's template submission moving through the review pipeline (§community templates).
-/// A brand-new template and an edit of an already-published one are the same thing — one row walking
-/// the <see cref="Enums.CustomTemplateStatus"/> status machine — the edit case simply carries a
-/// <see cref="PublishedTemplateId"/>, so an approved edit bumps that template's version instead of
-/// creating a new one. Approval is the ONLY moment a real <see cref="Template"/> row is written.
-/// </summary>
-public sealed class CustomTemplate
-{
-    public Guid Id { get; set; }
-    /// <summary>The designer account that submitted it.</summary>
-    public Guid DesignerUserId { get; set; }
-    public string Name { get; set; } = default!;
-    public string Description { get; set; } = default!;
-    public string Category { get; set; } = default!;
-    /// <summary>System-generated at submission time — never author-chosen.</summary>
-    public string Slug { get; set; } = default!;
-    /// <summary>The raw submitted source, kept verbatim for audit and re-review.</summary>
-    public string Html { get; set; } = default!;
-    /// <summary>Static preview image the designer uploaded with the submission.</summary>
-    public string? PreviewImageUrl { get; set; }
-    /// <summary>Where the packaged submission was published for review (set once it passes the scan).</summary>
-    public string? PackageUrl { get; set; }
-    public string ManifestJson { get; set; } = "{}";
-
-    public Enums.CustomTemplateStatus Status { get; set; }
-    public string? RejectionReason { get; set; }
-    /// <summary>Set on an edit (the template being revised) and on approval of a new submission.</summary>
-    public Guid? PublishedTemplateId { get; set; }
-
-    public decimal? CommissionPrice { get; set; }
-    public decimal? UsagePrice { get; set; }
-    /// <summary>Lowercased email of the person who commissioned this, when it answers a request.</summary>
-    public string? RequestedByEmail { get; set; }
-    public bool RequesterConsentToPublish { get; set; }
-    public bool DesignerConsentToPublish { get; set; }
-
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; }
 }

@@ -2,57 +2,21 @@ namespace InvitesBlog.Application.Dtos.Inquiries;
 
 // ----- Public submit -----
 
-/// <summary>
-/// The public "Start an inquiry" form. <paramref name="RequestedDesignerUserId"/> is optional — a
-/// customer may ask for a particular designer, or leave it to us.
-/// </summary>
-public sealed record SubmitInquiryRequest(
-    string Name, string Email, string Occasion, string Message, Guid? RequestedDesignerUserId = null);
-
-/// <summary>A designer a customer can ask for by name. Deliberately no email — this list is public.</summary>
-public sealed record PublicDesignerDto(Guid UserId, string DisplayName, int PublishedTemplates);
+/// <summary>The public "Start an inquiry" form.</summary>
+public sealed record SubmitInquiryRequest(string Name, string Email, string Occasion, string Message);
 
 public sealed record SubmitInquiryResponse(Guid Id);
 
 // ----- Admin list / detail -----
 
 public sealed record InquiryListItemDto(
-    Guid Id, string Name, string Email, string Occasion,
-    bool HasAttended, bool TemplateIssued, DateTimeOffset CreatedAt);
+    Guid Id, string Name, string Email, string Occasion, bool HasAttended, DateTimeOffset CreatedAt);
 
 public sealed record InquiryDetailDto(
     Guid Id, string Name, string Email, string Occasion, string Message,
     string? Colors, string? References, string? Notes,
     bool HasAttended, DateTimeOffset? AttendedAt,
-    bool TemplateIssued, DateTimeOffset? TemplateIssuedAt, Guid? IssuedTemplateId,
-    DateTimeOffset CreatedAt,
-    Guid? AssignedDesignerUserId, string? AssignedDesignerName,
-    decimal? CommissionPrice, decimal? UsagePrice,
-    Guid? RequestedDesignerUserId, string? RequestedDesignerName);
+    DateTimeOffset CreatedAt);
 
 /// <summary>Owner-filled consultation fields + attended flag (colors/references/notes are all optional).</summary>
 public sealed record UpdateInquiryRequest(string? Colors, string? References, string? Notes, bool HasAttended);
-
-/// <summary>Hands a request to a designer at an agreed price (§Phase 5 commissions).</summary>
-public sealed record AssignCommissionRequest(
-    Guid? DesignerUserId, decimal? CommissionPrice, decimal? UsagePrice);
-
-/// <summary>
-/// A request as the designer sees it. <paramref name="Assigned"/> separates work they've been put on
-/// from requests that merely NAMED them and are still waiting on terms.
-/// </summary>
-public sealed record DesignerCommissionDto(
-    Guid InquiryId, string RequesterName, string RequesterEmail, string Occasion, string Brief,
-    string? Colors, string? References, string? Notes,
-    decimal? CommissionPrice, decimal? UsagePrice,
-    bool TemplateIssued, DateTimeOffset CreatedAt,
-    bool Assigned, bool RequestedMe);
-
-// ----- Issue a dedicated template for an inquiry -----
-
-/// <summary>The packaged template data (produced in the API layer by the packager) the service persists.</summary>
-public sealed record IssueTemplateData(
-    string Name, string Slug, string Version, string Category, string? Description,
-    string ManifestJson, string PackageUrl);
-
-public sealed record InquiryIssuedResponse(Guid TemplateId, string Slug, bool Emailed);

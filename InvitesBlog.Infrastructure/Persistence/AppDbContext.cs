@@ -11,12 +11,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<Template> Templates => Set<Template>();
     public DbSet<TemplateType> TemplateTypes => Set<TemplateType>();
-    public DbSet<CustomTemplate> CustomTemplates => Set<CustomTemplate>();
     public DbSet<TemplateDesign> TemplateDesigns => Set<TemplateDesign>();
     public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
     public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
-    public DbSet<FeatureTester> FeatureTesters => Set<FeatureTester>();
-    public DbSet<FeatureRelease> FeatureReleases => Set<FeatureRelease>();
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
@@ -63,10 +60,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Visibility).HasDefaultValue("Public");
             e.Property(x => x.IsUsed).HasDefaultValue(false);
             e.HasIndex(x => x.AssignedEmail).HasDatabaseName("idx_templates_assigned_email");
-            e.Property(x => x.RequesterConsentToPublish).HasDefaultValue(false);
-            e.Property(x => x.DesignerConsentToPublish).HasDefaultValue(false);
-            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
-            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
             e.HasIndex(x => x.DesignerUserId).HasDatabaseName("idx_templates_designer_user_id");
         });
 
@@ -75,16 +68,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("inquiries");
             e.HasKey(x => x.Id);
             e.Property(x => x.HasAttended).HasDefaultValue(false);
-            e.Property(x => x.TemplateIssued).HasDefaultValue(false);
             // Admin list ordering: unattended first, then oldest first.
             e.HasIndex(x => new { x.HasAttended, x.CreatedAt }).HasDatabaseName("idx_inquiries_queue");
             e.HasIndex(x => x.Email).HasDatabaseName("idx_inquiries_email");
-            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
-            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
-            // A designer's commission list: what has been handed to them.
-            e.HasIndex(x => x.AssignedDesignerUserId).HasDatabaseName("idx_inquiries_assigned_designer");
-            // A designer also needs to find the requests that ASKED FOR THEM but aren't theirs yet.
-            e.HasIndex(x => x.RequestedDesignerUserId).HasDatabaseName("idx_inquiries_requested_designer");
         });
 
         b.Entity<TemplateDesign>(e =>
@@ -123,43 +109,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.TemplateId).HasDatabaseName("idx_template_reports_template_id");
         });
 
-        b.Entity<FeatureTester>(e =>
-        {
-            e.ToTable("feature_testers");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Email).HasMaxLength(254);
-            e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_feature_testers_email");
-            e.Property(x => x.Features).HasDefaultValueSql("'{}'::text[]");
-            e.Property(x => x.Note).HasMaxLength(300);
-        });
-
-        b.Entity<FeatureRelease>(e =>
-        {
-            e.ToTable("feature_releases");
-            e.HasKey(x => x.Key);
-            e.Property(x => x.Key).HasMaxLength(64);
-        });
-
         b.Entity<TemplateType>(e =>
         {
             e.ToTable("template_types");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Slug).IsUnique().HasDatabaseName("idx_template_types_slug");
-        });
-
-        b.Entity<CustomTemplate>(e =>
-        {
-            e.ToTable("custom_templates");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.ManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
-            e.Property(x => x.CommissionPrice).HasColumnType("numeric(12,2)");
-            e.Property(x => x.UsagePrice).HasColumnType("numeric(12,2)");
-            e.Property(x => x.RequesterConsentToPublish).HasDefaultValue(false);
-            e.Property(x => x.DesignerConsentToPublish).HasDefaultValue(false);
-            // The review queue: pending submissions first, oldest first.
-            e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_custom_templates_queue");
-            e.HasIndex(x => x.DesignerUserId).HasDatabaseName("idx_custom_templates_designer_user_id");
-            e.HasIndex(x => x.Slug).HasDatabaseName("idx_custom_templates_slug");
         });
 
         b.Entity<Inviter>(e =>
@@ -192,7 +146,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.RolesJson).HasColumnType("jsonb").HasDefaultValue("{\"roles\":[]}");
             e.Property(x => x.RsvpQuestionsJson).HasColumnType("jsonb").HasDefaultValue("{\"questions\":[]}");
             e.Property(x => x.TemplateManifestJson).HasColumnType("jsonb").HasDefaultValue("{}");
-            e.Property(x => x.DesignerFee).HasColumnType("numeric(12,2)").HasDefaultValue(0m);
             e.Property(x => x.TemplatePackageUrl).HasDefaultValue(string.Empty);
             e.HasIndex(x => x.CreatedByUserId).HasDatabaseName("idx_campaign_created_by");
         });

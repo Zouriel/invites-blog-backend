@@ -43,7 +43,7 @@ public sealed class PaymentService(
         var inviteCount = Math.Max(guestCount, PricingCalculator.IncludedInvites);
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         var price = PricingCalculator.CalculateInitial(
-            inviteCount, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName,
+            inviteCount, campaign.HasDesignerDiscount,
             premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
             minimumCovered: plan.PassCoversFirstSend);
         var capacity = price.IncludedInvites + price.ExtraBlocks * price.BlockSize;

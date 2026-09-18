@@ -1,5 +1,4 @@
 using InvitesBlog.Api.Authorization;
-using InvitesBlog.Application.Dtos.Designers;
 using InvitesBlog.Application.Services.Designers;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,15 +15,6 @@ public sealed class MyTemplatesController(IMyTemplatesService templates) : BaseA
 {
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct) => Success(await templates.ListAsync(ct));
-
-    [HttpGet("{id:guid}/source")]
-    public async Task<IActionResult> Source(Guid id, CancellationToken ct) =>
-        Success(await templates.GetSourceAsync(id, ct));
-
-    [HttpPut("{id:guid}/pricing")]
-    public async Task<IActionResult> SetPricing(
-        Guid id, [FromBody] SetTemplatePricingRequest request, CancellationToken ct) =>
-        Success(await templates.SetPricingAsync(id, request, ct));
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)

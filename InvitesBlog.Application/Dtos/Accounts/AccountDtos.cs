@@ -104,6 +104,4 @@ public sealed record MyCampaignDto(
     bool CanManage = true);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
-public sealed record MyRequestDto(
-    Guid Id, string Occasion, string Message, bool HasAttended, bool TemplateIssued,
-    Guid? IssuedTemplateId, string? IssuedTemplateSlug, DateTimeOffset CreatedAt);
+public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);

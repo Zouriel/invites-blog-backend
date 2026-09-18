@@ -114,11 +114,7 @@ public sealed partial class RawTemplatePackager(IStorageService storage)
         byte[]? poster = null) =>
         PublishToAsync($"templates/{slug}@{version}", slug, version, html, ct, poster);
 
-    /// <summary>
-    /// Publishes to an arbitrary base path. The review pipeline uses this to stage a submission
-    /// somewhere reviewable (<c>submissions/{id}/</c>) WITHOUT it becoming a live gallery template —
-    /// promotion to <c>templates/…</c> happens only on approval.
-    /// </summary>
+    /// <summary>Publishes to a given base path (the designer's publish passes the live template path).</summary>
     public async Task<RawPublishedPackage> PublishToAsync(
         string basePath, string slug, string version, string html,
         CancellationToken ct = default, byte[]? poster = null)

@@ -8,17 +8,6 @@ namespace InvitesBlog.Infrastructure.Templates;
 /// </summary>
 public sealed class TemplatePackagerAdapter(RawTemplatePackager packager, IStorageService storage) : ITemplatePackager
 {
-    public int RecommendedBytes => RawTemplatePackager.RecommendedTemplateBytes;
-    public int MaxBytes => RawTemplatePackager.MaxTemplateBytes;
-
-    public void Scan(string html) => RawTemplatePackager.EnsureSelfContainedAndSafe(html);
-
-    public TemplateStructure Describe(string slug, string html)
-    {
-        var manifest = packager.BuildManifest(slug, "scan", html);
-        return Flatten(manifest);
-    }
-
     public async Task<TemplatePackage> PublishAsync(
         string basePath, string slug, string version, string html, CancellationToken ct = default,
         byte[]? poster = null)

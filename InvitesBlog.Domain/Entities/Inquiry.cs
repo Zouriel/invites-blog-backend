@@ -1,10 +1,10 @@
 namespace InvitesBlog.Domain.Entities;
 
 /// <summary>
-/// A customer inquiry for a made-to-order (dedicated) invitation. Captured from the public "Start an
-/// inquiry" form, then worked through a small pipeline: it arrives <c>unattended</c>; the owner meets the
-/// customer and fills the consultation fields (colors/references/notes) + marks it attended; finally a
-/// dedicated template is issued to the customer's email and <see cref="TemplateIssued"/> flips.
+/// A customer inquiry for a made-to-order invitation, captured from the public "Start an inquiry" form.
+/// It arrives <c>unattended</c>; the owner talks to the customer, keeps consultation notes
+/// (colors/references/notes) and marks it attended. The invitation is then made in the designer and
+/// published for the customer's email — outside this record.
 /// </summary>
 public sealed class Inquiry
 {
@@ -12,7 +12,7 @@ public sealed class Inquiry
 
     // ----- Submitted by the customer -----
     public string Name { get; set; } = default!;
-    /// <summary>Lowercased — becomes the issued template's <c>AssignedEmail</c> (the dedicated key).</summary>
+    /// <summary>Lowercased.</summary>
     public string Email { get; set; } = default!;
     public string Occasion { get; set; } = default!;
     public string Message { get; set; } = default!;
@@ -26,27 +26,6 @@ public sealed class Inquiry
     /// <summary>True once the owner has met/consulted the customer about this inquiry.</summary>
     public bool HasAttended { get; set; }
     public DateTimeOffset? AttendedAt { get; set; }
-
-    /// <summary>True once a dedicated template has been issued (and the "ready" email sent).</summary>
-    public bool TemplateIssued { get; set; }
-    public DateTimeOffset? TemplateIssuedAt { get; set; }
-    /// <summary>The dedicated <see cref="Template"/> issued for this inquiry, if any.</summary>
-    public Guid? IssuedTemplateId { get; set; }
-
-    // ----- Commission (§Phase 5) -----
-    /// <summary>
-    /// The designer the CUSTOMER asked for, chosen on the request form. A preference, not an
-    /// assignment: it tells us who the request is meant to reach, while the commercial terms are
-    /// still agreed before anyone is formally put on it.
-    /// </summary>
-    public Guid? RequestedDesignerUserId { get; set; }
-
-    /// <summary>The designer this request was handed to, once one has been assigned.</summary>
-    public Guid? AssignedDesignerUserId { get; set; }
-    /// <summary>The one-time fee agreed for the bespoke work.</summary>
-    public decimal? CommissionPrice { get; set; }
-    /// <summary>The per-use fee agreed for if it later goes public.</summary>
-    public decimal? UsagePrice { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }

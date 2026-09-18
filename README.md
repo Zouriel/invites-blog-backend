@@ -2,7 +2,7 @@
 
 The API for **invites.blog** — animated digital invitations, and what happens around them.
 
-A host picks or commissions a template, builds an invitation, and sends every guest their own
+A host picks a template (or has one made), builds an invitation, and sends every guest their own
 link. Each guest opens a **server-rendered, personalized** invitation — their name, their role,
 the blocks that apply to them — and replies without creating anything. On the night, they open a
 **camera inside that same invitation**, and everything anyone shoots collects in one place — open to
@@ -73,9 +73,10 @@ what was sent stays what was sent. Creating is deliberately anonymous, so the da
 create rather than a second call: the possession token that makes the event theirs is minted by that
 very request and cannot be presented on it.
 
-**Templates.** Three sources: first-party templates in this repo, community templates submitted by
-designers and reviewed before publication, and bespoke commissions arranged through an inquiry.
-Designers set a per-use fee; commissioned templates can be reserved to one customer.
+**Templates.** Two sources: first-party templates in this repo, and templates made in the template
+designer by designer accounts, published privately, for one customer (reserved to their email), or to
+the gallery. Made-to-order requests arrive through the inquiry form and are then designed and
+published for the customer in the designer.
 
 **Privacy.** EXIF, IPTC and XMP are stripped from every uploaded image — these are photographs of
 other people's guests, and a GPS tag would publish where a wedding was. There is a suppression list,

@@ -23,14 +23,6 @@ public sealed class Campaign
     /// </summary>
     public string TemplatePackageUrl { get; set; } = string.Empty;
 
-    /// <summary>
-    /// The community designer's per-use fee, frozen from the template at creation time along with the
-    /// manifest. Read live it would let a designer change the price of a campaign already in progress;
-    /// frozen, the inviter pays what they were quoted. Zero for platform templates.
-    /// </summary>
-    public decimal DesignerFee { get; set; }
-    /// <summary>Who the fee is owed to, for the checkout line item and the payouts report.</summary>
-    public string? DesignerFeeName { get; set; }
     public Guid? InviterId { get; set; }                      // set at inviter-details step
 
     /// <summary>

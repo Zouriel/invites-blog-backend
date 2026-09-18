@@ -32,7 +32,6 @@ public static class StorageCache
     {
         var k = (key ?? string.Empty).TrimStart('/');
         return k.StartsWith("templates/", StringComparison.OrdinalIgnoreCase)
-            || k.StartsWith("submissions/", StringComparison.OrdinalIgnoreCase)
             ? Revalidate
             : Immutable;
     }

@@ -25,8 +25,8 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
     }
 
     /// <summary>
-    /// Everyone with an account is also a customer: one person can commission an invitation and
-    /// design templates, and the unified sign-in shows both halves off the same roles. Existing
+    /// Everyone with an account is also a customer: one person can send invitations and design
+    /// templates, and the unified sign-in shows both halves off the same roles. Existing
     /// accounts predate the Customer role, so they're granted it once here.
     /// </summary>
     private async Task GrantDesignersCustomerRoleAsync(CancellationToken ct)
@@ -79,6 +79,12 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
                 if (!permissions.TryGetValue(permName, out var perm) || assigned.Contains(perm.Id)) continue;
                 role.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionId = perm.Id });
             }
+
+            // Sign-in grants what Roles.Definitions says, so a permission taken out of a role there is
+            // taken out of the table too — otherwise the admin screens would list access nobody has.
+            var wanted = permissionNames.Where(permissions.ContainsKey).Select(n => permissions[n].Id).ToHashSet();
+            foreach (var stale in role.RolePermissions.Where(rp => !wanted.Contains(rp.PermissionId)).ToList())
+                role.RolePermissions.Remove(stale);
         }
         await db.SaveChangesAsync(ct);
     }

@@ -79,9 +79,6 @@ public sealed class CampaignService(
             TemplateManifestJson = string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson,
             // …and the package the pinned version serves, so an approved edit can't re-serve new markup.
             TemplatePackageUrl = template.PackageUrl,
-            // The designer's per-use fee is frozen with it, so a later price change can't reach this campaign.
-            DesignerFee = template.UsagePrice ?? 0m,
-            DesignerFeeName = template.UsagePrice > 0m ? template.DesignerName : null,
             AccessTokenHash = TokenService.Hash(rawToken),
             Title = req.Title,
             Slug = Slugify(req.Title),
@@ -487,8 +484,6 @@ public sealed class CampaignService(
         campaign.TemplateManifestJson =
             string.IsNullOrWhiteSpace(template.ManifestJson) ? "{}" : template.ManifestJson;
         campaign.TemplatePackageUrl = template.PackageUrl;
-        campaign.DesignerFee = template.UsagePrice ?? 0m;
-        campaign.DesignerFeeName = template.UsagePrice > 0m ? template.DesignerName : null;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
         campaigns.Update(campaign);
@@ -678,7 +673,6 @@ public sealed class CampaignService(
         var plan = await plans.ForCampaignAsync(id, ct);
         var price = PricingCalculator.CalculateInitial(
             Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount,
-            campaign.DesignerFee, campaign.DesignerFeeName,
             premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
             minimumCovered: plan.PassCoversFirstSend);
 
@@ -720,7 +714,7 @@ public sealed class CampaignService(
         var count = inviteCount ?? await guests.CountByCampaignAsync(id, ct);
         var plan = await plans.ForCampaignAsync(id, ct);
         return PricingCalculator.CalculateInitial(
-            count, campaign.HasDesignerDiscount, campaign.DesignerFee, campaign.DesignerFeeName,
+            count, campaign.HasDesignerDiscount,
             premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
             minimumCovered: plan.PassCoversFirstSend);
     }

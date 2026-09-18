@@ -13,7 +13,6 @@ public class StorageCacheTests
     [Theory]
     [InlineData("templates/gilded-hour@1.0.0/index.html")]
     [InlineData("/templates/a-love-story@1.1.0/index.html")]
-    [InlineData("submissions/4f2c/manifest.json")]
     public void A_package_republished_at_the_same_url_must_revalidate(string key) =>
         Assert.Equal("no-cache, must-revalidate", StorageCache.For(key));
 

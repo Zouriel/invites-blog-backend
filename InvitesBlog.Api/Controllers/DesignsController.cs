@@ -8,12 +8,12 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace InvitesBlog.Api.Controllers;
 
 /// <summary>
-/// The visual template designer. Every action is the signed-in account's own; the service re-checks
-/// ownership on each one.
+/// The visual template designer, for designer accounts (and admins): <c>designs.manage</c> belongs to
+/// those two roles only. Every action is the signed-in account's own; the service re-checks ownership
+/// on each one.
 /// </summary>
 [Route("api/designs")]
 [HasPermission(Permissions.Designs.Manage)]
-[RequiresFeature(Domain.Entities.Features.TemplateDesigner)]
 public sealed class DesignsController(IDesignService designs) : BaseApiController
 {
     [HttpGet("catalog")]

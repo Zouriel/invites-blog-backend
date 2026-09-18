@@ -121,10 +121,10 @@ public static class Permissions
     {
         (Templates.Read, "templates", "Browse active templates"),
         (Templates.Manage, "templates", "Create and publish platform templates"),
-        (Designer.Manage, "designer", "Create and submit custom templates"),
+        (Designer.Manage, "designer", "Manage their own published templates"),
         (Designs.Manage, "designs", "Build and publish templates in the designer"),
         (Designs.Moderate, "designs", "Handle template reports; unlist or remove gallery templates"),
-        (Designer.Review, "designer", "Review community template submissions"),
+        (Designer.Review, "designer", "Manage designer accounts"),
         (Campaigns.Create, "campaigns", "Create a campaign"),
         (Campaigns.Read, "campaigns", "Read a campaign"),
         (Campaigns.Write, "campaigns", "Edit a campaign"),
@@ -184,8 +184,8 @@ public static class Roles
     {
         [Admin] = Permissions.All.Select(p => p.Name).ToArray(), // all permissions
 
-        // A designer authors and submits templates. Reviewing them is an ADMIN act
-        // (Designer.Review), deliberately withheld here so no one approves their own work.
+        // A designer makes templates in the designer and publishes them. Managing designers is an
+        // ADMIN act (Designer.Review), deliberately withheld here.
         // They also get the customer's read permissions: a designer is a person who receives
         // invitations too, and their account page would 403 without them.
         [Designer] = new[]
@@ -202,12 +202,11 @@ public static class Roles
         //
         // These permissions say "may do this KIND of thing", never "may do it to THIS campaign".
         // Every campaign-scoped action re-checks ownership through ICampaignOwnershipService, so a
-        // customer still cannot touch a campaign that isn't theirs. Designer.Manage is withheld:
-        // publishing templates is a separate role you opt into.
+        // customer still cannot touch a campaign that isn't theirs. Designer.Manage and Designs.Manage
+        // are withheld: making and publishing templates is the Designer role's.
         [Customer] = new[]
         {
             Permissions.Templates.Read, Permissions.Dashboard.Read, Permissions.Inbox.Read,
-            Permissions.Designs.Manage,
             Permissions.Campaigns.Create, Permissions.Campaigns.Read, Permissions.Campaigns.Write,
             Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write,
@@ -218,7 +217,7 @@ public static class Roles
 
         [Inviter] = new[]
         {
-            Permissions.Templates.Read, Permissions.Designer.Manage,
+            Permissions.Templates.Read,
             Permissions.Campaigns.Create, Permissions.Campaigns.Read, Permissions.Campaigns.Write,
             Permissions.Campaigns.Delete, Permissions.Campaigns.Checkout, Permissions.Campaigns.Cancel,
             Permissions.Guests.Read, Permissions.Guests.Upload, Permissions.Guests.Write, Permissions.Guests.Resend,
