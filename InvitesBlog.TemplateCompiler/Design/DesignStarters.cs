@@ -15,7 +15,7 @@ public static class DesignStarters
 
     public static readonly IReadOnlyList<Starter> All =
     [
-        new("blank", "Blank page", "An empty page with the essentials: title, date, venue and RSVP."),
+        new("blank", "Blank page", "Nothing on it yet. Start from scratch."),
         new("wedding", "Classic wedding", "Gold on ivory, a cover photo that holds while the details rise past it."),
         new("birthday", "Birthday party", "Bold colours and confetti shapes that spin as you scroll."),
         new("save-the-date", "Save the date", "One screen, big type, straight to the point."),
@@ -32,24 +32,11 @@ public static class DesignStarters
 
     // ----- Starters ----------------------------------------------------------------------------------
 
-    private static DesignScene Blank()
-    {
-        var s = Scene("#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
-        var y = 0.0;
-        s.Elements.Add(Text("title", 30, 300, 330, 90, [Var("event.title")], Heading(40)));
-        s.Elements.Add(Text("subtitle", 30, 400, 330, 40, [Var("event.subtitle")], Body(18, italic: true)));
-        y = 844;
-        s.Elements.Add(Text("date", 30, y + 250, 330, 40, [Var("event.date")], Body(20, color: "theme:accent")));
-        s.Elements.Add(Text("time", 30, y + 292, 330, 32, [Var("event.time")], Body(16)));
-        s.Elements.Add(Text("venue", 30, y + 380, 330, 36, [Var("event.venue.name")], Heading(24)));
-        s.Elements.Add(Text("address", 30, y + 420, 330, 50, [Var("event.venue.address")], Body(14)));
-        y = 1688;
-        s.Elements.Add(Text("dear", 30, y + 200, 330, 40, [Lit("Dear "), Var("guest.name")], Body(18)));
-        s.Elements.Add(Rsvp("rsvp", 95, y + 280, 200, 52));
-        s.Elements.Add(Dress("dress", 30, y + 400, 330, 120));
-        foreach (var el in s.Elements) FadeUp(s, el);
-        return s;
-    }
+    /// <summary>
+    /// Truly blank: the page's colours and fonts, and nothing on it. (Check asks for an RSVP button before
+    /// it can be published — that's the one thing every invitation needs, and the editor says so.)
+    /// </summary>
+    private static DesignScene Blank() => Scene("#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
 
     private static DesignScene Wedding()
     {

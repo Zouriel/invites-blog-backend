@@ -18,8 +18,29 @@ public class DesignCompilerTests
         return data;
     }
 
+    /// <summary>The starters that are invitations already: every one but the blank page.</summary>
+    public static TheoryData<string> LaidOutStarters()
+    {
+        var data = new TheoryData<string>();
+        foreach (var s in DesignStarters.All.Where(s => s.Id != "blank")) data.Add(s.Id);
+        return data;
+    }
+
+    [Fact]
+    public void The_blank_starter_is_truly_blank_but_still_compiles()
+    {
+        var scene = DesignStarters.Create("blank")!;
+        Assert.Empty(scene.Elements);
+        Assert.NotEmpty(scene.Theme);
+        var html = DesignCompiler.Compile(scene);
+        RawTemplatePackager.EnsureSelfContainedAndSafe(html);
+        // Nothing to publish yet: Check asks for the RSVP button and nothing else.
+        var errors = DesignValidator.Validate(scene).Concat(DesignValidator.CheckCompiled(html)).Where(i => i.Severity == DesignIssue.Error).ToList();
+        Assert.All(errors, e => Assert.Contains("rsvp", e.Code));
+    }
+
     [Theory]
-    [MemberData(nameof(Starters))]
+    [MemberData(nameof(LaidOutStarters))]
     public void Every_starter_passes_check_with_no_errors(string id)
     {
         var scene = DesignStarters.Create(id)!;
@@ -38,7 +59,7 @@ public class DesignCompilerTests
     }
 
     [Theory]
-    [MemberData(nameof(Starters))]
+    [MemberData(nameof(LaidOutStarters))]
     public void Every_starter_is_accepted_by_the_platform_packager(string id)
     {
         var scene = DesignStarters.Create(id)!;
@@ -86,7 +107,7 @@ public class DesignCompilerTests
         var scene = Minimal();
         var el = scene.Elements[0];
         el.Track = new DesignTrack { Start = 120, End = 400 };
-        el.Keyframes = [new() { T = 0, Y = el.Y + 40, Opacity = 0, Easing = "ease-out" }, new() { T = 1, Opacity = 1 }];
+        el.Keyframes = [new() { T = 0, Y = el.Y + 40, Opacity = 0, Easing = "ease-out" }, new() { T = 1, Y = el.Y, Opacity = 1 }];
 
         var html = DesignCompiler.Compile(scene);
 
@@ -242,7 +263,7 @@ public class DesignCompilerTests
     [Fact]
     public void Binding_the_compiled_page_fills_values_and_hides_what_is_missing()
     {
-        var scene = DesignStarters.Create("blank")!;
+        var scene = DesignStarters.Create("wedding")!;
         var html = DesignCompiler.Compile(scene);
 
         var filled = new HtmlParser().ParseDocument(ServerBinder.Bind(html, DesignSampleData.Build(scene, DesignSampleData.Filled)));
@@ -491,8 +512,13 @@ public class DesignCompilerTests
 
     private static DesignScene Minimal()
     {
+        // The blank page, with an RSVP button near the top and one line of text.
         var scene = DesignStarters.Create("blank")!;
-        scene.Elements = scene.Elements.Where(e => e.Type is "rsvp").ToList();
+        scene.Elements.Add(new DesignElement
+        {
+            Id = "rsvp", Type = "rsvp", X = 95, Y = 1968, W = 200, H = 52,
+            Button = new DesignButton { Fill = "theme:accent", Radius = 999, Style = new DesignTypography { Color = "theme:bg" } },
+        });
         scene.Elements.Insert(0, new DesignElement
         {
             Id = "t", Type = "text", X = 10, Y = 20, W = 200, H = 40,
