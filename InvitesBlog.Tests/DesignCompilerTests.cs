@@ -342,6 +342,21 @@ public class DesignCompilerTests
         Assert.DoesNotContain(DesignValidator.Validate(scene), i => i.Code is "schema" or "track" or "element_id" or "element_duplicate");
     }
 
+    [Fact]
+    public void A_photo_slot_with_a_null_path_is_reported_not_a_crash()
+    {
+        // Found by the renderer parity fuzzing: a scene is client JSON, and "path": null reached Regex.IsMatch.
+        var scene = DesignScene.Parse("""
+        {"schema":3,"theme":[{"key":"accent","label":"A","value":"#000000"},{"key":"bg","label":"B","value":"#ffffff"},{"key":"text","label":"T","value":"#111111"}],
+         "elements":[{"id":"p","type":"slot","x":0,"y":0,"w":100,"h":100,"slot":{"path":null}}]}
+        """);
+
+        Assert.Contains(DesignValidator.Validate(scene), i => i.Code == "slot_path");
+        var data = DesignSampleData.Build(scene, DesignSampleData.Filled);
+        Assert.NotNull(data["event"]);
+        Assert.Contains("data-src=\"event.coverImage\"", DesignCompiler.Compile(scene));
+    }
+
     // ----- Injection: the reason a designed template can skip human review -------------------------
 
     [Theory]

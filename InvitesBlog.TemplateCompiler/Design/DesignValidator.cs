@@ -216,13 +216,14 @@ public static partial class DesignValidator
                     break;
                 case "slot":
                     var slot = el.Slot ?? new DesignSlot();
-                    var slotVar = DesignCatalog.FindVariable(slot.Path);
-                    if (!(slotVar is { Kind: "image" } || CustomPathRegex().IsMatch(slot.Path) && DesignCatalog.FindVariable(slot.Path) is null))
+                    var slotPath = slot.Path ?? string.Empty;
+                    var slotVar = DesignCatalog.FindVariable(slotPath);
+                    if (!(slotVar is { Kind: "image" } || CustomPathRegex().IsMatch(slotPath) && DesignCatalog.FindVariable(slotPath) is null))
                         Error("slot_path", $"“{label}” needs an image key like event.coverImage.", el.Id);
                     if (string.IsNullOrWhiteSpace(slot.Label)) Warn("slot_label", $"“{label}” has no label, so the inviter won't know what to upload.", el.Id);
                     if (slot.Multiple && slot.Min is { } min && slot.Max is { } max && min > max)
                         Error("slot_bounds", $"“{label}” asks for more photos at least than at most.", el.Id);
-                    NotePath(slot.Path);
+                    NotePath(slotPath);
                     break;
                 case "rsvp":
                     rsvp++;

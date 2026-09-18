@@ -50,7 +50,8 @@ public static class DesignSampleData
         foreach (var (el, _, _) in scene.Walk())
         {
             if (el.Type != "slot" || el.Slot is null || empty) continue;
-            var key = el.Slot.Path.StartsWith("event.", StringComparison.Ordinal) ? el.Slot.Path[6..] : null;
+            var slotPath = el.Slot.Path ?? string.Empty;
+            var key = slotPath.StartsWith("event.", StringComparison.Ordinal) ? slotPath[6..] : null;
             if (key is null || key.Contains('.')) continue;
             // A gallery, or one photo out of it: either way the preview gets the whole numbered set.
             eventObj[key] = el.Slot.Multiple || el.Slot.Index is > 0 ? photos.DeepClone() : Placeholder(key.Length);
