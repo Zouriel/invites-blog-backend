@@ -10,6 +10,9 @@ public interface IMyTemplatesService
 {
     Task<MyTemplatesPageDto> ListAsync(CancellationToken ct = default);
 
+    /// <summary>Every event made from one of this person's templates: who and when (see <see cref="TemplateUseDto"/>).</summary>
+    Task<IReadOnlyList<TemplateUseDto>> UsesAsync(Guid templateId, CancellationToken ct = default);
+
     /// <summary>
     /// Removes a template. One already used by campaigns — or made for one customer (Dedicated with
     /// an AssignedEmail) — is UNLISTED rather than deleted, so every invitation built from it keeps

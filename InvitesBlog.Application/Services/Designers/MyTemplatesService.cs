@@ -18,8 +18,58 @@ public sealed class MyTemplatesService(
     ICurrentUser currentUser,
     ITemplateRepository templates,
     ICampaignRepository campaigns,
-    IUnitOfWork uow) : IMyTemplatesService
+    IUnitOfWork uow,
+    IRepository<AppUser> users,
+    IInviterRepository inviters,
+    Plans.IPassOfferService offers) : IMyTemplatesService
 {
+    public async Task<IReadOnlyList<TemplateUseDto>> UsesAsync(Guid templateId, CancellationToken ct = default)
+    {
+        var template = await LoadOwnedAsync(templateId, ct);
+        var rows = await campaigns.Query()
+            .Where(c => c.TemplateId == template.Id)
+            .OrderByDescending(c => c.CreatedAt)
+            .Take(200)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return [];
+
+        // A client (made for someone) or your own (private) is yours to see; a stranger on a public
+        // design isn't, unless you run the platform.
+        var named = IsAdmin() || template.Visibility != TemplateVisibility.Public;
+
+        var hostIds = rows.Select(c => c.CreatedByUserId).OfType<Guid>().Distinct().ToList();
+        var hosts = named
+            ? await users.Query().Where(u => hostIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, ct)
+            : new Dictionary<Guid, AppUser>();
+        var inviterIds = rows.Select(c => c.InviterId).OfType<Guid>().Distinct().ToList();
+        var byInviter = named
+            ? await inviters.Query().Where(i => inviterIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct)
+            : new Dictionary<Guid, Inviter>();
+
+        var now = DateTimeOffset.UtcNow;
+        var list = new List<TemplateUseDto>(rows.Count);
+        foreach (var c in rows)
+        {
+            var account = c.CreatedByUserId is { } h ? hosts.GetValueOrDefault(h) : null;
+            var inviter = c.InviterId is { } i ? byInviter.GetValueOrDefault(i) : null;
+            var pass = Plans.EventPasses.Active(c, now);
+            list.Add(new TemplateUseDto(
+                c.Id, c.Title, c.CreatedAt, c.EventStartAt,
+                c.Status switch
+                {
+                    Domain.Enums.CampaignStatus.Draft => "Not finished",
+                    Domain.Enums.CampaignStatus.Cancelled => "Cancelled",
+                    _ => "Live",
+                },
+                InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind),
+                named ? inviter?.Name ?? account?.DisplayName : null,
+                named ? account?.Email ?? inviter?.Email : null,
+                pass.ToString(),
+                template.AssignedEmail is not null && (await offers.ForCampaignAsync(c.Id, ct)).DiscountPercent > 0));
+        }
+        return list;
+    }
+
     public async Task<MyTemplatesPageDto> ListAsync(CancellationToken ct = default)
     {
         var me = currentUser.UserId ?? throw new UnauthorizedException();

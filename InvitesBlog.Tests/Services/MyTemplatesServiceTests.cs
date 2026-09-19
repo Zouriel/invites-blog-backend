@@ -28,8 +28,12 @@ public class MyTemplatesServiceTests
             .Returns(0);
     }
 
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
+    private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
+    private readonly InvitesBlog.Application.Plans.IPassOfferService _offers = Substitute.For<InvitesBlog.Application.Plans.IPassOfferService>();
+
     private MyTemplatesService Sut() =>
-        new(_currentUser, _templates, _campaigns, _uow);
+        new(_currentUser, _templates, _campaigns, _uow, _users, _inviters, _offers);
 
     private void AsAdmin() => _currentUser.HasPermission(Permissions.Templates.Manage).Returns(true);
 
@@ -168,5 +172,57 @@ public class MyTemplatesServiceTests
             InvitesBlog.Api.Controllers.AdminTemplatesController.DeleteResultDto>>(ok.Value);
         Assert.True(body.Data!.Deleted);
         _templates.Received(1).Remove(t);
+    }
+
+    // ---------- who used a template, and when ----------
+
+    private (Template Template, Campaign Event, AppUser Host) UsedBy(string visibility)
+    {
+        var t = Template(_designerId);
+        t.Visibility = visibility;
+        t.AssignedEmail = visibility == TemplateVisibility.Dedicated ? "client@x.mv" : null;
+        _templates.Query(Arg.Any<bool>()).Returns(new[] { t }.AsAsyncQueryable());
+        var host = new AppUser { Id = Guid.NewGuid(), Email = "client@x.mv", DisplayName = "Aisha" };
+        var e = TestData.Campaign(templateId: t.Id);
+        e.CreatedByUserId = host.Id;
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { e }.AsAsyncQueryable());
+        _users.Query(Arg.Any<bool>()).Returns(new[] { host }.AsAsyncQueryable());
+        _inviters.Query(Arg.Any<bool>()).Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+        _offers.ForCampaignAsync(e.Id, Arg.Any<CancellationToken>())
+            .Returns(new InvitesBlog.Application.Plans.PassOfferDto(139, 489, 199, 699, 30, "Me", 99, 349));
+        return (t, e, host);
+    }
+
+    [Fact]
+    public async Task A_design_made_for_a_client_shows_who_used_it_and_when()
+    {
+        var (t, e, host) = UsedBy(TemplateVisibility.Dedicated);
+        var use = Assert.Single(await Sut().UsesAsync(t.Id));
+        Assert.Equal(e.Id, use.CampaignId);
+        Assert.Equal("Aisha", use.HostName);
+        Assert.Equal(host.Email, use.HostEmail);
+        Assert.Equal("Not finished", use.Status);
+        Assert.True(use.Discounted);
+    }
+
+    [Fact]
+    public async Task A_stranger_on_a_public_design_is_not_named_except_to_an_admin()
+    {
+        var (t, _, _) = UsedBy(TemplateVisibility.Public);
+        var use = Assert.Single(await Sut().UsesAsync(t.Id));
+        Assert.Null(use.HostName);
+        Assert.Null(use.HostEmail);
+        Assert.False(use.Discounted);
+
+        AsAdmin();
+        Assert.Equal("Aisha", Assert.Single(await Sut().UsesAsync(t.Id)).HostName);
+    }
+
+    [Fact]
+    public async Task Another_designers_template_is_refused()
+    {
+        var t = Template(Guid.NewGuid());
+        _templates.Query(Arg.Any<bool>()).Returns(new[] { t }.AsAsyncQueryable());
+        await Assert.ThrowsAsync<ForbiddenException>(() => Sut().UsesAsync(t.Id));
     }
 }

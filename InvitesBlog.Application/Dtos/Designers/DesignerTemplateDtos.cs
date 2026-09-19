@@ -34,5 +34,16 @@ public sealed record MyTemplateRowDto(
 /// <summary>The templates the signed-in person published (admins included: the full catalogue is the admin screen's).</summary>
 public sealed record MyTemplatesPageDto(IReadOnlyList<MyTemplateRowDto> Templates);
 
+/// <summary>
+/// One event made from a designer's template: who, and when. The host is named only where the
+/// designer has a right to know — a design made for someone (their client) or kept private (their
+/// own) — or to an admin; a stranger who picked a public design stays "a host".
+/// </summary>
+/// <param name="Status">"Not finished", "Live" or "Cancelled".</param>
+/// <param name="Discounted">Their pass is (or would be) the Studio discount: made for them, first use.</param>
+public sealed record TemplateUseDto(
+    Guid CampaignId, string EventTitle, DateTimeOffset UsedAt, DateTimeOffset EventStartAt, string Status,
+    string Kind, string? HostName, string? HostEmail, string Pass, bool Discounted);
+
 /// <summary>What a delete actually did — unlisting is not the same as removing.</summary>
 public sealed record DeleteTemplateResultDto(bool Deleted, bool Unlisted, int CampaignCount, string Message);

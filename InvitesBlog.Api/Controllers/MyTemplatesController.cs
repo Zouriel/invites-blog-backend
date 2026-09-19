@@ -16,6 +16,10 @@ public sealed class MyTemplatesController(IMyTemplatesService templates) : BaseA
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct) => Success(await templates.ListAsync(ct));
 
+    /// <summary>Who made events from this template, and when.</summary>
+    [HttpGet("{id:guid}/uses")]
+    public async Task<IActionResult> Uses(Guid id, CancellationToken ct) => Success(await templates.UsesAsync(id, ct));
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
