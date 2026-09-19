@@ -61,7 +61,7 @@ public sealed class TemplateSeeder(
                 Slug = scene.Slug,
                 Version = scene.Version,
                 Category = scene.Category,
-                Description = $"A premium {scene.Category.ToLowerInvariant()} invitation template.",
+                Description = $"An animated {scene.Category.ToLowerInvariant()} invitation template.",
                 PreviewImageUrl = $"{published.PackageUrl}index.html",
                 PreviewAnimationUrl = null,
                 DesignerInviterId = null,

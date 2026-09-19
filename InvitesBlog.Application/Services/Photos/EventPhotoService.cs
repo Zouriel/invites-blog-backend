@@ -103,7 +103,9 @@ public sealed class EventPhotoService(
     IStorageService storage,
     IImageOptimizer imageOptimizer,
     IMediaBucketService bucketService,
-    IUnitOfWork uow) : IEventPhotoService
+    IUnitOfWork uow,
+    IRepository<Venue> venues,
+    Plans.IPlanService plans) : IEventPhotoService
 {
     /// <summary>
     /// What a tap opens. NOT what a download hands over — the original is kept for that, so this is
@@ -157,14 +159,23 @@ public sealed class EventPhotoService(
         // still open — a Wedding pass's five-day album would otherwise be told it had closed after one.
         var windowDays = await bucketService.WindowForCampaignAsync(campaignId, ct);
 
+        var venue = campaign.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
+        // The plan's side of the same answer the writer gives: its cover and its space.
+        var plan = await plans.ForCampaignAsync(campaignId, ct);
+        var eventUsed = await bucketService.EventUsedBytesAsync(campaignId, ct);
+
         var closed =
             campaign.Status == CampaignStatus.Cancelled
                 ? "This event has been cancelled. Everything already added is still here."
-                : EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays)
-                    ? null
-                    : DateTimeOffset.UtcNow < campaign.EventStartAt
-                        ? "This one isn't open yet — it opens on the day."
-                        : "This one has closed. Everything already added is still here.";
+                : plan.Phase != Plans.MediaPhase.Active
+                    ? "This event's photos are no longer collecting. Everything already added is still here for now."
+                : !EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays)
+                    ? DateTimeOffset.UtcNow < campaign.EventStartAt
+                        ? "This one isn't open yet — it opens the day before the event."
+                        : "This one has closed. Everything already added is still here."
+                : eventUsed >= plan.EventBytes
+                    ? "This event's space is full. Everything already added is still here."
+                    : null;
 
         return new EventPhotoBoxDto(
             campaign.Id,
@@ -175,7 +186,9 @@ public sealed class EventPhotoService(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName,
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
                 p.CreatedAt)).ToList(),
-            closed);
+            closed,
+            venue?.Name,
+            venue?.LogoUrl);
     }
 
     public async Task<EventPhotoDto> AddAsync(
@@ -236,13 +249,15 @@ public sealed class EventPhotoService(
             // a week ago" is more useful than "this is full" when both are true.
             !bucket.IsOpen
                 ? DateTimeOffset.UtcNow < bucket.EventDate
-                    ? "This one isn't open yet — it opens on the day."
+                    ? "This one isn't open yet — it opens the day before the event."
                     : "This one has closed. Everything already added is still here."
                 : bucket.Expired
                     ? "This event's plan has ended. Everything already here is kept for now."
                     : bucket.EventUsedBytes >= bucket.CapacityBytes
                         ? "This event is out of space. See the plans for more."
-                        : null);
+                        : null,
+            bucket.VenueName,
+            bucket.VenueLogoUrl);
     }
 
     public async Task DeleteFromBucketAsync(

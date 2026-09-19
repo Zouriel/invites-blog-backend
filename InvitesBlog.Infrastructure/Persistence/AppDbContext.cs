@@ -440,6 +440,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("venues");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.OwnerUserId).IsUnique().HasDatabaseName("idx_venues_owner_user_id");
+            e.HasIndex(x => x.Code).IsUnique().HasDatabaseName("idx_venues_code");
+            e.Property(x => x.Code).HasMaxLength(12);
             e.Property(x => x.Name).HasMaxLength(120);
             e.Property(x => x.Place).HasMaxLength(120);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Cascade);

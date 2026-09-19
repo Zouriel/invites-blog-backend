@@ -66,7 +66,7 @@ public class EventPhotoServiceTests
     private EventPhotoService Sut() => new(
         _photos, _campaigns, _guests,
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
-        _currentUser, _storage, _optimizer, _buckets, _uow);
+        _currentUser, _storage, _optimizer, _buckets, _uow, TestData.Empty<Venue>(), TestData.FreePlans());
 
     /// <summary>
     /// A photo-like image — noise, so the two derivatives can't both compress away to nothing and make
@@ -543,7 +543,7 @@ public class EventPhotoServiceTests
     /// standing at the party a day early and somebody looking a week later.
     /// </summary>
     [Fact]
-    public async Task An_event_still_to_come_says_it_opens_on_the_day()
+    public async Task An_event_still_to_come_says_it_opens_the_day_before()
     {
         var (campaign, guest) = OnTheGuestList();
         campaign.EventStartAt = DateTimeOffset.UtcNow.AddDays(30);
@@ -551,7 +551,7 @@ public class EventPhotoServiceTests
         var box = await Sut().GetAsync(campaign.Id, guest.Id);
 
         Assert.False(box.CanUpload);
-        Assert.Contains("opens on the day", box.ClosedNote);
+        Assert.Contains("opens the day before the event", box.ClosedNote);
     }
 
     [Fact]

@@ -55,7 +55,8 @@ public sealed class CampaignService(
     IValidator<UpdateVenueRequest> venueValidator,
     IValidator<UpdateInviterRequest> inviterValidator,
     IValidator<UpdateDeliverySettingsRequest> deliveryValidator,
-    IPlanService plans) : ICampaignService
+    IPlanService plans,
+    ISendingAllowanceService allowances) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -327,6 +328,9 @@ public sealed class CampaignService(
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
         var emailed = 0;
+        var heldBack = 0;
+        var allowance = await allowances.ForCampaignAsync(id, ct);
+        var left = allowance.Left;
         if (settings.Uses("email"))
         {
             // The same provider — and so the same email, §15.2 removal link included — that resends
@@ -340,11 +344,22 @@ public sealed class CampaignService(
             {
                 if (string.IsNullOrWhiteSpace(g.Email)) continue;
 
+                // Emailing is counted per guest, once: somebody already emailed is re-sent for free,
+                // and a new guest past what the event includes is left for the host to share a link
+                // with (or for more to be added). See SendingAllowanceService.
+                var existing = await invites.GetByGuestIdAsync(g.Id, ct);
+                var firstTime = existing?.FirstEmailedAt is null;
+                if (firstTime && left <= 0)
+                {
+                    heldBack++;
+                    continue;
+                }
+
                 // Emailed links are per-guest tokenized: clicking opens the invite directly — the raw
                 // token IS the key, no OTP. (The SHARE button link, by contrast, is the gated /e/{id}.)
                 // We can't recover a raw token from its stored hash, so mint a fresh one each finalize.
                 var rawToken = TokenService.GenerateToken();
-                var invite = await invites.GetByGuestIdAsync(g.Id, ct);
+                var invite = existing;
                 if (invite is null)
                 {
                     invite = new Invite
@@ -372,11 +387,17 @@ public sealed class CampaignService(
                     campaign, g, invite.Id, settings, inviteeBase, rawToken, inviter?.Name, inviter?.Email);
                 await emailChannel.SendAsync(letter.To("email", g.Email), ct);
                 emailed++;
+                if (firstTime)
+                {
+                    invite.FirstEmailedAt = DateTimeOffset.UtcNow;
+                    left--;
+                }
             }
         }
 
         await uow.SaveChangesAsync(ct);
-        return new FinalizeResponse(shareLink, guestList.Count, emailed);
+        return new FinalizeResponse(shareLink, guestList.Count, emailed, heldBack,
+            allowance with { Used = allowance.Used + (allowance.Left - left) });
     }
 
     public async Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default)
@@ -634,7 +655,8 @@ public sealed class CampaignService(
             price,
             template?.Visibility == TemplateVisibility.Imported,
             campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
-            inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization);
+            inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization,
+            await allowances.ForCampaignAsync(id, ct));
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -738,7 +760,7 @@ public sealed class CampaignService(
                     CampaignAccess.Manager => "manager",
                     _ => "organiser",
                 }),
-            report, guestRows, questions);
+            report, guestRows, questions, await allowances.ForCampaignAsync(campaign.Id, ct));
     }
 
     /// <summary>

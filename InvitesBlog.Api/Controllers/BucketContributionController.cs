@@ -70,6 +70,9 @@ public sealed class BucketContributionController(
             branded = admission.Branded,
             venueName = admission.VenueName,
             venueLogoUrl = admission.VenueLogoUrl,
+            // When adding opens and closes, so the page can say so rather than guess from the date.
+            opensAt = admission.OpensAt,
+            closesAt = admission.ClosesAt,
         });
     }
 
@@ -211,7 +214,7 @@ public sealed class BucketContributionController(
 
         if (!admission.CanUpload)
             return BadRequest(ApiResponse<object?>.Fail(
-                admission.IsOpen ? "This bucket is full." : "This one isn't open."));
+                admission.IsOpen ? "This album is full." : "This one isn't open."));
 
         if (file is null || file.Length == 0)
             return BadRequest(ApiResponse<object?>.Fail("Pick a photo or a video."));

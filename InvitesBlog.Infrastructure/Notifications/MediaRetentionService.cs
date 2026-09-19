@@ -198,8 +198,8 @@ public sealed class MediaRetentionService(
 
         var (subject, lines) = stage switch
         {
-            1 => ($"The photos from {campaign.Title}: the plan has ended",
-                $"The plan for <strong>{title}</strong> has ended, so guests can't add anything new. " +
+            1 => ($"The photos from {campaign.Title}: guests can no longer add to them",
+                $"Guests can no longer add photos to <strong>{title}</strong>. " +
                 $"Guests can still look at the photos until {organiserOnly}. After that only you can, " +
                 $"and the photos are removed on {deleteOn}. Download everything now, or keep them online for another year " +
                 $"(MVR {PlanCatalog.KeepPhotosYearly:0} a year)."),

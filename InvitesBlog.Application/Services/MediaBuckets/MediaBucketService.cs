@@ -93,6 +93,16 @@ public interface IMediaBucketService
     /// </summary>
     Task<MediaBucketDto> SetWindowAsync(Guid bucketId, SetBucketWindowRequest req, CancellationToken ct = default);
 
+    /// <summary>
+    /// Brings every album on an event up to the days its plan now allows — called when a pass is
+    /// given, so a Wedding pass means five days without the host changing anything. Never shortens
+    /// one: a window already given is kept.
+    /// </summary>
+    Task RaiseWindowsToPlanAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>What all of an event's albums hold together.</summary>
+    Task<long> EventUsedBytesAsync(Guid campaignId, CancellationToken ct = default);
+
     /// <summary>The space a venue's events share, for the venue's owner and staff. Empty for everyone else.</summary>
     Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default);
     /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
@@ -225,7 +235,8 @@ public sealed record GuestBucketView(IReadOnlySet<Guid> BucketIds, bool SeesUnbu
 /// <param name="VenueName">The venue the event is at, whose name and logo the page carries.</param>
 public sealed record MediaBucketQrAdmission(
     Guid QrId, Guid BucketId, string BucketTitle, bool AllowAnonymous, bool CanUpload,
-    bool IsOpen, DateTimeOffset EventDate, bool Branded = true, string? VenueName = null, string? VenueLogoUrl = null);
+    bool IsOpen, DateTimeOffset EventDate, bool Branded = true, string? VenueName = null, string? VenueLogoUrl = null,
+    DateTimeOffset? OpensAt = null, DateTimeOffset? ClosesAt = null);
 
 /// <inheritdoc cref="IMediaBucketService"/>
 public sealed class MediaBucketService(
@@ -269,10 +280,10 @@ public sealed class MediaBucketService(
     public async Task<MediaBucketDto> ViewAsync(Guid bucketId, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
-                     ?? throw new NotFoundException("That media bucket no longer exists.");
+                     ?? throw new NotFoundException("That album no longer exists.");
 
         if (!await MayViewAsync(bucketId, ct))
-            throw new ForbiddenException("This bucket belongs to an event you're not on.");
+            throw new ForbiddenException("This album belongs to an event you're not on.");
 
         return (await DescribeAsync([bucket], ct))[0];
     }
@@ -430,7 +441,7 @@ public sealed class MediaBucketService(
             // And a ceiling above that, which no plan lifts. See MediaBucket.MaxPerCampaign.
             if (already >= MediaBucket.MaxPerCampaign)
                 throw new BusinessRuleException(
-                    $"An event can hold {MediaBucket.MaxPerCampaign} media buckets at most. Remove "
+                    $"An event can hold {MediaBucket.MaxPerCampaign} albums at most. Remove "
                     + "one, or give the extra night an event of its own.",
                     "bucket_limit_reached");
         }
@@ -458,7 +469,8 @@ public sealed class MediaBucketService(
         // here and FROZEN onto the row, so a pass running out later cannot shut a bucket
         // somebody has already printed codes for — see MediaBucket.UploadWindowDays.
         var eventPlan = await plans.ForCampaignAsync(eventId, ct);
-        var windowDays = WindowFor(req.WindowDays, eventPlan.MaxWindowDays);
+        // Not asked: the most the plan allows, which is what a pass was bought for.
+        var windowDays = WindowFor(req.WindowDays ?? eventPlan.MaxWindowDays, eventPlan.MaxWindowDays);
 
         var target = await campaigns.GetByIdAsync(eventId, ct)
                      ?? throw new NotFoundException("That event no longer exists.");
@@ -665,7 +677,7 @@ public sealed class MediaBucketService(
         var most = Math.Min(EventDayWindow.MaxWindowDays, Math.Max(plan.MaxWindowDays, bucket.UploadWindowDays));
 
         if (req.Days < 1)
-            throw new BusinessRuleException("A bucket collects for at least the one night.", "window_invalid");
+            throw new BusinessRuleException("An album collects for at least the one night.", "window_invalid");
         if (req.Days > most)
             throw new BusinessRuleException(
                 most <= 1
@@ -680,6 +692,26 @@ public sealed class MediaBucketService(
         return (await DescribeAsync([bucket], ct))[0];
     }
 
+    public async Task RaiseWindowsToPlanAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var most = (await plans.ForCampaignAsync(campaignId, ct)).MaxWindowDays;
+        var rows = await buckets.Query(tracking: true)
+            .Where(b => b.CampaignId == campaignId && b.UploadWindowDays < most)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var b in rows)
+        {
+            b.UploadWindowDays = most;
+            b.UpdatedAt = now;
+            buckets.Update(b);
+        }
+        await uow.SaveChangesAsync(ct);
+    }
+
+    public Task<long> EventUsedBytesAsync(Guid campaignId, CancellationToken ct = default) =>
+        buckets.Query().Where(b => b.CampaignId == campaignId).SumAsync(b => b.UsedBytes, ct);
+
     public async Task<int> WindowForCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
         var days = await buckets.Query()
@@ -687,7 +719,8 @@ public sealed class MediaBucketService(
             .OrderBy(b => b.CreatedAt).ThenBy(b => b.Id)
             .Select(b => (int?)b.UploadWindowDays)
             .FirstOrDefaultAsync(ct);
-        return days ?? 1;
+        // No album yet: the one made on the first upload takes the plan's days, so answer with those.
+        return days ?? (await PlanOrNullAsync(campaignId, ct))?.MaxWindowDays ?? 1;
     }
 
     public async Task<MediaBucket> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
@@ -714,9 +747,11 @@ public sealed class MediaBucketService(
         //
         // It can still legitimately be nobody: a campaign booked with a possession link and never
         // claimed has no account behind it, and an empty owner is correct there rather than an error.
+        // As many days as the event's plan gives: one on Free, more with a pass or at a venue.
         var bucket = NewBucket(
             campaign.CreatedByUserId ?? currentUser.UserId ?? Guid.Empty,
-            campaignId, campaign.EventStartAt);
+            campaignId, campaign.EventStartAt,
+            WindowFor((await plans.ForCampaignAsync(campaignId, ct)).MaxWindowDays, EventDayWindow.MaxWindowDays));
 
         await buckets.AddAsync(bucket, ct);
 
@@ -806,7 +841,7 @@ public sealed class MediaBucketService(
     public async Task EnsureRoomAsync(Guid bucketId, long incomingBytes, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
-                     ?? throw new NotFoundException("That media bucket no longer exists.");
+                     ?? throw new NotFoundException("That album no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
         // Space is per EVENT, shared by all of its albums. Summed fresh rather than read off the
@@ -819,7 +854,9 @@ public sealed class MediaBucketService(
             throw new BusinessRuleException(
                 plan.Kind is PlanKind.WeddingPass or PlanKind.Venue
                     ? $"This event's {Size(plan.EventBytes)} is full."
-                    : $"This event's {Size(plan.EventBytes)} is full. A pass gives it more room.",
+                    : plan.Kind == PlanKind.PartyPass
+                        ? $"This event's {Size(plan.EventBytes)} is full. A Wedding pass gives it more room."
+                        : $"This event's {Size(plan.EventBytes)} is full. A Party or Wedding pass gives it more room.",
                 "bucket_full");
 
         // And a venue's limit across all of its events.
@@ -833,7 +870,7 @@ public sealed class MediaBucketService(
     public async Task ReserveRoomAsync(Guid bucketId, long bytes, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
-                     ?? throw new NotFoundException("That media bucket no longer exists.");
+                     ?? throw new NotFoundException("That album no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
         // The lock is on whatever the check sums across. A venue's limit spans all of its events, so
@@ -901,7 +938,7 @@ public sealed class MediaBucketService(
     public async Task EnsureOpenAsync(Guid bucketId, CancellationToken ct = default)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct)
-                     ?? throw new NotFoundException("That media bucket no longer exists.");
+                     ?? throw new NotFoundException("That album no longer exists.");
 
         if ((await plans.ForCampaignAsync(bucket.CampaignId, ct)).Phase != MediaPhase.Active)
             throw new BusinessRuleException(
@@ -919,7 +956,7 @@ public sealed class MediaBucketService(
         // somebody standing at the party a day early and somebody looking a week later.
         throw new BusinessRuleException(
             DateTimeOffset.UtcNow < night
-                ? "This one isn't open yet — it opens on the day."
+                ? "This one isn't open yet — it opens the day before the event."
                 : "This one has closed. Everything already added is still here.",
             "bucket_closed");
     }
@@ -1036,12 +1073,13 @@ public sealed class MediaBucketService(
 
         // The name a scanner is shown is the EVENT's — the bucket has none of its own. This is what
         // somebody standing at a party reads to know they are adding to the right night.
-        var title = campaign?.Title ?? "Media bucket";
+        var title = campaign?.Title ?? "Album";
 
         var venue = plan?.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
+        var (opensAt, closesAt) = EventDayWindow.Bounds(night, bucket.UploadWindowDays);
         return new MediaBucketQrAdmission(
             code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night,
-            plan?.Branded ?? true, venue?.Name, venue?.LogoUrl);
+            plan?.Branded ?? true, venue?.Name, venue?.LogoUrl, opensAt, closesAt);
     }
 
     public async Task<MediaBucket?> GetBucketForContributionAsync(
@@ -1105,16 +1143,16 @@ public sealed class MediaBucketService(
             ? await buckets.Query(tracking: true).FirstOrDefaultAsync(b => b.Id == bucketId, ct)
             : await buckets.GetByIdAsync(bucketId, ct);
 
-        if (bucket is null) throw new NotFoundException("That media bucket no longer exists.");
+        if (bucket is null) throw new NotFoundException("That album no longer exists.");
 
         if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return bucket;
         if (await ownership.OwnsAsync(bucket.CampaignId, ct)) return bucket;
 
-        throw new ForbiddenException("That media bucket isn't yours.");
+        throw new ForbiddenException("That album isn't yours.");
     }
 
     private Guid RequireUser() =>
-        currentUser.UserId ?? throw new ForbiddenException("Sign in to manage media buckets.");
+        currentUser.UserId ?? throw new ForbiddenException("Sign in to manage albums.");
 
     private async Task<IReadOnlyList<MediaBucketDto>> DescribeAsync(
         IReadOnlyList<MediaBucket> rows, CancellationToken ct)
@@ -1236,7 +1274,7 @@ public sealed class MediaBucketService(
     /// back to something sayable rather than to an empty string in the middle of somebody's list.
     /// </summary>
     private static string Title(MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>
-        events.TryGetValue(bucket.CampaignId, out var face) ? face.Title : "Media bucket";
+        events.TryGetValue(bucket.CampaignId, out var face) ? face.Title : "Album";
 
     /// <summary>The event's cover, read from where the host's own choice is kept.</summary>
     private static string? Cover(MediaBucket bucket, IReadOnlyDictionary<Guid, EventFace> events) =>

@@ -3,6 +3,8 @@ using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Designers;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Filters.Designers;
+using InvitesBlog.Application.Plans;
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +16,7 @@ public sealed class DesignerAdminService(
     IRepository<AppUser> users,
     IRepository<UserExternalLogin> externalLogins,
     ITemplateRepository templates,
+    IRepository<PassCredit> credits,
     IUnitOfWork uow) : IDesignerAdminService
 {
     public async Task<PagedResult<DesignerAdminDto>> ListAsync(
@@ -44,11 +47,31 @@ public sealed class DesignerAdminService(
             .GroupBy(l => l.UserId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(l => l.Provider).OrderBy(p => p).ToList());
 
+        // Their clients: templates published for one person.
+        var forClients = await templates.Query()
+            .Where(t => t.DesignerUserId != null && ids.Contains(t.DesignerUserId!.Value) && t.AssignedEmail != null)
+            .GroupBy(t => t.DesignerUserId!.Value)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        var held = (await credits.Query()
+                .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
+                .Select(c => new { c.OwnerUserId, c.Kind })
+                .ToListAsync(ct))
+            .GroupBy(c => c.OwnerUserId)
+            .ToDictionary(g => g.Key, g => (Party: g.Count(c => c.Kind == EventPassKind.Party), Wedding: g.Count(c => c.Kind == EventPassKind.Wedding)));
+        var now = DateTimeOffset.UtcNow;
+
         var items = page.Select(u => new DesignerAdminDto(
             u.Id, u.Email, u.DisplayName, u.IsActive,
             providers.GetValueOrDefault(u.Id, []),
             published.GetValueOrDefault(u.Id),
-            u.CreatedAt)).ToList();
+            u.CreatedAt,
+            u.SubscriptionTier == SubscriptionTier.Studio && PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now),
+            u.SubscriptionTier == SubscriptionTier.Studio ? u.SubscriptionEndsAt : null,
+            held.GetValueOrDefault(u.Id).Party + held.GetValueOrDefault(u.Id).Wedding,
+            forClients.GetValueOrDefault(u.Id),
+            held.GetValueOrDefault(u.Id).Party,
+            held.GetValueOrDefault(u.Id).Wedding)).ToList();
 
         return PagedResult<DesignerAdminDto>.Create(items, total, filter);
     }

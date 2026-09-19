@@ -71,8 +71,9 @@ public class DispatchServiceTests
         return (db, campaign.Id, template.Id);
     }
 
-    private static DispatchService Sut(AppDbContext db, IInviteDeliveryProvider provider) =>
-        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance);
+    private static DispatchService Sut(AppDbContext db, IInviteDeliveryProvider provider,
+        InvitesBlog.Application.Plans.ISendingAllowanceService? allowance = null) =>
+        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance, allowance ?? TestData.Allowance());
 
     [Fact]
     public async Task A_delivered_invitation_spends_the_dedicated_template()
@@ -122,5 +123,37 @@ public class DispatchServiceTests
 
         var after = await db.Templates.FirstAsync(t => t.Id == templateId);
         Assert.False(after.IsUsed);
+    }
+
+    // ---------- emailed invitations are counted per guest ----------
+
+    [Fact]
+    public async Task A_new_guest_past_the_events_emailed_invitations_is_held_back_and_told_why()
+    {
+        var (db, campaignId, _) = await SeedAsync();
+        var provider = EmailProvider(succeeds: true);
+
+        await Sut(db, provider, TestData.Allowance(left: 0)).DispatchCampaignAsync(campaignId);
+
+        await provider.DidNotReceive().SendAsync(Arg.Any<InviteDeliveryMessage>(), Arg.Any<CancellationToken>());
+        var attempt = await db.DeliveryAttempts.SingleAsync();
+        Assert.Equal(DeliveryStatus.Skipped, attempt.Status);
+        Assert.Equal(DispatchService.OverLimitMessage, attempt.ErrorMessage);
+        Assert.Null((await db.Invites.SingleAsync()).FirstEmailedAt);
+    }
+
+    [Fact]
+    public async Task Emailing_a_guest_records_the_first_time_and_a_resend_to_them_is_free()
+    {
+        var (db, campaignId, _) = await SeedAsync();
+        var provider = EmailProvider(succeeds: true);
+
+        await Sut(db, provider, TestData.Allowance(left: 1)).DispatchCampaignAsync(campaignId);
+        var invite = await db.Invites.SingleAsync();
+        Assert.NotNull(invite.FirstEmailedAt);
+
+        // Now the event has nothing left, but this guest was already emailed: the resend goes out.
+        Assert.True(await Sut(db, provider, TestData.Allowance(left: 0)).ResendAsync(invite.GuestId));
+        await provider.Received(2).SendAsync(Arg.Any<InviteDeliveryMessage>(), Arg.Any<CancellationToken>());
     }
 }

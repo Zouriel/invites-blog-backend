@@ -26,8 +26,8 @@ RSVPs land live on the host's dashboard. A guest who would rather use an account
 email code, Google or Microsoft, and find every invitation ever sent to their address — including
 ones sent before they signed up.
 
-**Media buckets.** The place a night's photographs and clips end up — and a product of its own,
-sized by the event's plan. Guests open a camera from their invitation — front and rear, colour grades, tap to
+**Media buckets** ("albums" on the pricing page). The place an event's photographs and clips end
+up, sized by the event's plan. Guests open a camera from their invitation — front and rear, colour grades, tap to
 focus, an exposure bias for a dark room — and every shot queues to a store that survives a locked
 phone or a dead connection. Photos and **video** both, from the camera or straight off a camera roll.
 Nothing is capped per file: the shot as taken is kept, alongside a screen-sized copy and a grid tile.
@@ -35,15 +35,16 @@ Adding is deliberately wider than looking — anyone at the party can contribute
 who comes to one is on a list, while the grid itself is for the people who were invited. The host
 moderates.
 
-A bucket owns a **size** and a **term** and nothing else: its name, its cover, its date and its guest
-list are the event's, shared with the invitation. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
+A bucket owns its **window** and its **audience** and little else: its cover, its date and its
+guest list are the event's, shared with the invitation, and its space is the event's plan's. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
 (`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or a venue's plan
 for events held there. Studio (designers and planners) and Venue (resorts and halls) are the only
 subscriptions; hosts pay per event. Prices are in rufiyaa.
 
-A bucket is an occasion rather than a drive, so it only **takes** anything on its night: open from
-the start of that day in Malé until 24 hours after the event begins. That is the same window that
+A bucket is an occasion rather than a drive, so it only **takes** anything around its event: open
+from the start of the day before (Malé time) until the day after ends — or, with a pass, until 3 or
+5 days after the event starts. That is the same window that
 decides whether a guest is offered the camera on their invitation — one definition, in
 `EventDayWindow`, because answered separately they drift and what that looks like is a camera leading
 to a bucket that refuses every photo taken with it. Looking is never gated; the point of the thing is
@@ -191,7 +192,7 @@ dotnet test          # 883 tests
 - **Media buckets as a product** — `MediaBucket` owns the storage and only the storage: a size
   within what the event's plan allows (`PlanCatalog`), and a quota enforced before a single object
   is written. Its name, cover, date and guest list are the campaign's, because every bucket has one —
-  a bucket bought on its own is a campaign with no invitation, not a loose object.
+  a bucket made on its own is a campaign with no invitation, not a loose object.
 - **QR contribution codes** — `MediaBucketQr`: a printed code that authorizes adding to one bucket
   and nothing else. The token is stored as a SHA-256 hash and the rendered PNG alongside it, so the
   dashboard can always show the code without the database ever holding a working one. Each code

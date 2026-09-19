@@ -51,7 +51,9 @@ public sealed record CampaignSummaryDto(
     string? InviterName = null,
     string? InviterEmail = null,
     string? InviterPhone = null,
-    string? InviterOrganization = null);
+    string? InviterOrganization = null,
+    /// <summary>What invites.blog may still email for this event. Sharing links is always free.</summary>
+    InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
@@ -89,7 +91,10 @@ public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, strin
 public sealed record DeleteCampaignResponse(bool Deleted);
 
 /// <summary>Result of finalizing a campaign: the shareable link + how many guests were emailed it.</summary>
-public sealed record FinalizeResponse(string ShareLink, int GuestCount, int Emailed);
+/// <param name="NotEmailed">Guests not emailed because the event's emailed invitations were used up.</param>
+/// <param name="Sending">What the event may email, after this send.</param>
+public sealed record FinalizeResponse(
+    string ShareLink, int GuestCount, int Emailed, int NotEmailed = 0, InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);
 
 // ----- Dashboard (§4.7.4 / §13.3) -----
 
@@ -168,4 +173,6 @@ public sealed record DashboardResponse(
     DashboardReportDto Report,
     IReadOnlyList<DashboardGuestDto> Guests,
     /// <summary>What was asked, so the table can put answers under the right headings.</summary>
-    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null);
+    IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null,
+    /// <summary>What invites.blog may still email for this event. Sharing links is always free.</summary>
+    InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);

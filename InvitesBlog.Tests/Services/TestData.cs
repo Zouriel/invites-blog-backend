@@ -21,6 +21,15 @@ internal static class TestData
         new(kind, eventBytes, accountBytes, maxBuckets, maxWindowDays, 0, privateAlbums,
             kind == InvitesBlog.Application.Plans.PlanKind.Free, null, phase, owner, venueId);
 
+    /// <summary>An event that may email <paramref name="left"/> more guests (plenty, by default).</summary>
+    public static InvitesBlog.Application.Plans.ISendingAllowanceService Allowance(int left = 100_000, int used = 0)
+    {
+        var s = Substitute.For<InvitesBlog.Application.Plans.ISendingAllowanceService>();
+        s.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new InvitesBlog.Application.Plans.SendingAllowanceDto(left + used, 0, used));
+        return s;
+    }
+
     /// <summary>A plan service that answers every event with <see cref="Plan"/>.</summary>
     public static InvitesBlog.Application.Plans.IPlanService FreePlans()
     {
@@ -118,7 +127,7 @@ internal static class TestData
         Kind = kind,
         InviteCount = inviteCount,
         Amount = amount,
-        Currency = "USD",
+        Currency = "MVR",
         Status = status,
         Provider = "Fake",
         ProviderSessionId = sessionId,

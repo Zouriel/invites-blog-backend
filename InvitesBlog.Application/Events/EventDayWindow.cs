@@ -71,14 +71,22 @@ public static class EventDayWindow
         if (eventStartAt < DateTimeOffset.MinValue + guard || eventStartAt > DateTimeOffset.MaxValue - guard)
             return false;
 
+        var (opens, closes) = Bounds(eventStartAt, windowDays);
+        return now >= opens && now < closes;
+    }
+
+    /// <summary>
+    /// When the window opens and closes, for pages that say so. The same arithmetic as
+    /// <see cref="IsOpen"/>; callers pass a real event date (IsOpen guards the extremes).
+    /// </summary>
+    public static (DateTimeOffset Opens, DateTimeOffset Closes) Bounds(DateTimeOffset eventStartAt, int windowDays = 1)
+    {
         var days = Math.Clamp(windowDays, 1, MaxWindowDays);
         var eventDay = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
 
         var opens = eventDay.AddDays(-DaysBefore);
         var dayAfterEnds = eventDay.AddDays(DaysAfter + 1);
         var longWindowEnds = eventStartAt + ClosesAfter * days;
-        var closes = dayAfterEnds > longWindowEnds ? dayAfterEnds : longWindowEnds;
-
-        return now >= opens && now < closes;
+        return (opens, dayAfterEnds > longWindowEnds ? dayAfterEnds : longWindowEnds);
     }
 }

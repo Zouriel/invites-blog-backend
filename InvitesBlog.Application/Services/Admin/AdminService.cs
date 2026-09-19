@@ -30,7 +30,10 @@ public sealed class AdminService(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     ICampaignRepository campaigns,
-    IRepository<PassCredit> credits) : IAdminService
+    IRepository<PassCredit> credits,
+    MediaBuckets.IMediaBucketService buckets,
+    IPlanService plans,
+    ISendingAllowanceService allowances) : IAdminService
 {
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
@@ -46,6 +49,19 @@ public sealed class AdminService(
                 u.DisplayName.ToLower().Contains(term));
         }
 
+        switch (filter.Plan?.Trim().ToLowerInvariant())
+        {
+            case "studio":
+                query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Studio);
+                break;
+            case "venue":
+                query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Venue);
+                break;
+            case "passes":
+                query = query.Where(u => credits.Query().Any(c => c.OwnerUserId == u.Id && c.UsedOnCampaignId == null));
+                break;
+        }
+
         var total = await query.CountAsync(ct);
         var page = await query
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
@@ -54,11 +70,12 @@ public sealed class AdminService(
             .ToListAsync(ct);
 
         var ids = page.Select(u => u.Id).ToList();
-        var held = await credits.Query()
-            .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
+        var held = (await credits.Query()
+                .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
+                .Select(c => new { c.OwnerUserId, c.Kind })
+                .ToListAsync(ct))
             .GroupBy(c => c.OwnerUserId)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+            .ToDictionary(g => g.Key, g => (g.Count(c => c.Kind == EventPassKind.Party), g.Count(c => c.Kind == EventPassKind.Wedding)));
         var items = page.Select(u => Describe(u, held.GetValueOrDefault(u.Id))).ToList();
 
         return PagedResult<AdminUserDto>.Create(items, total, filter);
@@ -199,16 +216,19 @@ public sealed class AdminService(
         return Describe(user, await UnusedCreditsAsync(user.Id, ct));
     }
 
-    private AdminUserDto Describe(AppUser u, int unusedCredits) => new(
+    private AdminUserDto Describe(AppUser u, (int Party, int Wedding) held) => new(
         u.Id, u.Email, u.DisplayName, u.IsActive,
         u.UserRoles.Select(ur => ur.Role?.Name).OfType<string>().OrderBy(n => n).ToList(),
         u.SubscriptionTier.ToString(),
         u.SubscriptionEndsAt,
         PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow),
-        unusedCredits);
+        held.Party + held.Wedding,
+        held.Party,
+        held.Wedding);
 
-    private Task<int> UnusedCreditsAsync(Guid userId, CancellationToken ct) =>
-        credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null, ct);
+    private async Task<(int Party, int Wedding)> UnusedCreditsAsync(Guid userId, CancellationToken ct) => (
+        await credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null && c.Kind == EventPassKind.Party, ct),
+        await credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null && c.Kind == EventPassKind.Wedding, ct));
 
     /// <summary>
     /// Sets an account's professional plan by hand, until billing exists: Studio for designers and
@@ -233,6 +253,11 @@ public sealed class AdminService(
             ?? throw new NotFoundException("That account no longer exists.");
 
         var wasActive = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+        // One end date serves both plans, and a venue's events count their lapse from it; switching
+        // straight across would overwrite the date the venue's photos are being kept by.
+        if (wasActive && tier != SubscriptionTier.None && user.SubscriptionTier != tier)
+            throw new BusinessRuleException(
+                $"End their {user.SubscriptionTier} plan first (choose None), then give them {tier}.", "tier_switch");
         if (tier == SubscriptionTier.None)
         {
             if (wasActive) user.SubscriptionEndsAt = now;
@@ -309,16 +334,49 @@ public sealed class AdminService(
             .Where(c => c.CreatedByUserId == userId)
             .OrderByDescending(c => c.EventStartAt)
             .ToListAsync(ct);
-        return rows.Select(DescribeEvent).ToList();
+        var list = new List<AdminUserEventDto>();
+        foreach (var c in rows) list.Add(await DescribeEventAsync(c, ct));
+        return list;
     }
 
-    private static AdminUserEventDto DescribeEvent(Campaign c)
+    private async Task<AdminUserEventDto> DescribeEventAsync(Campaign c, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
+        var plan = await plans.ForCampaignAsync(c.Id, ct);
         return new AdminUserEventDto(
             c.Id, c.Title, c.EventStartAt, c.EventPass.ToString(), c.EventPassUntil,
             c.EventPass != EventPassKind.None && c.EventPassUntil is { } until && until > now,
-            c.KeepPhotosUntil);
+            c.KeepPhotosUntil,
+            plan.Kind.ToString(), plan.CoveredUntil, plan.Phase.ToString(),
+            await allowances.ForCampaignAsync(c.Id, ct));
+    }
+
+    /// <summary>
+    /// Adds emailed invitations to an event on top of what its pass includes (a negative number takes
+    /// unused ones back), until they can be bought online.
+    /// </summary>
+    public async Task<AdminUserEventDto> AddSendingAsync(Guid campaignId, AddSendingRequest req, CancellationToken ct = default)
+    {
+        if (req.Invitations is 0 or > 10000 or < -10000)
+            throw new BusinessRuleException("Choose between 1 and 10,000 invitations.", "sending_count_invalid");
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        campaign.PaidInviteCapacity = Math.Max(0, campaign.PaidInviteCapacity + req.Invitations);
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await auditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "admin.sending.add",
+            Actor = currentUser.UserId?.ToString() ?? "admin",
+            CampaignId = campaign.Id,
+            DataJson = JsonSerializer.Serialize(new { added = req.Invitations, extra = campaign.PaidInviteCapacity }),
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, ct);
+
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+        return await DescribeEventAsync(campaign, ct);
     }
 
     /// <summary>
@@ -349,7 +407,8 @@ public sealed class AdminService(
 
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
-        return DescribeEvent(campaign);
+        if (kind != EventPassKind.None) await buckets.RaiseWindowsToPlanAsync(campaign.Id, ct);
+        return await DescribeEventAsync(campaign, ct);
     }
 
     /// <summary>
@@ -368,11 +427,10 @@ public sealed class AdminService(
         if (req.Years == 0) campaign.KeepPhotosUntil = null;
         else
         {
-            var from = new[]
-            {
-                campaign.KeepPhotosUntil, campaign.EventPassUntil,
-                campaign.EventStartAt.AddDays(PlanCatalog.FreeCoverDays), now,
-            }.Max()!.Value;
+            // A year more from whenever the photos would otherwise start to lapse — every cover counts
+            // (a pass, one already kept, a venue that has ended, what older events were promised).
+            var cover = (await plans.ForCampaignAsync(campaign.Id, ct)).CoveredUntil ?? now;
+            var from = cover > now ? cover : now;
             campaign.KeepPhotosUntil = from.AddMonths(PlanCatalog.KeepPhotosMonths * req.Years);
         }
 
@@ -388,6 +446,6 @@ public sealed class AdminService(
 
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
-        return DescribeEvent(campaign);
+        return await DescribeEventAsync(campaign, ct);
     }
 }

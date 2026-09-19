@@ -34,7 +34,7 @@ public class StudioServiceTests
     private StudioService Sut() => new(
         _currentUser, _plans, _campaigns, _templates, _inviters,
         TestData.Empty<Guest>(), TestData.Empty<Invite>(), _creditRepo, TestData.Empty<AuditLog>(),
-        Substitute.For<IUnitOfWork>());
+        Substitute.For<IUnitOfWork>(), Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>());
 
     private Campaign Mine()
     {

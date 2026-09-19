@@ -46,7 +46,8 @@ public sealed class StudioService(
     IRepository<Invite> invites,
     IRepository<PassCredit> credits,
     IRepository<AuditLog> auditLogs,
-    IUnitOfWork uow) : IStudioService
+    IUnitOfWork uow,
+    MediaBuckets.IMediaBucketService buckets) : IStudioService
 {
     public async Task<StudioOverviewDto> OverviewAsync(CancellationToken ct = default)
     {
@@ -103,6 +104,7 @@ public sealed class StudioService(
             CreatedAt = now,
         }, ct);
         await uow.SaveChangesAsync(ct);
+        await buckets.RaiseWindowsToPlanAsync(tracked.Id, ct);
 
         return (await DescribeAsync(me, [tracked], ct))[0];
     }

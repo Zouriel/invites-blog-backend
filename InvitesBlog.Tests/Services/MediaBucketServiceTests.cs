@@ -180,7 +180,7 @@ public class MediaBucketServiceTests
 
         var e = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().EnsureRoomAsync(bucket.Id, 1024));
-        Assert.Contains("A pass gives it more room", e.Message);
+        Assert.Contains("A Party or Wedding pass gives it more room", e.Message);
     }
 
     [Fact]
@@ -1072,6 +1072,23 @@ public class MediaBucketServiceTests
 
         await Assert.ThrowsAsync<ForbiddenException>(
             () => Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: false)));
+    }
+
+    // ---------- a pass lengthens the albums it covers ----------
+
+    [Fact]
+    public async Task Giving_a_pass_stretches_an_events_albums_to_its_days_and_never_shortens_one()
+    {
+        var one = Mine(); one.UploadWindowDays = 1;
+        var longer = Mine(); longer.CampaignId = one.CampaignId; longer.UploadWindowDays = 5;
+        _buckets.Query(Arg.Any<bool>()).Returns(new[] { one, longer }.AsAsyncQueryable());
+        _plans.ForCampaignAsync(one.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(kind: PlanKind.PartyPass, maxBuckets: 2, maxWindowDays: 3));
+
+        await Sut().RaiseWindowsToPlanAsync(one.CampaignId);
+
+        Assert.Equal(3, one.UploadWindowDays);
+        Assert.Equal(5, longer.UploadWindowDays);
     }
 
     // ---------- a venue's space, and private albums ----------

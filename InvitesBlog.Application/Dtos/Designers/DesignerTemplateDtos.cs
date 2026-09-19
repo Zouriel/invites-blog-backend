@@ -9,7 +9,17 @@ public sealed record DesignerAdminDto(
     bool IsActive,
     IReadOnlyList<string> LinkedProviders,
     int PublishedTemplates,
-    DateTimeOffset JoinedAt);
+    DateTimeOffset JoinedAt,
+    /// <summary>Whether their Studio plan is in force, and when it ends (null: no end, or never had one).</summary>
+    bool StudioActive = false,
+    DateTimeOffset? StudioEndsAt = null,
+    /// <summary>Passes they hold and haven't given to a client yet.</summary>
+    int PassCredits = 0,
+    /// <summary>Templates they published FOR someone: their clients.</summary>
+    int ClientTemplates = 0,
+    /// <summary>The passes they hold, by kind.</summary>
+    int PartyCredits = 0,
+    int WeddingCredits = 0);
 
 /// <summary>One row of the templates table.</summary>
 public sealed record MyTemplateRowDto(

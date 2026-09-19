@@ -61,16 +61,6 @@ public sealed class MediaBucketsController(
         [FromBody] CreateMediaBucketRequest req, CancellationToken ct) =>
         Created(await buckets.CreateAsync(req, ct));
 
-    /// <summary>
-    /// Moves the bucket onto a size. <b>There is no payment behind this yet</b> — it grants the space
-    /// outright. When checkout arrives it calls this, after it is paid, rather than replacing it.
-    /// </summary>
-    /// <summary>
-    /// Renames a bucket — its own name, not the event's.
-    ///
-    /// <para>PUT because it states the name it should have afterwards, and refused for anyone
-    /// without the right to keep more than one: that is the only situation a name is needed in.</para>
-    /// </summary>
     /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
     [HttpGet("{bucketId:guid}/access")]
     [HasPermission(Permissions.Buckets.Manage)]
@@ -105,6 +95,10 @@ public sealed class MediaBucketsController(
         Guid bucketId, [FromBody] SetBucketWindowRequest req, CancellationToken ct) =>
         Success(await buckets.SetWindowAsync(bucketId, req, ct));
 
+    /// <summary>
+    /// Renames a bucket — its own name, not the event's. Refused on an event whose plan allows only
+    /// one: that is the only situation a name isn't needed in.
+    /// </summary>
     [HttpPut("{bucketId:guid}/name")]
     [HasPermission(Permissions.Buckets.Manage)]
     public async Task<IActionResult> Rename(
@@ -115,7 +109,7 @@ public sealed class MediaBucketsController(
 
     /// <summary>
     /// The bucket's contents. Reached by BUCKET rather than by campaign, which is the only way a
-    /// standalone one can be opened at all — otherwise somebody could buy a bucket with no event
+    /// standalone one can be opened at all — otherwise somebody could make a bucket with no event
     /// behind it and have no way to look inside it.
     /// </summary>
     [HttpGet("{bucketId:guid}/media")]

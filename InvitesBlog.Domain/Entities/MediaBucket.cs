@@ -3,12 +3,14 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Domain.Entities;
 
 /// <summary>
-/// A media bucket — the place a night's photographs and clips are kept, and a product in its own
-/// right.
+/// A media bucket (an "album" on the pricing page) — the place an event's photographs and clips are
+/// kept.
 ///
 /// <para><b>Why this is a row and not a column on <see cref="Campaign"/>.</b> It began as a column:
-/// every campaign implicitly owned a photo box, unbounded and free. That shape cannot be sold. What
-/// is sold is a SIZE and a TERM, and those are what this row holds.</para>
+/// every campaign implicitly owned a photo box, unbounded and free. An event may now have several —
+/// the nikah, the reception, the after-party — each with its own window and audience. How much they
+/// hold together and how long they are kept is the EVENT's plan (Free, a pass, or a venue's), not the
+/// bucket's.</para>
 ///
 /// <para><b>It holds nothing else.</b> No name, no cover, and no list of who may see it — the
 /// campaign owns all three, and a bucket carrying its own copies would be a second answer to
@@ -23,7 +25,7 @@ public sealed class MediaBucket
     /// <summary>
     /// The account that owns it — who may rename it, change its cover, hand out a QR, and moderate
     /// what lands in it. Not the campaign's inviter: an <see cref="Inviter"/> is who is HOSTING and
-    /// is a detail of one event, while a bucket outlives the event and is bought by an account.
+    /// is a detail of one event, while a bucket belongs to the account that runs the event.
     /// </summary>
     public Guid OwnerUserId { get; set; }
 

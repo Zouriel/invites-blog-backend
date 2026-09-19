@@ -6,6 +6,9 @@ namespace InvitesBlog.Application.Filters.Admin;
 public sealed class AdminUserFilter : PaginationRequest
 {
     public bool? IsActive { get; set; }
+
+    /// <summary>"Studio" or "Venue" for accounts on that plan (ended or not), "Passes" for Studio passes still held.</summary>
+    public string? Plan { get; set; }
 }
 
 /// <summary>Query filter for the suppression list, optionally scoped to a contact type.</summary>

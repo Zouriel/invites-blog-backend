@@ -1,6 +1,7 @@
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Delivery;
+using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -21,8 +22,13 @@ public sealed class DispatchService(
     AppDbContext db,
     IEnumerable<IInviteDeliveryProvider> providers,
     IConfiguration config,
-    ILogger<DispatchService> logger)
+    ILogger<DispatchService> logger,
+    ISendingAllowanceService allowances)
 {
+    /// <summary>What the dashboard shows beside a guest held back by the event's emailed-invitation limit.</summary>
+    public const string OverLimitMessage =
+        "Not sent: this event's emailed invitations are used up. Share their link, or ask us to add more.";
+
 
     public async Task DispatchCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
@@ -125,10 +131,32 @@ public sealed class DispatchService(
         }
         invite.TokenHash = TokenService.Hash(rawToken);
 
+        // Emailing is counted per guest, once (SendingAllowanceService): a guest already emailed is
+        // re-sent for free; a new one past what the event includes is held back, and says so.
+        var emailsThem = settings.Uses("email") && !string.IsNullOrWhiteSpace(guest.Email);
+        var firstTime = emailsThem && invite.FirstEmailedAt is null;
+        if (firstTime && (await allowances.ForCampaignAsync(campaign.Id, ct)).Left <= 0)
+        {
+            db.DeliveryAttempts.Add(new DeliveryAttempt
+            {
+                Id = Guid.NewGuid(),
+                InviteId = invite.Id,
+                Channel = "email",
+                RecipientAddress = guest.Email!,
+                Status = DeliveryStatus.Skipped,
+                ErrorMessage = OverLimitMessage,
+                AttemptedAt = DateTimeOffset.UtcNow
+            });
+            if (invite.Status is InviteStatus.Created or InviteStatus.Queued) invite.Status = InviteStatus.NotSent;
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
         var letter = InviteLetter.For(
             campaign, guest, invite.Id, settings, config.InviteeBase(), rawToken, inviterName, inviterEmail);
 
         var ok = await TryDeliverAsync(invite, guest, settings, letter, ct);
+        if (ok && firstTime) invite.FirstEmailedAt = DateTimeOffset.UtcNow;
         // Distinguish "not sent — no deliverable contact" from a provider failure (§product rule).
         invite.Status = ok
             ? InviteStatus.Sent

@@ -7,17 +7,27 @@ public sealed record AdminUserDto(
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
     bool SubscriptionActive = false,
-    /// <summary>Passes a Studio account holds and hasn't given to a client yet.</summary>
-    int PassCredits = 0);
+    /// <summary>Passes a Studio account holds and hasn't given to a client yet, and of which kind.</summary>
+    int PassCredits = 0,
+    int PartyCredits = 0,
+    int WeddingCredits = 0);
 
 /// <summary>Sets an account's professional plan: None, Studio or Venue. <c>None</c> ends it now.</summary>
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
 
 /// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>
 /// <param name="Pass">None, Party or Wedding.</param>
+/// <param name="Plan">What covers it now: Free, PartyPass, WeddingPass or Venue.</param>
+/// <param name="CoveredUntil">When its photos start to lapse; null while a venue covers it.</param>
+/// <param name="Phase">Active, UploadsClosed, OrganiserOnly or Deleted.</param>
+/// <param name="Sending">Emailed invitations: included, added, used.</param>
 public sealed record AdminUserEventDto(
     Guid Id, string Title, DateTimeOffset EventStartAt, string Pass, DateTimeOffset? EventPassUntil, bool PassActive,
-    DateTimeOffset? KeepPhotosUntil);
+    DateTimeOffset? KeepPhotosUntil, string Plan = "Free", DateTimeOffset? CoveredUntil = null, string Phase = "Active",
+    InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);
+
+/// <summary>Emailed invitations to add to an event (negative takes unused ones back).</summary>
+public sealed record AddSendingRequest(int Invitations);
 
 /// <summary>Gives an event a pass (<c>Party</c> or <c>Wedding</c>) or takes it away (<c>None</c>).</summary>
 public sealed record SetEventPassRequest(string Kind);

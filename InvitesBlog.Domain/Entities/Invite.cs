@@ -13,6 +13,12 @@ public sealed class Invite
     public InviteStatus Status { get; set; }
     public RsvpStatus RsvpStatus { get; set; }
     public DateTimeOffset? ViewedAt { get; set; }
+
+    /// <summary>
+    /// The first time invites.blog emailed this guest. What an event's emailed invitations are
+    /// counted by: each guest once, so resending to someone already emailed costs nothing.
+    /// </summary>
+    public DateTimeOffset? FirstEmailedAt { get; set; }
     public DateTimeOffset? RespondedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

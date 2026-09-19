@@ -439,7 +439,15 @@ public sealed class AccountService(
                     c, template?.Visibility.ToString() == "Imported",
                     guestCounts.GetValueOrDefault(c.Id)),
                 Relation: IsHost(c) ? "host" : "celebrant",
-                CanManage: IsHost(c) || celebrating.GetValueOrDefault(c.Id)));
+                CanManage: IsHost(c) || celebrating.GetValueOrDefault(c.Id),
+                // For the badge only — the limits themselves are PlanService's, per event.
+                Plan: c.VenueId is not null ? "Venue"
+                    : InvitesBlog.Application.Plans.EventPasses.Active(c, DateTimeOffset.UtcNow) switch
+                    {
+                        Domain.Enums.EventPassKind.Wedding => "WeddingPass",
+                        Domain.Enums.EventPassKind.Party => "PartyPass",
+                        _ => "Free",
+                    }));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));

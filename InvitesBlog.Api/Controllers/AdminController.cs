@@ -64,6 +64,12 @@ public sealed class AdminController(IAdminService admin) : BaseApiController
     public async Task<IActionResult> KeepPhotos(Guid id, [FromBody] KeepPhotosRequest req, CancellationToken ct) =>
         Success(await admin.KeepPhotosAsync(id, req, ct));
 
+    /// <summary>Adds emailed invitations to an event, on top of what its pass includes.</summary>
+    [HttpPut("events/{id:guid}/sending")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> AddSending(Guid id, [FromBody] AddSendingRequest req, CancellationToken ct) =>
+        Success(await admin.AddSendingAsync(id, req, ct));
+
     /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
     [HttpPost("users/{id:guid}/pass-credits")]
     [HasPermission(Permissions.Admin.ManageUsers)]

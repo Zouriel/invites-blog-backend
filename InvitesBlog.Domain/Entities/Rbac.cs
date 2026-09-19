@@ -33,12 +33,12 @@ public sealed class AppUser
     /// </summary>
     public string? ThemePreference { get; set; }
 
-    /// <summary>The account's subscription. Set by an admin until billing exists.</summary>
+    /// <summary>The account's professional plan (Studio or Venue). Set by an admin until billing exists.</summary>
     public SubscriptionTier SubscriptionTier { get; set; }
 
     /// <summary>
-    /// When the subscription stops, or null for no end. Kept after it ends: it is also when the
-    /// account's events stopped being covered, which the photo retention counts from.
+    /// When the plan stops, or null for no end. Kept after it ends: for a venue it is also when its
+    /// events stopped being covered, which their photo retention counts from.
     /// </summary>
     public DateTimeOffset? SubscriptionEndsAt { get; set; }
 

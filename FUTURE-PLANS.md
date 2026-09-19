@@ -14,7 +14,7 @@ iframe. Everything else on that host still goes to the Angular app. §2's app di
 not started.
 
 §5 is **largely built, and has changed shape on the way**: the photo box shipped as a web feature
-with an in-browser camera, and has since become a **media bucket** — a product sold by the gigabyte
+with an in-browser camera, and has since become a **media bucket** — whose space now comes from the event's plan (2026-09-19)
 rather than a property of a campaign. See the section itself. **This file is the authority on the
 roadmap; a copy of it in the local umbrella working tree may be ahead or behind — trust this one.**
 
@@ -694,7 +694,8 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
 - **Subscriptions are for professionals only.** `SubscriptionTier` is None/Studio/Venue (1 was Basic,
   retired; 2 was Premium and is now Studio — same number, so nothing moved). **Studio** (MVR 450/month):
   a client list (events from templates published FOR someone, and events the planner organised — never
-  strangers using a public design), a "Designed by" credit on those invitations, and **pass credits**
+  strangers using a public design), a "Designed by" credit on every invitation made from their templates
+  while Studio runs, and **pass credits**
   bought at 30% off and given to a client's event (`PassCredit`, `EventPasses.Apply`). **Venue** (from
   MVR 2,300/month): a `Venue` with a name and logo, `VenueStaff` matched by email like celebrants, and
   events created at the venue (`Campaign.VenueId`) that get Wedding-level albums while the plan runs,
@@ -703,6 +704,14 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
 - **Bucket sizing is gone.** Space is per event, shared by its albums; the allocation endpoint, the
   bucket-size picker and `media_buckets.allocated_bytes` were removed. `campaigns.has_designer_discount`
   and `templates.is_premium` (never true) went with them.
+- **Emailed invitations are counted** (`SendingAllowanceService`): each guest once, the first time
+  they are emailed (`invites.first_emailed_at`; guests already sent or viewed were backfilled). An
+  event may email what its plan includes (0 / 100 / 500) plus `PaidInviteCapacity`, which now means
+  only what was added on top — by an admin until payments are live. Past that, a new guest is held
+  back with a reason; a resend to someone already emailed is free. Sharing links is never counted.
+- **A host can hold their own event at a venue** by the venue's code (`Venue.Code`, on the Venue
+  page); the organiser only, since it gives the venue's staff access. The event then gets the venue's
+  plan and its albums are lengthened to it.
 - **Every old event pass became a Wedding pass** in the migration: it was the one that covered the old
   pass's 50 GB and three albums.
 
@@ -725,8 +734,8 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
   what expiry should eventually MEAN for the photographs already inside is unanswered — and it is
   somebody's memories on the other side of that decision. Same open question as retention, now with a
   billing date attached to it.
-- **Billing is not wired up.** Choosing a size grants it and starts the term. When checkout arrives it
-  goes in front of `ChooseTierAsync` rather than replacing it.
+- ~~**Billing is not wired up.** Choosing a size grants it and starts the term.~~ Superseded: sizes are
+  no longer chosen (see "What changed (2026-09-19)").
 - **No bucket-scoped archive.** "Download everything" is campaign-scoped, so a standalone bucket cannot
   offer it; the control is hidden there rather than shown broken.
 - **The quota estimate is the raw upload size** — exact for a clip, close for a photograph — so a

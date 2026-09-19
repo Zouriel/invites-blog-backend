@@ -76,7 +76,7 @@ public static class Permissions
 
     /// <summary>
     /// Media buckets (§5). <see cref="Buckets.Manage"/> is the OWNER's right — rename, re-cover,
-    /// resize, and hand out or revoke a contribution code. Like every other permission here it says
+    /// set its window, and hand out or revoke a contribution code. Like every other permission here it says
     /// "may do this KIND of thing", never "may do it to THIS bucket": which bucket is decided by
     /// ownership, checked separately on every call.
     ///
@@ -139,8 +139,8 @@ public static class Permissions
         (Photos.Read, "photos", "See an event's photo box"),
         (Photos.Upload, "photos", "Add a photo to an event"),
         (Photos.Moderate, "photos", "Remove any photo from an event"),
-        (Buckets.Read, "buckets", "See your media buckets"),
-        (Buckets.Manage, "buckets", "Create, resize and share a media bucket"),
+        (Buckets.Read, "buckets", "See your albums"),
+        (Buckets.Manage, "buckets", "Create, name and share an album"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),

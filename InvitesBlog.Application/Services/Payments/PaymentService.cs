@@ -42,7 +42,9 @@ public sealed class PaymentService(
 
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites);
-        var capacity = price.IncludedInvites + price.ExtraBlocks * price.BlockSize;
+        // What is bought is the EXTRA: the pass's included invitations are counted separately
+        // (SendingAllowanceService), so PaidInviteCapacity only ever holds what was paid or given on top.
+        var capacity = price.ExtraBlocks * price.BlockSize;
 
         var payment = new Payment
         {
@@ -77,14 +79,13 @@ public sealed class PaymentService(
 
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
         var plan = await plans.ForCampaignAsync(campaignId, ct);
-        // What the pass includes counts as covered even before anything was paid for.
+        // Covered: what the pass includes plus what was already added on top.
         var topUp = PricingCalculator.CalculateTopUp(
-            Math.Max(campaign.PaidInviteCapacity, plan.IncludedInvites), guestCount, 0);
+            plan.IncludedInvites + campaign.PaidInviteCapacity, guestCount, 0);
         if (topUp.ExtraBlocks == 0)
             return new TopUpResponse(null, null, "No top-up needed; capacity covers all guests.");
 
-        // Raised to what the pass includes first, so the paid capacity ends up covering every guest.
-        var capacityAdded = Math.Max(0, plan.IncludedInvites - campaign.PaidInviteCapacity) + topUp.ExtraBlocks * topUp.BlockSize;
+        var capacityAdded = topUp.ExtraBlocks * topUp.BlockSize;
         var payment = new Payment
         {
             Id = Guid.NewGuid(),
@@ -131,10 +132,10 @@ public sealed class PaymentService(
             a.btn{display:block;padding:14px;border-radius:10px;text-decoration:none;margin:10px 0}
             .pay{background:#1b3d59;color:#fff}.cancel{background:#eee;color:#333}</style></head>
             <body><h2>invites.blog demo checkout</h2>
-            <p>Amount due: <strong>${{due}}</strong></p>
+            <p>Amount due: <strong>{{PlanCatalog.Currency}} {{due}}</strong></p>
             <a class="btn pay" href="{{pay}}">Simulate successful payment</a>
             <a class="btn cancel" href="{{back}}">Cancel</a>
-            <p style="color:#999;font-size:12px">This page stands in for Stripe in local dev.</p>
+            <p style="color:#999;font-size:12px">This page stands in for the payment gateway in local dev.</p>
             </body></html>
             """;
     }
@@ -231,7 +232,7 @@ public sealed class PaymentService(
 
         if (payment.Kind == PaymentKind.Initial)
         {
-            campaign.PaidInviteCapacity = payment.InviteCount;
+            campaign.PaidInviteCapacity += payment.InviteCount;
             campaign.Status = CampaignStatus.DispatchQueued;   // §13.1 — only on initial payment
         }
         else // TopUp

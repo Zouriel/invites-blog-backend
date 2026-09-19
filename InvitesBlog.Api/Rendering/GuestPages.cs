@@ -214,7 +214,7 @@ public static class GuestPages
     public static string CameraClosed(string eventTitle, string backPath, GuestPalette? palette = null, string? note = null) =>
         Shell("Camera closed", $"""
             <h1>{E(eventTitle)}</h1>
-            <p>{E(note ?? "The camera isn't open right now. It opens on the day of the event.")}</p>
+            <p>{E(note ?? "The camera isn't open right now. It opens the day before the event.")}</p>
             <p><a href="{E(backPath)}">Back to the invitation</a></p>
             """, palette);
 

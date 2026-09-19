@@ -108,7 +108,7 @@ public class DevCheckoutTests
 
         Assert.DoesNotContain("<script>", page);
         Assert.DoesNotContain("<img", page);
-        Assert.Contains("$12.50", page);
+        Assert.Contains("MVR 12.50", page);
     }
 
     [Fact]

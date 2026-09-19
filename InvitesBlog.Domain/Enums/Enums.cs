@@ -104,16 +104,15 @@ public enum TemplateReportStatus
 }
 
 /// <summary>
-/// What size of media bucket someone is on. The GB figure is the NAME of the tier, not the number
-/// the system enforces — <see cref="Entities.MediaBucket.CapacityBytes"/> is frozen from it at
-/// purchase so that renaming or repricing a tier cannot resize a bucket somebody already bought.
+/// LEGACY: the per-bucket sizes from before per-event plans (2026-09-15). Only read for buckets made
+/// before <c>PlanCatalog.IntroducedAt</c>, which keep the space they had; nothing new is created with
+/// anything but Free. Space now comes from the event's plan.
 ///
-/// <para>Appended-only, and never reordered: EF stores these as ints, so moving one renames every
-/// bucket already sold.</para>
+/// <para>Appended-only, and never reordered: EF stores these as ints.</para>
 /// </summary>
 public enum MediaBucketTier
 {
-    /// <summary>What every event's box gets without anyone buying anything. No term, no bill.</summary>
+    /// <summary>Every bucket made since per-event plans: its space is the event's plan's.</summary>
     Free,
     Gb10,
     Gb20,

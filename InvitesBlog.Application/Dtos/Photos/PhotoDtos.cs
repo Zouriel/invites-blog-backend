@@ -42,4 +42,7 @@ public sealed record EventPhotoBoxDto(
     /// button simply disappears, and "the button is gone" is not an answer to "why can't I add the
     /// photos from last night".
     /// </summary>
-    string? ClosedNote = null);
+    string? ClosedNote = null,
+    /// <summary>The venue the event is held at, whose name and logo head its albums.</summary>
+    string? VenueName = null,
+    string? VenueLogoUrl = null);

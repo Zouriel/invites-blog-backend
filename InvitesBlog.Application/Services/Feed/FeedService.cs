@@ -291,7 +291,7 @@ public sealed class FeedService(
                 throw new BusinessRuleException("This event has no photos to choose from yet.", "no_bucket");
             var live = await LivePicksAsync(wanted, b, ct);
             if (live.Count != wanted.Count)
-                throw new BusinessRuleException("Some of those photos aren't in this event's main bucket any more.", "cover_not_in_bucket");
+                throw new BusinessRuleException("Some of those photos aren't in this event's main album any more.", "cover_not_in_bucket");
         }
 
         var tracked = await campaigns.GetByIdAsync(campaignId, ct)

@@ -135,10 +135,9 @@ public sealed class GuestService(
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
 
         // If the invitations have already gone out, send this new guest immediately — unless the
-        // caller explicitly asked to add it for a later send instead (SendNow: false). Sending is
-        // not charged, so there is no capacity check here: the first send (FinalizeAsync) and
-        // resends don't have one either, and PaidInviteCapacity is only ever raised by the
-        // payments webhook, so gating on it meant a new event's "add and send now" never sent.
+        // caller explicitly asked to add it for a later send instead (SendNow: false). Whether the
+        // event may still email somebody new is decided where every send goes through
+        // (DispatchService, against SendingAllowanceService), so it isn't asked twice here.
         var shouldSend = req.SendNow ?? true;
         Guid? dispatchGuestId = null;
         if (added == 1 && shouldSend &&

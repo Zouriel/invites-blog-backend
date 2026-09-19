@@ -21,6 +21,12 @@ public sealed class Venue
     /// <summary>The venue's logo, shown on its QR cards and albums. Null shows the name alone.</summary>
     public string? LogoUrl { get; set; }
 
+    /// <summary>
+    /// What a couple types on their own event to hold it at this venue — so an invitation they made
+    /// themselves gets the venue's albums too. Short, uppercase, unique.
+    /// </summary>
+    public string? Code { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

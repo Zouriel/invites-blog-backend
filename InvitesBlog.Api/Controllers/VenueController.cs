@@ -46,6 +46,26 @@ public sealed class VenueController(IVenueService venues) : BaseApiController
     public async Task<IActionResult> RemoveStaff(Guid staffId, CancellationToken ct) =>
         Success(await venues.RemoveStaffAsync(staffId, ct));
 
+    /// <summary>The venue a host's event is held at, or null.</summary>
+    [HttpGet("/api/campaigns/{campaignId:guid}/venue-link")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> EventVenue(Guid campaignId, CancellationToken ct) =>
+        Success(await venues.ForEventAsync(campaignId, ct));
+
+    /// <summary>Holds the host's event at a venue, by the venue's code.</summary>
+    [HttpPut("/api/campaigns/{campaignId:guid}/venue-link")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> LinkEvent(Guid campaignId, [FromBody] LinkEventVenueRequest req, CancellationToken ct) =>
+        Success(await venues.LinkEventAsync(campaignId, req, ct));
+
+    [HttpDelete("/api/campaigns/{campaignId:guid}/venue-link")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> UnlinkEvent(Guid campaignId, CancellationToken ct)
+    {
+        await venues.UnlinkEventAsync(campaignId, ct);
+        return SuccessMessage("The event is no longer held at the venue.");
+    }
+
     /// <summary>A new event at the venue, with its first album.</summary>
     [HttpPost("events")]
     [HasPermission(Permissions.Campaigns.Create)]

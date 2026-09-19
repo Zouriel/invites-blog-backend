@@ -35,6 +35,9 @@ public interface IAdminService
     /// <summary>"Keep your photos": adds years to how long an event's albums stay online, or takes them away.</summary>
     Task<AdminUserEventDto> KeepPhotosAsync(Guid campaignId, KeepPhotosRequest req, CancellationToken ct = default);
 
+    /// <summary>Adds emailed invitations to an event on top of what its pass includes.</summary>
+    Task<AdminUserEventDto> AddSendingAsync(Guid campaignId, AddSendingRequest req, CancellationToken ct = default);
+
     /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
     Task<AdminUserDto> AdjustPassCreditsAsync(Guid userId, AdjustPassCreditsRequest req, CancellationToken ct = default);
 }

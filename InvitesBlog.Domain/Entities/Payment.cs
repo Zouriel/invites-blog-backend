@@ -10,7 +10,7 @@ public sealed class Payment
     public PaymentKind Kind { get; set; }              // Initial | TopUp
     public int InviteCount { get; set; }
     public decimal Amount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = "MVR";
     public PaymentStatus Status { get; set; }
     public string Provider { get; set; } = default!;
     public string? ProviderSessionId { get; set; }

@@ -15,9 +15,16 @@ namespace InvitesBlog.Application.Services.Venues;
 /// <summary>A venue as its owner and staff see it: its face, its people, its events and its space.</summary>
 /// <param name="IsOwner">Whether the caller owns it; only the owner changes its name, logo and staff.</param>
 /// <param name="PlanActive">Whether the owner's Venue plan is in force. New events need it.</param>
+/// <param name="Code">What a couple enters on their own event to hold it here.</param>
 public sealed record VenueDto(
     Guid Id, string Name, string? Place, string? LogoUrl, bool IsOwner, bool PlanActive, DateTimeOffset? PlanEndsAt,
-    long AccountBytes, long UsedBytes, IReadOnlyList<VenueStaffDto> Staff, IReadOnlyList<VenueEventDto> Events);
+    long AccountBytes, long UsedBytes, IReadOnlyList<VenueStaffDto> Staff, IReadOnlyList<VenueEventDto> Events,
+    string? Code = null);
+
+/// <summary>The venue an event is held at, as its host sees it.</summary>
+public sealed record EventVenueDto(Guid Id, string Name, string? Place, string? LogoUrl, bool PlanActive);
+
+public sealed record LinkEventVenueRequest(string Code);
 
 public sealed record VenueStaffDto(Guid Id, string Email, string? Name, DateTimeOffset CreatedAt);
 
@@ -42,6 +49,18 @@ public interface IVenueService
 
     /// <summary>A new event at the venue, with its first album. Owner or staff, while the plan is in force.</summary>
     Task<VenueEventDto> CreateEventAsync(CreateVenueEventRequest req, CancellationToken ct = default);
+
+    /// <summary>The venue an event is held at, or null. For the event's host.</summary>
+    Task<EventVenueDto?> ForEventAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Holds the host's own event at a venue, by the code the venue gave them. The organiser only:
+    /// it lets the venue's staff run the event, guest list included.
+    /// </summary>
+    Task<EventVenueDto> LinkEventAsync(Guid campaignId, LinkEventVenueRequest req, CancellationToken ct = default);
+
+    /// <summary>Takes the event back from the venue. The organiser only.</summary>
+    Task UnlinkEventAsync(Guid campaignId, CancellationToken ct = default);
 }
 
 public sealed class VenueService(
@@ -54,6 +73,7 @@ public sealed class VenueService(
     IRepository<MediaBucket> buckets,
     IRepository<EventPhoto> photos,
     ICampaignService campaignService,
+    ICampaignOwnershipService ownership,
     IMediaBucketService bucketService,
     IPlanService plans,
     IStorageService storage,
@@ -65,6 +85,69 @@ public sealed class VenueService(
 
     public async Task<VenueDto> GetAsync(CancellationToken ct = default) =>
         await DescribeAsync(await MineAsync(ct), ct);
+
+    public async Task<EventVenueDto?> ForEventAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        if (await ownership.AccessAsync(campaignId, ct) == CampaignAccess.None)
+            throw new ForbiddenException("That event isn't yours.");
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new NotFoundException("That event no longer exists.");
+        return campaign.VenueId is { } id && await venues.GetByIdAsync(id, ct) is { } venue
+            ? await DescribeForEventAsync(venue, ct)
+            : null;
+    }
+
+    public async Task<EventVenueDto> LinkEventAsync(Guid campaignId, LinkEventVenueRequest req, CancellationToken ct = default)
+    {
+        if (await ownership.AccessAsync(campaignId, ct) != CampaignAccess.Organiser)
+            throw new ForbiddenException("Only the event's host can hold it at a venue.");
+        var code = (req.Code ?? "").Trim().ToUpperInvariant();
+        var venue = string.IsNullOrEmpty(code) ? null : await venues.Query().FirstOrDefaultAsync(v => v.Code == code, ct);
+        if (venue is null)
+            throw new BusinessRuleException("That code doesn't match a venue. Check it with them.", "venue_code_unknown");
+        if (!await PlanActiveAsync(venue, ct))
+            throw new BusinessRuleException($"{venue.Name}'s plan isn't active, so it can't take events right now.", "venue_plan_ended");
+
+        var campaign = await campaigns.Query(tracking: true).FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        campaign.VenueId = venue.Id;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+        // The venue's albums collect for as long as a Wedding pass's.
+        await bucketService.RaiseWindowsToPlanAsync(campaignId, ct);
+        return await DescribeForEventAsync(venue, ct);
+    }
+
+    public async Task UnlinkEventAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        if (await ownership.AccessAsync(campaignId, ct) != CampaignAccess.Organiser)
+            throw new ForbiddenException("Only the event's host can change its venue.");
+        var campaign = await campaigns.Query(tracking: true).FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        campaign.VenueId = null;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+    }
+
+    private async Task<EventVenueDto> DescribeForEventAsync(Venue venue, CancellationToken ct) =>
+        new(venue.Id, venue.Name, venue.Place, venue.LogoUrl, await PlanActiveAsync(venue, ct));
+
+    /// <summary>A short code a couple can read off a card: no 0/O or 1/I to confuse.</summary>
+    private async Task EnsureCodeAsync(Venue venue, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(venue.Code)) return;
+        const string letters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        string code;
+        do
+        {
+            code = new string(Enumerable.Range(0, 6)
+                .Select(_ => letters[System.Security.Cryptography.RandomNumberGenerator.GetInt32(letters.Length)]).ToArray());
+        } while (await venues.AnyAsync(v => v.Code == code, ct));
+        venue.Code = code;
+        venues.Update(venue);
+        await uow.SaveChangesAsync(ct);
+    }
 
     public async Task<VenueDto> UpdateAsync(UpdateVenueProfileRequest req, CancellationToken ct = default)
     {
@@ -208,6 +291,7 @@ public sealed class VenueService(
 
     private async Task<VenueDto> DescribeAsync(Venue venue, CancellationToken ct)
     {
+        await EnsureCodeAsync(venue, ct);
         var owner = await users.GetByIdAsync(venue.OwnerUserId, ct);
         var isOwner = venue.OwnerUserId == currentUser.UserId;
         var people = isOwner
@@ -218,7 +302,7 @@ public sealed class VenueService(
             venue.Id, venue.Name, venue.Place, venue.LogoUrl, isOwner,
             await PlanActiveAsync(venue, ct), owner?.SubscriptionEndsAt,
             PlanCatalog.VenueAccountBytes, await plans.VenueUsedBytesAsync(venue.Id, ct),
-            people, await EventsAsync(venue.Id, ct));
+            people, await EventsAsync(venue.Id, ct), venue.Code);
     }
 
     private async Task<IReadOnlyList<VenueEventDto>> EventsAsync(Guid venueId, CancellationToken ct)
