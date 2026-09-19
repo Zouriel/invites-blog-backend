@@ -43,4 +43,21 @@ public class RbacSeederTests
             Permissions.All.Select(p => p.Name).OrderBy(n => n),
             (await db.Permissions.Select(p => p.Name).ToListAsync()).OrderBy(n => n));
     }
+
+    [Fact]
+    public async Task A_description_reworded_in_code_replaces_the_stored_one()
+    {
+        using var db = NewDb();
+        var (name, group, description) = Permissions.All.First(p => p.Name == Permissions.Buckets.Read);
+        var row = new Permission { Id = Guid.NewGuid(), Name = name, Group = "buckets", Description = "See your buckets" };
+        db.Permissions.Add(row);
+        await db.SaveChangesAsync();
+
+        await Sut(db).SeedAsync();
+
+        var after = await db.Permissions.SingleAsync(p => p.Name == name);
+        Assert.Equal(row.Id, after.Id);
+        Assert.Equal(description, after.Description);
+        Assert.Equal(group, after.Group);
+    }
 }

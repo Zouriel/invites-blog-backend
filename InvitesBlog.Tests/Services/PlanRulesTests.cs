@@ -157,8 +157,32 @@ public class PlanRulesTests
     [Fact]
     public void Studio_passes_cost_30_percent_less()
     {
-        Assert.Equal(139m, PlanCatalog.StudioPassPrice(EventPassKind.Party));
-        Assert.Equal(489m, PlanCatalog.StudioPassPrice(EventPassKind.Wedding));
+        Assert.Equal(139m, Prices.Defaults.StudioPassPrice(EventPassKind.Party));
+        Assert.Equal(489m, Prices.Defaults.StudioPassPrice(EventPassKind.Wedding));
+    }
+
+    [Fact]
+    public void The_catalogue_shows_the_price_book_not_the_defaults()
+    {
+        var changed = Prices.Defaults with { PartyPass = 249m, SendingPerBlock = 60m, StudioDiscountPercent = 20 };
+        var c = PlanCatalog.Describe(changed);
+        var party = c.Plans.Single(p => p.Kind == "PartyPass");
+        Assert.Equal(249m, party.Price);
+        Assert.Equal(199m, party.StudioPrice);
+        Assert.Equal(60m, c.Sending.PerBlock);
+        Assert.Equal(20, c.StudioDiscountPercent);
+        // Limits are not prices: they stay where the code enforces them.
+        Assert.Equal(PlanCatalog.PartyEventBytes, party.EventBytes);
+    }
+
+    [Fact]
+    public void Prices_that_make_no_sense_are_refused()
+    {
+        Assert.Empty(Prices.Defaults.Problems());
+        Assert.NotEmpty((Prices.Defaults with { PartyPass = 0 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { WeddingPass = 100 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { StudioYearly = 100 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { StudioDiscountPercent = 95 }).Problems());
     }
 
     [Fact]

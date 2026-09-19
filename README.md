@@ -207,7 +207,10 @@ Worth knowing before reading the pricing code:
 
 - **Plans are not billed.** The plans and their limits are real (`PlanCatalog`) and enforced, but
   passes, "Keep your photos", Studio, Venue and Studio pass credits are all granted by an admin in
-  Admin settings; nothing is sold online yet.
+  Admin settings; nothing is sold online yet (a Bank of Maldives gateway is being registered).
+- **Prices are data, limits are code.** What things cost comes from `IPriceBook` (the `prices` row of
+  `app_settings`, edited in Admin → Prices, audited as `prices.set`), falling back to the defaults in
+  `PlanCatalog`/`Prices.Defaults`. Space, albums, days and included emails stay in `PlanCatalog`.
 - **Payments are not live.** `PricingCalculator` is complete and tested — MVR 50 per 100 invitations,
   after the 100 a Party pass or 500 a Wedding pass includes — but the only registered
   `IPaymentProvider` is `FakePaymentProvider`, and sending invitations is not charged at all today.

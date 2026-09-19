@@ -690,7 +690,9 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
   with invites.blog" on the invitation and album), a **Party pass** (MVR 199: 10 GB, two albums, three
   days, a year, 100 invitations sent) and a **Wedding pass** (MVR 699: 100 GB, five albums, five days,
   private albums, a year, 500 invitations). **Keep your photos** adds a year for MVR 150. Sending
-  beyond a pass is MVR 50 per 100. All of it is `PlanCatalog`; the frontend's fallback copy must match.
+  beyond a pass is MVR 50 per 100. Limits are `PlanCatalog`; prices are the admin price book
+  (`IPriceBook`, Admin → Prices) with `PlanCatalog` as its defaults. The frontend's fallback copy must
+  match the defaults; it loads the prices in force at start.
 - **Subscriptions are for professionals only.** `SubscriptionTier` is None/Studio/Venue (1 was Basic,
   retired; 2 was Premium and is now Studio — same number, so nothing moved). **Studio** (MVR 450/month):
   a client list (events from templates published FOR someone, and events the planner organised — never

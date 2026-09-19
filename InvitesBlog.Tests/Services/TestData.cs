@@ -30,6 +30,14 @@ internal static class TestData
         return s;
     }
 
+    /// <summary>A price book holding <paramref name="prices"/>, or the defaults in code.</summary>
+    public static InvitesBlog.Application.Plans.IPriceBook PriceBook(InvitesBlog.Application.Plans.Prices? prices = null)
+    {
+        var book = Substitute.For<InvitesBlog.Application.Plans.IPriceBook>();
+        book.CurrentAsync(Arg.Any<CancellationToken>()).Returns(prices ?? InvitesBlog.Application.Plans.Prices.Defaults);
+        return book;
+    }
+
     /// <summary>A plan service that answers every event with <see cref="Plan"/>.</summary>
     public static InvitesBlog.Application.Plans.IPlanService FreePlans()
     {

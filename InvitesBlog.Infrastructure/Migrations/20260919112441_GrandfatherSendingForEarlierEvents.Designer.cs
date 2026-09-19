@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using InvitesBlog.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260919112441_GrandfatherSendingForEarlierEvents")]
+    partial class GrandfatherSendingForEarlierEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -22,31 +25,6 @@ namespace InvitesBlog.Infrastructure.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("InvitesBlog.Domain.Entities.AppSetting", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("key");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid?>("UpdatedByUserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("updated_by_user_id");
-
-                    b.Property<string>("ValueJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("value_json");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("app_settings", (string)null);
-                });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.AppUser", b =>
                 {

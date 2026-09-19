@@ -111,6 +111,7 @@ public static class Permissions
         public const string ManageUsers = "admin.users.manage";
         public const string ManageSuppression = "admin.suppression.manage";
         public const string ReadAudit = "admin.audit.read";
+        public const string ManagePrices = "admin.prices.manage";
     }
 
     /// <summary>Every permission with its group + human description, for the seeder.</summary>
@@ -139,13 +140,14 @@ public static class Permissions
         (Photos.Read, "photos", "See an event's photo box"),
         (Photos.Upload, "photos", "Add a photo to an event"),
         (Photos.Moderate, "photos", "Remove any photo from an event"),
-        (Buckets.Read, "buckets", "See your albums"),
-        (Buckets.Manage, "buckets", "Create, name and share an album"),
+        (Buckets.Read, "albums", "See your albums"),
+        (Buckets.Manage, "albums", "Create, name and share an album"),
         (Otp.Request, "otp", "Request an OTP code"),
         (Otp.Verify, "otp", "Verify an OTP code"),
         (Privacy.Remove, "privacy", "Remove guest data"),
         (Dashboard.Read, "dashboard", "Read the campaign dashboard"),
         (Admin.ManageUsers, "admin", "Manage users and roles"),
+        (Admin.ManagePrices, "admin", "Change what plans, passes and sending cost"),
         (Admin.ManageSuppression, "admin", "Manage the suppression list"),
         (Admin.ReadAudit, "admin", "Read audit logs"),
     };

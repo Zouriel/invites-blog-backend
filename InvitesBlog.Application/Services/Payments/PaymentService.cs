@@ -28,7 +28,8 @@ public sealed class PaymentService(
     IUnitOfWork unitOfWork,
     IPaymentProvider provider,
     IConfiguration config,
-    IPlanService plans) : IPaymentService
+    IPlanService plans,
+    IPriceBook prices) : IPaymentService
 {
     private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";
@@ -41,7 +42,8 @@ public sealed class PaymentService(
         if (guestCount == 0) throw new CampaignHasNoGuestsException();
 
         var plan = await plans.ForCampaignAsync(campaignId, ct);
-        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites);
+        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites,
+            (await prices.CurrentAsync(ct)).SendingPerBlock);
         // What is bought is the EXTRA: the pass's included invitations are counted separately
         // (SendingAllowanceService), so PaidInviteCapacity only ever holds what was paid or given on top.
         var capacity = price.ExtraBlocks * price.BlockSize;
@@ -81,7 +83,8 @@ public sealed class PaymentService(
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         // Covered: what the pass includes plus what was already added on top.
         var topUp = PricingCalculator.CalculateTopUp(
-            plan.IncludedInvites + campaign.PaidInviteCapacity, guestCount, 0);
+            plan.IncludedInvites + campaign.PaidInviteCapacity, guestCount, 0,
+            (await prices.CurrentAsync(ct)).SendingPerBlock);
         if (topUp.ExtraBlocks == 0)
             return new TopUpResponse(null, null, "No top-up needed; capacity covers all guests.");
 

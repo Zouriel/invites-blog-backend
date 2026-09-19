@@ -86,6 +86,8 @@ public static class PlanCatalog
     /// <summary>Rufiyaa to the dollar, for the approximate dollar prices shown alongside.</summary>
     public const decimal MvrPerUsd = 15.42m;
 
+    // Default prices. What is charged comes from IPriceBook, which an admin can change; these are
+    // what it starts from and falls back to.
     public const decimal PartyPassPrice = 199m;
     public const decimal WeddingPassPrice = 699m;
     public const decimal KeepPhotosYearly = 150m;
@@ -98,16 +100,6 @@ public static class PlanCatalog
     /// <summary>What a Studio account pays for a pass it gives to a client: 30% off.</summary>
     public const int StudioPassDiscountPercent = 30;
 
-    public static decimal PassPrice(EventPassKind kind) => kind switch
-    {
-        EventPassKind.Party => PartyPassPrice,
-        EventPassKind.Wedding => WeddingPassPrice,
-        _ => 0m,
-    };
-
-    public static decimal StudioPassPrice(EventPassKind kind) =>
-        Math.Round(PassPrice(kind) * (100 - StudioPassDiscountPercent) / 100m, 0, MidpointRounding.AwayFromZero);
-
     /// <summary>
     /// When per-event plans replaced per-bucket sizes. Anything made before it keeps the space it had
     /// until six months after its event, and isn't removed before 90 days after this date.
@@ -117,25 +109,30 @@ public static class PlanCatalog
     /// <summary>How long a bucket made before <see cref="IntroducedAt"/> keeps the space it had, from its event.</summary>
     public const int LegacyMonths = 6;
 
-    public static PlanCatalogDto Describe() => new(
-        Currency,
-        MvrPerUsd,
-        [
-            new PlanDto("Free", "Free", 0m, "every event", null, null,
-                FreeEventBytes, null, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
-            new PlanDto("PartyPass", "Party pass", PartyPassPrice, "per event", null, StudioPassPrice(EventPassKind.Party),
-                PartyEventBytes, null, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false),
-            new PlanDto("WeddingPass", "Wedding pass", WeddingPassPrice, "per event", null, StudioPassPrice(EventPassKind.Wedding),
-                WeddingEventBytes, null, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false),
-            new PlanDto("Studio", "Studio", StudioMonthly, "per month", StudioYearly, null,
-                null, null, null, null, null, 0, false, false),
-            new PlanDto("Venue", "Venue", VenueMonthlyFrom, "per month", null, null,
-                VenueEventBytes, VenueAccountBytes, WeddingBuckets, WeddingWindowDays, null, 0, true, false, From: true),
-        ],
-        new KeepPhotosDto(KeepPhotosYearly, KeepPhotosMonths),
-        new SendingPriceDto(PricingCalculator.PricePerBlock, PricingCalculator.BlockSize),
-        new LapseDto(ReminderDay, OrganiserOnlyDay, FinalNoticeDay, DeleteDay),
-        StudioPassDiscountPercent);
+    /// <summary>The catalog as /api/plans serves it: limits from here, prices from the price book.</summary>
+    public static PlanCatalogDto Describe(Prices? prices = null)
+    {
+        var p = prices ?? Prices.Defaults;
+        return new(
+            Currency,
+            p.MvrPerUsd,
+            [
+                new PlanDto("Free", "Free", 0m, "every event", null, null,
+                    FreeEventBytes, null, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
+                new PlanDto("PartyPass", "Party pass", p.PartyPass, "per event", null, p.StudioPassPrice(EventPassKind.Party),
+                    PartyEventBytes, null, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false),
+                new PlanDto("WeddingPass", "Wedding pass", p.WeddingPass, "per event", null, p.StudioPassPrice(EventPassKind.Wedding),
+                    WeddingEventBytes, null, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false),
+                new PlanDto("Studio", "Studio", p.StudioMonthly, "per month", p.StudioYearly, null,
+                    null, null, null, null, null, 0, false, false),
+                new PlanDto("Venue", "Venue", p.VenueMonthlyFrom, "per month", null, null,
+                    VenueEventBytes, VenueAccountBytes, WeddingBuckets, WeddingWindowDays, null, 0, true, false, From: true),
+            ],
+            new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
+            new SendingPriceDto(p.SendingPerBlock, PricingCalculator.BlockSize),
+            new LapseDto(ReminderDay, OrganiserOnlyDay, FinalNoticeDay, DeleteDay),
+            p.StudioDiscountPercent);
+    }
 }
 
 /// <summary>One plan as the pricing page shows it. Studio has no event limits of its own: nulls.</summary>

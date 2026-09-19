@@ -50,11 +50,15 @@ public sealed class MediaRetentionService(
         }
     }
 
+    /// <summary>"Keep your photos" as the price book says at the start of each sweep, for the notices.</summary>
+    private decimal _keepPrice = PlanCatalog.KeepPhotosYearly;
+
     public async Task RunOnceAsync(CancellationToken ct)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var plans = scope.ServiceProvider.GetRequiredService<IPlanService>();
+        _keepPrice = (await scope.ServiceProvider.GetRequiredService<IPriceBook>().CurrentAsync(ct)).KeepPhotosYearly;
         var email = scope.ServiceProvider.GetRequiredService<IEmailSender>();
         var now = DateTimeOffset.UtcNow;
 
@@ -202,7 +206,7 @@ public sealed class MediaRetentionService(
                 $"Guests can no longer add photos to <strong>{title}</strong>. " +
                 $"Guests can still look at the photos until {organiserOnly}. After that only you can, " +
                 $"and the photos are removed on {deleteOn}. Download everything now, or keep them online for another year " +
-                $"(MVR {PlanCatalog.KeepPhotosYearly:0} a year)."),
+                $"({PlanCatalog.Currency} {_keepPrice:0} a year)."),
             2 => ($"One week left for guests to see the photos from {campaign.Title}",
                 $"From {organiserOnly}, only you will be able to see the photos from <strong>{title}</strong>. " +
                 $"They are removed on {deleteOn} unless you keep them online for another year."),

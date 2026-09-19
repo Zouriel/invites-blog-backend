@@ -56,7 +56,8 @@ public sealed class CampaignService(
     IValidator<UpdateInviterRequest> inviterValidator,
     IValidator<UpdateDeliverySettingsRequest> deliveryValidator,
     IPlanService plans,
-    ISendingAllowanceService allowances) : ICampaignService
+    ISendingAllowanceService allowances,
+    IPriceBook prices) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -640,7 +641,8 @@ public sealed class CampaignService(
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
         var plan = await plans.ForCampaignAsync(id, ct);
-        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites);
+        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites,
+            (await prices.CurrentAsync(ct)).SendingPerBlock);
 
         return new CampaignSummaryDto(
             campaign.Id, campaign.Title, campaign.Slug, campaign.Status.ToString(),

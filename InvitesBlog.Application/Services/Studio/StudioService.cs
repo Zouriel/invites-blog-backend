@@ -47,7 +47,8 @@ public sealed class StudioService(
     IRepository<PassCredit> credits,
     IRepository<AuditLog> auditLogs,
     IUnitOfWork uow,
-    MediaBuckets.IMediaBucketService buckets) : IStudioService
+    MediaBuckets.IMediaBucketService buckets,
+    IPriceBook prices) : IStudioService
 {
     public async Task<StudioOverviewDto> OverviewAsync(CancellationToken ct = default)
     {
@@ -58,11 +59,12 @@ public sealed class StudioService(
             .Select(g => new { g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
 
+        var p = await prices.CurrentAsync(ct);
         return new StudioOverviewDto(
             held.GetValueOrDefault(EventPassKind.Party),
             held.GetValueOrDefault(EventPassKind.Wedding),
-            PlanCatalog.StudioPassPrice(EventPassKind.Party),
-            PlanCatalog.StudioPassPrice(EventPassKind.Wedding),
+            p.StudioPassPrice(EventPassKind.Party),
+            p.StudioPassPrice(EventPassKind.Wedding),
             await DescribeAsync(me, await ClientCampaigns(me).ToListAsync(ct), ct));
     }
 

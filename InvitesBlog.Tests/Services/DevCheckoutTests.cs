@@ -47,7 +47,7 @@ public class DevCheckoutTests
                 Substitute.For<ICampaignRepository>(), Substitute.For<IInviterRepository>(), TestData.NoCelebrants(),
                 TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
             Substitute.For<ICampaignRepository>(), Substitute.For<IPaymentRepository>(),
-            Substitute.For<IGuestRepository>(), Substitute.For<IUnitOfWork>(), provider, cfg, TestData.FreePlans());
+            Substitute.For<IGuestRepository>(), Substitute.For<IUnitOfWork>(), provider, cfg, TestData.FreePlans(), TestData.PriceBook());
     }
 
     // ----- not there outside Development ---------------------------------------------------------

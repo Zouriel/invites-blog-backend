@@ -40,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<VerifiedContactLink> VerifiedContactLinks => Set<VerifiedContactLink>();
     public DbSet<Venue> Venues => Set<Venue>();
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<VenueStaff> VenueStaff => Set<VenueStaff>();
     public DbSet<PassCredit> PassCredits => Set<PassCredit>();
 
@@ -432,6 +433,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => new { x.RoleId, x.PermissionId });
             e.HasOne(x => x.Role).WithMany(r => r.RolePermissions).HasForeignKey(x => x.RoleId);
             e.HasOne(x => x.Permission).WithMany(p => p.RolePermissions).HasForeignKey(x => x.PermissionId);
+        });
+
+        // Settings an admin changes at runtime (prices), one JSON value per key.
+        b.Entity<AppSetting>(e =>
+        {
+            e.ToTable("app_settings");
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(64);
+            e.Property(x => x.ValueJson).HasColumnType("jsonb");
         });
 
         // Venues, their staff, and the passes a Studio account holds for its clients.

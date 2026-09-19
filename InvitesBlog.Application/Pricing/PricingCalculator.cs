@@ -27,7 +27,7 @@ public static class PricingCalculator
     public const decimal PricePerBlock = 50m;
 
     /// <summary>The price of sending to <paramref name="inviteCount"/> guests, <paramref name="includedInvites"/> of them already paid for by the event's pass.</summary>
-    public static PriceBreakdown CalculateInitial(int inviteCount, int includedInvites = 0)
+    public static PriceBreakdown CalculateInitial(int inviteCount, int includedInvites = 0, decimal perBlock = PricePerBlock)
     {
         if (inviteCount < 0) throw new ArgumentOutOfRangeException(nameof(inviteCount));
         if (includedInvites < 0) throw new ArgumentOutOfRangeException(nameof(includedInvites));
@@ -35,9 +35,9 @@ public static class PricingCalculator
         var included = Math.Min(inviteCount, includedInvites);
         var extraInvites = inviteCount - included;
         var extraBlocks = (int)Math.Ceiling(extraInvites / (double)BlockSize);
-        var total = extraBlocks * PricePerBlock;
+        var total = extraBlocks * perBlock;
 
-        return new PriceBreakdown(inviteCount, included, extraInvites, extraBlocks, BlockSize, PricePerBlock, total);
+        return new PriceBreakdown(inviteCount, included, extraInvites, extraBlocks, BlockSize, perBlock, total);
     }
 
     /// <summary>
@@ -45,7 +45,7 @@ public static class PricingCalculator
     /// guests beyond it are charged, a block at a time.
     /// </summary>
     /// <param name="coveredCapacity">What is already covered: paid for, plus what the pass includes.</param>
-    public static PriceBreakdown CalculateTopUp(int coveredCapacity, int currentGuestCount, int additionalGuests)
+    public static PriceBreakdown CalculateTopUp(int coveredCapacity, int currentGuestCount, int additionalGuests, decimal perBlock = PricePerBlock)
     {
         if (coveredCapacity < 0) throw new ArgumentOutOfRangeException(nameof(coveredCapacity));
         if (currentGuestCount < 0) throw new ArgumentOutOfRangeException(nameof(currentGuestCount));
@@ -53,9 +53,9 @@ public static class PricingCalculator
 
         var shortfall = Math.Max(0, currentGuestCount + additionalGuests - coveredCapacity);
         var extraBlocks = (int)Math.Ceiling(shortfall / (double)BlockSize);
-        var total = extraBlocks * PricePerBlock;
+        var total = extraBlocks * perBlock;
 
-        return new PriceBreakdown(additionalGuests, 0, shortfall, extraBlocks, BlockSize, PricePerBlock, total);
+        return new PriceBreakdown(additionalGuests, 0, shortfall, extraBlocks, BlockSize, perBlock, total);
     }
 
     /// <summary>New paid capacity after a top-up that bought <paramref name="blocks"/> blocks.</summary>

@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddSingleton<RuleEngine>();
         services.AddScoped<GuestUploadParser>();
         services.AddScoped<RbacSeeder>();
+        services.AddScoped<Application.Plans.IPriceBook, Application.Plans.PriceBook>();
 
         // Invitee JWT (issuer + validation params), exposed to Application via IInviteeTokenIssuer.
         services.AddSingleton<Security.InviteeJwt>();

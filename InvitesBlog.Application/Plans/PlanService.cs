@@ -16,8 +16,6 @@ public interface IPlanService
 
     /// <summary>Whether this account's Studio plan is in force.</summary>
     Task<bool> IsStudioAsync(Guid userId, CancellationToken ct = default);
-
-    PlanCatalogDto Catalog();
 }
 
 public sealed class PlanService(
@@ -90,5 +88,4 @@ public sealed class PlanService(
         await users.GetByIdAsync(userId, ct) is { SubscriptionTier: SubscriptionTier.Studio } user
         && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow);
 
-    public PlanCatalogDto Catalog() => PlanCatalog.Describe();
 }

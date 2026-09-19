@@ -6,9 +6,10 @@ namespace InvitesBlog.Api.Controllers;
 
 /// <summary>The plans and prices, for the pricing page. Public.</summary>
 [Route("api/plans")]
-public sealed class PlansController(IPlanService plans) : BaseApiController
+public sealed class PlansController(IPriceBook prices) : BaseApiController
 {
     [HttpGet]
     [AllowAnonymous]
-    public IActionResult Catalog() => Success(plans.Catalog());
+    public async Task<IActionResult> Catalog(CancellationToken ct) =>
+        Success(PlanCatalog.Describe(await prices.CurrentAsync(ct)));
 }

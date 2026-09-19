@@ -49,10 +49,20 @@ public sealed class RbacSeeder(AppDbContext db, IConfiguration config, ILogger<R
     private async Task SeedPermissionsAsync(CancellationToken ct)
     {
         var existing = await db.Permissions.ToListAsync(ct);
-        var existingSet = existing.Select(p => p.Name).ToHashSet();
+        var byName = existing.ToDictionary(p => p.Name);
         foreach (var (name, group, description) in Permissions.All)
         {
-            if (existingSet.Contains(name)) continue;
+            // Code owns the wording too: a description or group reworded in code reaches the admin
+            // screen on the next start, rather than only on a fresh database.
+            if (byName.TryGetValue(name, out var row))
+            {
+                if (row.Description != description || row.Group != group)
+                {
+                    row.Description = description;
+                    row.Group = group;
+                }
+                continue;
+            }
             db.Permissions.Add(new Permission { Id = Guid.NewGuid(), Name = name, Group = group, Description = description });
         }
 

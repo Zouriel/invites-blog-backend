@@ -1,5 +1,7 @@
 using InvitesBlog.Api.Authorization;
+using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Dtos.Admin;
+using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Filters.Admin;
 using InvitesBlog.Application.Services.Admin;
 using InvitesBlog.Domain.Authorization;
@@ -10,8 +12,25 @@ namespace InvitesBlog.Api.Controllers;
 
 /// <summary>Admin surface (full-RBAC). Signing in happens at <c>/api/auth/login</c> like everyone else.</summary>
 [Route("api/admin")]
-public sealed class AdminController(IAdminService admin) : BaseApiController
+public sealed class AdminController(IAdminService admin, IPriceBook prices, ICurrentUser currentUser) : BaseApiController
 {
+    /// <summary>What everything costs now, and what code would charge without an admin's prices.</summary>
+    [HttpGet("prices")]
+    [HasPermission(Permissions.Admin.ManagePrices)]
+    public async Task<IActionResult> Prices(CancellationToken ct) =>
+        Success(new { current = await prices.CurrentAsync(ct), defaults = Application.Plans.Prices.Defaults });
+
+    /// <summary>New prices, used for everything charged from now on. Already-paid passes are unchanged.</summary>
+    [HttpPut("prices")]
+    [HasPermission(Permissions.Admin.ManagePrices)]
+    public async Task<IActionResult> SetPrices([FromBody] Application.Plans.Prices body, CancellationToken ct) =>
+        Success(await prices.SetAsync(body, currentUser.UserId, ct));
+
+    [HttpDelete("prices")]
+    [HasPermission(Permissions.Admin.ManagePrices)]
+    public async Task<IActionResult> ResetPrices(CancellationToken ct) =>
+        Success(await prices.ResetAsync(currentUser.UserId, ct));
+
     [HttpGet("users")]
     [HasPermission(Permissions.Admin.ManageUsers)]
     public async Task<IActionResult> Users([FromQuery] AdminUserFilter filter, CancellationToken ct) =>
