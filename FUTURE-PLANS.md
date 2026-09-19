@@ -775,3 +775,22 @@ never hears about a bounce.
 
 **Trap.** Don't "fix" it by letting an empty secret skip verification. That would make the endpoint
 accept forged events, and a forged complaint is a way to stop someone's invitations being sent.
+
+
+## Save the dates — *shipped 2026-09-19*
+
+A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with just the day:
+
+- **No album, no camera, no replies** — the one exception to "every event has an album".
+  `MediaBucketService` refuses to make one (`save_the_date_no_album`), RSVP is refused
+  (`save_the_date_no_replies`), and the guest routes for replies, photos and the camera send the guest
+  back to the page. Save the dates stay out of the feed and can't take a venue code.
+- **Date required, time optional**: `Campaign.AllDay` → an all-day calendar entry.
+- **Add to calendar** (`Application/Events/CalendarLinks`): Google, Outlook.com and Microsoft 365
+  links plus an .ics (METHOD:PUBLISH). A bar is injected on the guest page (`GuestCalendarHtml`),
+  `/r/{id}/calendar.ics` serves the file, and the email ("Save the date: …") carries the buttons and
+  the .ics as an attachment (`EmailMessage.Attachments` → Resend `attachments`).
+- **Emails count like invitations.** "Make the invitation" (`POST /api/campaigns/{id}/invitation`,
+  `SaveTheDateService`) copies the guests, celebrants, host and wording into a new invitation, carries
+  each guest's `FirstEmailedAt` (so nobody counts twice) and moves the pass and extra emails.
+- Designs: the **Save the Date** template type; the designer's starter sets `scene.kind`.

@@ -4,7 +4,8 @@ namespace InvitesBlog.Application.Dtos.Campaigns;
 // kept identical to the legacy Minimal-API request records so the Angular inviter app is unaffected.
 
 /// <summary>Create a draft campaign from a template (§10.3).</summary>
-public sealed record CreateCampaignRequest(Guid TemplateId, string Title);
+/// <param name="Kind">"invitation" or "saveTheDate"; left out, a design from the Save the Date category makes a save the date.</param>
+public sealed record CreateCampaignRequest(Guid TemplateId, string Title, string? Kind = null);
 
 /// <summary>Patch the campaign content/theme/rules and event metadata (partial — nulls are ignored).</summary>
 /// <summary>The campaign's cover photo. Null clears it, falling back to the template's preview.</summary>
@@ -25,7 +26,8 @@ public sealed record UpdateContentRequest(
     bool? IsSensitive,
     DateTimeOffset? EventStartAt,
     DateTimeOffset? EventEndAt,
-    string? EventType);
+    string? EventType,
+    bool? AllDay = null);
 
 /// <summary>Set the venue block (stored inside CustomContentJson.venue).</summary>
 public sealed record UpdateVenueRequest(

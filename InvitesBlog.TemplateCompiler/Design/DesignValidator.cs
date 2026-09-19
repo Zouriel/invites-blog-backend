@@ -247,10 +247,19 @@ public static partial class DesignValidator
             }
         }
 
-        if (rsvp == 0)
-            Error("rsvp_required", "Add an RSVP button — every invitation has to let guests reply.");
-        if (dress == 0)
-            Warn("dress_missing", "There's no spot for dress colours, so the platform will add its own section at the end.");
+        if (scene.IsSaveTheDate)
+        {
+            // A save the date asks nothing yet: the reply and the dress colours come with the invitation.
+            if (rsvp > 0)
+                Warn("rsvp_on_save_the_date", "A save the date doesn't take replies, so its RSVP button won't show. The invitation will ask.");
+        }
+        else
+        {
+            if (rsvp == 0)
+                Error("rsvp_required", "Add an RSVP button — every invitation has to let guests reply.");
+            if (dress == 0)
+                Warn("dress_missing", "There's no spot for dress colours, so the platform will add its own section at the end.");
+        }
         if (animated > DesignCatalog.AnimatedElementWarning)
             Warn("many_animations", $"{animated} elements move. Past about {DesignCatalog.AnimatedElementWarning} a phone starts to stutter.");
         foreach (var (path, id) in pathsInsideBlocks.Where(p => !pathsOutsideBlocks.Contains(p.Path)).DistinctBy(p => p.Path))

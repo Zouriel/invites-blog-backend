@@ -23,7 +23,9 @@ public sealed record InviteDeliveryMessage(
     Guid? CampaignId = null,
     Guid? InviteId = null,
     string? InviterEmail = null,
-    string? RemovalLink = null);
+    string? RemovalLink = null,
+    // Set for a save the date: the email offers this to the guest's calendar instead of a reply.
+    Events.CalendarEntry? SaveTheDate = null);
 
 public sealed record DeliveryResult(bool Success, string? ProviderMessageId, string? Error)
 {
@@ -65,7 +67,11 @@ public sealed record EmailMessage(
     string? Text = null,
     string? ReplyTo = null,
     IReadOnlyList<KeyValuePair<string, string>>? Tags = null,
-    IReadOnlyDictionary<string, string>? Headers = null);
+    IReadOnlyDictionary<string, string>? Headers = null,
+    IReadOnlyList<EmailAttachment>? Attachments = null);
+
+/// <summary>A file sent with an email, such as a save the date's .ics.</summary>
+public sealed record EmailAttachment(string Filename, byte[] Content, string ContentType);
 
 public interface IEmailSender
 {

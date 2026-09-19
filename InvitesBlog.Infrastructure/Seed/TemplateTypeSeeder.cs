@@ -11,7 +11,9 @@ public sealed class TemplateTypeSeeder(AppDbContext db)
     {
         "Wedding", "Engagement", "Anniversary", "Birthday", "Baby Shower",
         "Graduation", "Ceremony", "Religious Event", "Corporate Event", "Conference",
-        "Workshop", "Launch Event", "Private Dinner", "Custom Event"
+        "Workshop", "Launch Event", "Private Dinner", "Custom Event",
+        // Designs here start a save the date (no album, no replies) rather than an invitation.
+        "Save the Date"
     };
 
     public async Task SeedAsync(CancellationToken ct = default)

@@ -19,7 +19,8 @@ public sealed record InviteLetter(
     string? InviterEmail,
     string InviteLink,
     string RemovalLink,
-    string MessageText)
+    string MessageText,
+    Events.CalendarEntry? SaveTheDate = null)
 {
     /// <summary>What the host is called when the campaign has no inviter name yet.</summary>
     public const string FallbackInviterName = "your host";
@@ -39,11 +40,13 @@ public sealed record InviteLetter(
         return new InviteLetter(
             campaign.Id, inviteId, host, inviterEmail, link,
             RemovalLink: $"{inviteeBase}/privacy/remove/{rawToken}",
-            MessageText: settings.Personalize(guestName, host, link));
+            MessageText: settings.Personalize(guestName, host, link),
+            SaveTheDate: Campaigns.SaveTheDates.Is(campaign) ? Campaigns.EventCalendar.For(campaign, link) : null);
     }
 
     /// <summary>The letter addressed for one channel.</summary>
     public InviteDeliveryMessage To(string channel, string address) =>
         new(channel, address, InviterName, InviteLink, MessageText,
-            CampaignId: CampaignId, InviteId: InviteId, InviterEmail: InviterEmail, RemovalLink: RemovalLink);
+            CampaignId: CampaignId, InviteId: InviteId, InviterEmail: InviterEmail, RemovalLink: RemovalLink,
+            SaveTheDate: SaveTheDate);
 }

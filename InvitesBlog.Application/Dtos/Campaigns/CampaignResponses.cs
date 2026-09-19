@@ -53,7 +53,11 @@ public sealed record CampaignSummaryDto(
     string? InviterPhone = null,
     string? InviterOrganization = null,
     /// <summary>What invites.blog may still email for this event. Sharing links is always free.</summary>
-    InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);
+    InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null,
+    /// <summary>"invitation" or "saveTheDate" — what the wizard's steps and wording follow.</summary>
+    string Kind = "invitation",
+    /// <summary>The host gave a day but no time.</summary>
+    bool AllDay = false);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
@@ -145,7 +149,13 @@ public sealed record DashboardCampaignDto(
     /// Who is looking: "organiser", "manager" (a celebrant with full access) or "celebrant"
     /// (read-only). The page hides what the viewer can't do.
     /// </summary>
-    string Viewer = "organiser");
+    string Viewer = "organiser",
+    /// <summary>"invitation" or "saveTheDate". A save the date has no album, reply stats or camera.</summary>
+    string Kind = "invitation",
+    bool AllDay = false,
+    DateTimeOffset? EventStartAt = null,
+    /// <summary>On a save the date: the invitation made from it, once there is one.</summary>
+    Guid? InvitationCampaignId = null);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

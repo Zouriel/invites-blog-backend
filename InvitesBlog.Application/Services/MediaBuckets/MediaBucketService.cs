@@ -426,6 +426,8 @@ public sealed class MediaBucketService(
         {
             if (!await ownership.OwnsAsync(existing, ct))
                 throw new ForbiddenException("That event isn't yours.");
+            if (await campaigns.GetByIdAsync(existing, ct) is { Kind: CampaignKind.SaveTheDate })
+                throw new BusinessRuleException(SaveTheDates.NoAlbumMessage, "save_the_date_no_album");
             var already = await buckets.CountAsync(b => b.CampaignId == existing, ct);
             var existingPlan = await plans.ForCampaignAsync(existing, ct);
 
@@ -735,6 +737,9 @@ public sealed class MediaBucketService(
                        ?? throw new NotFoundException("That event no longer exists.");
         if (campaign.Status == CampaignStatus.Cancelled)
             throw new BusinessRuleException("This event was cancelled, so it has no photo space.", "event_cancelled");
+        // The one kind of event with no album: a save the date. Photos come with the invitation.
+        if (campaign.Kind == CampaignKind.SaveTheDate)
+            throw new BusinessRuleException(SaveTheDates.NoAlbumMessage, "save_the_date_no_album");
 
         // Provisioned for whoever the CAMPAIGN belongs to, not for whoever happens to be calling.
         //
@@ -786,6 +791,8 @@ public sealed class MediaBucketService(
             throw new ForbiddenException("That event isn't yours.");
 
         var bucket = await buckets.FirstOrDefaultAsync(b => b.CampaignId == campaignId, ct);
+        if (bucket is null && await campaigns.GetByIdAsync(campaignId, ct) is { Kind: CampaignKind.SaveTheDate })
+            return null;
 
         // A campaign that ALREADY HOLDS MEDIA has a bucket in every sense the host cares about —
         // only the row is missing, because those photographs predate buckets existing. Offering to

@@ -135,6 +135,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("campaigns");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Status).HasDatabaseName("idx_campaigns_status");
+            // Every campaign before save the dates was an invitation: 0, and no all-day dates.
+            e.Property(x => x.Kind).HasDefaultValue(CampaignKind.Invitation);
+            e.Property(x => x.AllDay).HasDefaultValue(false);
             e.HasIndex(x => x.AccessTokenHash).IsUnique().HasDatabaseName("idx_campaigns_access_token_hash");
             e.HasIndex(x => x.DashboardTokenHash).HasDatabaseName("idx_campaigns_dashboard_token_hash");
             // Every open link resolves through this index, and the lookup runs before anything is

@@ -151,15 +151,16 @@ public static class DesignStarters
     private static DesignScene SaveTheDate()
     {
         var s = Scene("#1b3d59", "#f3eed8", "#152026", "italiana", "josefin-sans");
+        s.Kind = "saveTheDate";
         s.Fonts = ["italiana", "josefin-sans", "cinzel"];
         s.Elements.Add(Text("kicker", 30, 170, 330, 30, [Lit("Save the date")], Body(15, uppercase: true, spacing: 0.35, color: "theme:accent")));
         s.Elements.Add(Text("title", 20, 230, 350, 120, [Var("event.title")], Heading(54)));
         s.Elements.Add(Shape("rule", 170, 370, 50, 2, "line", stroke: "theme:accent"));
         s.Elements.Add(Text("date", 20, 400, 350, 60, [Var("event.date")], Heading(30, color: "theme:accent")));
         s.Elements.Add(Text("venue", 30, 470, 330, 40, [Var("event.venue.name")], Body(16, uppercase: true, spacing: 0.15)));
-        s.Elements.Add(Text("later", 30, 1100, 330, 60, [Lit("Formal invitation to follow")], Body(15, italic: true)));
-        s.Elements.Add(Rsvp("rsvp", 95, 1180, 200, 52));
-        s.Elements.Add(Dress("dress", 30, 1290, 330, 110));
+        // No reply button and no dress colours: a save the date asks nothing yet. "Add to calendar"
+        // is added by the server at the foot of every save the date.
+        s.Elements.Add(Text("later", 30, 1100, 330, 60, [Lit("Invitation to follow")], Body(15, italic: true)));
         foreach (var el in s.Elements) FadeUp(s, el, "fade");
         return s;
     }

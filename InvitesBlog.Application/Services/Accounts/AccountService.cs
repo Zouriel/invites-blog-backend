@@ -447,7 +447,8 @@ public sealed class AccountService(
                         Domain.Enums.EventPassKind.Wedding => "WeddingPass",
                         Domain.Enums.EventPassKind.Party => "PartyPass",
                         _ => "Free",
-                    }));
+                    },
+                Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind)));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));

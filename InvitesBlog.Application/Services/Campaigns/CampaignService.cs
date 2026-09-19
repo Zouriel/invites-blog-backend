@@ -6,6 +6,7 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Delivery;
 using InvitesBlog.Application.Designs;
+using InvitesBlog.Application.Campaigns;
 using InvitesBlog.Application.Dtos.Campaigns;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Campaigns;
@@ -93,6 +94,8 @@ public sealed class CampaignService(
             // so without this a draft abandoned before then belongs to nobody and is unreachable.
             CreatedByUserId = currentUser.UserId,
             EventStartAt = now.AddDays(30),
+            Kind = SaveTheDates.Parse(req.Kind)
+                   ?? (template.Category == SaveTheDates.Category ? CampaignKind.SaveTheDate : CampaignKind.Invitation),
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -141,6 +144,7 @@ public sealed class CampaignService(
             campaign.EventStartAt = req.EventStartAt.Value;
         }
         if (req.EventEndAt is not null) campaign.EventEndAt = req.EventEndAt;
+        if (req.AllDay is not null) campaign.AllDay = req.AllDay.Value;
         if (req.EventType is not null) campaign.EventType = req.EventType;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
@@ -502,7 +506,8 @@ public sealed class CampaignService(
         || currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage);
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
-        string title, DateTimeOffset? eventDate = null, CancellationToken ct = default)
+        string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
@@ -519,7 +524,7 @@ public sealed class CampaignService(
         await templates.AddAsync(placeholder, ct);
         await uow.SaveChangesAsync(ct);
 
-        var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim()), ct);
+        var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim(), SaveTheDates.Name(kind)), ct);
 
         // Written straight through, not via a separate ownership-checked update — see the interface note: that one
         // checks ownership, and the token making this campaign theirs is in the response being built.
@@ -530,6 +535,7 @@ public sealed class CampaignService(
             if (campaign is not null)
             {
                 campaign.EventStartAt = when.ToUniversalTime();
+                campaign.AllDay = allDay;
                 campaign.UpdatedAt = DateTimeOffset.UtcNow;
                 campaigns.Update(campaign);
                 await uow.SaveChangesAsync(ct);
@@ -658,7 +664,8 @@ public sealed class CampaignService(
             template?.Visibility == TemplateVisibility.Imported,
             campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
             inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization,
-            await allowances.ForCampaignAsync(id, ct));
+            await allowances.ForCampaignAsync(id, ct),
+            SaveTheDates.Name(campaign.Kind), campaign.AllDay);
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -761,7 +768,9 @@ public sealed class CampaignService(
                     CampaignAccess.Celebrant => "celebrant",
                     CampaignAccess.Manager => "manager",
                     _ => "organiser",
-                }),
+                },
+                SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.EventStartAt,
+                campaign.InvitationCampaignId),
             report, guestRows, questions, await allowances.ForCampaignAsync(campaign.Id, ct));
     }
 

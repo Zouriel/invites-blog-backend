@@ -16,6 +16,17 @@ public enum CampaignStatus
     DispatchFailed   // paid, but every delivery failed — appended; EF stores ints
 }
 
+/// <summary>
+/// What a campaign sends. A save the date goes out months ahead with just the day: no album, no
+/// camera, no replies — guests add it to their calendar, and the invitation follows as its own
+/// campaign made from it (<see cref="Entities.Campaign.InvitationCampaignId"/>).
+/// </summary>
+public enum CampaignKind
+{
+    Invitation,
+    SaveTheDate,
+}
+
 public enum InviteStatus
 {
     Created,

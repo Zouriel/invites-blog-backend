@@ -109,6 +109,8 @@ public sealed class VenueService(
 
         var campaign = await campaigns.Query(tracking: true).FirstOrDefaultAsync(c => c.Id == campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
+        if (campaign.Kind == Domain.Enums.CampaignKind.SaveTheDate)
+            throw new BusinessRuleException("A save the date has no albums for a venue to run. Add the venue to the invitation.", "save_the_date_no_venue");
         campaign.VenueId = venue.Id;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         campaigns.Update(campaign);

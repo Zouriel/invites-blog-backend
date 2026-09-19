@@ -23,6 +23,9 @@ public static class CampaignResume
         if (string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)) return null;
 
         if (isImported) return campaign.InviterId is null ? "guests" : "delivery";
+        // A save the date has no roles step: there is nothing for a role to decide yet.
+        if (campaign.Kind == CampaignKind.SaveTheDate)
+            return guestCount == 0 ? "guests" : campaign.InviterId is null ? "inviter" : "delivery";
         if (!HasRoles(campaign.RolesJson)) return "roles";
         if (guestCount == 0) return "guests";
         if (campaign.InviterId is null) return "inviter";

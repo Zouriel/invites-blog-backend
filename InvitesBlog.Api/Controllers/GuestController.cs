@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using InvitesBlog.Api.Rendering;
 using InvitesBlog.Application.Dtos.Invites;
+using InvitesBlog.Application.Events;
 using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Invites;
@@ -157,6 +158,7 @@ public sealed class GuestController(
         var html = await rendered.BuildAsync(payload.PackageUrl, payload.Data, ct);
         if (html is null) return Html(GuestPages.Unavailable(), StatusCodes.Status500InternalServerError);
         html = GuestCreditHtml.InjectIntoInvitation(html, payload.Credit);
+        html = GuestCalendarHtml.Inject(html, payload.Data);
 
         Response.Headers["Content-Security-Policy"] = TemplateRuntime.ContentSecurityPolicy;
         Response.Headers["Referrer-Policy"] = TemplateRuntime.ReferrerPolicy;
@@ -165,6 +167,39 @@ public sealed class GuestController(
         Response.Headers.CacheControl = "private, no-store";
         return Content(html, "text/html; charset=utf-8");
     }
+
+    /// <summary>
+    /// The event as an .ics file, for Apple Calendar and anything that isn't Google or Outlook. Same
+    /// admission as the page it is linked from; opened in a new tab (see GuestCalendarHtml).
+    /// </summary>
+    [HttpGet("/r/{renderId}/calendar.ics")]
+    public async Task<IActionResult> CalendarFile(string renderId, CancellationToken ct)
+    {
+        var campaignId = await CampaignForRenderAsync(renderId, ct);
+        if (campaignId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        var calendar = await invites.CalendarAsync(campaignId.Value, PublicUrl($"/r/{renderId}"), ct);
+        if (calendar is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        Response.Headers.CacheControl = "private, no-store";
+        return File(System.Text.Encoding.UTF8.GetBytes(CalendarLinks.Ics(calendar.Value.Entry)),
+            "text/calendar; charset=utf-8", "save-the-date.ics");
+    }
+
+    /// <summary>The campaign behind a render id, by either admission (personal invite or open link).</summary>
+    private async Task<Guid?> CampaignForRenderAsync(string renderId, CancellationToken ct)
+    {
+        if (Admitted(renderId) is { } inviteId)
+            return (await invites.InviteSubjectAsync(inviteId, ct))?.CampaignId;
+        return AdmittedOpen(renderId);
+    }
+
+    /// <summary>
+    /// A save the date has no reply form, no photo box and no camera. Anyone who follows an old or
+    /// hand-typed link to one lands back on the page itself rather than on a door that won't open.
+    /// </summary>
+    private async Task<bool> IsSaveTheDateAsync(string renderId, CancellationToken ct) =>
+        await CampaignForRenderAsync(renderId, ct) is { } id
+        && await invites.CalendarAsync(id, "", ct) is { SaveTheDate: true };
 
     /// <summary>
     /// The colours the guest's own invitation is painted in. These pages sit either side of it, so
@@ -187,6 +222,7 @@ public sealed class GuestController(
     {
         var inviteId = Admitted(renderId);
         if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        if (await IsSaveTheDateAsync(renderId, ct)) return Redirect($"/r/{renderId}");
 
         var payload = await invites.RenderAuthorizedAsync(inviteId.Value, PublicUrl($"/r/{renderId}"), Render, ct);
         if (payload is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
@@ -231,6 +267,7 @@ public sealed class GuestController(
     {
         var inviteId = Admitted(renderId);
         if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        if (await IsSaveTheDateAsync(renderId, ct)) return Redirect($"/r/{renderId}");
         return await RenderBoxAsync(renderId, inviteId.Value, null, ct);
     }
 
@@ -327,6 +364,7 @@ public sealed class GuestController(
         var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
         if (inviteId is null && openCampaignId is null)
             return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        if (await IsSaveTheDateAsync(renderId, ct)) return Redirect($"/r/{renderId}");
 
         // A static invitation (an uploaded design) has its own camera: it asks for a name and posts
         // into the event's default bucket. The open link only ever admits one of those.

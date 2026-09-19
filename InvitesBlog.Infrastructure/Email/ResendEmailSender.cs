@@ -37,7 +37,10 @@ public sealed partial class ResendEmailSender(
             Text: message.Text ?? ToPlainText(message.Html),
             ReplyTo: message.ReplyTo,
             Tags: tags is { Count: > 0 } ? tags : null,
-            Headers: message.Headers is { Count: > 0 } ? message.Headers : null);
+            Headers: message.Headers is { Count: > 0 } ? message.Headers : null,
+            Attachments: message.Attachments is { Count: > 0 } files
+                ? files.Select(f => new ResendAttachment(f.Filename, Convert.ToBase64String(f.Content), f.ContentType)).ToList()
+                : null);
 
         try
         {

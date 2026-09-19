@@ -221,7 +221,10 @@ public sealed class CampaignsController(
     public async Task<IActionResult> CreateBare(
         [FromBody] CreateBareCampaignRequest req, CancellationToken ct)
     {
-        return Created(await campaigns.CreateBareAsync(req.Title, req.EventDate, ct));
+        return Created(await campaigns.CreateBareAsync(
+            req.Title, req.EventDate, ct,
+            Application.Campaigns.SaveTheDates.Parse(req.Kind) ?? Domain.Enums.CampaignKind.Invitation,
+            req.AllDay ?? false));
     }
 
     /// <summary>
@@ -290,4 +293,6 @@ public sealed class CampaignsController(
 public sealed record AttachTemplateRequest(Guid TemplateId);
 
 /// <summary>Starting an event: what it is called and the night it is for.</summary>
-public sealed record CreateBareCampaignRequest(string Title, DateTimeOffset? EventDate);
+/// <param name="Kind">"invitation" (the default) or "saveTheDate".</param>
+/// <param name="AllDay">The host gave a day but no time.</param>
+public sealed record CreateBareCampaignRequest(string Title, DateTimeOffset? EventDate, string? Kind = null, bool? AllDay = null);

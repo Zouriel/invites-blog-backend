@@ -77,7 +77,8 @@ public sealed class FeedService(
 
         var ids = involved.Keys.ToList();
         var events = await campaigns.Query()
-            .Where(c => ids.Contains(c.Id) && c.Status != CampaignStatus.Cancelled)
+            // A save the date is not an event post: it has no photos and the invitation follows it.
+            .Where(c => ids.Contains(c.Id) && c.Status != CampaignStatus.Cancelled && c.Kind != CampaignKind.SaveTheDate)
             .ToListAsync(ct);
         if (events.Count == 0) return new FeedPageDto([], false);
 

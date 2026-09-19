@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Dtos.Campaigns;
 
 namespace InvitesBlog.Application.Services.Campaigns;
@@ -36,7 +37,8 @@ public interface ICampaignService
     /// which is most of the people the unguarded create page exists for.
     /// </param>
     Task<CreateCampaignResponse> CreateBareAsync(
-        string title, DateTimeOffset? eventDate = null, CancellationToken ct = default);
+        string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false);
 
     /// <summary>
     /// Gives an event that has no invitation one, by pinning a template onto it.

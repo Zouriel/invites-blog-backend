@@ -73,6 +73,19 @@ public sealed class Campaign
     public string EventType { get; set; } = "Other";
     public DateTimeOffset EventStartAt { get; set; }
     public DateTimeOffset? EventEndAt { get; set; }
+
+    /// <summary>An invitation, or a save the date (no album, no camera, no replies).</summary>
+    public CampaignKind Kind { get; set; }
+
+    /// <summary>
+    /// The host knows the day but not the time yet: calendars get an all-day entry and pages show the
+    /// date alone. Only the Malé date of <see cref="EventStartAt"/> means anything then.
+    /// </summary>
+    public bool AllDay { get; set; }
+
+    /// <summary>On a save the date: the invitation made from it, once the host has made one.</summary>
+    public Guid? InvitationCampaignId { get; set; }
+
     public int PaidInviteCapacity { get; set; }
 
     /// <summary>The organiser's words for the event's post in the feed. Null uses the invitation's own wording.</summary>

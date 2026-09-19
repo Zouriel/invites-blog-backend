@@ -179,6 +179,8 @@ Who fills what:
 | `inviter.name`, `inviter.phone`, `inviter.email` | The inviter, on the Inviter step |
 | `guest.name`, `guest.role`, `guest.gender` | Each guest's own details, added automatically |
 | `rsvp.link`, `rsvp.label`, `rsvp.status` | The platform |
+| `calendar.google`, `calendar.outlook`, `calendar.office365`, `calendar.ics` | The platform (Add to calendar links) |
+| `invitation.type` | `invitation` or `saveTheDate` |
 | `invite.link`, `camera.link`, `photos.link` | The platform |
 
 A few of these need explaining:
@@ -553,3 +555,13 @@ Embed them.
 
 **Putting everything in blocks.** A block any role ticked is hidden from everyone else. A guest with no
 matching role then gets a half-empty invitation.
+
+
+## Save the date designs
+
+A design in the **Save the Date** category starts a save the date: a campaign with no album, no camera
+and no replies. Its `rsvp.*`, `photos.link` and `camera.link` are always empty, so anything bound to
+them hides itself (keep those controls inside `data-optional`). The server adds an **Add to calendar**
+button at the foot of every save the date; a design may also bind `calendar.*` links itself. In the
+designer, the "Save the date" starter sets the scene's `kind` to `saveTheDate`, which lifts the
+"needs an RSVP button" check.

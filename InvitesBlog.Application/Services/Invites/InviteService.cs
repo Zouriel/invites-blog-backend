@@ -17,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Plans;
+using InvitesBlog.Application.Campaigns;
 
 namespace InvitesBlog.Application.Services.Invites;
 
@@ -201,7 +202,8 @@ public sealed class InviteService(
 
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         var isStatic = template?.Visibility == TemplateVisibility.Imported;
-        if (!isStatic)
+        // A save the date has no camera at all, whatever its design: nothing to open, nothing to make.
+        if (!isStatic || campaign.Kind == CampaignKind.SaveTheDate)
             return new StaticCameraInfo(campaign.Id, Guid.Empty, campaign.Title, false, false, false);
         // A cancelled event's photo space is deleted with it; there is no camera to open.
         if (campaign.Status == CampaignStatus.Cancelled)
@@ -301,6 +303,14 @@ public sealed class InviteService(
     {
         var invite = await invites.GetByIdAsync(inviteId, ct);
         return invite is null ? null : (invite.CampaignId, invite.GuestId);
+    }
+
+    public async Task<(InvitesBlog.Application.Events.CalendarEntry Entry, bool SaveTheDate)?> CalendarAsync(
+        Guid campaignId, string url, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null || campaign.Status == CampaignStatus.Cancelled) return null;
+        return (EventCalendar.For(campaign, url), SaveTheDates.Is(campaign));
     }
 
     /// <summary>
@@ -431,6 +441,8 @@ public sealed class InviteService(
     {
         if (!Enum.TryParse<RsvpStatus>(req.Status, true, out var status))
             throw new InvalidRsvpStatusException(req.Status);
+        if (await campaigns.GetByIdAsync(invite.CampaignId, ct) is { Kind: CampaignKind.SaveTheDate })
+            throw new BusinessRuleException(SaveTheDates.NoRepliesMessage, "save_the_date_no_replies");
 
         invite.RsvpStatus = status;
         invite.RespondedAt = DateTimeOffset.UtcNow;
@@ -455,6 +467,14 @@ public sealed class InviteService(
         await uow.SaveChangesAsync(ct);
 
         return new RsvpResultResponse(status.ToString());
+    }
+
+    /// <summary>A save the date's calendar links for the guest's inbox. The entry links to nothing: the inbox is the way back.</summary>
+    private static CalendarLinksDto CalendarFor(Campaign c)
+    {
+        var entry = EventCalendar.For(c, null);
+        return new CalendarLinksDto(
+            Events.CalendarLinks.Google(entry), Events.CalendarLinks.Outlook(entry), Events.CalendarLinks.Office365(entry));
     }
 
     public async Task<IReadOnlyList<InboxCardResponse>> GetInboxAsync(CancellationToken ct = default)
@@ -513,7 +533,9 @@ public sealed class InviteService(
                     // from demo content, so leading with it showed a stranger's name on the tile.
                     Application.Campaigns.CampaignCover.Read(c.CustomContentJson)
                         ?? TemplatePoster.OrNull(previews.GetValueOrDefault(c.TemplateId)),
-                    photoCounts.GetValueOrDefault(c.Id));
+                    photoCounts.GetValueOrDefault(c.Id),
+                    SaveTheDates.Name(c.Kind),
+                    SaveTheDates.Is(c) ? CalendarFor(c) : null);
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)

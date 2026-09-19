@@ -39,6 +39,12 @@ public interface IInviteService
     Task<(Guid CampaignId, Guid GuestId)?> InviteSubjectAsync(Guid inviteId, CancellationToken ct = default);
 
     /// <summary>
+    /// The calendar entry for a campaign, and whether it is a save the date. Like
+    /// <see cref="InviteSubjectAsync"/>, for a caller whose admission already happened.
+    /// </summary>
+    Task<(InvitesBlog.Application.Events.CalendarEntry Entry, bool SaveTheDate)?> CalendarAsync(Guid campaignId, string url, CancellationToken ct = default);
+
+    /// <summary>
     /// The palette the guest's invitation actually renders in — the template's declared defaults with
     /// the campaign's theme choices laid over them, resolved for this guest's role.
     /// </summary>

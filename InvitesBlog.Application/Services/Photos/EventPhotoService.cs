@@ -167,6 +167,8 @@ public sealed class EventPhotoService(
         var closed =
             campaign.Status == CampaignStatus.Cancelled
                 ? "This event has been cancelled. Everything already added is still here."
+                : campaign.Kind == CampaignKind.SaveTheDate
+                    ? InvitesBlog.Application.Campaigns.SaveTheDates.NoAlbumMessage
                 : plan.Phase != Plans.MediaPhase.Active
                     ? "This event's photos are no longer collecting. Everything already added is still here for now."
                 : !EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays)
@@ -188,7 +190,8 @@ public sealed class EventPhotoService(
                 p.CreatedAt)).ToList(),
             closed,
             venue?.Name,
-            venue?.LogoUrl);
+            venue?.LogoUrl,
+            campaign.Kind == CampaignKind.SaveTheDate);
     }
 
     public async Task<EventPhotoDto> AddAsync(

@@ -42,7 +42,13 @@ public sealed record RsvpResultResponse(string Rsvp);
 public sealed record InboxCardResponse(
     Guid InviteId, Guid CampaignId, string EventTitle, DateTimeOffset EventDate, string VenueType,
     string RsvpStatus, bool IsNew, bool IsPast, bool Cancelled, string? InviterName = null,
-    string? PreviewImageUrl = null, int PhotoCount = 0);
+    string? PreviewImageUrl = null, int PhotoCount = 0,
+    /// <summary>"invitation" or "saveTheDate"; a save the date has no reply and carries calendar links.</summary>
+    string Kind = "invitation",
+    CalendarLinksDto? Calendar = null);
+
+/// <summary>Add to calendar, pre-filled: Google, Outlook.com and Microsoft 365.</summary>
+public sealed record CalendarLinksDto(string Google, string Outlook, string Office365);
 
 /// <summary>
 /// The resolved render payload the Application service needs to shape <see cref="InviteViewResponse"/>.

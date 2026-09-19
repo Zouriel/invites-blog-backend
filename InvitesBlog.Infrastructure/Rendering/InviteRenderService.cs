@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Events;
+using InvitesBlog.Application.Campaigns;
 using InvitesBlog.Application.Rules;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.TemplateCompiler;
@@ -39,8 +40,9 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             ["title"] = Str(content, "title") ?? campaign.Title,
             ["subtitle"] = Str(content, "subtitle"),
             ["description"] = Str(content, "description"),
-            ["date"] = Str(content, "date") ?? campaign.EventStartAt.ToString("dddd, d MMMM yyyy"),
-            ["time"] = Str(content, "time") ?? campaign.EventStartAt.ToString("h:mm tt"),
+            // Malé's clock, the only one the platform has; a day with no time yet shows no time.
+            ["date"] = Str(content, "date") ?? campaign.EventStartAt.ToOffset(EventDayWindow.Male).ToString("dddd, d MMMM yyyy"),
+            ["time"] = Str(content, "time") ?? (campaign.AllDay ? null : campaign.EventStartAt.ToOffset(EventDayWindow.Male).ToString("h:mm tt")),
             ["schedule"] = Str(content, "schedule"),
             ["dressCode"] = Str(content, "dressCode"),
             ["venue"] = new JsonObject
@@ -78,6 +80,11 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
         var resolved = ResolveBlocks(campaign.RulesJson, guest, guestRoles, manifest?.ContentBlocks);
         var theme = ResolveTheme(campaign.ThemeOverridesJson, primaryRole);
 
+        // A save the date asks nothing and collects nothing: no reply, no camera, no photo box. What it
+        // offers instead is the day, for the guest's calendar.
+        var saveTheDate = campaign.Kind == CampaignKind.SaveTheDate;
+        var calendar = EventCalendar.For(campaign, inviteLink);
+
         var data = new JsonObject
         {
             ["event"] = eventObj,
@@ -91,24 +98,39 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             },
             // The link is absent for a guest who already said they are coming — see RsvpPrompt. The
             // label goes with it, because a control with neither is what [data-optional] hides.
-            ["rsvp"] = new JsonObject
-            {
-                ["link"] = invite.RsvpStatus == RsvpStatus.Going ? null : $"{inviteLink}/rsvp",
-                ["label"] = RsvpPrompt(invite.RsvpStatus),
-                ["status"] = invite.RsvpStatus.ToString()
-            },
+            ["rsvp"] = saveTheDate
+                ? new JsonObject()
+                : new JsonObject
+                {
+                    ["link"] = invite.RsvpStatus == RsvpStatus.Going ? null : $"{inviteLink}/rsvp",
+                    ["label"] = RsvpPrompt(invite.RsvpStatus),
+                    ["status"] = invite.RsvpStatus.ToString()
+                },
             ["invite"] = new JsonObject { ["link"] = inviteLink },
-            ["invitation"] = new JsonObject { ["kind"] = isStatic ? "static" : "dynamic" },
+            ["invitation"] = new JsonObject
+            {
+                ["kind"] = isStatic ? "static" : "dynamic",
+                ["type"] = saveTheDate ? "saveTheDate" : "invitation",
+            },
+            // Add to calendar: bindable by a template (data-href="calendar.google"), and what the bar
+            // on a save the date is built from.
+            ["calendar"] = new JsonObject
+            {
+                ["google"] = CalendarLinks.Google(calendar),
+                ["outlook"] = CalendarLinks.Outlook(calendar),
+                ["office365"] = CalendarLinks.Office365(calendar),
+                ["ics"] = $"{inviteLink}/calendar.ics",
+            },
             // The event photo box (§5), derived from the path the guest actually arrived by — same
             // rule as rsvp.link, so the template's own button stays inside whichever flow they came
             // through instead of bouncing to one that wants a session they don't have.
-            ["photos"] = new JsonObject { ["link"] = $"{inviteLink}/photos" },
+            ["photos"] = saveTheDate ? new JsonObject() : new JsonObject { ["link"] = $"{inviteLink}/photos" },
             // The camera (§5). Separate from photos.link, which is the gallery: a template that binds
             // the gallery itself keeps doing so, and the appended bar prefers this. The object is
             // always present and the LINK is what comes and goes — that is how a template's
             // [data-optional] wrapper knows to hide itself, and how the appended bar tells a closed
             // camera apart from a payload rendered before there was one.
-            ["camera"] = CameraIsOpen(
+            ["camera"] = !saveTheDate && CameraIsOpen(
                 campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow,
                 DateIgnoredFor(campaign.Id), bucketWindowDays, rsvpRequired: !isStatic)
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }

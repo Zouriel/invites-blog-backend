@@ -32,6 +32,14 @@ public sealed class DesignScene
     [JsonPropertyName("schema")] public int Schema { get; set; } = CurrentSchema;
     [JsonPropertyName("canvas")] public DesignCanvas Canvas { get; set; } = new();
 
+    /// <summary>
+    /// "saveTheDate" for a save the date, which asks nothing — no reply button needed, and none shown
+    /// (the server adds "Add to calendar" instead). Null or anything else is an invitation.
+    /// </summary>
+    [JsonPropertyName("kind")] public string? Kind { get; set; }
+
+    [JsonIgnore] public bool IsSaveTheDate => Kind == "saveTheDate";
+
     /// <summary>Theme keys, each becoming <c>--ib-{key}</c>. <c>accent</c>, <c>bg</c> and <c>text</c> are required.</summary>
     [JsonPropertyName("theme")] public List<DesignThemeEntry> Theme { get; set; } = new();
 

@@ -105,7 +105,9 @@ public sealed record MyCampaignDto(
     /// <summary>For a celebrant: whether the organiser gave them full access.</summary>
     bool CanManage = true,
     /// <summary>What the event is on, for its badge: Free, PartyPass, WeddingPass or Venue.</summary>
-    string Plan = "Free");
+    string Plan = "Free",
+    /// <summary>"invitation" or "saveTheDate".</summary>
+    string Kind = "invitation");
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);

@@ -23,7 +23,14 @@ public sealed record ResendEmailRequest(
     [property: JsonPropertyName("text")] string? Text = null,
     [property: JsonPropertyName("reply_to")] string? ReplyTo = null,
     [property: JsonPropertyName("tags")] IReadOnlyList<ResendTag>? Tags = null,
-    [property: JsonPropertyName("headers")] IReadOnlyDictionary<string, string>? Headers = null);
+    [property: JsonPropertyName("headers")] IReadOnlyDictionary<string, string>? Headers = null,
+    [property: JsonPropertyName("attachments")] IReadOnlyList<ResendAttachment>? Attachments = null);
+
+/// <summary>A file on the email, base64 in <c>content</c> (Resend's attachments field).</summary>
+public sealed record ResendAttachment(
+    [property: JsonPropertyName("filename")] string Filename,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("content_type")] string? ContentType = null);
 
 public sealed record ResendSendResult([property: JsonPropertyName("id")] string Id);
 

@@ -68,7 +68,9 @@ public class DesignCompilerTests
         RawTemplatePackager.EnsureSelfContainedAndSafe(html);
         var manifest = new RawTemplatePackager(Substitute.For<IStorageService>()).BuildManifest("starter", "1.0.0", html);
 
-        Assert.Contains(manifest.Fields, f => f.Key == "rsvp.link");
+        // A save the date asks nothing, so its starter has no reply button; every other one does.
+        if (scene.IsSaveTheDate) Assert.DoesNotContain(manifest.Fields, f => f.Key == "rsvp.link");
+        else Assert.Contains(manifest.Fields, f => f.Key == "rsvp.link");
         Assert.Contains(manifest.Theme.Keys, k => k.CssVar == "--ib-accent" && k.Type == "color");
         Assert.Contains(manifest.Theme.Keys, k => k.CssVar == "--ib-heading-font" && k.Type == "font");
     }

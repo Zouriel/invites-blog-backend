@@ -45,4 +45,6 @@ public sealed record EventPhotoBoxDto(
     string? ClosedNote = null,
     /// <summary>The venue the event is held at, whose name and logo head its albums.</summary>
     string? VenueName = null,
-    string? VenueLogoUrl = null);
+    string? VenueLogoUrl = null,
+    /// <summary>A save the date: no album, so no photos to show and nothing to add.</summary>
+    bool SaveTheDate = false);
