@@ -785,7 +785,10 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   `MediaBucketService` refuses to make one (`save_the_date_no_album`), RSVP is refused
   (`save_the_date_no_replies`), and the guest routes for replies, photos and the camera send the guest
   back to the page. Save the dates stay out of the feed and can't take a venue code.
-- **Date required, time optional**: `Campaign.AllDay` → an all-day calendar entry.
+- **Same flow as an invitation.** No separate entry point: attaching a design from the **Save the
+  Date** template type sets the kind (`AttachTemplateAsync`, which also drops the album New event made
+  up front while it is still empty). Uploaded designs are invitations.
+- **Time optional**: no time → `Campaign.AllDay` → an all-day calendar entry.
 - **Add to calendar** (`Application/Events/CalendarLinks`): Google, Outlook.com and Microsoft 365
   links plus an .ics (METHOD:PUBLISH). A bar is injected on the guest page (`GuestCalendarHtml`),
   `/r/{id}/calendar.ics` serves the file, and the email ("Save the date: …") carries the buttons and

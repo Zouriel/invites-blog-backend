@@ -63,7 +63,8 @@ public class CampaignServiceTests
         new IInviteDeliveryProvider[] { new InvitesBlog.Infrastructure.Delivery.EmailInviteDeliveryProvider(_email) },
         _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
-        TestData.FreePlans(), _allowance, TestData.PriceBook());
+        TestData.FreePlans(), _allowance, TestData.PriceBook(),
+        TestData.Empty<MediaBucket>(), TestData.Empty<MediaBucketQr>(), TestData.Empty<EventPhoto>());
 
     private InvitesBlog.Application.Plans.ISendingAllowanceService _allowance = TestData.Allowance();
 

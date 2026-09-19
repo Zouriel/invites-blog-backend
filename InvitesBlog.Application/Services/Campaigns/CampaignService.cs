@@ -58,7 +58,10 @@ public sealed class CampaignService(
     IValidator<UpdateDeliverySettingsRequest> deliveryValidator,
     IPlanService plans,
     ISendingAllowanceService allowances,
-    IPriceBook prices) : ICampaignService
+    IPriceBook prices,
+    IRepository<MediaBucket> mediaBuckets,
+    IRepository<MediaBucketQr> bucketQrs,
+    IRepository<EventPhoto> eventPhotos) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -485,10 +488,36 @@ public sealed class CampaignService(
         campaign.TemplatePackageUrl = template.PackageUrl;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
+        // What it is follows from the design: one from the Save the Date category makes a save the
+        // date, anything else an invitation. The host goes through the same flow either way.
+        campaign.Kind = template.Category == SaveTheDates.Category ? CampaignKind.SaveTheDate : CampaignKind.Invitation;
+        if (campaign.Kind == CampaignKind.SaveTheDate)
+            await DropEmptyAlbumsAsync(campaign.Id, ct);
+
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
 
         return await GetSummaryAsync(campaignId, ct);
+    }
+
+    /// <summary>
+    /// A save the date has no album, but New event makes one up front, before the design says what
+    /// the event is. An untouched album goes; one that already holds photos or printed codes means
+    /// the event is already collecting, and it can't become a save the date.
+    /// </summary>
+    private async Task DropEmptyAlbumsAsync(Guid campaignId, CancellationToken ct)
+    {
+        var albums = await mediaBuckets.Query(tracking: true).Where(b => b.CampaignId == campaignId).ToListAsync(ct);
+        if (albums.Count == 0) return;
+        var ids = albums.Select(b => b.Id).ToList();
+        var inUse = await eventPhotos.Query().AnyAsync(p => p.CampaignId == campaignId
+                        || (p.BucketId != null && ids.Contains(p.BucketId.Value)), ct)
+                    || await bucketQrs.Query().AnyAsync(q => ids.Contains(q.BucketId), ct);
+        if (inUse)
+            throw new BusinessRuleException(
+                "This event already has photos or table codes, so it can't be a save the date. Start a new event for it.",
+                "save_the_date_has_album");
+        mediaBuckets.RemoveRange(albums);
     }
 
     /// <summary>
