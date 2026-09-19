@@ -18,7 +18,7 @@ public sealed class VenueController(IVenueService venues) : BaseApiController
 
     [HttpPut]
     [HasPermission(Permissions.Campaigns.Write)]
-    public async Task<IActionResult> Update([FromBody] UpdateVenueRequest req, CancellationToken ct) =>
+    public async Task<IActionResult> Update([FromBody] UpdateVenueProfileRequest req, CancellationToken ct) =>
         Success(await venues.UpdateAsync(req, ct));
 
     [HttpPost("logo")]

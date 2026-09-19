@@ -25,7 +25,7 @@ public sealed record VenueStaffDto(Guid Id, string Email, string? Name, DateTime
 public sealed record VenueEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, int Albums, int Photos, long UsedBytes, bool HasInvitation);
 
-public sealed record UpdateVenueRequest(string Name, string? Place);
+public sealed record UpdateVenueProfileRequest(string Name, string? Place);
 public sealed record AddVenueStaffRequest(string Email, string? Name);
 public sealed record CreateVenueEventRequest(string Title, DateTimeOffset EventDate);
 
@@ -34,7 +34,7 @@ public interface IVenueService
     /// <summary>The venue the caller owns or works at. Made on first visit for an account on the Venue plan.</summary>
     Task<VenueDto> GetAsync(CancellationToken ct = default);
 
-    Task<VenueDto> UpdateAsync(UpdateVenueRequest req, CancellationToken ct = default);
+    Task<VenueDto> UpdateAsync(UpdateVenueProfileRequest req, CancellationToken ct = default);
     Task<VenueDto> SetLogoAsync(byte[] content, string contentType, string fileName, CancellationToken ct = default);
     Task<VenueDto> RemoveLogoAsync(CancellationToken ct = default);
     Task<VenueDto> AddStaffAsync(AddVenueStaffRequest req, CancellationToken ct = default);
@@ -66,7 +66,7 @@ public sealed class VenueService(
     public async Task<VenueDto> GetAsync(CancellationToken ct = default) =>
         await DescribeAsync(await MineAsync(ct), ct);
 
-    public async Task<VenueDto> UpdateAsync(UpdateVenueRequest req, CancellationToken ct = default)
+    public async Task<VenueDto> UpdateAsync(UpdateVenueProfileRequest req, CancellationToken ct = default)
     {
         var venue = await OwnedAsync(ct);
         var name = req.Name?.Trim();

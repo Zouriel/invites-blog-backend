@@ -339,8 +339,10 @@ public sealed class GuestController(
         if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
 
         var box = await photos.GetAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
+        // Closed says why — not open yet, over, or cancelled — rather than calling every closed
+        // camera a cancelled event.
         if (!box.CanUpload)
-            return Html(GuestPages.Cancelled("This event has been cancelled, so its camera is closed."));
+            return Html(GuestPages.CameraClosed(box.EventTitle, $"/r/{renderId}", await PaletteAsync(inviteId.Value, ct), box.ClosedNote));
 
         // Ties the one inline script to this response. Cheaper than a bundler and stronger than
         // opening the page to script-src 'unsafe-inline'.

@@ -210,10 +210,11 @@ public static class GuestPages
     }
 
     /// <summary>The camera outside its window: open from the day before the event to the end of the day after.</summary>
-    public static string CameraClosed(string eventTitle, string backPath, GuestPalette? palette = null) =>
+    /// <param name="note">Why, in the words the photo box uses: not open yet, closed, or cancelled.</param>
+    public static string CameraClosed(string eventTitle, string backPath, GuestPalette? palette = null, string? note = null) =>
         Shell("Camera closed", $"""
             <h1>{E(eventTitle)}</h1>
-            <p>The camera isn't open right now. It opens the day before the event and closes when the day after it ends.</p>
+            <p>{E(note ?? "The camera isn't open right now. It opens on the day of the event.")}</p>
             <p><a href="{E(backPath)}">Back to the invitation</a></p>
             """, palette);
 
