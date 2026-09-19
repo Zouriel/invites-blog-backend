@@ -39,5 +39,4 @@ public interface IAdminService
     Task<AdminUserEventDto> AddSendingAsync(Guid campaignId, AddSendingRequest req, CancellationToken ct = default);
 
     /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
-    Task<AdminUserDto> AdjustPassCreditsAsync(Guid userId, AdjustPassCreditsRequest req, CancellationToken ct = default);
 }

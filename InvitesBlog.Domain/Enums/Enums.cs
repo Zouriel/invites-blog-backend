@@ -68,8 +68,10 @@ public enum PaymentKind
     Sending,
     StudioMonthly,
     StudioYearly,
-    StudioPartyCredits,
-    StudioWeddingCredits,
+    StudioPartyCredits,     // retired: Studio clients get the discount automatically now
+    StudioWeddingCredits,   // retired
+    PartyExtension,
+    WeddingExtension,
 }
 
 public enum PaymentStatus

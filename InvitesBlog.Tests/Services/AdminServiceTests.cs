@@ -24,9 +24,10 @@ public class AdminServiceTests
 
     private AdminService Sut() => new(
         _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow,
-        Substitute.For<ICampaignRepository>(), TestData.Empty<PassCredit>(),
+        Substitute.For<ICampaignRepository>(),
         Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
-        TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>());
+        TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>(),
+        Substitute.For<IEmailSender>(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
 
     // ---------- granting and revoking a role ----------
 

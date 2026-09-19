@@ -16,19 +16,20 @@ namespace InvitesBlog.Application.Services.Billing;
 
 public sealed record BillingPricesDto(
     decimal PartyPass, decimal WeddingPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
-    decimal StudioMonthly, decimal StudioYearly, decimal VenueMonthlyFrom, decimal StudioPartyPass, decimal StudioWeddingPass);
+    decimal StudioMonthly, decimal StudioYearly, decimal VenueMonthlyFrom, int StudioDiscountPercent,
+    decimal PartyExtension, decimal WeddingExtension);
 
 /// <summary>The account's own plan: None, Studio or Venue.</summary>
 public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active);
 
-/// <summary>Pass credits a Studio account holds to give clients.</summary>
-public sealed record BillingCreditsDto(int Party, int Wedding);
-
 /// <summary>One of the account's events, with everything that can be bought for it.</summary>
+/// <param name="Pass">The pass it has or last had (None, Party, Wedding) — what an extension extends.</param>
+/// <param name="Offer">What its passes cost this host: with the Studio discount on a design made for them.</param>
+/// <param name="IsDraft">Not finished yet: a pass bought now is what it goes out with.</param>
 public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
     DateTimeOffset? PassUntil, DateTimeOffset? KeepPhotosUntil, DateTimeOffset? CoveredUntil, string Phase,
-    SendingAllowanceDto Sending, bool AtVenue);
+    SendingAllowanceDto Sending, bool AtVenue, string Pass, bool PassActive, PassOfferDto Offer, bool IsDraft);
 
 public sealed record BillingPaymentDto(
     Guid Id, string Item, string Description, decimal Amount, string Currency, string Status,
@@ -36,12 +37,13 @@ public sealed record BillingPaymentDto(
 
 public sealed record BillingOverviewDto(
     bool PaymentsEnabled, string Currency, decimal MvrPerUsd, BillingPricesDto Prices, BillingAccountDto Account,
-    BillingCreditsDto? Credits, IReadOnlyList<BillingEventDto> Events, IReadOnlyList<BillingPaymentDto> Payments);
+    IReadOnlyList<BillingEventDto> Events, IReadOnlyList<BillingPaymentDto> Payments);
 
-/// <param name="Item">party-pass, wedding-pass, keep-photos, sending, studio-monthly, studio-yearly,
-/// studio-party-credits or studio-wedding-credits.</param>
-/// <param name="Quantity">Blocks of emails, or pass credits. 1 for the rest.</param>
-public sealed record CheckoutRequest(string Item, Guid? CampaignId, int? Quantity);
+/// <param name="Item">party-pass, wedding-pass, party-extension, wedding-extension, keep-photos, sending,
+/// studio-monthly or studio-yearly.</param>
+/// <param name="Quantity">Blocks of emails. 1 for the rest.</param>
+/// <param name="ReturnPath">A path on this site to come back to after paying (the plan step); the billing page by default.</param>
+public sealed record CheckoutRequest(string Item, Guid? CampaignId, int? Quantity, string? ReturnPath = null);
 
 /// <summary>
 /// Where to pay, or — while online payment isn't switched on — that it isn't yet, and which
@@ -52,6 +54,9 @@ public sealed record CheckoutResultDto(bool Available, string? CheckoutUrl, stri
 public interface IBillingService
 {
     Task<BillingOverviewDto> GetAsync(CancellationToken ct = default);
+
+    /// <summary>One event's plan and what it can have: what the plan step before sending shows.</summary>
+    Task<BillingEventDto> EventAsync(Guid campaignId, CancellationToken ct = default);
     Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default);
 
     /// <summary>Applies what a paid payment bought, once. Called after the gateway confirms payment.</summary>
@@ -59,8 +64,9 @@ public interface IBillingService
 }
 
 /// <summary>
-/// Everything that can be paid for, in one place: per event (a pass, keeping the photos, emails),
-/// per account (Studio) and for a Studio (pass credits for clients). Prices come from the price book.
+/// Everything that can be paid for, in one place: per event (a pass, another year of it, keeping the
+/// photos, emails) and per account (Studio). Prices come from the price book; a pass on a design a
+/// Studio made for this host is discounted automatically (<see cref="IPassOfferService"/>).
 ///
 /// <para><b>Ready for the gateway.</b> Checkout records a pending <see cref="Payment"/> and asks the
 /// <see cref="IPaymentProvider"/> for a checkout page; the gateway's webhook marks it paid
@@ -75,8 +81,8 @@ public sealed class BillingService(
     ICampaignOwnershipService ownership,
     ICampaignRepository campaigns,
     IRepository<AppUser> users,
-    IRepository<PassCredit> credits,
     IPaymentRepository payments,
+    IPassOfferService offers,
     IPaymentProvider provider,
     ISendingAllowanceService allowances,
     MediaBuckets.IMediaBucketService buckets,
@@ -95,7 +101,6 @@ public sealed class BillingService(
                    ?? throw new NotFoundException("That account no longer exists.");
         var p = await priceBook.CurrentAsync(ct);
         var now = DateTimeOffset.UtcNow;
-        var studio = user.SubscriptionTier == SubscriptionTier.Studio && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
 
         var mine = await campaigns.Query()
             .Where(c => c.CreatedByUserId == me && c.Status != CampaignStatus.Cancelled)
@@ -103,15 +108,7 @@ public sealed class BillingService(
             .Take(MaxListed)
             .ToListAsync(ct);
         var events = new List<BillingEventDto>(mine.Count);
-        foreach (var c in mine)
-        {
-            var plan = await plans.ForCampaignAsync(c.Id, ct);
-            var pass = EventPasses.Active(c, now);
-            events.Add(new BillingEventDto(
-                c.Id, c.Title, c.EventStartAt, SaveTheDates.Name(c.Kind), plan.Kind.ToString(),
-                pass == EventPassKind.None ? null : c.EventPassUntil, c.KeepPhotosUntil, plan.CoveredUntil,
-                plan.Phase.ToString(), await allowances.ForCampaignAsync(c.Id, ct), c.VenueId is not null));
-        }
+        foreach (var c in mine) events.Add(await DescribeEventAsync(c, now, ct));
 
         var ids = mine.Select(c => c.Id).ToList();
         var history = await payments.Query()
@@ -120,25 +117,37 @@ public sealed class BillingService(
             .Take(MaxListed)
             .ToListAsync(ct);
 
-        BillingCreditsDto? held = null;
-        if (studio)
-        {
-            var unused = await credits.Query().Where(c => c.OwnerUserId == me && c.UsedOnCampaignId == null)
-                .Select(c => c.Kind).ToListAsync(ct);
-            held = new BillingCreditsDto(unused.Count(k => k == EventPassKind.Party), unused.Count(k => k == EventPassKind.Wedding));
-        }
-
         return new BillingOverviewDto(
             Enabled, PlanCatalog.Currency, p.MvrPerUsd,
             new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
-                p.StudioMonthly, p.StudioYearly, p.VenueMonthlyFrom,
-                p.StudioPassPrice(EventPassKind.Party), p.StudioPassPrice(EventPassKind.Wedding)),
+                p.StudioMonthly, p.StudioYearly, p.VenueMonthlyFrom, p.StudioDiscountPercent,
+                p.PartyExtension, p.WeddingExtension),
             new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt,
                 PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)),
-            held,
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
                 x.Amount, x.Currency, x.Status.ToString(), x.CreatedAt, x.PaidAt, x.CampaignId)).ToList());
+    }
+
+    public async Task<BillingEventDto> EventAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        RequireUser();
+        if (await ownership.AccessAsync(campaignId, ct) != CampaignAccess.Organiser)
+            throw new ForbiddenException("Only the event's host can see what it costs.");
+        var c = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new NotFoundException("That event no longer exists.");
+        return await DescribeEventAsync(c, DateTimeOffset.UtcNow, ct);
+    }
+
+    private async Task<BillingEventDto> DescribeEventAsync(Campaign c, DateTimeOffset now, CancellationToken ct)
+    {
+        var plan = await plans.ForCampaignAsync(c.Id, ct);
+        var pass = EventPasses.Active(c, now);
+        return new BillingEventDto(
+            c.Id, c.Title, c.EventStartAt, SaveTheDates.Name(c.Kind), plan.Kind.ToString(),
+            pass == EventPassKind.None ? null : c.EventPassUntil, c.KeepPhotosUntil, plan.CoveredUntil,
+            plan.Phase.ToString(), await allowances.ForCampaignAsync(c.Id, ct), c.VenueId is not null,
+            c.EventPass.ToString(), pass != EventPassKind.None, await offers.ForCampaignAsync(c.Id, ct),
+            c.Status == CampaignStatus.Draft);
     }
 
     public async Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default)
@@ -147,12 +156,7 @@ public sealed class BillingService(
         var kind = ParseItem(req.Item);
         var p = await priceBook.CurrentAsync(ct);
         var now = DateTimeOffset.UtcNow;
-        var quantity = kind switch
-        {
-            PaymentKind.Sending => Math.Clamp(req.Quantity ?? 1, 1, 50),
-            PaymentKind.StudioPartyCredits or PaymentKind.StudioWeddingCredits => Math.Clamp(req.Quantity ?? 1, 1, 20),
-            _ => 1,
-        };
+        var quantity = kind == PaymentKind.Sending ? Math.Clamp(req.Quantity ?? 1, 1, 50) : 1;
 
         Campaign? campaign = null;
         if (IsEventItem(kind))
@@ -170,6 +174,9 @@ public sealed class BillingService(
                 if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
                     throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
             }
+            if (kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension
+                && campaign.EventPass != (kind == PaymentKind.WeddingExtension ? EventPassKind.Wedding : EventPassKind.Party))
+                throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
         }
         else
         {
@@ -179,24 +186,25 @@ public sealed class BillingService(
             if (kind is PaymentKind.StudioMonthly or PaymentKind.StudioYearly
                 && active && user.SubscriptionTier == SubscriptionTier.Venue)
                 throw new BusinessRuleException("This account is on the Venue plan. Talk to us about changing it.", "billing_venue_account");
-            if (kind is PaymentKind.StudioPartyCredits or PaymentKind.StudioWeddingCredits
-                && !(active && user.SubscriptionTier == SubscriptionTier.Studio))
-                throw new BusinessRuleException("Passes for clients come with Studio.", "studio_required");
         }
 
+        var offer = campaign is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
         var amount = kind switch
         {
-            PaymentKind.PartyPass => p.PartyPass,
-            PaymentKind.WeddingPass => p.WeddingPass,
+            PaymentKind.PartyPass => offer!.PartyPass,
+            PaymentKind.WeddingPass => offer!.WeddingPass,
+            PaymentKind.PartyExtension => offer!.PartyExtension,
+            PaymentKind.WeddingExtension => offer!.WeddingExtension,
             PaymentKind.KeepPhotos => p.KeepPhotosYearly,
             PaymentKind.Sending => p.SendingPerBlock * quantity,
             PaymentKind.StudioMonthly => p.StudioMonthly,
             PaymentKind.StudioYearly => p.StudioYearly,
-            PaymentKind.StudioPartyCredits => p.StudioPassPrice(EventPassKind.Party) * quantity,
-            PaymentKind.StudioWeddingCredits => p.StudioPassPrice(EventPassKind.Wedding) * quantity,
             _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
         };
         var description = Describe(kind, quantity, campaign);
+        // The discount says where it comes from, on the receipt as on the page.
+        if (kind is PaymentKind.PartyPass or PaymentKind.WeddingPass && offer is { DiscountPercent: > 0 } o)
+            description += $" · {o.DiscountPercent}% off, designed by {o.DesignedBy}";
 
         if (!Enabled)
             return new CheckoutResultDto(false, null,
@@ -221,9 +229,11 @@ public sealed class BillingService(
         await uow.SaveChangesAsync(ct);
 
         var inviterBase = config.InviterBase();
+        var back = string.IsNullOrWhiteSpace(req.ReturnPath) || !req.ReturnPath.StartsWith('/') || req.ReturnPath.StartsWith("//")
+            ? "/billing" : req.ReturnPath;
         var session = await provider.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest(
             campaign?.Id ?? Guid.Empty, kind.ToString(), amount, PlanCatalog.Currency, payment.InviteCount,
-            $"{inviterBase}/billing?paid={payment.Id}", $"{inviterBase}/billing"), ct);
+            $"{inviterBase}{back}{(back.Contains('?') ? '&' : '?')}paid={payment.Id}", $"{inviterBase}{back}"), ct);
         payment.ProviderSessionId = session.SessionId;
         await uow.SaveChangesAsync(ct);
 
@@ -249,6 +259,11 @@ public sealed class BillingService(
                 if (campaign is null) break;
                 EventPasses.Apply(campaign, payment.Kind == PaymentKind.WeddingPass ? EventPassKind.Wedding : EventPassKind.Party, now);
                 raiseWindows = true;
+                break;
+            case PaymentKind.PartyExtension:
+            case PaymentKind.WeddingExtension:
+                if (campaign is null) break;
+                raiseWindows = EventPasses.Extend(campaign, now);
                 break;
             case PaymentKind.KeepPhotos:
                 if (campaign is null) break;
@@ -277,14 +292,6 @@ public sealed class BillingService(
                 user.SubscriptionTier = SubscriptionTier.Studio;
                 studioChanged = true;
                 break;
-            case PaymentKind.StudioPartyCredits:
-            case PaymentKind.StudioWeddingCredits:
-                if (payment.UserId is not { } owner) break;
-                var passKind = payment.Kind == PaymentKind.StudioWeddingCredits ? EventPassKind.Wedding : EventPassKind.Party;
-                var each = payment.Quantity > 0 ? Math.Round(payment.Amount / payment.Quantity, 2) : payment.Amount;
-                for (var i = 0; i < payment.Quantity; i++)
-                    await credits.AddAsync(new PassCredit { Id = Guid.NewGuid(), OwnerUserId = owner, Kind = passKind, Price = each, CreatedAt = now }, ct);
-                break;
         }
 
         payment.FulfilledAt = now;
@@ -307,7 +314,8 @@ public sealed class BillingService(
     private Guid RequireUser() => currentUser.UserId ?? throw new ForbiddenException("Sign in to see your billing.");
 
     private static bool IsEventItem(PaymentKind kind) =>
-        kind is PaymentKind.PartyPass or PaymentKind.WeddingPass or PaymentKind.KeepPhotos or PaymentKind.Sending;
+        kind is PaymentKind.PartyPass or PaymentKind.WeddingPass or PaymentKind.PartyExtension or PaymentKind.WeddingExtension
+            or PaymentKind.KeepPhotos or PaymentKind.Sending;
 
     public static PaymentKind ParseItem(string? item) => (item ?? "").Trim().ToLowerInvariant() switch
     {
@@ -317,8 +325,8 @@ public sealed class BillingService(
         "sending" => PaymentKind.Sending,
         "studio-monthly" => PaymentKind.StudioMonthly,
         "studio-yearly" => PaymentKind.StudioYearly,
-        "studio-party-credits" => PaymentKind.StudioPartyCredits,
-        "studio-wedding-credits" => PaymentKind.StudioWeddingCredits,
+        "party-extension" => PaymentKind.PartyExtension,
+        "wedding-extension" => PaymentKind.WeddingExtension,
         _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
     };
 
@@ -330,6 +338,8 @@ public sealed class BillingService(
         PaymentKind.Sending or PaymentKind.Initial or PaymentKind.TopUp => "sending",
         PaymentKind.StudioMonthly => "studio-monthly",
         PaymentKind.StudioYearly => "studio-yearly",
+        PaymentKind.PartyExtension => "party-extension",
+        PaymentKind.WeddingExtension => "wedding-extension",
         PaymentKind.StudioPartyCredits => "studio-party-credits",
         PaymentKind.StudioWeddingCredits => "studio-wedding-credits",
         _ => "other",
@@ -342,6 +352,8 @@ public sealed class BillingService(
         {
             PaymentKind.PartyPass => $"Party pass{on}",
             PaymentKind.WeddingPass => $"Wedding pass{on}",
+            PaymentKind.PartyExtension => $"Party pass, another year{on}",
+            PaymentKind.WeddingExtension => $"Wedding pass, another year{on}",
             PaymentKind.KeepPhotos => $"Keep your photos, a year{on}",
             PaymentKind.Sending => $"{quantity * PricingCalculator.BlockSize} emailed invitations{on}",
             PaymentKind.StudioMonthly => "Studio, a month",
@@ -354,8 +366,8 @@ public sealed class BillingService(
 
     private static string InquireTopic(PaymentKind kind) => kind switch
     {
-        PaymentKind.PartyPass => "party",
-        PaymentKind.WeddingPass => "wedding",
+        PaymentKind.PartyPass or PaymentKind.PartyExtension => "party",
+        PaymentKind.WeddingPass or PaymentKind.WeddingExtension => "wedding",
         PaymentKind.KeepPhotos => "keep",
         PaymentKind.Sending => "sending",
         PaymentKind.StudioMonthly or PaymentKind.StudioYearly => "studio",

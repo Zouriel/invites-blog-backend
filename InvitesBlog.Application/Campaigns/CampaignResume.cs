@@ -12,24 +12,27 @@ namespace InvitesBlog.Application.Campaigns;
 public static class CampaignResume
 {
     /// <returns>
-    /// A wizard step path (<c>roles</c>, <c>guests</c>, <c>inviter</c>, <c>delivery</c>), or null when
-    /// there is nothing to finish: the invitation was sent, or the event is photos only.
+    /// A wizard step path (<c>roles</c>, <c>guests</c>, <c>inviter</c>, <c>photos</c> — the plan step),
+    /// or null when there is nothing to finish: the event is live.
     /// </returns>
     public static string? Step(Campaign campaign, bool isImported, int guestCount)
     {
         if (campaign.Status != CampaignStatus.Draft) return null;
-        // No pinned design means no invitation at all. That is a finished photos-only event, not a
-        // half-made invitation.
-        if (string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)) return null;
+        // No design yet. A save the date needs one (null: its page offers "Choose a design"); any
+        // other event can finish as photos only, at the plan step.
+        if (string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl))
+            return campaign.Kind == CampaignKind.SaveTheDate ? null : "photos";
 
-        if (isImported) return campaign.InviterId is null ? "guests" : "delivery";
+        // The plan step ("photos") comes last before Share: a pass is chosen, and paid for, before
+        // anything is sent.
+        if (isImported) return campaign.InviterId is null ? "guests" : "photos";
         // A save the date has no roles step: there is nothing for a role to decide yet.
         if (campaign.Kind == CampaignKind.SaveTheDate)
-            return guestCount == 0 ? "guests" : campaign.InviterId is null ? "inviter" : "delivery";
+            return guestCount == 0 ? "guests" : campaign.InviterId is null ? "inviter" : "photos";
         if (!HasRoles(campaign.RolesJson)) return "roles";
         if (guestCount == 0) return "guests";
         if (campaign.InviterId is null) return "inviter";
-        return "delivery";
+        return "photos";
     }
 
     private static bool HasRoles(string? rolesJson)

@@ -536,7 +536,7 @@ public sealed class CampaignService(
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false)
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
@@ -565,6 +565,8 @@ public sealed class CampaignService(
             {
                 campaign.EventStartAt = when.ToUniversalTime();
                 campaign.AllDay = allDay;
+                // Made complete in one go (a venue's event): not a draft waiting for its plan step.
+                if (live) campaign.Status = CampaignStatus.Dispatched;
                 campaign.UpdatedAt = DateTimeOffset.UtcNow;
                 campaigns.Update(campaign);
                 await uow.SaveChangesAsync(ct);
@@ -572,6 +574,17 @@ public sealed class CampaignService(
         }
 
         return created;
+    }
+
+    public async Task ActivateAsync(Guid id, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+        if (campaign.Status != CampaignStatus.Draft) return;
+        if (campaign.Kind == CampaignKind.SaveTheDate || !string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl))
+            throw new BusinessRuleException("This one finishes by being sent, from the Share step.", "finish_by_sending");
+        campaign.Status = CampaignStatus.Dispatched;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
     }
 
     public async Task<CampaignImageDto> SetCoverAsync(Guid id, string? url, CancellationToken ct = default)

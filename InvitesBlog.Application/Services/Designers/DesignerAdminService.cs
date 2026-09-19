@@ -16,7 +16,6 @@ public sealed class DesignerAdminService(
     IRepository<AppUser> users,
     IRepository<UserExternalLogin> externalLogins,
     ITemplateRepository templates,
-    IRepository<PassCredit> credits,
     IUnitOfWork uow) : IDesignerAdminService
 {
     public async Task<PagedResult<DesignerAdminDto>> ListAsync(
@@ -53,12 +52,6 @@ public sealed class DesignerAdminService(
             .GroupBy(t => t.DesignerUserId!.Value)
             .Select(g => new { Id = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var held = (await credits.Query()
-                .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
-                .Select(c => new { c.OwnerUserId, c.Kind })
-                .ToListAsync(ct))
-            .GroupBy(c => c.OwnerUserId)
-            .ToDictionary(g => g.Key, g => (Party: g.Count(c => c.Kind == EventPassKind.Party), Wedding: g.Count(c => c.Kind == EventPassKind.Wedding)));
         var now = DateTimeOffset.UtcNow;
 
         var items = page.Select(u => new DesignerAdminDto(
@@ -68,10 +61,7 @@ public sealed class DesignerAdminService(
             u.CreatedAt,
             u.SubscriptionTier == SubscriptionTier.Studio && PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now),
             u.SubscriptionTier == SubscriptionTier.Studio ? u.SubscriptionEndsAt : null,
-            held.GetValueOrDefault(u.Id).Party + held.GetValueOrDefault(u.Id).Wedding,
-            forClients.GetValueOrDefault(u.Id),
-            held.GetValueOrDefault(u.Id).Party,
-            held.GetValueOrDefault(u.Id).Wedding)).ToList();
+            forClients.GetValueOrDefault(u.Id))).ToList();
 
         return PagedResult<DesignerAdminDto>.Create(items, total, filter);
     }

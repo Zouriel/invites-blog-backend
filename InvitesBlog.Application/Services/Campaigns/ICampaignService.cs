@@ -38,7 +38,13 @@ public interface ICampaignService
     /// </param>
     Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false);
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false);
+
+    /// <summary>
+    /// Finishes an event that has no invitation (photos only) on its plan as it stands: it stops
+    /// being a draft, and its album, codes and camera open. An invitation finishes by being sent.
+    /// </summary>
+    Task ActivateAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
     /// Gives an event that has no invitation one, by pinning a template onto it.

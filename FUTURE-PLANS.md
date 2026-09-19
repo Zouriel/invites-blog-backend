@@ -817,3 +817,25 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
 - **To go live with BML:** implement `IPaymentProvider` for BML (create session → hosted payment page,
   verify webhook signature, refunds), register it instead of `FakePaymentProvider`, set
   `Payments:Enabled=true`. Nothing else changes.
+
+
+## The plan step, drafts, the automatic Studio discount and pass extensions — *shipped 2026-09-19*
+
+- **Drafts are not events.** Nothing makes an album up front any more; a draft gets no album, QR code,
+  camera or upload (`event_not_finished`). It finishes by being sent (Share) or, with no invitation,
+  at the plan step (`POST /api/campaigns/{id}/activate`). A live event's album is made the first time
+  its dashboard asks. Venue events and standalone albums are created live. `CampaignResume` sends a
+  draft to the plan step (`photos`). Photos-only drafts from before were made live (migration
+  `PassRemindersAndLiveEvents`).
+- **The plan step** (route `create/:id/photos`, before Share in every flow): Free, Party or Wedding;
+  a pass is paid before anything is sent (`/api/billing/checkout` with a `returnPath`, then back to
+  the step). While `Payments:Enabled` is off, choosing a pass leads to "Ask us" and the event waits;
+  an admin adding the pass to a draft emails the host `PassEmails.Ready`.
+- **Studio discount, automatic** (`PassOfferService`): a design a Studio published FOR a client takes
+  the Studio percentage off a Party/Wedding pass — only when the event's host is that client (by
+  email), only on their first event from it, only while the designer's Studio is active. Nothing
+  else is discounted. The Studio pass stock (credits, admin grants, "give a pass") is gone.
+- **Extending a pass** (`party-extension`/`wedding-extension`, defaults MVR 99/349 in the price book):
+  a year more from its end, without invitations. `PassReminderService` (6-hourly) emails the host a
+  month and a week before a pass ends (`Campaign.PassNoticeStage`, reset on extension); the dashboard
+  and billing page offer "Extend a year" from a month before.

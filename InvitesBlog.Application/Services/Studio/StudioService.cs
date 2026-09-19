@@ -9,10 +9,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Services.Studio;
 
-/// <summary>A Studio account's page: the passes it holds, what they cost it, and its clients' events.</summary>
+/// <summary>
+/// A Studio account's page: its clients' events, and what its clients pay for a pass — the Studio
+/// discount comes off automatically on a design it made for them.
+/// </summary>
 public sealed record StudioOverviewDto(
-    int PartyCredits, int WeddingCredits, decimal PartyPassPrice, decimal WeddingPassPrice,
-    IReadOnlyList<StudioClientDto> Clients);
+    int DiscountPercent, decimal PartyPassPrice, decimal WeddingPassPrice, IReadOnlyList<StudioClientDto> Clients);
 
 /// <summary>
 /// One client's event. A client is someone the designer published a template FOR, or an event the
@@ -20,20 +22,15 @@ public sealed record StudioOverviewDto(
 /// </summary>
 /// <param name="Pass">The pass in force now: None, Party or Wedding.</param>
 /// <param name="Mine">Organised by this account, so its dashboard opens for them.</param>
+/// <param name="Discounted">Made from a design this Studio published for the client: their pass is discounted.</param>
 public sealed record StudioClientDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Status,
     string? HostName, string? HostEmail, string? TemplateName,
-    int GuestCount, int Going, string Pass, DateTimeOffset? PassUntil, bool Mine);
-
-/// <summary>Giving one of the Studio's passes to a client's event.</summary>
-public sealed record GivePassRequest(string Kind);
+    int GuestCount, int Going, string Pass, DateTimeOffset? PassUntil, bool Mine, bool Discounted = false);
 
 public interface IStudioService
 {
     Task<StudioOverviewDto> OverviewAsync(CancellationToken ct = default);
-
-    /// <summary>Uses one of the Studio's passes on a client's event.</summary>
-    Task<StudioClientDto> GivePassAsync(Guid campaignId, GivePassRequest req, CancellationToken ct = default);
 }
 
 public sealed class StudioService(
@@ -44,71 +41,18 @@ public sealed class StudioService(
     IInviterRepository inviters,
     IRepository<Guest> guests,
     IRepository<Invite> invites,
-    IRepository<PassCredit> credits,
-    IRepository<AuditLog> auditLogs,
-    IUnitOfWork uow,
-    MediaBuckets.IMediaBucketService buckets,
-    IPriceBook prices) : IStudioService
+    IPriceBook prices,
+    IPassOfferService offers) : IStudioService
 {
     public async Task<StudioOverviewDto> OverviewAsync(CancellationToken ct = default)
     {
         var me = await RequireStudioAsync(ct);
-        var held = await credits.Query()
-            .Where(c => c.OwnerUserId == me && c.UsedOnCampaignId == null)
-            .GroupBy(c => c.Kind)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
-
         var p = await prices.CurrentAsync(ct);
         return new StudioOverviewDto(
-            held.GetValueOrDefault(EventPassKind.Party),
-            held.GetValueOrDefault(EventPassKind.Wedding),
+            p.StudioDiscountPercent,
             p.StudioPassPrice(EventPassKind.Party),
             p.StudioPassPrice(EventPassKind.Wedding),
             await DescribeAsync(me, await ClientCampaigns(me).ToListAsync(ct), ct));
-    }
-
-    public async Task<StudioClientDto> GivePassAsync(Guid campaignId, GivePassRequest req, CancellationToken ct = default)
-    {
-        var me = await RequireStudioAsync(ct);
-        if (!Enum.TryParse<EventPassKind>(req.Kind?.Trim(), ignoreCase: true, out var kind) || kind == EventPassKind.None)
-            throw new BusinessRuleException("Choose a Party or Wedding pass.", "pass_kind_unknown");
-
-        // Only a client's event: giving a pass is harmless, but the list is what proves who they are.
-        var campaign = await ClientCampaigns(me).FirstOrDefaultAsync(c => c.Id == campaignId, ct)
-                       ?? throw new NotFoundException("That isn't one of your clients' events.");
-        var tracked = await campaigns.Query(tracking: true).FirstAsync(c => c.Id == campaign.Id, ct);
-        var now = DateTimeOffset.UtcNow;
-
-        if (EventPasses.Active(tracked, now) > kind)
-            throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
-
-        var credit = await credits.Query(tracking: true)
-            .Where(c => c.OwnerUserId == me && c.Kind == kind && c.UsedOnCampaignId == null)
-            .OrderBy(c => c.CreatedAt)
-            .FirstOrDefaultAsync(ct)
-            ?? throw new BusinessRuleException(
-                $"You have no {kind} passes left. Get more from your Studio page.", "no_pass_credits");
-
-        EventPasses.Apply(tracked, kind, now);
-        credit.UsedOnCampaignId = tracked.Id;
-        credit.UsedAt = now;
-        campaigns.Update(tracked);
-        credits.Update(credit);
-
-        await auditLogs.AddAsync(new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            Action = "studio.pass.give",
-            Actor = me.ToString(),
-            CampaignId = tracked.Id,
-            DataJson = JsonSerializer.Serialize(new { kind = kind.ToString(), credit = credit.Id, until = tracked.EventPassUntil }),
-            CreatedAt = now,
-        }, ct);
-        await uow.SaveChangesAsync(ct);
-        await buckets.RaiseWindowsToPlanAsync(tracked.Id, ct);
-
-        return (await DescribeAsync(me, [tracked], ct))[0];
     }
 
     private async Task<Guid> RequireStudioAsync(CancellationToken ct)
@@ -141,6 +85,10 @@ public sealed class StudioService(
         var names = await templates.Query()
             .Where(t => templateIds.Contains(t.Id) && t.Visibility != TemplateVisibility.Imported)
             .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+        // The same rule the host's checkout uses: made for them, first use, Studio still active.
+        var discounted = new HashSet<Guid>();
+        foreach (var c in rows)
+            if ((await offers.ForCampaignAsync(c.Id, ct)).DiscountPercent > 0) discounted.Add(c.Id);
         var hosts = await inviters.Query()
             .Where(i => inviterIds.Contains(i.Id))
             .ToDictionaryAsync(i => i.Id, ct);
@@ -165,7 +113,8 @@ public sealed class StudioService(
                 host?.Name, host?.Email, names.GetValueOrDefault(c.TemplateId),
                 guestCounts.GetValueOrDefault(c.Id), going.GetValueOrDefault(c.Id),
                 pass.ToString(), pass == EventPassKind.None ? null : c.EventPassUntil,
-                c.CreatedByUserId == me);
+                c.CreatedByUserId == me,
+                discounted.Contains(c.Id));
         }).ToList();
     }
 }

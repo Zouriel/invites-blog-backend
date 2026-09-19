@@ -204,7 +204,7 @@ public class MediaBucketServiceTests
     {
         var campaignId = Guid.NewGuid();
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "The wedding", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "The wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.FirstOrDefaultAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(),
             Arg.Any<CancellationToken>()).Returns((MediaBucket?)null);
@@ -413,7 +413,7 @@ public class MediaBucketServiceTests
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "Test invitation", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "Test invitation", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.FirstOrDefaultAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(),
             Arg.Any<CancellationToken>()).Returns((MediaBucket?)null);
@@ -423,7 +423,7 @@ public class MediaBucketServiceTests
         _photos.Query(Arg.Any<bool>()).Returns(Array.Empty<EventPhoto>().AsAsyncQueryable());
         // DescribeAsync reads the campaign for the title and cover a bucket no longer holds.
         _campaigns.Query(Arg.Any<bool>()).Returns(
-            new[] { new Campaign { Id = campaignId, Title = "Test invitation" } }.AsAsyncQueryable());
+            new[] { new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "Test invitation" } }.AsAsyncQueryable());
 
         var described = await Sut().ForCampaignOwnerAsync(campaignId);
 
@@ -616,7 +616,7 @@ public class MediaBucketServiceTests
         _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
             .Returns(TestData.Plan(eventBytes: 500 * 1024L * 1024));
         _campaigns.GetByIdAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = bucket.CampaignId, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = bucket.CampaignId, Status = CampaignStatus.Dispatched, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
         const string token = "a-printed-token";
         _qrs.Query(Arg.Any<bool>()).Returns(new[] { Code(bucket.Id, token, anonymous: true) }.AsAsyncQueryable());
 
@@ -634,7 +634,7 @@ public class MediaBucketServiceTests
         var ended = TestData.Plan(eventBytes: 500 * 1024L * 1024) with { Phase = InvitesBlog.Application.Plans.MediaPhase.UploadsClosed };
         _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>()).Returns(ended);
         _campaigns.GetByIdAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = bucket.CampaignId, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = bucket.CampaignId, Status = CampaignStatus.Dispatched, Title = "Garden party", EventStartAt = DateTimeOffset.UtcNow });
         const string token = "a-printed-token";
         _qrs.Query(Arg.Any<bool>()).Returns(new[] { Code(bucket.Id, token, anonymous: true) }.AsAsyncQueryable());
 
@@ -681,7 +681,7 @@ public class MediaBucketServiceTests
         _currentUser.CampaignId.Returns(campaignId);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(TestData.Plan());
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _inviters.FirstOrDefaultAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<Inviter, bool>>>(), Arg.Any<CancellationToken>())
             .Returns((Inviter?)null);
@@ -711,7 +711,7 @@ public class MediaBucketServiceTests
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(MediaBucket.MaxPerCampaign);
@@ -730,7 +730,7 @@ public class MediaBucketServiceTests
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(MediaBucket.MaxPerCampaign - 1);
@@ -806,7 +806,7 @@ public class MediaBucketServiceTests
         var night = new DateTimeOffset(2026, 10, 1, 15, 0, 0, TimeSpan.Zero);
         _currentUser.CampaignId.Returns(campaignId);
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = night });
         _buckets.AnyAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(false);
@@ -818,6 +818,21 @@ public class MediaBucketServiceTests
             "Ignored", null, campaignId, night.AddDays(4)));
 
         Assert.Equal(night, saved!.EventDate);
+    }
+
+    /// <summary>A draft isn't an event yet: no album until it's finished (sent, or finished as photos only).</summary>
+    [Fact]
+    public async Task A_draft_gets_no_album()
+    {
+        var campaignId = Guid.NewGuid();
+        _currentUser.CampaignId.Returns(campaignId);
+        _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Draft, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().CreateAsync(new CreateMediaBucketRequest("x", null, campaignId, null)));
+        Assert.Equal("event_not_finished", e.ErrorCode);
+        var lazy = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().ForCampaignAsync(campaignId));
+        Assert.Equal("event_not_finished", lazy.ErrorCode);
     }
 
     /// <summary>
@@ -834,7 +849,7 @@ public class MediaBucketServiceTests
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = night });
         _buckets.AnyAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(true);
@@ -983,7 +998,7 @@ public class MediaBucketServiceTests
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
-            .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
+            .Returns(new Campaign { Id = campaignId, Status = CampaignStatus.Dispatched, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.AnyAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<MediaBucket, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(true);

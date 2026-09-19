@@ -169,6 +169,8 @@ public sealed class EventPhotoService(
                 ? "This event has been cancelled. Everything already added is still here."
                 : campaign.Kind == CampaignKind.SaveTheDate
                     ? InvitesBlog.Application.Campaigns.SaveTheDates.NoAlbumMessage
+                : campaign.Status == CampaignStatus.Draft
+                    ? "Finish setting up this event first. Its album opens once it's done."
                 : plan.Phase != Plans.MediaPhase.Active
                     ? "This event's photos are no longer collecting. Everything already added is still here for now."
                 : !EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays)

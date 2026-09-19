@@ -91,6 +91,9 @@ public static class PlanCatalog
     public const decimal PartyPassPrice = 199m;
     public const decimal WeddingPassPrice = 699m;
     public const decimal KeepPhotosYearly = 150m;
+    /// <summary>Another year of a pass, without invitations: half the pass.</summary>
+    public const decimal PartyExtension = 99m;
+    public const decimal WeddingExtension = 349m;
     public const decimal StudioMonthly = 450m;
     public const decimal StudioYearly = 4500m;
 
@@ -120,9 +123,11 @@ public static class PlanCatalog
                 new PlanDto("Free", "Free", 0m, "every event", null, null,
                     FreeEventBytes, null, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
                 new PlanDto("PartyPass", "Party pass", p.PartyPass, "per event", null, p.StudioPassPrice(EventPassKind.Party),
-                    PartyEventBytes, null, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false),
+                    PartyEventBytes, null, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false,
+                    ExtensionPrice: p.PartyExtension),
                 new PlanDto("WeddingPass", "Wedding pass", p.WeddingPass, "per event", null, p.StudioPassPrice(EventPassKind.Wedding),
-                    WeddingEventBytes, null, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false),
+                    WeddingEventBytes, null, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false,
+                    ExtensionPrice: p.WeddingExtension),
                 new PlanDto("Studio", "Studio", p.StudioMonthly, "per month", p.StudioYearly, null,
                     null, null, null, null, null, 0, false, false),
                 new PlanDto("Venue", "Venue", p.VenueMonthlyFrom, "per month", null, null,
@@ -136,7 +141,8 @@ public static class PlanCatalog
 }
 
 /// <summary>One plan as the pricing page shows it. Studio has no event limits of its own: nulls.</summary>
-/// <param name="StudioPrice">What a Studio account pays for this pass to give a client; null for the rest.</param>
+/// <param name="StudioPrice">What a client pays for this pass on a design a Studio made for them; null for the rest.</param>
+/// <param name="ExtensionPrice">Another year of this pass, without invitations; null for the rest.</param>
 /// <param name="RetentionDays">How long photos are kept from the event day; null while a subscription covers them.</param>
 /// <param name="IncludedInvites">Invitations sent for the event without charge.</param>
 /// <param name="PrivateAlbums">Whether an album can be closed to some guests.</param>
@@ -145,7 +151,7 @@ public static class PlanCatalog
 public sealed record PlanDto(
     string Kind, string Name, decimal Price, string Billing, decimal? YearlyPrice, decimal? StudioPrice,
     long? EventBytes, long? AccountBytes, int? MaxBuckets, int? MaxWindowDays, int? RetentionDays,
-    int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false);
+    int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false, decimal? ExtensionPrice = null);
 
 /// <summary>"Keep your photos": how much a year, and how many months each one adds.</summary>
 public sealed record KeepPhotosDto(decimal Price, int Months);

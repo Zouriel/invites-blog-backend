@@ -13,6 +13,10 @@ public sealed class BillingController(IBillingService billing) : BaseApiControll
     [HasPermission(Permissions.Campaigns.Read)]
     public async Task<IActionResult> Get(CancellationToken ct) => Success(await billing.GetAsync(ct));
 
+    [HttpGet("events/{campaignId:guid}")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> Event(Guid campaignId, CancellationToken ct) => Success(await billing.EventAsync(campaignId, ct));
+
     /// <summary>Starts paying for one item. While online payment is off, says so instead.</summary>
     [HttpPost("checkout")]
     [HasPermission(Permissions.Campaigns.Read)]

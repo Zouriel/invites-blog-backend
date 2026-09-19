@@ -103,6 +103,9 @@ public sealed class Campaign
     /// <summary>When <see cref="EventPass"/> stops covering the event. Null when it never had a pass.</summary>
     public DateTimeOffset? EventPassUntil { get; set; }
 
+    /// <summary>How far the "your pass ends soon" emails have got: 0 none, 1 a month before, 2 a week before. Reset when the pass is extended.</summary>
+    public int PassNoticeStage { get; set; }
+
     /// <summary>"Keep your photos": the album stays online until then, bought a year at a time.</summary>
     public DateTimeOffset? KeepPhotosUntil { get; set; }
 

@@ -38,6 +38,21 @@ public static class EventPasses
             campaign.EventPassUntil = fresh;
 
         if (kind > current) campaign.EventPass = kind;
+        campaign.PassNoticeStage = 0;
         campaign.UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Another year of the pass the event has (or last had), without invitations: from when it ends,
+    /// or from today if it already has. Returns false when there is no pass to extend.
+    /// </summary>
+    public static bool Extend(Campaign campaign, DateTimeOffset now)
+    {
+        if (campaign.EventPass == EventPassKind.None) return false;
+        var from = campaign.EventPassUntil is { } until && until > now ? until : now;
+        campaign.EventPassUntil = from.AddMonths(PlanCatalog.PassMonths);
+        campaign.PassNoticeStage = 0;
+        campaign.UpdatedAt = now;
+        return true;
     }
 }

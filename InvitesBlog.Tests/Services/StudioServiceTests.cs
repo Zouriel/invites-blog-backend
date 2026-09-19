@@ -10,7 +10,10 @@ using Xunit;
 
 namespace InvitesBlog.Tests.Services;
 
-/// <summary>A Studio account giving the passes it holds to its clients' events.</summary>
+/// <summary>
+/// A Studio account's clients, and the discount they get: automatic, on a design the Studio made for
+/// them. There is no stock of passes to give any more.
+/// </summary>
 public class StudioServiceTests
 {
     private readonly Guid _me = Guid.NewGuid();
@@ -19,54 +22,46 @@ public class StudioServiceTests
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
-    private readonly List<PassCredit> _credits = [];
-    private readonly IRepository<PassCredit> _creditRepo = Substitute.For<IRepository<PassCredit>>();
+    private readonly List<Template> _templateRows = [];
 
     public StudioServiceTests()
     {
         _currentUser.UserId.Returns(_me);
         _plans.IsStudioAsync(_me, Arg.Any<CancellationToken>()).Returns(true);
-        _templates.Query(Arg.Any<bool>()).Returns(Array.Empty<Template>().AsAsyncQueryable());
+        _templates.Query(Arg.Any<bool>()).Returns(_ => _templateRows.AsAsyncQueryable());
         _inviters.Query(Arg.Any<bool>()).Returns(Array.Empty<Inviter>().AsAsyncQueryable());
-        _creditRepo.Query(Arg.Any<bool>()).Returns(_ => _credits.AsAsyncQueryable());
+        _campaigns.Query(Arg.Any<bool>()).Returns(Array.Empty<Campaign>().AsAsyncQueryable());
     }
 
     private StudioService Sut() => new(
         _currentUser, _plans, _campaigns, _templates, _inviters,
-        TestData.Empty<Guest>(), TestData.Empty<Invite>(), _creditRepo, TestData.Empty<AuditLog>(),
-        Substitute.For<IUnitOfWork>(), Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
-        TestData.PriceBook());
+        TestData.Empty<Guest>(), TestData.Empty<Invite>(), TestData.PriceBook(), _offers);
 
-    private Campaign Mine()
-    {
-        var c = TestData.Campaign();
-        c.CreatedByUserId = _me;
-        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { c }.AsAsyncQueryable());
-        return c;
-    }
+    private readonly IPassOfferService _offers = Substitute.For<IPassOfferService>();
+
+    private static PassOfferDto Offer(int percent) =>
+        new(139m, 489m, 199m, 699m, percent, percent > 0 ? "Me" : null, 99m, 349m);
 
     [Fact]
-    public async Task Giving_a_pass_puts_it_on_the_event_and_uses_one_credit()
+    public async Task Clients_on_a_design_made_for_them_are_marked_discounted()
     {
-        var campaign = Mine();
-        _credits.Add(new PassCredit { Id = Guid.NewGuid(), OwnerUserId = _me, Kind = EventPassKind.Wedding, CreatedAt = DateTimeOffset.UtcNow });
+        var forClient = new Template { Id = Guid.NewGuid(), Name = "For Aisha", DesignerUserId = _me, AssignedEmail = "aisha@x.mv", Version = "1", Visibility = TemplateVisibility.Dedicated };
+        _templateRows.Add(forClient);
+        var theirs = TestData.Campaign();
+        theirs.TemplateId = forClient.Id;
+        var mine = TestData.Campaign();
+        mine.CreatedByUserId = _me;
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { theirs, mine }.AsAsyncQueryable());
+        _offers.ForCampaignAsync(theirs.Id, Arg.Any<CancellationToken>()).Returns(Offer(30));
+        _offers.ForCampaignAsync(mine.Id, Arg.Any<CancellationToken>()).Returns(Offer(0));
 
-        var result = await Sut().GivePassAsync(campaign.Id, new GivePassRequest("Wedding"));
+        var o = await Sut().OverviewAsync();
 
-        Assert.Equal(EventPassKind.Wedding, campaign.EventPass);
-        Assert.Equal("Wedding", result.Pass);
-        Assert.Equal(campaign.Id, _credits[0].UsedOnCampaignId);
-    }
-
-    [Fact]
-    public async Task Without_a_credit_of_that_kind_nothing_is_given()
-    {
-        var campaign = Mine();
-        _credits.Add(new PassCredit { Id = Guid.NewGuid(), OwnerUserId = _me, Kind = EventPassKind.Party, CreatedAt = DateTimeOffset.UtcNow });
-
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().GivePassAsync(campaign.Id, new GivePassRequest("Wedding")));
-        Assert.Equal("no_pass_credits", e.ErrorCode);
-        Assert.Equal(EventPassKind.None, campaign.EventPass);
+        Assert.Equal(30, o.DiscountPercent);
+        Assert.Equal(139m, o.PartyPassPrice);
+        Assert.Equal(489m, o.WeddingPassPrice);
+        Assert.True(o.Clients.Single(c => c.CampaignId == theirs.Id).Discounted);
+        Assert.False(o.Clients.Single(c => c.CampaignId == mine.Id).Discounted);
     }
 
     [Fact]

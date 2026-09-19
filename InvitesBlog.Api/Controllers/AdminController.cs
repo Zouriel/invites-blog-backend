@@ -89,12 +89,6 @@ public sealed class AdminController(IAdminService admin, IPriceBook prices, ICur
     public async Task<IActionResult> AddSending(Guid id, [FromBody] AddSendingRequest req, CancellationToken ct) =>
         Success(await admin.AddSendingAsync(id, req, ct));
 
-    /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
-    [HttpPost("users/{id:guid}/pass-credits")]
-    [HasPermission(Permissions.Admin.ManageUsers)]
-    public async Task<IActionResult> AdjustPassCredits(Guid id, [FromBody] AdjustPassCreditsRequest req, CancellationToken ct) =>
-        Success(await admin.AdjustPassCreditsAsync(id, req, ct));
-
     [HttpGet("audit")]
     [HasPermission(Permissions.Admin.ReadAudit)]
     public async Task<IActionResult> Audit([FromQuery] AuditLogFilter filter, CancellationToken ct) =>

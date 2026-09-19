@@ -30,11 +30,12 @@ public sealed class AdminService(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     ICampaignRepository campaigns,
-    IRepository<PassCredit> credits,
     MediaBuckets.IMediaBucketService buckets,
     IPlanService plans,
     ISendingAllowanceService allowances,
-    IDesignerAccessService designerAccess) : IAdminService
+    IDesignerAccessService designerAccess,
+    IEmailSender email,
+    Microsoft.Extensions.Configuration.IConfiguration config) : IAdminService
 {
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
@@ -58,9 +59,6 @@ public sealed class AdminService(
             case "venue":
                 query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Venue);
                 break;
-            case "passes":
-                query = query.Where(u => credits.Query().Any(c => c.OwnerUserId == u.Id && c.UsedOnCampaignId == null));
-                break;
         }
 
         var total = await query.CountAsync(ct);
@@ -70,14 +68,7 @@ public sealed class AdminService(
             .Skip(filter.Skip).Take(filter.PageSize)
             .ToListAsync(ct);
 
-        var ids = page.Select(u => u.Id).ToList();
-        var held = (await credits.Query()
-                .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
-                .Select(c => new { c.OwnerUserId, c.Kind })
-                .ToListAsync(ct))
-            .GroupBy(c => c.OwnerUserId)
-            .ToDictionary(g => g.Key, g => (g.Count(c => c.Kind == EventPassKind.Party), g.Count(c => c.Kind == EventPassKind.Wedding)));
-        var items = page.Select(u => Describe(u, held.GetValueOrDefault(u.Id))).ToList();
+        var items = page.Select(Describe).ToList();
 
         return PagedResult<AdminUserDto>.Create(items, total, filter);
     }
@@ -185,7 +176,7 @@ public sealed class AdminService(
                    ?? throw new NotFoundException($"The {canonical} role hasn't been seeded yet.");
 
         var held = user.UserRoles.FirstOrDefault(ur => ur.RoleId == role.Id);
-        if (req.Granted == (held is not null)) return Describe(user, await UnusedCreditsAsync(user.Id, ct));
+        if (req.Granted == (held is not null)) return Describe(user);
 
         if (!req.Granted && canonical == Roles.Admin)
         {
@@ -217,22 +208,15 @@ public sealed class AdminService(
         }, ct);
 
         await uow.SaveChangesAsync(ct);
-        return Describe(user, await UnusedCreditsAsync(user.Id, ct));
+        return Describe(user);
     }
 
-    private AdminUserDto Describe(AppUser u, (int Party, int Wedding) held) => new(
+    private AdminUserDto Describe(AppUser u) => new(
         u.Id, u.Email, u.DisplayName, u.IsActive,
         u.UserRoles.Select(ur => ur.Role?.Name).OfType<string>().OrderBy(n => n).ToList(),
         u.SubscriptionTier.ToString(),
         u.SubscriptionEndsAt,
-        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow),
-        held.Party + held.Wedding,
-        held.Party,
-        held.Wedding);
-
-    private async Task<(int Party, int Wedding)> UnusedCreditsAsync(Guid userId, CancellationToken ct) => (
-        await credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null && c.Kind == EventPassKind.Party, ct),
-        await credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null && c.Kind == EventPassKind.Wedding, ct));
+        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
 
     /// <summary>
     /// Sets an account's professional plan by hand, until billing exists: Studio for designers and
@@ -285,53 +269,7 @@ public sealed class AdminService(
         await uow.SaveChangesAsync(ct);
         // Studio is what gives the designer: on with it, off without it.
         await designerAccess.SyncAsync(user.Id, ct);
-        return Describe(user, await UnusedCreditsAsync(user.Id, ct));
-    }
-
-    /// <summary>
-    /// Adds passes to a Studio account's stock (a positive count) or takes unused ones away (a
-    /// negative one), until they can be bought online.
-    /// </summary>
-    public async Task<AdminUserDto> AdjustPassCreditsAsync(
-        Guid userId, AdjustPassCreditsRequest req, CancellationToken ct = default)
-    {
-        if (!Enum.TryParse<EventPassKind>(req.Kind?.Trim(), ignoreCase: true, out var kind) || kind == EventPassKind.None)
-            throw new BusinessRuleException("Choose Party or Wedding.", "pass_kind_unknown");
-        if (req.Count is 0 or > 100 or < -100)
-            throw new BusinessRuleException("Choose between 1 and 100 passes.", "pass_count_invalid");
-
-        var user = await users.Query()
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Id == userId, ct)
-            ?? throw new NotFoundException("That account no longer exists.");
-        var now = DateTimeOffset.UtcNow;
-
-        if (req.Count > 0)
-        {
-            for (var i = 0; i < req.Count; i++)
-                await credits.AddAsync(new PassCredit { Id = Guid.NewGuid(), OwnerUserId = userId, Kind = kind, Price = 0m, CreatedAt = now }, ct);
-        }
-        else
-        {
-            var unused = await credits.Query(tracking: true)
-                .Where(c => c.OwnerUserId == userId && c.Kind == kind && c.UsedOnCampaignId == null)
-                .OrderByDescending(c => c.CreatedAt)
-                .Take(-req.Count)
-                .ToListAsync(ct);
-            foreach (var c in unused) credits.Remove(c);
-        }
-
-        await auditLogs.AddAsync(new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            Action = "admin.pass_credits.adjust",
-            Actor = currentUser.UserId?.ToString() ?? "admin",
-            DataJson = JsonSerializer.Serialize(new { user = userId, kind = kind.ToString(), count = req.Count }),
-            CreatedAt = now,
-        }, ct);
-
-        await uow.SaveChangesAsync(ct);
-        return Describe(user, await UnusedCreditsAsync(userId, ct));
+        return Describe(user);
     }
 
     public async Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default)
@@ -414,6 +352,15 @@ public sealed class AdminService(
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
         if (kind != EventPassKind.None) await buckets.RaiseWindowsToPlanAsync(campaign.Id, ct);
+
+        // A host waiting at the plan step for the pass they asked us for: tell them it's there.
+        if (kind != EventPassKind.None && campaign.Status == CampaignStatus.Draft
+            && campaign.CreatedByUserId is { } hostId
+            && await users.Query().Where(u => u.Id == hostId).Select(u => u.Email).FirstOrDefaultAsync(ct) is { Length: > 0 } hostEmail)
+        {
+            var link = $"{InvitesBlog.Application.Common.AppUrls.InviterBase(config)}/create/{campaign.Id}/photos";
+            await email.SendAsync(PassEmails.Ready(hostEmail, campaign.Title, kind == EventPassKind.Wedding ? "Wedding pass" : "Party pass", link), ct);
+        }
         return await DescribeEventAsync(campaign, ct);
     }
 

@@ -6,11 +6,7 @@ public sealed record AdminUserDto(
     /// <summary>None, Studio or Venue, as set, whether or not it has ended.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
-    bool SubscriptionActive = false,
-    /// <summary>Passes a Studio account holds and hasn't given to a client yet, and of which kind.</summary>
-    int PassCredits = 0,
-    int PartyCredits = 0,
-    int WeddingCredits = 0);
+    bool SubscriptionActive = false);
 
 /// <summary>Sets an account's professional plan: None, Studio or Venue. <c>None</c> ends it now.</summary>
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
@@ -36,7 +32,6 @@ public sealed record SetEventPassRequest(string Kind);
 public sealed record KeepPhotosRequest(int Years);
 
 /// <summary>Passes to add to a Studio account (a positive count) or unused ones to take away (negative).</summary>
-public sealed record AdjustPassCreditsRequest(string Kind, int Count);
 
 /// <summary>A role with the names of the permissions it grants.</summary>
 public sealed record AdminRoleDto(

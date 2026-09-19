@@ -91,6 +91,15 @@ public sealed class CampaignsController(
         return SuccessMessage("That link no longer works.");
     }
 
+    /// <summary>Finishes a photos-only event (no invitation to send): it stops being a draft.</summary>
+    [HttpPost("{id:guid}/activate")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> Activate(Guid id, CancellationToken ct)
+    {
+        await campaigns.ActivateAsync(id, ct);
+        return Success(new { activated = true });
+    }
+
     // Finalize (no payment): mark ready, return the shareable /e/{id} link, email it to guests if chosen.
     [HttpPost("{id:guid}/finalize")]
     [HasPermission(Permissions.Campaigns.Write)]

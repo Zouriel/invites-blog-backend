@@ -235,7 +235,8 @@ public sealed class VenueService(
         if (!await PlanActiveAsync(venue, ct))
             throw new BusinessRuleException("The venue's plan has ended, so it can't start new events.", "venue_plan_ended");
 
-        var created = await campaignService.CreateBareAsync(req.Title, req.EventDate, ct);
+        // A venue's event is complete from the start: its plan is the venue's.
+        var created = await campaignService.CreateBareAsync(req.Title, req.EventDate, ct, live: true);
         var campaign = await campaigns.Query(tracking: true).FirstAsync(c => c.Id == created.CampaignId, ct);
         campaign.VenueId = venue.Id;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;

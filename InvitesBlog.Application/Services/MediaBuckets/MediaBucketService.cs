@@ -260,6 +260,9 @@ public sealed class MediaBucketService(
     IRepository<VenueStaff> venueStaff,
     IMediaBucketUsageRepository usage) : IMediaBucketService
 {
+    /// <summary>Said by every door a draft doesn't open yet.</summary>
+    private const string NotLiveMessage = "Finish setting up this event first. Its album, codes and camera open once it's done.";
+
     /// <summary>
     /// Where a scanned code lands. The printed code has to carry an ABSOLUTE URL — it is read by a
     /// phone camera with no page around it to resolve a relative path against — so this is the one
@@ -426,8 +429,11 @@ public sealed class MediaBucketService(
         {
             if (!await ownership.OwnsAsync(existing, ct))
                 throw new ForbiddenException("That event isn't yours.");
-            if (await campaigns.GetByIdAsync(existing, ct) is { Kind: CampaignKind.SaveTheDate })
+            var forEvent = await campaigns.GetByIdAsync(existing, ct);
+            if (forEvent is { Kind: CampaignKind.SaveTheDate })
                 throw new BusinessRuleException(SaveTheDates.NoAlbumMessage, "save_the_date_no_album");
+            if (forEvent is { Status: CampaignStatus.Draft })
+                throw new BusinessRuleException(NotLiveMessage, "event_not_finished");
             var already = await buckets.CountAsync(b => b.CampaignId == existing, ct);
             var existingPlan = await plans.ForCampaignAsync(existing, ct);
 
@@ -460,7 +466,8 @@ public sealed class MediaBucketService(
             // The date the caller gave is the EVENT's, so the event is where it goes — and it goes
             // in as part of creating it, because a second call to set it would check ownership that
             // the caller cannot yet prove. Normalising to UTC happens there too.
-            var created = await campaignService.CreateBareAsync(req.Title.Trim(), night, ct);
+            // An album made on its own is a finished photos-only event, on Free.
+            var created = await campaignService.CreateBareAsync(req.Title.Trim(), night, ct, live: true);
             campaignId = created.CampaignId;
         }
 
@@ -740,6 +747,9 @@ public sealed class MediaBucketService(
         // The one kind of event with no album: a save the date. Photos come with the invitation.
         if (campaign.Kind == CampaignKind.SaveTheDate)
             throw new BusinessRuleException(SaveTheDates.NoAlbumMessage, "save_the_date_no_album");
+        // A draft isn't an event yet: no album, no codes, no camera until it is finished.
+        if (campaign.Status == CampaignStatus.Draft)
+            throw new BusinessRuleException(NotLiveMessage, "event_not_finished");
 
         // Provisioned for whoever the CAMPAIGN belongs to, not for whoever happens to be calling.
         //
@@ -791,8 +801,13 @@ public sealed class MediaBucketService(
             throw new ForbiddenException("That event isn't yours.");
 
         var bucket = await buckets.FirstOrDefaultAsync(b => b.CampaignId == campaignId, ct);
-        if (bucket is null && await campaigns.GetByIdAsync(campaignId, ct) is { Kind: CampaignKind.SaveTheDate })
+        var owner = await campaigns.GetByIdAsync(campaignId, ct);
+        if (bucket is null && owner is { Kind: CampaignKind.SaveTheDate } or { Status: CampaignStatus.Draft })
             return null;
+        // A live event always has its album: made here, the first time its dashboard asks, now that
+        // albums are no longer made while the event is still a draft.
+        if (bucket is null && owner is { Status: not CampaignStatus.Cancelled })
+            bucket = await ForCampaignAsync(campaignId, ct);
 
         // A campaign that ALREADY HOLDS MEDIA has a bucket in every sense the host cares about —
         // only the row is missing, because those photographs predate buckets existing. Offering to
@@ -978,7 +993,9 @@ public sealed class MediaBucketService(
     public async Task<MediaBucketQrDto> CreateQrAsync(
         Guid bucketId, CreateMediaBucketQrRequest req, CancellationToken ct = default)
     {
-        await OwnedAsync(bucketId, ct);
+        var album = await OwnedAsync(bucketId, ct);
+        if (await campaigns.GetByIdAsync(album.CampaignId, ct) is { Status: CampaignStatus.Draft })
+            throw new BusinessRuleException(NotLiveMessage, "event_not_finished");
 
         var token = TokenService.GenerateToken();
         var id = Guid.NewGuid();
