@@ -32,7 +32,9 @@ public sealed class DesignerAccessService(
 {
     public async Task<bool> SyncAsync(Guid userId, CancellationToken ct = default)
     {
-        var designer = await roles.FirstOrDefaultAsync(r => r.Name == Roles.Designer, ct);
+        // Tracked, so it is the same instance EF gives every user's loaded roles: a second copy of the
+        // row makes the save throw the moment any account in the batch already holds the role.
+        var designer = await roles.Query(tracking: true).FirstOrDefaultAsync(r => r.Name == Roles.Designer, ct);
         if (designer is null) return false;
         var user = await users.Query(tracking: true)
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
@@ -45,7 +47,9 @@ public sealed class DesignerAccessService(
 
     public async Task<int> SweepAsync(CancellationToken ct = default)
     {
-        var designer = await roles.FirstOrDefaultAsync(r => r.Name == Roles.Designer, ct);
+        // Tracked, so it is the same instance EF gives every user's loaded roles: a second copy of the
+        // row makes the save throw the moment any account in the batch already holds the role.
+        var designer = await roles.Query(tracking: true).FirstOrDefaultAsync(r => r.Name == Roles.Designer, ct);
         if (designer is null) return 0;
         var list = await users.Query(tracking: true)
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
