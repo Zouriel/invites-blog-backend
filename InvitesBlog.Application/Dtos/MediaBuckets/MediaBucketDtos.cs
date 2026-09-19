@@ -17,7 +17,7 @@ public sealed record MediaBucketDto(
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
-    /// <summary>The event's plan: Free, Basic, EventPass or Premium.</summary>
+    /// <summary>The event's plan: Free, PartyPass, WeddingPass or Venue.</summary>
     string Tier,
     /// <summary>The event's space in GB, to one decimal. Shared by all of the event's buckets.</summary>
     double Gb,
@@ -49,21 +49,19 @@ public sealed record MediaBucketDto(
     string Phase = "Active",
     /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
     long EventUsedBytes = 0,
-    /// <summary>Whether this bucket's size can be set (Basic and Premium).</summary>
-    bool Allocatable = false,
-    /// <summary>The account's space on a subscription, and how much of it all its buckets are given.</summary>
-    long? AccountBytes = null,
-    long AccountAllocatedBytes = 0,
-    /// <summary>The most this bucket's event can be given, and how much its buckets are given now.</summary>
-    long EventMaxBytes = 0,
-    long EventAllocatedBytes = 0);
+    /// <summary>Whether the album can be closed to some guests (Wedding pass and venues).</summary>
+    bool PrivateAlbums = false,
+    /// <summary>Whether the event is on Free, so its pages carry a small "Made with invites.blog".</summary>
+    bool Branded = true,
+    /// <summary>The venue the event is held at, whose name and logo its albums and QR cards carry.</summary>
+    string? VenueName = null,
+    string? VenueLogoUrl = null);
 
-/// <summary>An account's subscription space: how much it has, how much is given out, and how much is used.</summary>
-public sealed record StorageSummaryDto(
-    string Tier, long? AccountBytes, long AllocatedBytes, long UsedBytes, long EventMaxBytes);
-
-/// <summary>Sets how many GB of the account's subscription space one bucket gets.</summary>
-public sealed record SetBucketAllocationRequest(double Gb);
+/// <summary>
+/// The space a venue's events share: how much there is and how much is used. For anyone who isn't a
+/// venue's owner or staff, <c>Tier</c> is "None" and there is nothing to show.
+/// </summary>
+public sealed record StorageSummaryDto(string Tier, long? AccountBytes, long UsedBytes, string? VenueName);
 
 /// <summary>
 /// Creating a bucket. <c>EventDate</c> is the night it is for and is required for a standalone one;
@@ -71,8 +69,8 @@ public sealed record SetBucketAllocationRequest(double Gb);
 /// </summary>
 /// <param name="WindowDays">
 /// How many days it collects for, counted from when the event begins. Null or 1 is the ordinary
-/// night; more is a subscriber's right and is capped at <c>EventDayWindow.MaxWindowDays</c>. Frozen
-/// onto the bucket, so losing the subscription cannot close one already made.
+/// night; more comes with a pass (3 days on Party, 5 on Wedding). Frozen onto the bucket, so a pass
+/// running out cannot close one already made.
 /// </param>
 public sealed record CreateMediaBucketRequest(
     string Title, string? Tier, Guid? CampaignId, DateTimeOffset? EventDate, int? WindowDays = null,

@@ -65,7 +65,7 @@ public class EventPhotoServiceTests
 
     private EventPhotoService Sut() => new(
         _photos, _campaigns, _guests,
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
         _currentUser, _storage, _optimizer, _buckets, _uow);
 
     /// <summary>

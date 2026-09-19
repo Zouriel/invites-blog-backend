@@ -3,20 +3,30 @@ namespace InvitesBlog.Application.Dtos.Admin;
 /// <summary>An application user with the names of the roles assigned to them.</summary>
 public sealed record AdminUserDto(
     Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles,
-    /// <summary>None, Basic or Premium, as set, whether or not it has ended.</summary>
+    /// <summary>None, Studio or Venue, as set, whether or not it has ended.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
-    bool SubscriptionActive = false);
+    bool SubscriptionActive = false,
+    /// <summary>Passes a Studio account holds and hasn't given to a client yet.</summary>
+    int PassCredits = 0);
 
-/// <summary>Sets an account's subscription. <c>None</c> ends it now.</summary>
+/// <summary>Sets an account's professional plan: None, Studio or Venue. <c>None</c> ends it now.</summary>
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
 
-/// <summary>An event an account organised, with its pass.</summary>
+/// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>
+/// <param name="Pass">None, Party or Wedding.</param>
 public sealed record AdminUserEventDto(
-    Guid Id, string Title, DateTimeOffset EventStartAt, DateTimeOffset? EventPassUntil, bool PassActive);
+    Guid Id, string Title, DateTimeOffset EventStartAt, string Pass, DateTimeOffset? EventPassUntil, bool PassActive,
+    DateTimeOffset? KeepPhotosUntil);
 
-/// <summary>Grants an event pass (adding six months) or takes it away.</summary>
-public sealed record SetEventPassRequest(bool Granted);
+/// <summary>Gives an event a pass (<c>Party</c> or <c>Wedding</c>) or takes it away (<c>None</c>).</summary>
+public sealed record SetEventPassRequest(string Kind);
+
+/// <summary>"Keep your photos" for this many years; 0 takes it away.</summary>
+public sealed record KeepPhotosRequest(int Years);
+
+/// <summary>Passes to add to a Studio account (a positive count) or unused ones to take away (negative).</summary>
+public sealed record AdjustPassCreditsRequest(string Kind, int Count);
 
 /// <summary>A role with the names of the permissions it grants.</summary>
 public sealed record AdminRoleDto(

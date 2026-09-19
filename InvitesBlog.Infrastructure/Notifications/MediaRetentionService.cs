@@ -201,20 +201,21 @@ public sealed class MediaRetentionService(
             1 => ($"The photos from {campaign.Title}: the plan has ended",
                 $"The plan for <strong>{title}</strong> has ended, so guests can't add anything new. " +
                 $"Guests can still look at the photos until {organiserOnly}. After that only you can, " +
-                $"and the photos are removed on {deleteOn}. Download everything now, or renew to keep them."),
+                $"and the photos are removed on {deleteOn}. Download everything now, or keep them online for another year " +
+                $"(MVR {PlanCatalog.KeepPhotosYearly:0} a year)."),
             2 => ($"One week left for guests to see the photos from {campaign.Title}",
                 $"From {organiserOnly}, only you will be able to see the photos from <strong>{title}</strong>. " +
-                $"They are removed on {deleteOn} unless you renew."),
+                $"They are removed on {deleteOn} unless you keep them online for another year."),
             _ => ($"The photos from {campaign.Title} will be removed in 7 days",
                 $"The photos and videos from <strong>{title}</strong> will be removed on {deleteOn}. " +
-                "Download everything now, or renew to keep them. Your invitation, guest list and replies stay."),
+                "Download everything now, or keep them online for another year. Your invitation, guest list and replies stay."),
         };
 
         var html =
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">{lines}</p>" +
             $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open the event and download</a></p>" +
-            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{pricing}\" style=\"color:#1b3d59\">See the plans</a></p>" +
+            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{pricing}\" style=\"color:#1b3d59\">Keep your photos</a></p>" +
             "<p style=\"font-size:12px;color:#4a6378;line-height:1.6\">Sent via invites.blog</p></div>";
 
         return (subject, html);

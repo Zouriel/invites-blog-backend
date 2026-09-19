@@ -58,7 +58,7 @@ public static class EventDayWindow
     /// the date.</para>
     /// </summary>
     /// <param name="windowDays">
-    /// For a subscriber's bucket, how many days it stays open counted from the moment the event
+    /// For an album on a pass, how many days it stays open counted from the moment the event
     /// begins. It can only make the window longer: it closes at whichever is later, the end of the
     /// day after or the start plus this many days. Clamped to 1..<see cref="MaxWindowDays"/>.
     /// </param>

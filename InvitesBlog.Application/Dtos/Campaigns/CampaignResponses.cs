@@ -27,7 +27,6 @@ public sealed record CampaignSummaryDto(
     DateTimeOffset EventStartAt,
     DateTimeOffset? EventEndAt,
     int PaidInviteCapacity,
-    bool HasDesignerDiscount,
     bool IsSensitive,
     string CustomContentJson,
     string ThemeOverridesJson,

@@ -6,16 +6,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Plans;
 
-/// <summary>Works out which plan covers an event, from its organiser's subscription and its pass.</summary>
+/// <summary>Works out which plan covers an event: its pass, its venue, and anything bought to keep its photos.</summary>
 public interface IPlanService
 {
     Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
-    /// <summary>
-    /// Space used by an account's events that its subscription pays for. Events with their own pass
-    /// don't count toward it.
-    /// </summary>
-    Task<long> AccountUsedBytesAsync(Guid ownerUserId, CancellationToken ct = default);
+    /// <summary>Space used by every event at a venue, which the venue's plan counts together.</summary>
+    Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default);
+
+    /// <summary>Whether this account's Studio plan is in force.</summary>
+    Task<bool> IsStudioAsync(Guid userId, CancellationToken ct = default);
 
     PlanCatalogDto Catalog();
 }
@@ -23,6 +23,7 @@ public interface IPlanService
 public sealed class PlanService(
     ICampaignRepository campaigns,
     IRepository<AppUser> users,
+    IRepository<Venue> venues,
     IRepository<MediaBucket> buckets) : IPlanService
 {
     public async Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
@@ -37,7 +38,17 @@ public sealed class PlanService(
 
         var ownerId = campaign.CreatedByUserId
                       ?? rows.OrderBy(b => b.CreatedAt).Select(b => (Guid?)b.OwnerUserId).FirstOrDefault();
-        var owner = ownerId is { } id && id != Guid.Empty ? await users.GetByIdAsync(id, ct) : null;
+
+        // The venue's plan is its owner's: in force while they are on Venue.
+        (Guid, bool, DateTimeOffset?)? venue = null;
+        if (campaign.VenueId is { } venueId && await venues.GetByIdAsync(venueId, ct) is { } place
+            && await users.GetByIdAsync(place.OwnerUserId, ct) is { } venueOwner)
+        {
+            var active = venueOwner.SubscriptionTier == SubscriptionTier.Venue
+                         && PlanRules.IsActive(venueOwner.SubscriptionTier, venueOwner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
+            // Once it has ended, the photos' lapse counts from when it did (ending a plan sets that date).
+            venue = (venueId, active, active ? null : venueOwner.SubscriptionEndsAt);
+        }
 
         // Anything from before the plans keeps what it had, and is never removed sooner than 90 days
         // after the plans arrived, so nobody loses photos the day this ships.
@@ -48,7 +59,7 @@ public sealed class PlanService(
             legacyCover = PlanCatalog.IntroducedAt.AddDays(PlanCatalog.FreeCoverDays);
             foreach (var paid in legacy.Where(b => b.Tier != MediaBucketTier.Free))
             {
-                var end = campaign.EventStartAt.AddMonths(PlanCatalog.EventPassMonths);
+                var end = campaign.EventStartAt.AddMonths(PlanCatalog.LegacyMonths);
                 if (paid.TermEndAt is { } term && term > end) end = term;
                 if (end > legacyCover) legacyCover = end;
             }
@@ -57,27 +68,27 @@ public sealed class PlanService(
         return PlanRules.Evaluate(
             DateTimeOffset.UtcNow,
             campaign.EventStartAt,
-            owner?.SubscriptionTier ?? SubscriptionTier.None,
-            owner?.SubscriptionEndsAt,
+            campaign.EventPass,
             campaign.EventPassUntil,
+            campaign.KeepPhotosUntil,
+            venue,
             legacy.Sum(b => b.CapacityBytes),
             legacyCover,
             campaign.MediaDeletedAt,
-            owner?.Id ?? ownerId);
+            ownerId is { } id && id != Guid.Empty ? id : null);
     }
 
-    public async Task<long> AccountUsedBytesAsync(Guid ownerUserId, CancellationToken ct = default)
+    public async Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
-        var passed = await campaigns.Query()
-            .Where(c => c.EventPassUntil != null && c.EventPassUntil > now)
-            .Select(c => c.Id)
-            .ToListAsync(ct);
-
+        var events = campaigns.Query().Where(c => c.VenueId == venueId).Select(c => c.Id);
         return await buckets.Query()
-            .Where(b => b.OwnerUserId == ownerUserId && !passed.Contains(b.CampaignId))
+            .Where(b => events.Contains(b.CampaignId))
             .SumAsync(b => b.UsedBytes, ct);
     }
+
+    public async Task<bool> IsStudioAsync(Guid userId, CancellationToken ct = default) =>
+        await users.GetByIdAsync(userId, ct) is { SubscriptionTier: SubscriptionTier.Studio } user
+        && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow);
 
     public PlanCatalogDto Catalog() => PlanCatalog.Describe();
 }

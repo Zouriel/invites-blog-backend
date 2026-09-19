@@ -38,8 +38,9 @@ moderates.
 A bucket owns a **size** and a **term** and nothing else: its name, its cover, its date and its guest
 list are the event's, shared with the invitation. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
-(`PlanCatalog`: Free, Basic, Event pass, Premium); every event gets the Free plan, so nothing that
-worked before costs anything now.
+(`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or a venue's plan
+for events held there. Studio (designers and planners) and Venue (resorts and halls) are the only
+subscriptions; hosts pay per event. Prices are in rufiyaa.
 
 A bucket is an occasion rather than a drive, so it only **takes** anything on its night: open from
 the start of that day in Malé until 24 hours after the event begins. That is the same window that
@@ -203,10 +204,11 @@ dotnet test          # 883 tests
 
 Worth knowing before reading the pricing code:
 
-- **Media buckets are not billed.** The plans and their limits are real (`PlanCatalog`), and resizing
-  a bucket within them (`SetAllocationAsync`) grants the space outright; nothing is charged.
-- **Payments are not live.** `PricingCalculator` is complete and tested — $5 minimum, 50 invites
-  included, $1 per block of 10 beyond (20 on the designer/Premium rate) — but the only registered
+- **Plans are not billed.** The plans and their limits are real (`PlanCatalog`) and enforced, but
+  passes, "Keep your photos", Studio, Venue and Studio pass credits are all granted by an admin in
+  Admin settings; nothing is sold online yet.
+- **Payments are not live.** `PricingCalculator` is complete and tested — MVR 50 per 100 invitations,
+  after the 100 a Party pass or 500 a Wedding pass includes — but the only registered
   `IPaymentProvider` is `FakePaymentProvider`, and sending invitations is not charged at all today.
   No real money has moved through this.
 - **Delivery is email only.** The landing page's Telegram and WhatsApp are marked "coming soon"

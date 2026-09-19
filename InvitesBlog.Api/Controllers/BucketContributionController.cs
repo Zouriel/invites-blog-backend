@@ -66,6 +66,10 @@ public sealed class BucketContributionController(
             canUpload = admission.CanUpload,
             isOpen = admission.IsOpen,
             eventDate = admission.EventDate,
+            // A Free event's page carries a small "Made with invites.blog"; a venue's carries its name.
+            branded = admission.Branded,
+            venueName = admission.VenueName,
+            venueLogoUrl = admission.VenueLogoUrl,
         });
     }
 

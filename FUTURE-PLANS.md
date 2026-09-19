@@ -682,9 +682,36 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
 - **Subscriber-only controls are shown to everybody and refused with a reason.** Not hidden, not
   disabled. A control that vanishes reads as a bug and a disabled one never says what it is for.
 
+### What changed (2026-09-19) — per-event passes, Studio and Venue
+
+Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plans of 2026-09-15.
+
+- **Hosts pay per event, not per month.** Free (1 GB, one album, one night, 90 days, a small "Made
+  with invites.blog" on the invitation and album), a **Party pass** (MVR 199: 10 GB, two albums, three
+  days, a year, 100 invitations sent) and a **Wedding pass** (MVR 699: 100 GB, five albums, five days,
+  private albums, a year, 500 invitations). **Keep your photos** adds a year for MVR 150. Sending
+  beyond a pass is MVR 50 per 100. All of it is `PlanCatalog`; the frontend's fallback copy must match.
+- **Subscriptions are for professionals only.** `SubscriptionTier` is None/Studio/Venue (1 was Basic,
+  retired; 2 was Premium and is now Studio — same number, so nothing moved). **Studio** (MVR 450/month):
+  a client list (events from templates published FOR someone, and events the planner organised — never
+  strangers using a public design), a "Designed by" credit on those invitations, and **pass credits**
+  bought at 30% off and given to a client's event (`PassCredit`, `EventPasses.Apply`). **Venue** (from
+  MVR 2,300/month): a `Venue` with a name and logo, `VenueStaff` matched by email like celebrants, and
+  events created at the venue (`Campaign.VenueId`) that get Wedding-level albums while the plan runs,
+  1 TB across the venue, and the venue's name on their albums and QR pages. Staff reach those events
+  as Managers through `CampaignOwnershipService`.
+- **Bucket sizing is gone.** Space is per event, shared by its albums; the allocation endpoint, the
+  bucket-size picker and `media_buckets.allocated_bytes` were removed. `campaigns.has_designer_discount`
+  and `templates.is_premium` (never true) went with them.
+- **Every old event pass became a Wedding pass** in the migration: it was the one that covered the old
+  pass's 50 GB and three albums.
+
 ### Still to settle
 
-- **Billing still is not wired up**, so the subscriber list is literally a list. When checkout
+- **Billing still is not wired up**, so passes, Keep your photos, Studio, Venue and pass credits are
+  granted by an admin. When checkout arrives it calls `EventPasses.Apply` (and sets `KeepPhotosUntil`,
+  the account tier, or adds a `PassCredit`) — nothing that reads a plan changes.
+- **(2026-09-07 note, superseded)** Billing still is not wired up, so the subscriber list is literally a list. When checkout
   arrives it changes what SETS the role and nothing that reads it — everything asks `isSubscriber`
   or the two permissions rather than about roles directly.
 - **Nothing distinguishes a bucket's photographs by which bucket a QR code fed.** Codes are per

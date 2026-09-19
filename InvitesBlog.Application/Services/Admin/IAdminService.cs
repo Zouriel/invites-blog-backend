@@ -17,18 +17,24 @@ public interface IAdminService
     /// Gives one account a role, or takes it away, and returns the account as it now stands.
     ///
     /// <para>The only WRITE on this surface. Everything else here inspects; this is what makes a
-    /// subscriber a subscriber, so it is also the one call that has to refuse things — see the
+    /// designer a designer, so it is also the one call that has to refuse things — see the
     /// implementation for which, and why each refusal exists.</para>
     /// </summary>
     Task<AdminUserDto> SetUserRoleAsync(
         Guid userId, SetUserRoleRequest req, CancellationToken ct = default);
 
-    /// <summary>Sets an account's subscription tier and optional end date.</summary>
+    /// <summary>Sets an account's professional plan (None, Studio or Venue) and optional end date.</summary>
     Task<AdminUserDto> SetSubscriptionAsync(Guid userId, SetSubscriptionRequest req, CancellationToken ct = default);
 
     /// <summary>The events an account organised, with their passes.</summary>
     Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default);
 
-    /// <summary>Grants or removes an event pass.</summary>
+    /// <summary>Gives an event a Party or Wedding pass, or takes it away.</summary>
     Task<AdminUserEventDto> SetEventPassAsync(Guid campaignId, SetEventPassRequest req, CancellationToken ct = default);
+
+    /// <summary>"Keep your photos": adds years to how long an event's albums stay online, or takes them away.</summary>
+    Task<AdminUserEventDto> KeepPhotosAsync(Guid campaignId, KeepPhotosRequest req, CancellationToken ct = default);
+
+    /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
+    Task<AdminUserDto> AdjustPassCreditsAsync(Guid userId, AdjustPassCreditsRequest req, CancellationToken ct = default);
 }

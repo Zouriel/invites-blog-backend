@@ -66,9 +66,9 @@ public class MediaBucketServiceTests
 
     private MediaBucketService Sut() => new(
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
-        _uow, _plans, _usage);
+        _uow, _plans, TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _usage);
 
     /// <summary>
     /// Stands in for the database's atomic update and lock. What these tests pin down is what the
@@ -180,7 +180,7 @@ public class MediaBucketServiceTests
 
         var e = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().EnsureRoomAsync(bucket.Id, 1024));
-        Assert.Contains("See the plans for more space", e.Message);
+        Assert.Contains("A pass gives it more room", e.Message);
     }
 
     [Fact]
@@ -251,11 +251,11 @@ public class MediaBucketServiceTests
     }
 
     /// <summary>
-    /// A subscriber's account limit spans every event they hold, so two uploads to two different
-    /// events of theirs must still queue on one lock, or both could take the account's last gigabyte.
+    /// An event's space is shared by its albums, so uploads to any of them queue on the event.
+    /// (At a venue they queue on the venue instead — see the venue tests below.)
     /// </summary>
     [Fact]
-    public async Task A_subscribers_uploads_queue_on_their_account_not_on_each_event()
+    public async Task Uploads_queue_on_the_event_whose_space_they_share()
     {
         var bucket = Mine();
         Stored(bucket);
@@ -264,7 +264,7 @@ public class MediaBucketServiceTests
 
         await Sut().ReserveRoomAsync(bucket.Id, 1024);
 
-        Assert.Equal(_me, Assert.Single(_usage.Reserved).Key);
+        Assert.Equal(bucket.CampaignId, Assert.Single(_usage.Reserved).Key);
     }
 
     /// <summary>
@@ -292,10 +292,8 @@ public class MediaBucketServiceTests
     [Fact]
     public async Task The_room_check_reads_usage_fresh_rather_than_from_an_entity_already_loaded()
     {
-        var plan = TestData.Plan(kind: InvitesBlog.Application.Plans.PlanKind.Premium, owner: _me,
-            accountBytes: 1000 * MediaBucketPlans.BytesPerGb);
+        var plan = TestData.Plan(eventBytes: 10 * MediaBucketPlans.BytesPerGb, kind: InvitesBlog.Application.Plans.PlanKind.WeddingPass, owner: _me);
         var stale = Mine(capacityGb: 10, used: 0);
-        stale.AllocatedBytes = 10 * MediaBucketPlans.BytesPerGb;
         Stored(stale);
         _plans.ForCampaignAsync(stale.CampaignId, Arg.Any<CancellationToken>()).Returns(plan);
 
@@ -303,7 +301,6 @@ public class MediaBucketServiceTests
         var current = Mine(capacityGb: 10, used: 10 * MediaBucketPlans.BytesPerGb);
         current.Id = stale.Id;
         current.CampaignId = stale.CampaignId;
-        current.AllocatedBytes = stale.AllocatedBytes;
         _buckets.Query(Arg.Any<bool>()).Returns(new[] { current }.AsAsyncQueryable());
 
         var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnsureRoomAsync(stale.Id, 1024));
@@ -597,7 +594,7 @@ public class MediaBucketServiceTests
         Assert.Equal("window_needs_plan", free.ErrorCode);
 
         _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxWindowDays: 5, maxBuckets: 3, kind: InvitesBlog.Application.Plans.PlanKind.Premium, accountBytes: 200 * InvitesBlog.Application.Plans.PlanCatalog.Gb));
+            .Returns(TestData.Plan(maxWindowDays: 5, maxBuckets: 3, kind: InvitesBlog.Application.Plans.PlanKind.WeddingPass, accountBytes: 200 * InvitesBlog.Application.Plans.PlanCatalog.Gb));
         await Sut().SetWindowAsync(bucket.Id, new SetBucketWindowRequest(5));
         Assert.Equal(5, bucket.UploadWindowDays);
 
@@ -712,7 +709,7 @@ public class MediaBucketServiceTests
         _currentUser.CampaignId.Returns(campaignId);
         // A subscriber: the cap is what refuses this, not the permission.
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
@@ -731,7 +728,7 @@ public class MediaBucketServiceTests
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.CountAsync(
@@ -835,7 +832,7 @@ public class MediaBucketServiceTests
         var afterParty = night.AddDays(1);
         _currentUser.CampaignId.Returns(campaignId);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = night });
         _buckets.AnyAsync(
@@ -871,7 +868,7 @@ public class MediaBucketServiceTests
         var bucket = Mine();
         Stored(bucket);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
 
         var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("  The ceremony  "));
 
@@ -888,7 +885,7 @@ public class MediaBucketServiceTests
         bucket.Name = "The ceremony";
         Stored(bucket);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
 
         var result = await Sut().RenameAsync(bucket.Id, new RenameMediaBucketRequest("   "));
 
@@ -984,7 +981,7 @@ public class MediaBucketServiceTests
         var campaignId = Guid.NewGuid();
         _currentUser.CampaignId.Returns(campaignId);
         _plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.Premium));
+            .Returns(TestData.Plan(maxBuckets: MediaBucket.MaxPerCampaign, maxWindowDays: 5, kind: PlanKind.WeddingPass));
         _campaigns.GetByIdAsync(campaignId, Arg.Any<CancellationToken>())
             .Returns(new Campaign { Id = campaignId, Title = "A wedding", EventStartAt = DateTimeOffset.UtcNow });
         _buckets.AnyAsync(
@@ -1037,6 +1034,8 @@ public class MediaBucketServiceTests
         var bucket = Mine();
         Stored(bucket);
         var guests = GuestsOn(bucket, 3);
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(kind: PlanKind.WeddingPass, privateAlbums: true));
 
         await Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([guests[0].Id], Allowed: false));
 
@@ -1075,73 +1074,50 @@ public class MediaBucketServiceTests
             () => Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: false)));
     }
 
-    // ---------- sharing out a subscription's space ----------
+    // ---------- a venue's space, and private albums ----------
 
-    private MediaBucket OnPremium(long? allocated, long used = 0)
+    [Fact]
+    public async Task A_venue_counts_its_space_across_all_of_its_events()
     {
-        var bucket = Mine(used: used);
-        bucket.CreatedAt = PlanCatalog.IntroducedAt.AddDays(1);
-        bucket.AllocatedBytes = allocated;
+        var venue = Guid.NewGuid();
+        var bucket = Mine();
         Stored(bucket);
         _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(eventBytes: 50 * PlanCatalog.Gb, maxBuckets: 3, maxWindowDays: 5,
-                kind: PlanKind.Premium, accountBytes: 200 * PlanCatalog.Gb, owner: _me));
-        _plans.AccountUsedBytesAsync(_me, Arg.Any<CancellationToken>()).Returns(used);
-        return bucket;
+            .Returns(TestData.Plan(eventBytes: 100 * PlanCatalog.Gb, maxBuckets: 5, maxWindowDays: 5,
+                kind: PlanKind.Venue, accountBytes: 10 * PlanCatalog.Gb, venueId: venue));
+        _plans.VenueUsedBytesAsync(venue, Arg.Any<CancellationToken>()).Returns(10 * PlanCatalog.Gb - 100);
+
+        await Sut().EnsureRoomAsync(bucket.Id, 100);
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnsureRoomAsync(bucket.Id, 101));
+        Assert.Equal("account_full", e.ErrorCode);
     }
 
     [Fact]
-    public async Task On_premium_a_bucket_holds_what_it_was_given()
+    public async Task Uploads_at_a_venue_queue_on_the_venue()
     {
-        var bucket = OnPremium(allocated: 40 * PlanCatalog.Gb, used: 39 * PlanCatalog.Gb);
+        var venue = Guid.NewGuid();
+        var bucket = Mine();
+        Stored(bucket);
+        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
+            .Returns(TestData.Plan(kind: PlanKind.Venue, accountBytes: 10 * PlanCatalog.Gb, venueId: venue));
 
-        await Sut().EnsureRoomAsync(bucket.Id, PlanCatalog.Gb / 2);
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().EnsureRoomAsync(bucket.Id, 2 * PlanCatalog.Gb));
-        Assert.Equal("bucket_full", e.ErrorCode);
+        await Sut().ReserveRoomAsync(bucket.Id, 10);
+
+        Assert.Equal([(venue, bucket.Id, 10L)], _usage.Reserved);
     }
 
     [Fact]
-    public async Task A_premium_bucket_can_be_given_up_to_50_gb()
-    {
-        var bucket = OnPremium(allocated: null);
-
-        var result = await Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(50));
-
-        Assert.Equal(50 * PlanCatalog.Gb, bucket.AllocatedBytes);
-        Assert.Equal(50 * PlanCatalog.Gb, result.CapacityBytes);
-        Assert.True(result.Allocatable);
-    }
-
-    [Fact]
-    public async Task An_event_cannot_be_given_more_than_its_plan_allows()
-    {
-        var bucket = OnPremium(allocated: null);
-
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(51)));
-        Assert.Equal("allocation_over_event", e.ErrorCode);
-    }
-
-    [Fact]
-    public async Task A_bucket_cannot_be_made_smaller_than_what_it_holds()
-    {
-        var bucket = OnPremium(allocated: 20 * PlanCatalog.Gb, used: 12 * PlanCatalog.Gb);
-
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(10)));
-        Assert.Equal("allocation_below_usage", e.ErrorCode);
-    }
-
-    [Fact]
-    public async Task Free_events_cannot_resize_buckets()
+    public async Task Closing_an_album_to_some_guests_needs_a_wedding_pass_but_opening_it_never_does()
     {
         var bucket = Mine();
         Stored(bucket);
+        GuestsOn(bucket, 2);
 
         var e = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().SetAllocationAsync(bucket.Id, new SetBucketAllocationRequest(5)));
-        Assert.Equal("allocation_needs_subscription", e.ErrorCode);
+            () => Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: false)));
+        Assert.Equal("private_needs_plan", e.ErrorCode);
+
+        await Sut().SetAccessAsync(bucket.Id, new SetBucketAccessRequest([], Allowed: true));
     }
 
     // ----- Cancelled events -----

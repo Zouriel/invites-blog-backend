@@ -17,15 +17,9 @@ internal static class TestData
         long eventBytes = 10 * InvitesBlog.Application.Plans.PlanCatalog.Gb, int maxBuckets = 1, int maxWindowDays = 1,
         InvitesBlog.Application.Plans.MediaPhase phase = InvitesBlog.Application.Plans.MediaPhase.Active,
         InvitesBlog.Application.Plans.PlanKind kind = InvitesBlog.Application.Plans.PlanKind.Free,
-        long? accountBytes = null, Guid? owner = null) =>
-        new(kind, eventBytes, accountBytes, maxBuckets, maxWindowDays, 10, false, null, phase, owner,
-            kind is InvitesBlog.Application.Plans.PlanKind.Basic or InvitesBlog.Application.Plans.PlanKind.Premium,
-            kind switch
-            {
-                InvitesBlog.Application.Plans.PlanKind.Basic => InvitesBlog.Application.Plans.PlanCatalog.BasicBucketBytes,
-                InvitesBlog.Application.Plans.PlanKind.Premium => InvitesBlog.Application.Plans.PlanCatalog.PremiumBucketBytes,
-                _ => 0,
-            });
+        long? accountBytes = null, Guid? owner = null, bool privateAlbums = false, Guid? venueId = null) =>
+        new(kind, eventBytes, accountBytes, maxBuckets, maxWindowDays, 0, privateAlbums,
+            kind == InvitesBlog.Application.Plans.PlanKind.Free, null, phase, owner, venueId);
 
     /// <summary>A plan service that answers every event with <see cref="Plan"/>.</summary>
     public static InvitesBlog.Application.Plans.IPlanService FreePlans()
@@ -33,6 +27,14 @@ internal static class TestData
         var plans = Substitute.For<InvitesBlog.Application.Plans.IPlanService>();
         plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Plan());
         return plans;
+    }
+
+    /// <summary>A table with nothing in it, for services that look something up there that a test doesn't use.</summary>
+    public static InvitesBlog.Application.Abstractions.Persistence.IRepository<T> Empty<T>() where T : class
+    {
+        var repo = Substitute.For<InvitesBlog.Application.Abstractions.Persistence.IRepository<T>>();
+        repo.Query(Arg.Any<bool>()).Returns(Array.Empty<T>().AsAsyncQueryable());
+        return repo;
     }
 
     /// <summary>A celebrants table with nobody in it, for services that look people up there.</summary>
@@ -53,7 +55,6 @@ internal static class TestData
         Description = "An elegant wedding template.",
         PreviewImageUrl = "https://cdn.test/preview.png",
         PreviewAnimationUrl = null,
-        IsPremium = false,
         DesignerName = "Studio Test",
         SceneJson = "{}",
         ManifestJson = "{}",
@@ -64,7 +65,7 @@ internal static class TestData
 
     public static Campaign Campaign(
         Guid? id = null, Guid? templateId = null, CampaignStatus status = CampaignStatus.Draft,
-        int paidCapacity = 0, bool hasDesignerDiscount = false) => new()
+        int paidCapacity = 0) => new()
     {
         Id = id ?? Guid.NewGuid(),
         TemplateId = templateId ?? Guid.NewGuid(),
@@ -76,7 +77,6 @@ internal static class TestData
         EventType = "wedding",
         EventStartAt = DateTimeOffset.UtcNow.AddDays(30),
         PaidInviteCapacity = paidCapacity,
-        HasDesignerDiscount = hasDesignerDiscount,
         CreatedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow
     };

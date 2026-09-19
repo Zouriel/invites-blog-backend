@@ -149,7 +149,6 @@ public sealed class RawTemplateSeeder(
                 Category = meta.Category,
                 Description = meta.Description ?? $"A {meta.Category.ToLowerInvariant()} invitation template.",
                 PreviewImageUrl = published.PosterUrl ?? $"{published.PackageUrl}index.html",
-                IsPremium = false,
                 DesignerName = "invites.blog",
                 SceneJson = "{}",                       // raw templates have no SceneJson source
                 ManifestJson = published.ManifestJson,

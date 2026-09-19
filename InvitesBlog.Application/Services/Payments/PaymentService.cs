@@ -40,12 +40,8 @@ public sealed class PaymentService(
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
         if (guestCount == 0) throw new CampaignHasNoGuestsException();
 
-        var inviteCount = Math.Max(guestCount, PricingCalculator.IncludedInvites);
         var plan = await plans.ForCampaignAsync(campaignId, ct);
-        var price = PricingCalculator.CalculateInitial(
-            inviteCount, campaign.HasDesignerDiscount,
-            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
-            minimumCovered: plan.PassCoversFirstSend);
+        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites);
         var capacity = price.IncludedInvites + price.ExtraBlocks * price.BlockSize;
 
         var payment = new Payment
@@ -81,13 +77,14 @@ public sealed class PaymentService(
 
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
         var plan = await plans.ForCampaignAsync(campaignId, ct);
+        // What the pass includes counts as covered even before anything was paid for.
         var topUp = PricingCalculator.CalculateTopUp(
-            campaign.PaidInviteCapacity, guestCount, 0, campaign.HasDesignerDiscount,
-            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize);
+            Math.Max(campaign.PaidInviteCapacity, plan.IncludedInvites), guestCount, 0);
         if (topUp.ExtraBlocks == 0)
             return new TopUpResponse(null, null, "No top-up needed; capacity covers all guests.");
 
-        var capacityAdded = topUp.ExtraBlocks * topUp.BlockSize;
+        // Raised to what the pass includes first, so the paid capacity ends up covering every guest.
+        var capacityAdded = Math.Max(0, plan.IncludedInvites - campaign.PaidInviteCapacity) + topUp.ExtraBlocks * topUp.BlockSize;
         var payment = new Payment
         {
             Id = Guid.NewGuid(),

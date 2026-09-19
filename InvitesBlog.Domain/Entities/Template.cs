@@ -11,7 +11,6 @@ public sealed class Template
     public string Description { get; set; } = default!;
     public string PreviewImageUrl { get; set; } = default!;
     public string? PreviewAnimationUrl { get; set; }
-    public bool IsPremium { get; set; }
     public Guid? DesignerInviterId { get; set; }   // community attribution
     public string? DesignerName { get; set; }
     public string SceneJson { get; set; } = default!;

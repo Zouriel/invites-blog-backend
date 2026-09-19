@@ -46,7 +46,9 @@ public sealed class AccountService(
     IUnitOfWork uow,
     IInviteeTokenIssuer tokenIssuer,
     PhoneNormalizer phones,
-    IConfiguration config) : IAccountService
+    IConfiguration config,
+    IRepository<Venue> venues,
+    IRepository<VenueStaff> venueStaff) : IAccountService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(14);
 
@@ -648,7 +650,16 @@ public sealed class AccountService(
             PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow)
                 ? user.SubscriptionTier.ToString()
                 : "None",
-            user.SubscriptionEndsAt);
+            user.SubscriptionEndsAt,
+            await AtVenueAsync(user, ct));
+    }
+
+    /// <summary>Whether the account owns a venue or works at one, so its menu leads there.</summary>
+    private async Task<bool> AtVenueAsync(AppUser user, CancellationToken ct)
+    {
+        if (await venues.AnyAsync(v => v.OwnerUserId == user.Id, ct)) return true;
+        var email = user.Email?.Trim().ToLowerInvariant();
+        return !string.IsNullOrEmpty(email) && await venueStaff.AnyAsync(s => s.Email == email, ct);
     }
 
     /// <summary>

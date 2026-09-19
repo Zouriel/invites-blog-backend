@@ -43,7 +43,7 @@ public sealed class AdminController(IAdminService admin) : BaseApiController
     public async Task<IActionResult> SetRole(Guid id, [FromBody] SetUserRoleRequest req, CancellationToken ct) =>
         Success(await admin.SetUserRoleAsync(id, req, ct));
 
-    /// <summary>Sets an account's subscription. Until billing exists, this is how anyone gets one.</summary>
+    /// <summary>Sets an account's Studio or Venue plan. Until billing exists, this is how anyone gets one.</summary>
     [HttpPut("users/{id:guid}/subscription")]
     [HasPermission(Permissions.Admin.ManageUsers)]
     public async Task<IActionResult> SetSubscription(Guid id, [FromBody] SetSubscriptionRequest req, CancellationToken ct) =>
@@ -58,6 +58,17 @@ public sealed class AdminController(IAdminService admin) : BaseApiController
     [HasPermission(Permissions.Admin.ManageUsers)]
     public async Task<IActionResult> SetEventPass(Guid id, [FromBody] SetEventPassRequest req, CancellationToken ct) =>
         Success(await admin.SetEventPassAsync(id, req, ct));
+
+    [HttpPut("events/{id:guid}/keep-photos")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> KeepPhotos(Guid id, [FromBody] KeepPhotosRequest req, CancellationToken ct) =>
+        Success(await admin.KeepPhotosAsync(id, req, ct));
+
+    /// <summary>Adds passes to a Studio account's stock, or takes unused ones away.</summary>
+    [HttpPost("users/{id:guid}/pass-credits")]
+    [HasPermission(Permissions.Admin.ManageUsers)]
+    public async Task<IActionResult> AdjustPassCredits(Guid id, [FromBody] AdjustPassCreditsRequest req, CancellationToken ct) =>
+        Success(await admin.AdjustPassCreditsAsync(id, req, ct));
 
     [HttpGet("audit")]
     [HasPermission(Permissions.Admin.ReadAudit)]

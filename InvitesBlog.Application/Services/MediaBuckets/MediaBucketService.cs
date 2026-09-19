@@ -87,20 +87,13 @@ public interface IMediaBucketService
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
 
     /// <summary>
-    /// Sets how much of the owner's Basic or Premium space a bucket gets. Refused below what it already
-    /// holds, above what the account has left, and on plans whose space isn't shared out.
-    /// </summary>
-    Task<MediaBucketDto> SetAllocationAsync(
-        Guid bucketId, SetBucketAllocationRequest req, CancellationToken ct = default);
-
-    /// <summary>
     /// Changes how many days a bucket collects for. Up to what the event's plan allows now — so a
-    /// bucket made on the free night can be stretched after moving to Premium or a pass — or up to
+    /// bucket made on the free night can be stretched after buying a pass — or up to
     /// what it already has, since a window already given is never taken away by a plan ending.
     /// </summary>
     Task<MediaBucketDto> SetWindowAsync(Guid bucketId, SetBucketWindowRequest req, CancellationToken ct = default);
 
-    /// <summary>The signed-in account's subscription space: total, given out and used.</summary>
+    /// <summary>The space a venue's events share, for the venue's owner and staff. Empty for everyone else.</summary>
     Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default);
     /// <summary>Every guest on the bucket's event, with whether they may see it.</summary>
     Task<BucketAccessDto> AccessAsync(Guid bucketId, CancellationToken ct = default);
@@ -228,9 +221,11 @@ public sealed record GuestBucketView(IReadOnlySet<Guid> BucketIds, bool SeesUnbu
 /// no control, because somebody at a party will pick twenty photographs before finding out.
 /// </param>
 /// <param name="IsOpen">Whether it is the night, separately, so the page can say WHICH reason.</param>
+/// <param name="Branded">A Free event: the page carries a small "Made with invites.blog".</param>
+/// <param name="VenueName">The venue the event is at, whose name and logo the page carries.</param>
 public sealed record MediaBucketQrAdmission(
     Guid QrId, Guid BucketId, string BucketTitle, bool AllowAnonymous, bool CanUpload,
-    bool IsOpen, DateTimeOffset EventDate);
+    bool IsOpen, DateTimeOffset EventDate, bool Branded = true, string? VenueName = null, string? VenueLogoUrl = null);
 
 /// <inheritdoc cref="IMediaBucketService"/>
 public sealed class MediaBucketService(
@@ -250,6 +245,8 @@ public sealed class MediaBucketService(
     IConfiguration config,
     IUnitOfWork uow,
     IPlanService plans,
+    IRepository<Venue> venues,
+    IRepository<VenueStaff> venueStaff,
     IMediaBucketUsageRepository usage) : IMediaBucketService
 {
     /// <summary>
@@ -421,12 +418,13 @@ public sealed class MediaBucketService(
             var already = await buckets.CountAsync(b => b.CampaignId == existing, ct);
             var existingPlan = await plans.ForCampaignAsync(existing, ct);
 
-            // A second bucket on one event comes with Premium or an event pass: the ceremony and the
-            // after-party, each with its own night and its own audience.
+            // More albums on one event come with a pass: the ceremony and the after-party, each with
+            // its own night and its own audience. Two with a Party pass, five with a Wedding pass.
             if (already > 0 && already >= existingPlan.MaxBuckets && existingPlan.MaxBuckets < MediaBucket.MaxPerCampaign)
                 throw new BusinessRuleException(
-                    "That event already has a media bucket. More than one on the same event comes with "
-                    + "Premium or an event pass.",
+                    existingPlan.MaxBuckets <= 1
+                        ? "That event already has an album. More than one comes with a Party or Wedding pass."
+                        : $"That event already has {already} albums, the most its Party pass allows. A Wedding pass allows {MediaBucket.MaxPerCampaign}.",
                     "bucket_exists_for_campaign");
 
             // And a ceiling above that, which no plan lifts. See MediaBucket.MaxPerCampaign.
@@ -456,8 +454,8 @@ public sealed class MediaBucketService(
         // Settled either way by here: given by the caller, or the bare campaign just made for it.
         var eventId = campaignId.Value;
 
-        // Collecting for longer than the one night is the other half of a subscription. Asked for
-        // here and FROZEN onto the row, so revoking the subscription later cannot shut a bucket
+        // Collecting for longer than the one night comes with a pass. Asked for
+        // here and FROZEN onto the row, so a pass running out later cannot shut a bucket
         // somebody has already printed codes for — see MediaBucket.UploadWindowDays.
         var eventPlan = await plans.ForCampaignAsync(eventId, ct);
         var windowDays = WindowFor(req.WindowDays, eventPlan.MaxWindowDays);
@@ -518,6 +516,13 @@ public sealed class MediaBucketService(
         Guid bucketId, SetBucketAccessRequest req, CancellationToken ct = default)
     {
         var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+
+        // Closing an album to some guests comes with a Wedding pass or a venue. Opening one again is
+        // always allowed, so an album closed before a pass ran out can still be given back to everyone.
+        if (!req.Allowed && !(await plans.ForCampaignAsync(bucket.CampaignId, ct)).PrivateAlbums)
+            throw new BusinessRuleException(
+                "Private albums, that only some guests can see, come with a Wedding pass.", "private_needs_plan");
+
         var guests = await guestRepository.ListByCampaignAsync(bucket.CampaignId, includeOptedOut: true, ct);
         var everyone = guests.Select(g => g.Id).ToHashSet();
 
@@ -637,7 +642,7 @@ public sealed class MediaBucketService(
 
         if ((await plans.ForCampaignAsync(bucket.CampaignId, ct)).MaxBuckets <= 1)
             throw new BusinessRuleException(
-                "Naming buckets comes with Premium or an event pass.", "rename_needs_subscription");
+                "Naming albums comes with a Party or Wedding pass.", "rename_needs_subscription");
 
         // Blank is the default rather than an error: somebody clearing the box means "put it back",
         // and an empty name would render as a gap where the bucket's title should be.
@@ -664,7 +669,7 @@ public sealed class MediaBucketService(
         if (req.Days > most)
             throw new BusinessRuleException(
                 most <= 1
-                    ? "Collecting for more than one night comes with Premium or an event pass."
+                    ? "Collecting for more than one night comes with a Party or Wedding pass."
                     : $"This event can collect for up to {most} days.",
                 "window_needs_plan");
 
@@ -804,41 +809,24 @@ public sealed class MediaBucketService(
                      ?? throw new NotFoundException("That media bucket no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        // On a subscription each bucket holds what its owner gave it.
-        if (plan.Allocatable)
-        {
-            var given = Allocation(bucket, plan);
-            // Read fresh rather than off the entity: GetByIdAsync may hand back a copy this request
-            // loaded before the reservation lock was granted, and that figure predates the uploads the
-            // lock was waiting on.
-            var usedNow = await buckets.Query()
-                .Where(b => b.Id == bucketId)
-                .Select(b => b.UsedBytes)
-                .FirstOrDefaultAsync(ct);
-            if (usedNow + incomingBytes > given)
-                throw new BusinessRuleException(
-                    $"This bucket's {Size(given)} is full. Give it more space in Bucket settings.",
-                    "bucket_full");
-        }
-        else
-        {
-        // Otherwise space is per EVENT, shared by all of its buckets.
+        // Space is per EVENT, shared by all of its albums. Summed fresh rather than read off the
+        // entity: GetByIdAsync may hand back a copy this request loaded before the reservation lock
+        // was granted, and that figure predates the uploads the lock was waiting on.
         var eventUsed = await buckets.Query()
             .Where(b => b.CampaignId == bucket.CampaignId)
             .SumAsync(b => b.UsedBytes, ct);
         if (eventUsed + incomingBytes > plan.EventBytes)
             throw new BusinessRuleException(
-                plan.Kind is PlanKind.Premium or PlanKind.EventPass
+                plan.Kind is PlanKind.WeddingPass or PlanKind.Venue
                     ? $"This event's {Size(plan.EventBytes)} is full."
-                    : $"This event's {Size(plan.EventBytes)} is full. See the plans for more space.",
+                    : $"This event's {Size(plan.EventBytes)} is full. A pass gives it more room.",
                 "bucket_full");
-        }
 
-        // And a subscription's limit across all of the account's events.
-        if (plan.AccountBytes is { } cap && plan.OwnerUserId is { } owner
-            && await plans.AccountUsedBytesAsync(owner, ct) + incomingBytes > cap)
+        // And a venue's limit across all of its events.
+        if (plan.AccountBytes is { } cap && plan.VenueId is { } venue
+            && await plans.VenueUsedBytesAsync(venue, ct) + incomingBytes > cap)
             throw new BusinessRuleException(
-                $"This account's {Size(cap)} across all events is full. Remove some photos or move to a bigger plan.",
+                $"This venue's {Size(cap)} across all its events is full. Remove some photos or talk to us about a bigger plan.",
                 "account_full");
     }
 
@@ -848,11 +836,10 @@ public sealed class MediaBucketService(
                      ?? throw new NotFoundException("That media bucket no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        // The lock is on whatever the check sums across. A subscriber's account limit spans all of
-        // their events, so every one of their uploads queues on the account; otherwise the space is
-        // the event's, shared by its buckets.
+        // The lock is on whatever the check sums across. A venue's limit spans all of its events, so
+        // every upload there queues on the venue; otherwise the space is the event's, shared by its albums.
         await usage.ReserveAsync(
-            plan.OwnerUserId ?? bucket.CampaignId, bucketId, bytes,
+            plan.VenueId ?? bucket.CampaignId, bucketId, bytes,
             c => EnsureRoomAsync(bucketId, bytes, c), ct);
     }
 
@@ -872,102 +859,35 @@ public sealed class MediaBucketService(
         }
     }
 
-    /// <summary>What a bucket whose event is gone is described with: the free plan, nothing to resize.</summary>
+    /// <summary>What a bucket whose event is gone is described with: the free plan.</summary>
     private static readonly EventPlan OrphanPlan = PlanRules.Evaluate(
-        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, SubscriptionTier.None, null, null, 0, null, null, null);
-
-    /// <summary>What a bucket holds on a subscription: its own size, or the plan's starting size.</summary>
-    private static long Allocation(MediaBucket bucket, EventPlan plan) =>
-        bucket.AllocatedBytes
-        ?? Math.Max(plan.DefaultBucketBytes, bucket.CreatedAt < PlanCatalog.IntroducedAt ? bucket.CapacityBytes : 0);
-
-    /// <summary>How much of an owner's subscription space their buckets are given, across every event it covers.</summary>
-    private async Task<long> AccountAllocatedAsync(Guid ownerId, CancellationToken ct)
-    {
-        var mine = await buckets.Query().Where(b => b.OwnerUserId == ownerId).ToListAsync(ct);
-        long total = 0;
-        foreach (var group in mine.GroupBy(b => b.CampaignId))
-        {
-            // A bucket left behind by a deleted event has no plan and takes no space.
-            if (await PlanOrNullAsync(group.Key, ct) is not { Allocatable: true } plan) continue;
-            total += group.Sum(b => Allocation(b, plan));
-        }
-        return total;
-    }
-
-    public async Task<MediaBucketDto> SetAllocationAsync(
-        Guid bucketId, SetBucketAllocationRequest req, CancellationToken ct = default)
-    {
-        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
-        var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
-        if (!plan.Allocatable || plan.AccountBytes is not { } cap)
-            throw new BusinessRuleException(
-                plan.Kind == PlanKind.EventPass
-                    ? "This event has an event pass, so its 50 GB is shared by its buckets and can't be resized."
-                    : "Choosing each bucket's size comes with Basic or Premium.",
-                "allocation_needs_subscription");
-
-        if (double.IsNaN(req.Gb) || req.Gb < 0)
-            throw new BusinessRuleException("Choose a size of 0 GB or more.", "allocation_invalid");
-        var wanted = (long)Math.Round(req.Gb * PlanCatalog.Gb);
-
-        if (wanted < bucket.UsedBytes)
-            throw new BusinessRuleException(
-                $"This bucket already holds {Size(bucket.UsedBytes)}, so it can't be made smaller than that.",
-                "allocation_below_usage");
-
-        // No more than the plan's most per event, across the event's buckets.
-        var eventMax = PlanCatalog.EventMaxBytes(plan.Kind);
-        var siblings = await buckets.Query()
-            .Where(b => b.CampaignId == bucket.CampaignId && b.Id != bucket.Id)
-            .ToListAsync(ct);
-        var onThisEvent = siblings.Sum(b => Allocation(b, plan));
-        if (onThisEvent + wanted > eventMax)
-            throw new BusinessRuleException(
-                $"An event can have up to {Size(eventMax)} on your plan. This one has {Size(Math.Max(0, eventMax - onThisEvent))} left for this bucket.",
-                "allocation_over_event");
-
-        var owner = bucket.OwnerUserId;
-        var others = await AccountAllocatedAsync(owner, ct) - Allocation(bucket, plan);
-        if (others + wanted > cap)
-            throw new BusinessRuleException(
-                $"Your account has {Size(Math.Max(0, cap - others))} left to give. Make another bucket smaller first.",
-                "allocation_over_account");
-
-        bucket.AllocatedBytes = wanted;
-        bucket.UpdatedAt = DateTimeOffset.UtcNow;
-        buckets.Update(bucket);
-        await uow.SaveChangesAsync(ct);
-        return (await DescribeAsync([bucket], ct))[0];
-    }
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, EventPassKind.None, null, null, null, 0, null, null, null);
 
     public async Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default)
     {
         var me = RequireUser();
-        var account = await users.GetByIdAsync(me, ct);
-        var now = DateTimeOffset.UtcNow;
-        var tier = account is not null && PlanRules.IsActive(account.SubscriptionTier, account.SubscriptionEndsAt, now)
-            ? account.SubscriptionTier
-            : SubscriptionTier.None;
-        var kind = tier switch
-        {
-            SubscriptionTier.Premium => PlanKind.Premium,
-            SubscriptionTier.Basic => PlanKind.Basic,
-            _ => PlanKind.Free,
-        };
-        long? accountBytes = kind switch
-        {
-            PlanKind.Premium => PlanCatalog.PremiumAccountBytes,
-            PlanKind.Basic => PlanCatalog.BasicAccountBytes,
-            _ => null,
-        };
+        var venue = await MyVenueAsync(me, ct);
+        if (venue is null) return new StorageSummaryDto("None", null, 0, null);
 
+        var owner = await users.GetByIdAsync(venue.OwnerUserId, ct);
+        var active = owner is { SubscriptionTier: SubscriptionTier.Venue }
+                     && PlanRules.IsActive(owner.SubscriptionTier, owner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
         return new StorageSummaryDto(
-            tier.ToString(),
-            accountBytes,
-            accountBytes is null ? 0 : await AccountAllocatedAsync(me, ct),
-            await plans.AccountUsedBytesAsync(me, ct),
-            PlanCatalog.EventMaxBytes(kind));
+            active ? SubscriptionTier.Venue.ToString() : "None",
+            active ? PlanCatalog.VenueAccountBytes : null,
+            await plans.VenueUsedBytesAsync(venue.Id, ct),
+            venue.Name);
+    }
+
+    /// <summary>The venue this account owns, or works at.</summary>
+    private async Task<Venue?> MyVenueAsync(Guid me, CancellationToken ct)
+    {
+        var owned = await venues.Query().FirstOrDefaultAsync(v => v.OwnerUserId == me, ct);
+        if (owned is not null) return owned;
+        var email = (await users.GetByIdAsync(me, ct))?.Email?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(email)) return null;
+        var staffAt = await venueStaff.Query().Where(s => s.Email == email).Select(s => s.VenueId).FirstOrDefaultAsync(ct);
+        return staffAt == Guid.Empty ? null : await venues.GetByIdAsync(staffAt, ct);
     }
 
     private static string Size(long bytes) =>
@@ -1100,7 +1020,8 @@ public sealed class MediaBucketService(
         // bucket's own CapacityBytes is a leftover from per-bucket sizes and is 0 on every bucket made
         // since, so reading it here turned every table code into "full".
         var room = false;
-        if (campaign is not null && (await plans.ForCampaignAsync(campaign.Id, ct)).Phase == MediaPhase.Active)
+        var plan = campaign is null ? null : await plans.ForCampaignAsync(campaign.Id, ct);
+        if (plan?.Phase == MediaPhase.Active)
         {
             try
             {
@@ -1117,8 +1038,10 @@ public sealed class MediaBucketService(
         // somebody standing at a party reads to know they are adding to the right night.
         var title = campaign?.Title ?? "Media bucket";
 
+        var venue = plan?.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
         return new MediaBucketQrAdmission(
-            code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night);
+            code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night,
+            plan?.Branded ?? true, venue?.Name, venue?.LogoUrl);
     }
 
     public async Task<MediaBucket?> GetBucketForContributionAsync(
@@ -1216,7 +1139,7 @@ public sealed class MediaBucketService(
             ? []
             : await campaigns.Query()
                 .Where(c => campaignIds.Contains(c.Id))
-                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt))
+                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
         // Which bucket each event posts to by default — the oldest, matching ForCampaignAsync. Read
@@ -1241,23 +1164,22 @@ public sealed class MediaBucketService(
             .GroupBy(x => x.CampaignId)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.UsedBytes));
 
-        // How much each event's buckets are given, on a subscription.
-        var allocatedByEvent = (await buckets.Query().Where(b => campaignIds.Contains(b.CampaignId)).ToListAsync(ct))
-            .GroupBy(b => b.CampaignId)
-            .ToDictionary(g => g.Key, g => eventPlans[g.Key].Allocatable ? g.Sum(b => Allocation(b, eventPlans[g.Key])) : 0);
-
-        // And, on a subscription, how much of the owner's space all of their buckets are given.
-        var accountAllocated = new Dictionary<Guid, long>();
-        foreach (var owner in rows.Where(b => eventPlans[b.CampaignId].Allocatable).Select(b => b.OwnerUserId).Distinct())
-            accountAllocated[owner] = await AccountAllocatedAsync(owner, ct);
+        // The venue each event is held at, for the name and logo its albums carry.
+        var venueIds = events.Values.Select(e => e.VenueId).OfType<Guid>().Distinct().ToList();
+        var venueFaces = venueIds.Count == 0
+            ? new Dictionary<Guid, Venue>()
+            : await venues.Query().Where(v => venueIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
 
         var now = DateTimeOffset.UtcNow;
         return rows.Select(b =>
         {
             var plan = eventPlans[b.CampaignId];
-            // On a subscription the bucket is its own space; otherwise it shares the event's.
-            var capacity = plan.Allocatable ? Allocation(b, plan) : plan.EventBytes;
-            var eventUsed = plan.Allocatable ? b.UsedBytes : usedByEvent.GetValueOrDefault(b.CampaignId);
+            // The space is the event's, shared by all of its albums.
+            var capacity = plan.EventBytes;
+            var eventUsed = usedByEvent.GetValueOrDefault(b.CampaignId);
+            var venue = events.TryGetValue(b.CampaignId, out var face) && face.VenueId is { } v
+                ? venueFaces.GetValueOrDefault(v)
+                : null;
             return new MediaBucketDto(
                 b.Id,
                 b.Name,
@@ -1284,24 +1206,18 @@ public sealed class MediaBucketService(
                 plan.MaxWindowDays,
                 plan.Phase.ToString(),
                 eventUsed,
-                plan.Allocatable,
-                plan.Allocatable ? plan.AccountBytes : null,
-                accountAllocated.GetValueOrDefault(b.OwnerUserId),
-                PlanCatalog.EventMaxBytes(plan.Kind),
-                allocatedByEvent.GetValueOrDefault(b.CampaignId));
+                plan.PrivateAlbums,
+                plan.Branded,
+                venue?.Name,
+                venue?.LogoUrl);
         }).ToList();
     }
 
     private string ContributeUrl(string token) => $"{ContributeBase}/q/{token}";
 
-    /// <summary>
-    /// <paramref name="url"/> is non-null only for a code just created — see
-    /// <see cref="CreateQrAsync"/>. Every later read has the image and not the link, which is
-    /// sufficient: the picture is the thing a host reprints, and it still scans.
-    /// </summary>
-    /// <summary>How an event presents itself: the things a bucket used to duplicate.</summary>
+    /// <summary>How an event presents itself: the things a bucket used to duplicate, and where it is held.</summary>
     private sealed record EventFace(
-        Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt);
+        Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt, Guid? VenueId);
 
     /// <summary>
     /// The night, read from the EVENT rather than from the copy taken when the bucket was made.

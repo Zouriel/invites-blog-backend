@@ -39,6 +39,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<VerifiedContactLink> VerifiedContactLinks => Set<VerifiedContactLink>();
+    public DbSet<Venue> Venues => Set<Venue>();
+    public DbSet<VenueStaff> VenueStaff => Set<VenueStaff>();
+    public DbSet<PassCredit> PassCredits => Set<PassCredit>();
 
     // RBAC (full authorization model)
     public DbSet<AppUser> Users => Set<AppUser>();
@@ -138,6 +141,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // limited at the route, and UNIQUE: two events answering to one code would mean the
             // wrong invitation opening, and at 59 bits a collision is a bug rather than bad luck.
             e.HasIndex(x => x.OpenLinkCode).IsUnique().HasDatabaseName("idx_campaigns_open_link_code");
+            // A venue's events page lists by this. Leaving the venue plan keeps the events; they just stop being its.
+            e.HasIndex(x => x.VenueId).HasDatabaseName("idx_campaigns_venue_id");
+            e.HasOne<Venue>().WithMany().HasForeignKey(x => x.VenueId).OnDelete(DeleteBehavior.SetNull);
             e.Property(x => x.CustomContentJson).HasColumnType("jsonb");
             e.Property(x => x.ThemeOverridesJson).HasColumnType("jsonb");
             e.Property(x => x.DeliverySettingsJson).HasColumnType("jsonb");
@@ -310,7 +316,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Name).HasMaxLength(80);
             // No longer unique. It was, because "the campaign's bucket" had to mean exactly one
             // thing and a provisioning race on a first upload would otherwise split an event's media
-            // across two boxes. A subscriber may now keep several on one event — the ceremony and
+            // across two boxes. A pass now allows several on one event — the ceremony and
             // the after-party — so what a race must not do is create a second FREE one, and that is
             // now settled in the service by asking for the DEFAULT bucket rather than by the schema.
             e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_media_buckets_campaign");
@@ -426,6 +432,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => new { x.RoleId, x.PermissionId });
             e.HasOne(x => x.Role).WithMany(r => r.RolePermissions).HasForeignKey(x => x.RoleId);
             e.HasOne(x => x.Permission).WithMany(p => p.RolePermissions).HasForeignKey(x => x.PermissionId);
+        });
+
+        // Venues, their staff, and the passes a Studio account holds for its clients.
+        b.Entity<Venue>(e =>
+        {
+            e.ToTable("venues");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.OwnerUserId).IsUnique().HasDatabaseName("idx_venues_owner_user_id");
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.Property(x => x.Place).HasMaxLength(120);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<VenueStaff>(e =>
+        {
+            e.ToTable("venue_staff");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.VenueId, x.Email }).IsUnique().HasDatabaseName("idx_venue_staff_venue_email");
+            // Looked up by the signed-in account's email on every access check.
+            e.HasIndex(x => x.Email).HasDatabaseName("idx_venue_staff_email");
+            e.Property(x => x.Email).HasMaxLength(254);
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.HasOne<Venue>().WithMany().HasForeignKey(x => x.VenueId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PassCredit>(e =>
+        {
+            e.ToTable("pass_credits");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.OwnerUserId).HasDatabaseName("idx_pass_credits_owner_user_id");
+            e.Property(x => x.Price).HasPrecision(10, 2);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.UsedOnCampaignId).OnDelete(DeleteBehavior.SetNull);
         });
 
         b.Entity<UserRole>(e =>

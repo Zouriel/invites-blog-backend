@@ -61,10 +61,10 @@ public sealed class MediaBucket
     /// <summary>
     /// How many days from the start of the event's day this bucket accepts anything.
     ///
-    /// <para><b>Frozen at creation, exactly like <see cref="CapacityBytes"/>.</b> Whether somebody
-    /// may collect for longer than one night is a subscriber's right, and reading that live would
-    /// mean that dropping a person from the subscriber list retroactively slams shut buckets they
-    /// already made — and printed QR cards for. What someone was given when they made it is what it
+    /// <para><b>Frozen at creation, exactly like <see cref="CapacityBytes"/>.</b> Whether an album
+    /// may collect for longer than one night comes with a pass, and reading that live would mean
+    /// that a pass running out retroactively slams shut albums already made — and printed QR cards
+    /// for. What someone was given when they made it is what it
     /// keeps.</para>
     ///
     /// <para>One is the ordinary night: open from the start of the event's day in Malé until 24
@@ -73,12 +73,6 @@ public sealed class MediaBucket
     /// it is still open.</para>
     /// </summary>
     public int UploadWindowDays { get; set; } = 1;
-
-    /// <summary>
-    /// How much of its owner's subscription space this bucket is given, on Basic and Premium, where
-    /// the account's space is shared out bucket by bucket. Null takes the plan's starting size.
-    /// </summary>
-    public long? AllocatedBytes { get; set; }
 
     /// <summary>
     /// Whether only named guests may look, rather than the whole guest list.
@@ -124,16 +118,15 @@ public sealed class MediaBucket
     /// The most buckets one event may hold.
     ///
     /// <para>A cap rather than an upsell. A second bucket exists for an evening that is really two —
-    /// a ceremony and an after-party — and a third covers the morning after; past that an "event"
-    /// has stopped being one night and the guest list, the cover and the title it shares stop
-    /// describing what is in them. It is also what stops a subscription being read as unlimited
-    /// storage bought one free bucket at a time.</para>
+    /// a ceremony and an after-party — and a wedding runs to five: the nikah, the reception, the
+    /// after-party and the mornings either side. Past that an "event" has stopped being one occasion
+    /// and the guest list, the cover and the title it shares stop describing what is in them.</para>
     ///
     /// <para>Enforced in <c>MediaBucketService.CreateAsync</c>, which is the only path that can add
     /// a second one to an event. The dashboard says so before it is reached, but the server is what
     /// decides.</para>
     /// </summary>
-    public const int MaxPerCampaign = 3;
+    public const int MaxPerCampaign = 5;
 
     public MediaBucketTier Tier { get; set; } = MediaBucketTier.Free;
 

@@ -50,7 +50,17 @@ public sealed record InboxCardResponse(
 /// see Infrastructure — supplies it through the <see cref="InviteRenderer"/> delegate so the
 /// Application layer never takes a compile-time dependency on Infrastructure (which references it).
 /// </summary>
-public sealed record InviteRenderData(string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus);
+public sealed record InviteRenderData(
+    string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus, GuestCredit? Credit = null);
+
+/// <summary>
+/// The small line a guest-facing page carries: "Made with invites.blog" on a Free event, the Studio
+/// designer who made the invitation, and the venue whose albums they are.
+/// </summary>
+public sealed record GuestCredit(bool MadeWith, string? DesignedBy, string? VenueName, string? VenueLogoUrl)
+{
+    public bool IsEmpty => !MadeWith && DesignedBy is null && VenueName is null;
+}
 
 /// <summary>Bridges the Infrastructure invite renderer into the Application service.</summary>
 /// <param name="bucketWindowDays">

@@ -21,7 +21,10 @@ public enum CampaignAccess
     None,
     /// <summary>A celebrant with the default read-only access: sees the event, changes nothing.</summary>
     Celebrant,
-    /// <summary>A celebrant the organiser gave full access. Runs the event like the organiser.</summary>
+    /// <summary>
+    /// A celebrant the organiser gave full access, or the owner or staff of the venue the event is
+    /// held at. Runs the event like the organiser.
+    /// </summary>
     Manager,
     /// <summary>Whoever organised it: the possession token, the account that started it, or its host.</summary>
     Organiser,
@@ -44,7 +47,9 @@ public sealed class CampaignOwnershipService(
     IRepository<AppUser> users,
     ICampaignRepository campaigns,
     IInviterRepository inviters,
-    IRepository<CampaignCelebrant> celebrants) : ICampaignOwnershipService
+    IRepository<CampaignCelebrant> celebrants,
+    IRepository<Venue> venues,
+    IRepository<VenueStaff> venueStaff) : ICampaignOwnershipService
 {
     public async Task<bool> OwnsAsync(Guid campaignId, CancellationToken ct = default) =>
         await AccessAsync(campaignId, ct) >= CampaignAccess.Manager;
@@ -79,10 +84,18 @@ public sealed class CampaignOwnershipService(
             .OrderByDescending(c => c.CanManage)
             .FirstOrDefaultAsync(ct);
 
-        return celebrant is null ? CampaignAccess.None
-            : celebrant.CanManage ? CampaignAccess.Manager
-            : CampaignAccess.Celebrant;
+        if (celebrant is { CanManage: true }) return CampaignAccess.Manager;
+
+        // An event at a venue is run by the venue: its owner, and its staff by their proved email.
+        if (campaign.VenueId is { } venueId && await RunsVenueAsync(venueId, userId, email, ct))
+            return CampaignAccess.Manager;
+
+        return celebrant is null ? CampaignAccess.None : CampaignAccess.Celebrant;
     }
+
+    private async Task<bool> RunsVenueAsync(Guid venueId, Guid userId, string? email, CancellationToken ct) =>
+        await venues.Query().AnyAsync(v => v.Id == venueId && v.OwnerUserId == userId, ct)
+        || (email is not null && await venueStaff.Query().AnyAsync(s => s.VenueId == venueId && s.Email == email, ct));
 
     private static bool Matches(string? theirs, string? mine) =>
         !string.IsNullOrWhiteSpace(mine) && !string.IsNullOrWhiteSpace(theirs)

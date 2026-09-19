@@ -46,7 +46,7 @@ public class CampaignServiceTests
     // The REAL ownership service, not a substitute: it is what decides whether the possession token
     // or the signed-in account may act, so stubbing it out would stop these tests checking anything.
     private ICampaignOwnershipService Ownership() =>
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants());
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>());
 
     /// The real optimizer: image handling is part of what upload does, so stubbing it would stop
     /// these tests noticing if it started corrupting or dropping uploads.

@@ -84,8 +84,17 @@ public sealed class Campaign
     /// </summary>
     public List<Guid> PostCoverPhotoIds { get; set; } = [];
 
-    /// <summary>Premium for this one event until then. Null when it never had a pass.</summary>
+    /// <summary>The pass bought for this one event, if any. See <see cref="EventPassUntil"/> for how long it lasts.</summary>
+    public EventPassKind EventPass { get; set; }
+
+    /// <summary>When <see cref="EventPass"/> stops covering the event. Null when it never had a pass.</summary>
     public DateTimeOffset? EventPassUntil { get; set; }
+
+    /// <summary>"Keep your photos": the album stays online until then, bought a year at a time.</summary>
+    public DateTimeOffset? KeepPhotosUntil { get; set; }
+
+    /// <summary>The venue this event is held at, when a venue runs its photo albums. See <see cref="Venue"/>.</summary>
+    public Guid? VenueId { get; set; }
 
     /// <summary>How far the "your photos are ending" emails have got: 0 none, 1 ended, 2 reminder, 3 final notice.</summary>
     public int MediaNoticeStage { get; set; }
@@ -95,7 +104,6 @@ public sealed class Campaign
 
     /// <summary>When the event's photos were removed after its cover ran out.</summary>
     public DateTimeOffset? MediaDeletedAt { get; set; }
-    public bool HasDesignerDiscount { get; set; }
     public bool IsSensitive { get; set; }                     // §4.9.1 OTP-before-view
     public int RetentionDays { get; set; } = 90;              // §15.4
 

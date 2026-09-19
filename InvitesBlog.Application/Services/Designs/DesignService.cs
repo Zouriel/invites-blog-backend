@@ -342,7 +342,6 @@ public sealed class DesignService(
                 CreatedAt = now,
                 DesignerUserId = me,
                 DesignerName = owner?.DisplayName ?? "Community designer",
-                IsPremium = false,
             };
             await templates.AddAsync(template, ct);
         }

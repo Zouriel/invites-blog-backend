@@ -49,7 +49,7 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
             && !currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage))
             throw new TemplateNotFoundException(slug);
         return new TemplateDetailDto(t.Id, t.Name, t.Slug, t.Category, t.Description, t.Version,
-            TemplatePoster.OrNull(t.PreviewImageUrl), t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.ManifestJson,
+            TemplatePoster.OrNull(t.PreviewImageUrl), t.PreviewAnimationUrl, t.DesignerName, t.PackageUrl, t.ManifestJson,
             t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);
     }
 
@@ -77,6 +77,6 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
 
     private static TemplateListItemDto ToListItem(Template t) => new(
         t.Id, t.Name, t.Slug, t.Category, t.Description,
-        TemplatePoster.OrNull(t.PreviewImageUrl), t.PreviewAnimationUrl, t.IsPremium, t.DesignerName, t.PackageUrl, t.Version,
+        TemplatePoster.OrNull(t.PreviewImageUrl), t.PreviewAnimationUrl, t.DesignerName, t.PackageUrl, t.Version,
         t.Visibility == TemplateVisibility.Dedicated && t.IsUsed);
 }

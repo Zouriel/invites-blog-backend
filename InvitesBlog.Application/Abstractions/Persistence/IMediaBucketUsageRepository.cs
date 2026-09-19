@@ -18,8 +18,7 @@ public interface IMediaBucketUsageRepository
     /// both be admitted into the last of the space.
     /// </summary>
     /// <param name="quotaKey">
-    /// What the space belongs to: the subscriber's account when a plan spans their events, otherwise
-    /// the event. Every bucket whose usage the check sums must reserve under the same key.
+    /// What the space belongs to: the venue when its plan spans its events, otherwise the event. Every bucket whose usage the check sums must reserve under the same key.
     /// </param>
     /// <param name="ensureRoom">The room check. It throws to refuse, and nothing is added.</param>
     Task ReserveAsync(

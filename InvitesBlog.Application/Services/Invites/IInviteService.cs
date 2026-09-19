@@ -66,6 +66,9 @@ public interface IInviteService
     /// <para>Writes nothing — see the implementation for why a placeholder guest row would quietly
     /// give every anonymous viewer the host's media bucket.</para>
     /// </summary>
+    /// <summary>What an event's guest-facing pages credit: see <see cref="GuestCredit"/>.</summary>
+    Task<GuestCredit> CreditForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
     Task<InviteRenderData?> RenderOpenAsync(
         Guid campaignId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
 

@@ -29,7 +29,8 @@ public sealed class AdminService(
     IRepository<UserRole> userRoles,
     ICurrentUser currentUser,
     IUnitOfWork uow,
-    ICampaignRepository campaigns) : IAdminService
+    ICampaignRepository campaigns,
+    IRepository<PassCredit> credits) : IAdminService
 {
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
@@ -52,7 +53,13 @@ public sealed class AdminService(
             .Skip(filter.Skip).Take(filter.PageSize)
             .ToListAsync(ct);
 
-        var items = page.Select(Describe).ToList();
+        var ids = page.Select(u => u.Id).ToList();
+        var held = await credits.Query()
+            .Where(c => ids.Contains(c.OwnerUserId) && c.UsedOnCampaignId == null)
+            .GroupBy(c => c.OwnerUserId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+        var items = page.Select(u => Describe(u, held.GetValueOrDefault(u.Id))).ToList();
 
         return PagedResult<AdminUserDto>.Create(items, total, filter);
     }
@@ -119,9 +126,8 @@ public sealed class AdminService(
     /// <summary>
     /// The one write on the admin surface: hand somebody a role, or take it back.
     ///
-    /// <para>There is no billing behind <c>Subscriber</c> yet, so this IS the subscription — a list
-    /// kept by hand. It refuses four things, and all four are about not being able to break the
-    /// platform from a settings page:</para>
+    /// <para>It refuses four things, and all four are about not being able to break the platform
+    /// from a settings page:</para>
     /// <list type="bullet">
     ///   <item><b>A role that is not grantable.</b> Inviter, Invitee and Public describe how a
     ///     caller arrived rather than something an account holds; a row granting one is read by
@@ -158,7 +164,7 @@ public sealed class AdminService(
                    ?? throw new NotFoundException($"The {canonical} role hasn't been seeded yet.");
 
         var held = user.UserRoles.FirstOrDefault(ur => ur.RoleId == role.Id);
-        if (req.Granted == (held is not null)) return Describe(user);
+        if (req.Granted == (held is not null)) return Describe(user, await UnusedCreditsAsync(user.Id, ct));
 
         if (!req.Granted && canonical == Roles.Admin)
         {
@@ -190,28 +196,32 @@ public sealed class AdminService(
         }, ct);
 
         await uow.SaveChangesAsync(ct);
-        return Describe(user);
+        return Describe(user, await UnusedCreditsAsync(user.Id, ct));
     }
 
-    private static AdminUserDto Describe(AppUser u) => new(
+    private AdminUserDto Describe(AppUser u, int unusedCredits) => new(
         u.Id, u.Email, u.DisplayName, u.IsActive,
         u.UserRoles.Select(ur => ur.Role?.Name).OfType<string>().OrderBy(n => n).ToList(),
         u.SubscriptionTier.ToString(),
         u.SubscriptionEndsAt,
-        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow),
+        unusedCredits);
+
+    private Task<int> UnusedCreditsAsync(Guid userId, CancellationToken ct) =>
+        credits.CountAsync(c => c.OwnerUserId == userId && c.UsedOnCampaignId == null, ct);
 
     /// <summary>
-    /// Sets an account's subscription by hand, until billing exists.
+    /// Sets an account's professional plan by hand, until billing exists: Studio for designers and
+    /// planners, Venue for a resort or hall.
     ///
-    /// <para>Choosing None ends an active subscription now rather than erasing it, because the end
-    /// date is when the account's events stopped being covered and their photo retention counts
-    /// from it.</para>
+    /// <para>Choosing None ends an active plan now rather than erasing it, because the end date is
+    /// when a venue's events stopped being covered and their photo retention counts from it.</para>
     /// </summary>
     public async Task<AdminUserDto> SetSubscriptionAsync(
         Guid userId, SetSubscriptionRequest req, CancellationToken ct = default)
     {
-        if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier))
-            throw new BusinessRuleException("Choose None, Basic or Premium.", "tier_unknown");
+        if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier) || !Enum.IsDefined(tier))
+            throw new BusinessRuleException("Choose None, Studio or Venue.", "tier_unknown");
 
         var now = DateTimeOffset.UtcNow;
         if (tier != SubscriptionTier.None && req.EndsAt is { } requested && requested <= now)
@@ -244,58 +254,140 @@ public sealed class AdminService(
         }, ct);
 
         await uow.SaveChangesAsync(ct);
-        return Describe(user);
-    }
-
-    public async Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var rows = await campaigns.Query()
-            .Where(c => c.CreatedByUserId == userId)
-            .OrderByDescending(c => c.EventStartAt)
-            .Select(c => new { c.Id, c.Title, c.EventStartAt, c.EventPassUntil })
-            .ToListAsync(ct);
-        return rows.Select(c => new AdminUserEventDto(
-            c.Id, c.Title, c.EventStartAt, c.EventPassUntil, c.EventPassUntil is { } until && until > now)).ToList();
+        return Describe(user, await UnusedCreditsAsync(user.Id, ct));
     }
 
     /// <summary>
-    /// Grants a pass on one event, or takes it away. A pass runs six months from the event day, or
-    /// from today if the event has passed; granting again on an event that still has one adds six
-    /// more months to it.
+    /// Adds passes to a Studio account's stock (a positive count) or takes unused ones away (a
+    /// negative one), until they can be bought online.
     /// </summary>
-    public async Task<AdminUserEventDto> SetEventPassAsync(
-        Guid campaignId, SetEventPassRequest req, CancellationToken ct = default)
+    public async Task<AdminUserDto> AdjustPassCreditsAsync(
+        Guid userId, AdjustPassCreditsRequest req, CancellationToken ct = default)
     {
-        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
-                       ?? throw new NotFoundException("That event no longer exists.");
+        if (!Enum.TryParse<EventPassKind>(req.Kind?.Trim(), ignoreCase: true, out var kind) || kind == EventPassKind.None)
+            throw new BusinessRuleException("Choose Party or Wedding.", "pass_kind_unknown");
+        if (req.Count is 0 or > 100 or < -100)
+            throw new BusinessRuleException("Choose between 1 and 100 passes.", "pass_count_invalid");
+
+        var user = await users.Query()
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new NotFoundException("That account no longer exists.");
         var now = DateTimeOffset.UtcNow;
 
-        if (req.Granted)
+        if (req.Count > 0)
         {
-            var from = campaign.EventPassUntil is { } until && until > now
-                ? until
-                : campaign.EventStartAt > now ? campaign.EventStartAt : now;
-            campaign.EventPassUntil = from.AddMonths(PlanCatalog.EventPassMonths);
+            for (var i = 0; i < req.Count; i++)
+                await credits.AddAsync(new PassCredit { Id = Guid.NewGuid(), OwnerUserId = userId, Kind = kind, Price = 0m, CreatedAt = now }, ct);
         }
         else
         {
-            campaign.EventPassUntil = null;
+            var unused = await credits.Query(tracking: true)
+                .Where(c => c.OwnerUserId == userId && c.Kind == kind && c.UsedOnCampaignId == null)
+                .OrderByDescending(c => c.CreatedAt)
+                .Take(-req.Count)
+                .ToListAsync(ct);
+            foreach (var c in unused) credits.Remove(c);
         }
 
         await auditLogs.AddAsync(new AuditLog
         {
             Id = Guid.NewGuid(),
-            Action = req.Granted ? "admin.event_pass.grant" : "admin.event_pass.revoke",
+            Action = "admin.pass_credits.adjust",
+            Actor = currentUser.UserId?.ToString() ?? "admin",
+            DataJson = JsonSerializer.Serialize(new { user = userId, kind = kind.ToString(), count = req.Count }),
+            CreatedAt = now,
+        }, ct);
+
+        await uow.SaveChangesAsync(ct);
+        return Describe(user, await UnusedCreditsAsync(userId, ct));
+    }
+
+    public async Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default)
+    {
+        var rows = await campaigns.Query()
+            .Where(c => c.CreatedByUserId == userId)
+            .OrderByDescending(c => c.EventStartAt)
+            .ToListAsync(ct);
+        return rows.Select(DescribeEvent).ToList();
+    }
+
+    private static AdminUserEventDto DescribeEvent(Campaign c)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new AdminUserEventDto(
+            c.Id, c.Title, c.EventStartAt, c.EventPass.ToString(), c.EventPassUntil,
+            c.EventPass != EventPassKind.None && c.EventPassUntil is { } until && until > now,
+            c.KeepPhotosUntil);
+    }
+
+    /// <summary>
+    /// Gives one event a Party or Wedding pass, or takes it away. A pass runs a year from the event
+    /// day, or from today if the event has passed; giving the same pass again adds a year to it, and
+    /// moving up from Party to Wedding keeps whichever end is later.
+    /// </summary>
+    public async Task<AdminUserEventDto> SetEventPassAsync(
+        Guid campaignId, SetEventPassRequest req, CancellationToken ct = default)
+    {
+        if (!Enum.TryParse<EventPassKind>(req.Kind?.Trim(), ignoreCase: true, out var kind) || !Enum.IsDefined(kind))
+            throw new BusinessRuleException("Choose None, Party or Wedding.", "pass_kind_unknown");
+
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+        EventPasses.Apply(campaign, kind, now);
+
+        await auditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = kind == EventPassKind.None ? "admin.event_pass.revoke" : "admin.event_pass.grant",
             Actor = currentUser.UserId?.ToString() ?? "admin",
             CampaignId = campaign.Id,
-            DataJson = JsonSerializer.Serialize(new { until = campaign.EventPassUntil }),
+            DataJson = JsonSerializer.Serialize(new { kind = kind.ToString(), until = campaign.EventPassUntil }),
             CreatedAt = now,
         }, ct);
 
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
-        return new AdminUserEventDto(campaign.Id, campaign.Title, campaign.EventStartAt, campaign.EventPassUntil,
-            campaign.EventPassUntil is { } end && end > now);
+        return DescribeEvent(campaign);
+    }
+
+    /// <summary>
+    /// "Keep your photos": a year more online for the event's albums, from whenever they would
+    /// otherwise have started to lapse. <c>Years</c> 0 takes it away.
+    /// </summary>
+    public async Task<AdminUserEventDto> KeepPhotosAsync(
+        Guid campaignId, KeepPhotosRequest req, CancellationToken ct = default)
+    {
+        if (req.Years is < 0 or > 10)
+            throw new BusinessRuleException("Choose between 0 and 10 years.", "keep_years_invalid");
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct)
+                       ?? throw new NotFoundException("That event no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+
+        if (req.Years == 0) campaign.KeepPhotosUntil = null;
+        else
+        {
+            var from = new[]
+            {
+                campaign.KeepPhotosUntil, campaign.EventPassUntil,
+                campaign.EventStartAt.AddDays(PlanCatalog.FreeCoverDays), now,
+            }.Max()!.Value;
+            campaign.KeepPhotosUntil = from.AddMonths(PlanCatalog.KeepPhotosMonths * req.Years);
+        }
+
+        await auditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = "admin.keep_photos.set",
+            Actor = currentUser.UserId?.ToString() ?? "admin",
+            CampaignId = campaign.Id,
+            DataJson = JsonSerializer.Serialize(new { until = campaign.KeepPhotosUntil }),
+            CreatedAt = now,
+        }, ct);
+
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
+        return DescribeEvent(campaign);
     }
 }

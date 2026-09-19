@@ -154,7 +154,7 @@ public sealed class EventPhotoService(
         // night. This used to report only the cancellation, so an event six months past still offered
         // "Add media", and pressing it produced the refusal the box should have shown instead.
         // The bucket's own window, so the box and the bucket cannot disagree about whether it is
-        // still open — a subscriber's five-day bucket would otherwise be told it had closed after one.
+        // still open — a Wedding pass's five-day album would otherwise be told it had closed after one.
         var windowDays = await bucketService.WindowForCampaignAsync(campaignId, ct);
 
         var closed =

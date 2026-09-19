@@ -16,6 +16,7 @@ using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using InvitesBlog.Application.Common;
+using InvitesBlog.Application.Plans;
 
 namespace InvitesBlog.Application.Services.Invites;
 
@@ -39,7 +40,9 @@ public sealed class InviteService(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IConfiguration config,
-    IValidator<RsvpRequest> rsvpValidator) : IInviteService
+    IValidator<RsvpRequest> rsvpValidator,
+    IPlanService plans,
+    IRepository<Venue> venues) : IInviteService
 {
     /// <summary>Max concurrently-trusted IPs per personal invite link — see class doc on <see cref="InviteTrustedIp"/>.</summary>
     private const int MaxTrustedIps = 3;
@@ -116,7 +119,8 @@ public sealed class InviteService(
             await bucketService.WindowForCampaignAsync(campaign.Id, ct));
 
         return new InviteRenderData(
-            payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString());
+            payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString(),
+            await CreditAsync(campaign, template, ct));
     }
 
     /// <summary>
@@ -164,7 +168,30 @@ public sealed class InviteService(
         Anonymize(payload.Data);
 
         return new InviteRenderData(
-            payload.PackageUrl, payload.Data, false, campaign.Status.ToString());
+            payload.PackageUrl, payload.Data, false, campaign.Status.ToString(),
+            await CreditAsync(campaign, template, ct));
+    }
+
+    /// <summary>
+    /// What the guest's pages credit. A Free event carries "Made with invites.blog" — a pass or a venue
+    /// takes it off. An invitation a Studio designer made names them, which is part of what Studio is for.
+    /// </summary>
+    public async Task<GuestCredit> CreditAsync(Campaign campaign, Template? template, CancellationToken ct = default)
+    {
+        var plan = await plans.ForCampaignAsync(campaign.Id, ct);
+        string? designer = null;
+        if (template is { DesignerUserId: { } designerId, DesignerName: { Length: > 0 } name }
+            && await plans.IsStudioAsync(designerId, ct))
+            designer = name;
+        var venue = plan.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
+        return new GuestCredit(plan.Branded, designer, venue?.Name, venue?.LogoUrl);
+    }
+
+    public async Task<GuestCredit> CreditForCampaignAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null) return new GuestCredit(false, null, null, null);
+        return await CreditAsync(campaign, await templates.GetByIdAsync(campaign.TemplateId, ct), ct);
     }
 
     public async Task<StaticCameraInfo?> StaticCameraAsync(Guid campaignId, CancellationToken ct = default)

@@ -619,15 +619,12 @@ public sealed class CampaignService(
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
         var plan = await plans.ForCampaignAsync(id, ct);
-        var price = PricingCalculator.CalculateInitial(
-            Math.Max(guestCount, PricingCalculator.IncludedInvites), campaign.HasDesignerDiscount,
-            premiumRate: plan.InviteBlockSize > PricingCalculator.StandardBlockSize,
-            minimumCovered: plan.PassCoversFirstSend);
+        var price = PricingCalculator.CalculateInitial(guestCount, plan.IncludedInvites);
 
         return new CampaignSummaryDto(
             campaign.Id, campaign.Title, campaign.Slug, campaign.Status.ToString(),
             campaign.EventType, campaign.EventStartAt, campaign.EventEndAt,
-            campaign.PaidInviteCapacity, campaign.HasDesignerDiscount, campaign.IsSensitive,
+            campaign.PaidInviteCapacity, campaign.IsSensitive,
             campaign.CustomContentJson, campaign.ThemeOverridesJson, campaign.RulesJson, campaign.RolesJson, campaign.DeliverySettingsJson,
             guestCount,
             // The manifest served to the wizard is the campaign's frozen snapshot, never the live template's.

@@ -26,7 +26,7 @@ public class PaymentServiceTests
     public PaymentServiceTests() => _provider.Name.Returns("Fake");
 
     private PaymentService Sut() => new(
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
         _campaigns, _payments, _guests, _uow, _provider, _config, TestData.FreePlans());
 
     private void Authorize(Campaign c)

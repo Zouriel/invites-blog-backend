@@ -92,18 +92,11 @@ public sealed class MediaBucketsController(
     public async Task<IActionResult> VisibleBuckets(Guid campaignId, CancellationToken ct) =>
         Success(await buckets.VisibleForCampaignAsync(campaignId, ct));
 
-    /// <summary>The signed-in account's subscription space: total, given out and used.</summary>
+    /// <summary>The space a venue's events share, for its owner and staff.</summary>
     [HttpGet("/api/me/storage")]
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Storage(CancellationToken ct) =>
         Success(await buckets.StorageSummaryAsync(ct));
-
-    /// <summary>Gives a bucket a share of its owner's Basic or Premium space.</summary>
-    [HttpPut("{bucketId:guid}/allocation")]
-    [HasPermission(Permissions.Buckets.Manage)]
-    public async Task<IActionResult> SetAllocation(
-        Guid bucketId, [FromBody] SetBucketAllocationRequest req, CancellationToken ct) =>
-        Success(await buckets.SetAllocationAsync(bucketId, req, ct));
 
     /// <summary>How many days a bucket collects for, within what the event's plan allows.</summary>
     [HttpPut("{bucketId:guid}/window")]

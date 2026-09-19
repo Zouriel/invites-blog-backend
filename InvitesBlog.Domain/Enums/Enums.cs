@@ -121,10 +121,24 @@ public enum MediaBucketTier
     Gb50
 }
 
-/// <summary>A paid subscription on an account. <c>None</c> is the free plan.</summary>
+/// <summary>
+/// An account's plan for professionals. Hosts buy a pass per event instead (<see cref="EventPassKind"/>).
+/// The numbers are stored: 1 was Basic, retired in the 2026-09 plans, and 2 was Premium, which became Studio.
+/// </summary>
 public enum SubscriptionTier
 {
-    None,
-    Basic,
-    Premium
+    None = 0,
+    /// <summary>Designers and planners: their clients' events in one place, a credit on the invitations they
+    /// design, and passes at a discount to give to clients.</summary>
+    Studio = 2,
+    /// <summary>A resort or hall: albums for every event at the property, under its own name, run by its staff.</summary>
+    Venue = 3,
+}
+
+/// <summary>What one event was bought. Stored as a number; see <c>Campaign.EventPass</c>.</summary>
+public enum EventPassKind
+{
+    None = 0,
+    Party = 1,
+    Wedding = 2,
 }

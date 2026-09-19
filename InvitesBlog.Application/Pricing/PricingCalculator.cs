@@ -1,99 +1,64 @@
 namespace InvitesBlog.Application.Pricing;
 
-/// <summary>A fully itemized price breakdown, safe to show at checkout.</summary>
+/// <summary>A fully itemized price breakdown for sending, safe to show at checkout.</summary>
+/// <param name="InviteCount">How many invitations the price covers.</param>
+/// <param name="IncludedInvites">How many of them the event's pass already includes.</param>
+/// <param name="ExtraInvites">The rest, which are paid for.</param>
+/// <param name="ExtraBlocks">How many blocks of <paramref name="BlockSize"/> that takes.</param>
 public sealed record PriceBreakdown(
     int InviteCount,
     int IncludedInvites,
     int ExtraInvites,
     int ExtraBlocks,
     int BlockSize,
-    decimal MinimumPrice,
-    decimal ExtraCost,
+    decimal PerBlock,
     decimal Total,
-    bool HasDesignerDiscount,
-    string Currency = "USD");
+    string Currency = Plans.PlanCatalog.Currency);
 
 /// <summary>
-/// Implements the pricing model from spec §4.7.1–§4.7.2 and the top-up rules from §4.7.4:
-///   - $5 minimum including 50 invites (minimum charged once per campaign)
-///   - extra invites at $1 per 10 (or $1 per 20 with the community-designer discount, §6.5)
-///   - top-ups reuse unused prepaid capacity first and never charge a second minimum
-/// Pure and deterministic — the unit tests in InvitesBlog.Tests pin every branch.
+/// What invites.blog charges to SEND invitations. Sharing links yourself is always free. A Party pass
+/// includes the first 100 and a Wedding pass the first 500; beyond that, and for an event without a
+/// pass, it is <see cref="PricePerBlock"/> for every <see cref="BlockSize"/>. No minimum, and a top-up
+/// only pays for what is not already covered. Pure and deterministic — the unit tests pin every branch.
 /// </summary>
 public static class PricingCalculator
 {
-    public const int IncludedInvites = 50;
-    public const decimal MinimumPrice = 5m;
-    public const int StandardBlockSize = 10;
-    public const int DesignerBlockSize = 20;   // §6.5 — 50% off
-    public const decimal PricePerBlock = 1m;
+    public const int BlockSize = 100;
+    public const decimal PricePerBlock = 50m;
 
-    public static int BlockSize(bool hasDesignerDiscount) =>
-        hasDesignerDiscount ? DesignerBlockSize : StandardBlockSize;
-
-    /// <summary>Price for the initial campaign payment (§4.7.2).</summary>
-    /// <param name="premiumRate">Premium subscribers get extra invitations at the discounted block size.</param>
-    /// <param name="minimumCovered">An event pass includes the first 50, so the minimum isn't charged.</param>
-    public static PriceBreakdown CalculateInitial(
-        int inviteCount, bool hasDesignerDiscount, bool premiumRate = false, bool minimumCovered = false)
+    /// <summary>The price of sending to <paramref name="inviteCount"/> guests, <paramref name="includedInvites"/> of them already paid for by the event's pass.</summary>
+    public static PriceBreakdown CalculateInitial(int inviteCount, int includedInvites = 0)
     {
-        if (inviteCount < 0)
-            throw new ArgumentOutOfRangeException(nameof(inviteCount));
+        if (inviteCount < 0) throw new ArgumentOutOfRangeException(nameof(inviteCount));
+        if (includedInvites < 0) throw new ArgumentOutOfRangeException(nameof(includedInvites));
 
-        var blockSize = BlockSize(hasDesignerDiscount || premiumRate);
-        var minimum = minimumCovered ? 0m : MinimumPrice;
-        var extraInvites = Math.Max(0, inviteCount - IncludedInvites);
-        var extraBlocks = (int)Math.Ceiling(extraInvites / (double)blockSize);
-        var extraCost = extraBlocks * PricePerBlock;
-        var total = minimum + extraCost;
+        var included = Math.Min(inviteCount, includedInvites);
+        var extraInvites = inviteCount - included;
+        var extraBlocks = (int)Math.Ceiling(extraInvites / (double)BlockSize);
+        var total = extraBlocks * PricePerBlock;
 
-        return new PriceBreakdown(
-            InviteCount: inviteCount,
-            IncludedInvites: IncludedInvites,
-            ExtraInvites: extraInvites,
-            ExtraBlocks: extraBlocks,
-            BlockSize: blockSize,
-            MinimumPrice: minimum,
-            ExtraCost: extraCost,
-            Total: total,
-            HasDesignerDiscount: hasDesignerDiscount);
+        return new PriceBreakdown(inviteCount, included, extraInvites, extraBlocks, BlockSize, PricePerBlock, total);
     }
 
     /// <summary>
-    /// Price for a top-up (§4.7.4). Unused prepaid capacity is consumed first; only capacity
-    /// beyond what the campaign already paid for is charged, at the per-block rate — no second
-    /// $5 minimum. Returns a breakdown whose <see cref="PriceBreakdown.Total"/> is the top-up cost.
+    /// Price for a top-up. Capacity already paid for, or included by the pass, is used first; only
+    /// guests beyond it are charged, a block at a time.
     /// </summary>
-    public static PriceBreakdown CalculateTopUp(
-        int currentPaidCapacity,
-        int currentGuestCount,
-        int additionalGuests,
-        bool hasDesignerDiscount,
-        bool premiumRate = false)
+    /// <param name="coveredCapacity">What is already covered: paid for, plus what the pass includes.</param>
+    public static PriceBreakdown CalculateTopUp(int coveredCapacity, int currentGuestCount, int additionalGuests)
     {
-        if (currentPaidCapacity < 0) throw new ArgumentOutOfRangeException(nameof(currentPaidCapacity));
+        if (coveredCapacity < 0) throw new ArgumentOutOfRangeException(nameof(coveredCapacity));
         if (currentGuestCount < 0) throw new ArgumentOutOfRangeException(nameof(currentGuestCount));
         if (additionalGuests < 0) throw new ArgumentOutOfRangeException(nameof(additionalGuests));
 
-        var blockSize = BlockSize(hasDesignerDiscount || premiumRate);
-        var projectedGuests = currentGuestCount + additionalGuests;
-        var capacityShortfall = Math.Max(0, projectedGuests - currentPaidCapacity);
-        var extraBlocks = (int)Math.Ceiling(capacityShortfall / (double)blockSize);
+        var shortfall = Math.Max(0, currentGuestCount + additionalGuests - coveredCapacity);
+        var extraBlocks = (int)Math.Ceiling(shortfall / (double)BlockSize);
         var total = extraBlocks * PricePerBlock;
 
-        return new PriceBreakdown(
-            InviteCount: additionalGuests,
-            IncludedInvites: 0,
-            ExtraInvites: capacityShortfall,
-            ExtraBlocks: extraBlocks,
-            BlockSize: blockSize,
-            MinimumPrice: 0m,           // §4.7.4 / §23.3: minimum applies once per campaign
-            ExtraCost: total,
-            Total: total,
-            HasDesignerDiscount: hasDesignerDiscount);
+        return new PriceBreakdown(additionalGuests, 0, shortfall, extraBlocks, BlockSize, PricePerBlock, total);
     }
 
     /// <summary>New paid capacity after a top-up that bought <paramref name="blocks"/> blocks.</summary>
-    public static int CapacityAfterTopUp(int currentPaidCapacity, int blocks, bool hasDesignerDiscount) =>
-        currentPaidCapacity + blocks * BlockSize(hasDesignerDiscount);
+    public static int CapacityAfterTopUp(int currentPaidCapacity, int blocks) =>
+        currentPaidCapacity + blocks * BlockSize;
 }

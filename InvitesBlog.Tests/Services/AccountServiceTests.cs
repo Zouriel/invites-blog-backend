@@ -79,7 +79,8 @@ public class AccountServiceTests
         return new(
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
             _templates, _photos, TestData.NoCelebrants(), _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
-            [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config);
+            [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config,
+            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>());
     }
 
     private static AppUser User(

@@ -44,7 +44,8 @@ public class DevCheckoutTests
         return new PaymentService(
             new CampaignOwnershipService(
                 Substitute.For<ICurrentUser>(), Substitute.For<IRepository<AppUser>>(),
-                Substitute.For<ICampaignRepository>(), Substitute.For<IInviterRepository>(), TestData.NoCelebrants()),
+                Substitute.For<ICampaignRepository>(), Substitute.For<IInviterRepository>(), TestData.NoCelebrants(),
+                TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
             Substitute.For<ICampaignRepository>(), Substitute.For<IPaymentRepository>(),
             Substitute.For<IGuestRepository>(), Substitute.For<IUnitOfWork>(), provider, cfg, TestData.FreePlans());
     }

@@ -64,7 +64,6 @@ public sealed class TemplateSeeder(
                 Description = $"A premium {scene.Category.ToLowerInvariant()} invitation template.",
                 PreviewImageUrl = $"{published.PackageUrl}index.html",
                 PreviewAnimationUrl = null,
-                IsPremium = false,
                 DesignerInviterId = null,
                 DesignerName = "invites.blog",
                 SceneJson = json,

@@ -115,6 +115,11 @@ public static class GuestPages
                       color:var(--on-accent); background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
         .bar .cam { display:block; text-align:center; text-decoration:none; flex:0 0 auto; }
         .back { display:inline-block; margin-top:1.4rem; font-size:.9rem; color:var(--accent); }
+        .venue { display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:.85rem;
+                 font-weight:600; letter-spacing:.04em; text-transform:uppercase; opacity:.75; }
+        .venue__logo { width:36px; height:36px; object-fit:contain; border-radius:8px; }
+        .credit { margin-top:1.6rem; font-size:.78rem; opacity:.6; }
+        .credit a { color:inherit; }
 
         /* Asked in the page rather than on one of its own: a round trip before the question is a
            second of nothing happening, and it lands before any feedback that the tap registered. */
@@ -258,7 +263,7 @@ public static class GuestPages
         IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who,
             bool CanDelete, bool IsVideo)> photos,
         bool canUpload, string? error, string cameraPath, GuestPalette? palette = null,
-        string? nonce = null)
+        string? nonce = null, Application.Dtos.Invites.GuestCredit? credit = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -301,11 +306,13 @@ public static class GuestPages
 
         var body = $"""
             <div class="wrap">
+              {GuestCreditHtml.AlbumHeader(credit)}
               <h1>{E(eventTitle)}</h1>
               <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the event</p>
               {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
               {tiles}
               <a class="back" href="{E(backTo)}">Back to the invitation</a>
+              {GuestCreditHtml.AlbumFooter(credit)}
             </div>
             {bar}
             {(nonce is null ? "" : $"""

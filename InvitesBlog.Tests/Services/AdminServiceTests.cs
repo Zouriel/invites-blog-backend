@@ -24,7 +24,7 @@ public class AdminServiceTests
 
     private AdminService Sut() => new(
         _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow,
-        Substitute.For<ICampaignRepository>());
+        Substitute.For<ICampaignRepository>(), TestData.Empty<PassCredit>());
 
     // ---------- granting and revoking a role ----------
 

@@ -156,6 +156,7 @@ public sealed class GuestController(
 
         var html = await rendered.BuildAsync(payload.PackageUrl, payload.Data, ct);
         if (html is null) return Html(GuestPages.Unavailable(), StatusCodes.Status500InternalServerError);
+        html = GuestCreditHtml.InjectIntoInvitation(html, payload.Credit);
 
         Response.Headers["Content-Security-Policy"] = TemplateRuntime.ContentSecurityPolicy;
         Response.Headers["Referrer-Policy"] = TemplateRuntime.ReferrerPolicy;
@@ -570,7 +571,8 @@ public sealed class GuestController(
             error,
             $"/r/{renderId}/camera",
             await PaletteAsync(inviteId, ct),
-            nonce);
+            nonce,
+            await invites.CreditForCampaignAsync(subject.Value.CampaignId, ct));
 
         // Mostly photographs, so it needs img-src; and it carries one nonced script so a deletion
         // can be confirmed and carried out without two page loads. Not sandboxed — it holds the
