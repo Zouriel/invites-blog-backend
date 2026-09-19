@@ -797,3 +797,23 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   `SaveTheDateService`) copies the guests, celebrants, host and wording into a new invitation, carries
   each guest's `FirstEmailedAt` (so nobody counts twice) and moves the pass and extra emails.
 - Designs: the **Save the Date** template type; the designer's starter sets `scene.kind`.
+
+
+## Designer = Studio, and billing ready for the gateway — *shipped 2026-09-19*
+
+- **No designer sign-up.** Everyone signs up the same way (`/join`); `/signup`, `register/designer` and
+  `me/become-designer` are retired. The template designer comes with **Studio**: `DesignerAccessService`
+  keeps the Designer role in step with an active Studio plan (on when an admin sets Studio or it is
+  bought, off when it ends — hourly `DesignerAccessSweeper`); admins always keep it. The Designer role
+  can't be switched on by hand any more. Existing designers were given open-ended Studio
+  (migration `DesignersGetStudio`).
+- **Billing** (`BillingService`, `/api/billing`, page `/billing`): per event — Party/Wedding pass,
+  Keep your photos, 100 more emails; per account — Studio monthly/yearly; for a Studio — pass credits.
+  Checkout creates a pending `Payment` (now with `Kind`, `UserId`, `Quantity`, `Description`,
+  `FulfilledAt`; `CampaignId` nullable) and asks `IPaymentProvider` for a checkout page; the webhook
+  marks it paid (`PaymentService`) and `BillingService.FulfilAsync` applies it once — the same changes an
+  admin grant makes. **`Payments:Enabled` (default false)** gates checkout: off, the API answers
+  "not yet" with the "Ask us" topic and the page sends people there.
+- **To go live with BML:** implement `IPaymentProvider` for BML (create session → hosted payment page,
+  verify webhook signature, refunds), register it instead of `FakePaymentProvider`, set
+  `Payments:Enabled=true`. Nothing else changes.

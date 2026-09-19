@@ -75,52 +75,15 @@ public sealed class AccountService(
     /// set when the account has none, so this can never overwrite an existing one.
     /// </para>
     /// </summary>
-    public async Task<AuthResultDto> RegisterDesignerAsync(
-        RegisterDesignerRequest request, CancellationToken ct = default)
-    {
-        await registerValidator.ValidateAndThrowAsync(request, ct);
+    /// <summary>
+    /// Retired. Everyone signs up the same way (as a host); the template designer comes with the
+    /// Studio plan (DesignerAccessService), bought or given by an admin.
+    /// </summary>
+    public Task<AuthResultDto> RegisterDesignerAsync(RegisterDesignerRequest request, CancellationToken ct = default) =>
+        throw new BusinessRuleException(DesignerNeedsStudio, "designer_needs_studio");
 
-        var email = Normalize(request.Email);
-        var existing = await LoadAsync(u => u.Email == email, ct);
-
-        if (existing is not null)
-        {
-            if (!existing.IsActive) throw new AccountSuspendedException();
-
-            // An account with a password is somebody's login: adding a role to it from an anonymous
-            // endpoint would let a stranger who knows the address grant themselves that role.
-            if (!string.IsNullOrEmpty(existing.PasswordHash))
-                throw new BusinessRuleException(
-                    "An account already uses that email address. Sign in instead.", "email_taken");
-
-            existing.PasswordHash = PasswordHasher.Hash(request.Password);
-            if (!string.IsNullOrWhiteSpace(request.DisplayName))
-                existing.DisplayName = request.DisplayName.Trim();
-            await AddRoleAsync(existing, Roles.Designer, ct);
-            await uow.SaveChangesAsync(ct);
-
-            var upgraded = await LoadAsync(u => u.Id == existing.Id, ct) ?? existing;
-            return await IssueAsync(upgraded, ct);
-        }
-
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            Email = email,
-            DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
-                ? email.Split('@')[0]
-                : request.DisplayName.Trim(),
-            PasswordHash = PasswordHasher.Hash(request.Password),
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-        await AddRoleAsync(user, Roles.Designer, ct);
-        await AddRoleAsync(user, Roles.Customer, ct);
-        await users.AddAsync(user, ct);
-        await uow.SaveChangesAsync(ct);
-
-        return await IssueAsync(await LoadAsync(u => u.Id == user.Id, ct) ?? user, ct);
-    }
+    private const string DesignerNeedsStudio =
+        "Create an account the usual way. The template designer comes with the Studio plan.";
 
     // ----- Sign in -----------------------------------------------------------------------------
 
@@ -245,18 +208,9 @@ public sealed class AccountService(
     public async Task<AuthResultDto> RefreshAsync(CancellationToken ct = default) =>
         await IssueAsync(await CurrentAsync(ct), ct);
 
-    public async Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default)
-    {
-        var me = await CurrentAsync(ct);
-        if (RoleNames(me).Contains(Roles.Designer))
-            throw new BusinessRuleException(
-                "This account can already publish templates.", "already_a_designer");
-
-        await AddRoleAsync(me, Roles.Designer, ct);
-        await uow.SaveChangesAsync(ct);
-
-        return await IssueAsync(await LoadAsync(u => u.Id == me.Id, ct) ?? me, ct);
-    }
+    /// <summary>Retired: the designer comes with Studio, not from a button.</summary>
+    public Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default) =>
+        throw new BusinessRuleException(DesignerNeedsStudio, "designer_needs_studio");
 
     // ----- Linking a second identifier ----------------------------------------------------------
 

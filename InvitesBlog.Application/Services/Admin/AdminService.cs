@@ -33,7 +33,8 @@ public sealed class AdminService(
     IRepository<PassCredit> credits,
     MediaBuckets.IMediaBucketService buckets,
     IPlanService plans,
-    ISendingAllowanceService allowances) : IAdminService
+    ISendingAllowanceService allowances,
+    IDesignerAccessService designerAccess) : IAdminService
 {
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
@@ -163,6 +164,9 @@ public sealed class AdminService(
         Guid userId, SetUserRoleRequest req, CancellationToken ct = default)
     {
         var name = (req.Role ?? string.Empty).Trim();
+        if (string.Equals(name, Roles.Designer, StringComparison.OrdinalIgnoreCase))
+            throw new BusinessRuleException(
+                "The designer comes with the Studio plan. Give them Studio instead.", "designer_comes_with_studio");
 
         // Matched case-insensitively but compared against the canonical list, so "subscriber" works
         // from a hand-written request while "Subscribers" does not quietly become a new role.
@@ -279,6 +283,8 @@ public sealed class AdminService(
         }, ct);
 
         await uow.SaveChangesAsync(ct);
+        // Studio is what gives the designer: on with it, off without it.
+        await designerAccess.SyncAsync(user.Id, ct);
         return Describe(user, await UnusedCreditsAsync(user.Id, ct));
     }
 

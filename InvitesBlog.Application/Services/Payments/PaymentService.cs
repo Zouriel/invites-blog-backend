@@ -210,7 +210,7 @@ public sealed class PaymentService(
         if (evt.Kind == WebhookEventKind.PaymentFailed)
         {
             payment.Status = PaymentStatus.Failed;
-            var failedCampaign = await campaigns.GetByIdAsync(payment.CampaignId, ct);
+            var failedCampaign = payment.CampaignId is { } failedId ? await campaigns.GetByIdAsync(failedId, ct) : null;
             if (failedCampaign is not null && failedCampaign.Status == CampaignStatus.PendingPayment)
                 failedCampaign.Status = CampaignStatus.PaymentFailed;
             await unitOfWork.SaveChangesAsync(ct);
@@ -226,7 +226,15 @@ public sealed class PaymentService(
         payment.PaidAt = DateTimeOffset.UtcNow;
         payment.ProviderPaymentId = evt.ProviderPaymentId;
 
-        var campaign = await campaigns.GetByIdAsync(payment.CampaignId, ct);
+        // What the billing page sells is applied by BillingService, once the payment is recorded as
+        // paid — the caller hands it over (FulfilPaymentId).
+        if (payment.Kind is not (PaymentKind.Initial or PaymentKind.TopUp))
+        {
+            await unitOfWork.SaveChangesAsync(ct);
+            return new WebhookProcessResult(true, null, payment.Id);
+        }
+
+        var campaign = payment.CampaignId is { } paidFor ? await campaigns.GetByIdAsync(paidFor, ct) : null;
         if (campaign is null)
         {
             await unitOfWork.SaveChangesAsync(ct);

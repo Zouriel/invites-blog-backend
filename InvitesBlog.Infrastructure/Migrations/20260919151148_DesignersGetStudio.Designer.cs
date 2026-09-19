@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using InvitesBlog.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260919151148_DesignersGetStudio")]
+    partial class DesignersGetStudio
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1165,7 +1168,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("numeric(10,2)")
                         .HasColumnName("amount");
 
-                    b.Property<Guid?>("CampaignId")
+                    b.Property<Guid>("CampaignId")
                         .HasColumnType("uuid")
                         .HasColumnName("campaign_id");
 
@@ -1177,15 +1180,6 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("currency");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("description");
-
-                    b.Property<DateTimeOffset?>("FulfilledAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("fulfilled_at");
 
                     b.Property<int>("InviteCount")
                         .HasColumnType("integer")
@@ -1212,27 +1206,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("provider_session_id");
 
-                    b.Property<int>("Quantity")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(1)
-                        .HasColumnName("quantity");
-
                     b.Property<int>("Status")
                         .HasColumnType("integer")
                         .HasColumnName("status");
-
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("user_id");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CampaignId");
 
                     b.HasIndex("ProviderSessionId");
-
-                    b.HasIndex("UserId");
 
                     b.ToTable("payments", (string)null);
                 });

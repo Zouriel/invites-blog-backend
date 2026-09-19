@@ -173,7 +173,8 @@ public static class Roles
     /// than to an account. Granting one to a user would put a row in the table that no sign-in ever
     /// reads, which looks like it worked and does nothing.</para>
     /// </summary>
-    public static IReadOnlyList<string> Grantable { get; } = [Admin, Designer, Customer];
+    // Designer is not granted by hand: it comes with the Studio plan (DesignerAccessService).
+    public static IReadOnlyList<string> Grantable { get; } = [Admin, Customer];
 
     public static IReadOnlyDictionary<string, string[]> Definitions { get; } = new Dictionary<string, string[]>
     {

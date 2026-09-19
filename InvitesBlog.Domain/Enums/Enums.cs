@@ -60,7 +60,16 @@ public enum DeliveryStatus
 public enum PaymentKind
 {
     Initial,
-    TopUp
+    TopUp,
+    // What the billing page sells (appended; EF stores ints). See BillingService.
+    PartyPass,
+    WeddingPass,
+    KeepPhotos,
+    Sending,
+    StudioMonthly,
+    StudioYearly,
+    StudioPartyCredits,
+    StudioWeddingCredits,
 }
 
 public enum PaymentStatus

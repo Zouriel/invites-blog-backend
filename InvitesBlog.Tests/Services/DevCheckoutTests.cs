@@ -30,7 +30,8 @@ public class DevCheckoutTests
     }
 
     // DispatchService is never reached by a refused request, which is exactly what these assert.
-    private PaymentsController Controller(string environment) => new(_payments, null!, Env(environment));
+    private PaymentsController Controller(string environment) =>
+        new(_payments, null!, Env(environment), Substitute.For<InvitesBlog.Application.Services.Billing.IBillingService>());
 
     private static PaymentService Service(IConfiguration? config = null)
     {

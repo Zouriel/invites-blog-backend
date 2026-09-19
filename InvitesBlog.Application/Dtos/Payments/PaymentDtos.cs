@@ -26,4 +26,5 @@ public sealed record WebhookAckResponse(bool Received);
 /// leaves it null so the controller never re-dispatches. The dispatch call itself lives in the Api
 /// layer because <c>DispatchService</c> is an Infrastructure type the Application layer cannot reference.
 /// </summary>
-public sealed record WebhookProcessResult(bool Handled, Guid? DispatchCampaignId);
+/// <param name="FulfilPaymentId">A billing payment just marked paid: BillingService.FulfilAsync applies what it bought.</param>
+public sealed record WebhookProcessResult(bool Handled, Guid? DispatchCampaignId, Guid? FulfilPaymentId = null);

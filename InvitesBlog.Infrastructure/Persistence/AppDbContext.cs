@@ -249,7 +249,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("payments");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.CampaignId);
+            e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.ProviderSessionId);
+            e.Property(x => x.Quantity).HasDefaultValue(1);
+            e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.Amount).HasColumnType("numeric(10,2)");
         });
 

@@ -26,7 +26,7 @@ public class AdminServiceTests
         _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow,
         Substitute.For<ICampaignRepository>(), TestData.Empty<PassCredit>(),
         Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
-        TestData.FreePlans(), TestData.Allowance());
+        TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>());
 
     // ---------- granting and revoking a role ----------
 
@@ -67,13 +67,13 @@ public class AdminServiceTests
     [Fact]
     public async Task Granting_a_role_adds_it_and_records_why()
     {
-        var user = Account(Roles.Customer);
-        RoleRow(Roles.Designer);
+        var user = Account();
+        RoleRow(Roles.Customer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Customer, true));
 
-        Assert.Contains(Roles.Designer, result.Roles);
+        Assert.Contains(Roles.Customer, result.Roles);
         await _auditLogs.Received().AddAsync(
             Arg.Is<AuditLog>(a => a.Action == "admin.role.grant"), Arg.Any<CancellationToken>());
         await _uow.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -89,7 +89,7 @@ public class AdminServiceTests
         var user = Account(Roles.Customer, Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Customer, true));
 
         Assert.Equal(2, result.Roles.Count);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -101,9 +101,9 @@ public class AdminServiceTests
         var user = Account(Roles.Customer, Roles.Designer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, false));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Customer, false));
 
-        Assert.DoesNotContain(Roles.Designer, result.Roles);
+        Assert.DoesNotContain(Roles.Customer, result.Roles);
         await _auditLogs.Received().AddAsync(
             Arg.Is<AuditLog>(a => a.Action == "admin.role.revoke"), Arg.Any<CancellationToken>());
     }
@@ -126,16 +126,26 @@ public class AdminServiceTests
         Assert.Equal("role_not_grantable", ex.ErrorCode);
     }
 
+    /// <summary>The designer comes with Studio: the admin gives the plan, not the role.</summary>
+    [Fact]
+    public async Task Designer_is_not_granted_by_hand()
+    {
+        var user = Account(Roles.Customer);
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("designer", true)));
+        Assert.Equal("designer_comes_with_studio", ex.ErrorCode);
+    }
+
     [Fact]
     public async Task The_role_name_is_matched_without_regard_to_case()
     {
-        var user = Account(Roles.Customer);
-        RoleRow(Roles.Designer);
+        var user = Account();
+        RoleRow(Roles.Customer);
         _currentUser.UserId.Returns(_me);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("designer", true));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("customer", true));
 
-        Assert.Contains(Roles.Designer, result.Roles);
+        Assert.Contains(Roles.Customer, result.Roles);
     }
 
     /// <summary>The likeliest way to lock everybody out is to try the toggle on your own row.</summary>
@@ -186,26 +196,26 @@ public class AdminServiceTests
     [Fact]
     public async Task Revoking_a_subscription_from_a_lone_admin_is_fine()
     {
-        var user = Account(Roles.Admin, Roles.Designer);
+        var user = Account(Roles.Admin, Roles.Customer);
         _currentUser.UserId.Returns(user.Id);
         _userRoles.CountAsync(
             Arg.Any<System.Linq.Expressions.Expression<Func<UserRole, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(1);
 
-        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Designer, false));
+        var result = await Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest(Roles.Customer, false));
 
         Assert.Contains(Roles.Admin, result.Roles);
-        Assert.DoesNotContain(Roles.Designer, result.Roles);
+        Assert.DoesNotContain(Roles.Customer, result.Roles);
     }
 
     [Fact]
     public async Task An_account_that_is_not_there_is_a_not_found()
     {
         Account(Roles.Customer);
-        RoleRow(Roles.Designer);
+        RoleRow(Roles.Customer);
 
         await Assert.ThrowsAsync<NotFoundException>(
-            () => Sut().SetUserRoleAsync(Guid.NewGuid(), new SetUserRoleRequest(Roles.Designer, true)));
+            () => Sut().SetUserRoleAsync(Guid.NewGuid(), new SetUserRoleRequest(Roles.Customer, true)));
     }
 
     [Fact]

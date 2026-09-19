@@ -417,109 +417,11 @@ public class AccountServiceTests
 
     // ----- Designer sign-up ---------------------------------------------------------------------
 
-    [Fact]
-    public async Task Registering_creates_a_designer_who_is_also_a_customer()
-    {
-        _users.Query(Arg.Any<bool>()).Returns(Array.Empty<AppUser>().AsAsyncQueryable());
-        AppUser? added = null;
-        await _users.AddAsync(Arg.Do<AppUser>(u => added = u), Arg.Any<CancellationToken>());
-
-        await Sut().RegisterDesignerAsync(new RegisterDesignerRequest("  New@Test.com ", "a-long-password", "New"));
-
-        Assert.Equal("new@test.com", added!.Email);
-        Assert.Equal(2, added.UserRoles.Count);   // Designer to publish, Customer to receive
-        Assert.Contains(added.UserRoles, ur => ur.RoleId == _designerRoleId);
-        Assert.Contains(added.UserRoles, ur => ur.RoleId == _customerRoleId);
-        // Roles are referenced by id only — attaching the no-tracking instance would try to INSERT it.
-        Assert.All(added.UserRoles, ur => Assert.Null(ur.Role));
-    }
 
     // ----- Becoming a creator -------------------------------------------------------------------
 
-    /// <summary>
-    /// Signing up a second time with an address you already use cannot work — it's taken, and Google
-    /// sign-in just returns the customer you already were. Asking from the account is the way through.
-    /// </summary>
-    [Fact]
-    public async Task A_customer_can_opt_into_publishing_templates()
-    {
-        var me = User("nadia@test.com", roleNames: Roles.Customer);
-        ExistingWithRoleLookup(me);
-        _currentUser.UserId.Returns(me.Id);
 
-        var result = await Sut().BecomeDesignerAsync();
 
-        Assert.Contains(me.UserRoles, ur => ur.RoleId == _designerRoleId);
-        // Kept, not replaced: they still receive invitations.
-        Assert.Contains(me.UserRoles, ur => ur.Role?.Name == Roles.Customer);
-        Assert.Equal("session-jwt", result.Token);
-        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
-    }
-
-    /// <summary>The role rides in the token, so it means nothing until a new one is issued.</summary>
-    [Fact]
-    public async Task Becoming_a_creator_reissues_the_token_with_the_new_role()
-    {
-        var me = User("nadia@test.com", roleNames: Roles.Customer);
-        ExistingWithRoleLookup(me);
-        _currentUser.UserId.Returns(me.Id);
-
-        await Sut().BecomeDesignerAsync();
-
-        _tokens.Received(1).IssueForRoles(
-            Arg.Is<IReadOnlyCollection<string>>(r => r.Contains(Roles.Designer)),
-            Arg.Any<IReadOnlyDictionary<string, string>>(),
-            Arg.Any<TimeSpan>());
-    }
-
-    [Fact]
-    public async Task Asking_twice_says_so_rather_than_adding_the_role_again()
-    {
-        var me = User("nadia@test.com", roleNames: Roles.Designer, password: "pw");
-        Existing(me);
-        _currentUser.UserId.Returns(me.Id);
-
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().BecomeDesignerAsync());
-
-        Assert.Equal("already_a_designer", ex.ErrorCode);
-    }
-
-    [Fact]
-    public async Task Registering_never_takes_over_an_account_that_already_has_a_password()
-    {
-        _users.Query(Arg.Any<bool>()).Returns(new[] { User(email: "taken@test.com", password: "theirs") }.AsAsyncQueryable());
-
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            Sut().RegisterDesignerAsync(new RegisterDesignerRequest("taken@test.com", "a-long-password", "Me")));
-        Assert.Equal("email_taken", ex.ErrorCode);
-        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
-    }
-
-    /// <summary>
-    /// Someone who has only ever received invitations already has a passwordless account. Signing up
-    /// to design should upgrade THAT account, not strand their history behind a second one.
-    /// </summary>
-    [Fact]
-    public async Task Registering_upgrades_the_passwordless_account_that_email_already_has()
-    {
-        var existing = User(email: "customer@test.com", roleNames: Roles.Customer);
-        _users.Query(Arg.Any<bool>()).Returns(new[] { existing }.AsAsyncQueryable());
-
-        await Sut().RegisterDesignerAsync(new RegisterDesignerRequest("customer@test.com", "a-long-password", "Me"));
-
-        Assert.NotNull(existing.PasswordHash);
-        Assert.Contains(existing.UserRoles, ur => ur.RoleId == _designerRoleId);
-        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Registering_refuses_a_suspended_account()
-    {
-        _users.Query(Arg.Any<bool>()).Returns(new[] { User(email: "gone@test.com", active: false) }.AsAsyncQueryable());
-
-        await Assert.ThrowsAsync<AccountSuspendedException>(() =>
-            Sut().RegisterDesignerAsync(new RegisterDesignerRequest("gone@test.com", "a-long-password", "Gone")));
-    }
 
     // ----- OAuth --------------------------------------------------------------------------------
 
@@ -625,5 +527,20 @@ public class AccountServiceTests
         if (identity is not null)
             provider.VerifyAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(identity);
         return provider;
+    }
+
+    /// <summary>
+    /// Everyone signs up the same way now; the template designer comes with the Studio plan
+    /// (DesignerAccessService), so neither old door hands out the role any more.
+    /// </summary>
+    [Fact]
+    public async Task Designer_sign_up_and_become_a_creator_are_retired()
+    {
+        var sut = Sut();
+        var a = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            sut.RegisterDesignerAsync(new RegisterDesignerRequest("new@example.test", "a-long-password", "New")));
+        var b = await Assert.ThrowsAsync<BusinessRuleException>(() => sut.BecomeDesignerAsync());
+        Assert.Equal("designer_needs_studio", a.ErrorCode);
+        Assert.Equal("designer_needs_studio", b.ErrorCode);
     }
 }

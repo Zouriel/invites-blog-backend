@@ -16,7 +16,8 @@ namespace InvitesBlog.Api.Controllers;
 /// which the Application layer cannot reference).
 /// </summary>
 public sealed class PaymentsController(
-    IPaymentService payments, DispatchService dispatch, IWebHostEnvironment env) : BaseApiController
+    IPaymentService payments, DispatchService dispatch, IWebHostEnvironment env,
+    InvitesBlog.Application.Services.Billing.IBillingService billing) : BaseApiController
 {
     // POST /api/campaigns/{id}/checkout [campaign-token]
     [HttpPost("/api/campaigns/{id:guid}/checkout")]
@@ -41,6 +42,9 @@ public sealed class PaymentsController(
 
         var result = await payments.HandleWebhookAsync(body, signature, ct);
         if (!result.Handled) throw new PaymentWebhookInvalidException();
+        // Something from the billing page: apply what was bought (once — a retried webhook finds it done).
+        if (result.FulfilPaymentId is Guid paid)
+            await billing.FulfilAsync(paid, CancellationToken.None);
         if (result.DispatchCampaignId is Guid campaignId)
             // Use None, not the request token: a payment provider disconnecting/retrying must not
             // cancel a partially-completed dispatch (the retry short-circuits on Status==Paid and
@@ -76,6 +80,7 @@ public sealed class PaymentsController(
         if (!env.IsDevelopment()) return NotFound();
 
         var result = await payments.CompleteDevCheckoutAsync(session, payment, ct);
+        if (result.FulfilPaymentId is Guid paid) await billing.FulfilAsync(paid, ct);
         if (result.DispatchCampaignId is Guid campaignId)
             await dispatch.DispatchCampaignAsync(campaignId, ct);
         // Never wherever the query string says: that is an open redirect off our own domain.
