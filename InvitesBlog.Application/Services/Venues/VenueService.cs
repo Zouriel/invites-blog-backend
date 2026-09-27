@@ -304,7 +304,7 @@ public sealed class VenueService(
         return new VenueDto(
             venue.Id, venue.Name, venue.Place, venue.LogoUrl, isOwner,
             await PlanActiveAsync(venue, ct), owner?.SubscriptionEndsAt,
-            PlanCatalog.VenueAccountBytes, await plans.VenueUsedBytesAsync(venue.Id, ct),
+            0, await plans.VenueUsedBytesAsync(venue.Id, ct),
             people, await EventsAsync(venue.Id, ct), venue.Code);
     }
 

@@ -75,18 +75,22 @@ public class PlanRulesTests
         Assert.Equal(Now.AddMonths(12), PlanRules.PassUntil(Night, Now));
     }
 
+    /// <summary>
+    /// A venue no longer covers its events: it buys their passes (at the venue price), so an event it
+    /// runs is on whatever pass it has, and Free without one.
+    /// </summary>
     [Fact]
-    public void A_venue_outranks_a_pass_and_covers_its_events_while_it_runs()
+    public void A_venue_s_event_is_on_its_pass_not_on_the_venue()
     {
-        var plan = Evaluate(EventPassKind.Party, Now.AddMonths(2), venueActive: true);
+        var withPass = Evaluate(EventPassKind.Party, Now.AddMonths(2), venueActive: true);
+        var without = Evaluate(venueActive: true);
 
-        Assert.Equal(PlanKind.Venue, plan.Kind);
-        Assert.Equal(100 * PlanCatalog.Gb, plan.EventBytes);
-        Assert.Equal(PlanCatalog.VenueAccountBytes, plan.AccountBytes);
-        Assert.Equal(VenueId, plan.VenueId);
-        Assert.True(plan.PrivateAlbums);
-        Assert.False(plan.Branded);
-        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(PlanKind.PartyPass, withPass.Kind);
+        Assert.Equal(PlanCatalog.PartyEventBytes, withPass.EventBytes);
+        Assert.Null(withPass.AccountBytes);
+        Assert.Null(withPass.VenueId);
+        Assert.Equal(PlanKind.Free, without.Kind);
+        Assert.NotNull(without.CoveredUntil);
     }
 
     [Fact]
@@ -192,7 +196,9 @@ public class PlanRulesTests
 
         Assert.Equal("MVR", catalog.Currency);
         Assert.Equal(["Free", "PartyPass", "WeddingPass", "Studio", "Venue"], catalog.Plans.Select(p => p.Kind));
-        Assert.Equal([0m, 199m, 699m, 450m, 2300m], catalog.Plans.Select(p => p.Price));
+        // Venue is given, not bought: its price is 0, and it offers 40% off its events' passes.
+        Assert.Equal([0m, 199m, 699m, 450m, 0m], catalog.Plans.Select(p => p.Price));
+        Assert.Equal(40, catalog.VenueDiscountPercent);
         Assert.Equal(150m, catalog.KeepPhotos.Price);
         Assert.Equal(50m, catalog.Sending.PerBlock);
         Assert.Equal(100, catalog.Sending.BlockSize);

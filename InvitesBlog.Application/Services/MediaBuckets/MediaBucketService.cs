@@ -932,7 +932,8 @@ public sealed class MediaBucketService(
                      && PlanRules.IsActive(owner.SubscriptionTier, owner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
         return new StorageSummaryDto(
             active ? SubscriptionTier.Venue.ToString() : "None",
-            active ? PlanCatalog.VenueAccountBytes : null,
+            // No venue-wide space any more: each event's space is its pass's.
+            null,
             await plans.VenueUsedBytesAsync(venue.Id, ct),
             venue.Name);
     }

@@ -37,9 +37,10 @@ public enum MediaPhase
 /// the pricing page, so the two can't disagree.
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
-/// everything small, a Party pass, a Wedding pass. Subscriptions are for professionals only: Studio for
-/// designers and planners, Venue for resorts and halls. Prices are in rufiyaa, shown with dollars
-/// alongside.</para>
+/// everything small, a Party pass, a Wedding pass. Studio is a subscription for designers and
+/// planners. Venue (resorts and halls) is given by an admin, free: a venue buys and renews passes for
+/// the events it runs at the venue discount, and charges its clients itself. Prices are in rufiyaa,
+/// shown with dollars alongside.</para>
 /// </summary>
 public static class PlanCatalog
 {
@@ -49,10 +50,6 @@ public static class PlanCatalog
     public const long FreeEventBytes = 1 * Gb;
     public const long PartyEventBytes = 10 * Gb;
     public const long WeddingEventBytes = 100 * Gb;
-    public const long VenueEventBytes = 100 * Gb;
-
-    /// <summary>Everything a venue's events hold together.</summary>
-    public const long VenueAccountBytes = 1024 * Gb;
 
     public const int FreeBuckets = 1;
     public const int PartyBuckets = 2;
@@ -97,8 +94,8 @@ public static class PlanCatalog
     public const decimal StudioMonthly = 450m;
     public const decimal StudioYearly = 4500m;
 
-    /// <summary>The smallest venue's price; larger properties are quoted.</summary>
-    public const decimal VenueMonthlyFrom = 2300m;
+    /// <summary>What a venue pays for a pass, or another year of one, for an event it runs: 40% off.</summary>
+    public const int VenuePassDiscountPercent = 40;
 
     /// <summary>What a Studio account pays for a pass it gives to a client: 30% off.</summary>
     public const int StudioPassDiscountPercent = 30;
@@ -130,13 +127,15 @@ public static class PlanCatalog
                     ExtensionPrice: p.WeddingExtension),
                 new PlanDto("Studio", "Studio", p.StudioMonthly, "per month", p.StudioYearly, null,
                     null, null, null, null, null, 0, false, false),
-                new PlanDto("Venue", "Venue", p.VenueMonthlyFrom, "per month", null, null,
-                    VenueEventBytes, VenueAccountBytes, WeddingBuckets, WeddingWindowDays, null, 0, true, false, From: true),
+                // Given by an admin, never bought: what it offers is the discount on its events' passes.
+                new PlanDto("Venue", "Venue", 0m, "by invitation", null, null,
+                    null, null, null, null, null, 0, false, false),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
             new SendingPriceDto(p.SendingPerBlock, PricingCalculator.BlockSize),
             new LapseDto(ReminderDay, OrganiserOnlyDay, FinalNoticeDay, DeleteDay),
-            p.StudioDiscountPercent);
+            p.StudioDiscountPercent,
+            p.VenueDiscountPercent);
     }
 }
 
@@ -163,7 +162,7 @@ public sealed record LapseDto(int ReminderDay, int OrganiserOnlyDay, int FinalNo
 
 public sealed record PlanCatalogDto(
     string Currency, decimal MvrPerUsd, IReadOnlyList<PlanDto> Plans, KeepPhotosDto KeepPhotos,
-    SendingPriceDto Sending, LapseDto Lapse, int StudioDiscountPercent);
+    SendingPriceDto Sending, LapseDto Lapse, int StudioDiscountPercent, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent);
 
 /// <summary>What one event may do right now, and how long it is covered for.</summary>
 /// <param name="AccountBytes">A venue's space across all of its events; null for everything else.</param>
@@ -195,7 +194,11 @@ public static class PlanRules
     public static DateTimeOffset PassUntil(DateTimeOffset eventDate, DateTimeOffset now) =>
         (eventDate > now ? eventDate : now).AddMonths(PlanCatalog.PassMonths);
 
-    /// <param name="venue">The venue the event is at, if any: its id, whether its plan is in force, and when it ended.</param>
+    /// <param name="venue">
+    /// The venue the event is at, if any. It no longer covers the event: since 2026-09-27 a venue buys
+    /// passes for its events (at a discount) like anyone else, so its events are Free or on a pass.
+    /// Kept for its end date, which still never shortens a cover.
+    /// </param>
     /// <param name="legacyCoverUntil">The latest date anything from before the plans is covered to.</param>
     public static EventPlan Evaluate(
         DateTimeOffset now,
@@ -208,11 +211,9 @@ public static class PlanRules
         DateTimeOffset? mediaDeletedAt,
         Guid? ownerUserId)
     {
-        var atVenue = venue is { Active: true };
         var passActive = pass != EventPassKind.None && passUntil is { } until && until > now;
 
-        var kind = atVenue ? PlanKind.Venue
-            : passActive && pass == EventPassKind.Wedding ? PlanKind.WeddingPass
+        var kind = passActive && pass == EventPassKind.Wedding ? PlanKind.WeddingPass
             : passActive && pass == EventPassKind.Party ? PlanKind.PartyPass
             : PlanKind.Free;
 
@@ -220,30 +221,25 @@ public static class PlanRules
         {
             PlanKind.PartyPass => PlanCatalog.PartyEventBytes,
             PlanKind.WeddingPass => PlanCatalog.WeddingEventBytes,
-            PlanKind.Venue => PlanCatalog.VenueEventBytes,
             _ => PlanCatalog.FreeEventBytes,
         };
         // The plan is the only source of an event's space. Albums from before the plans once kept
         // their old size, which made an event on Free show and allow more than Free, while its
         // settings said 1 GB. Only their cover date is still honoured (legacyCoverUntil).
 
-        // A venue's plan covers its events while it runs. Otherwise the cover is the latest of the
-        // free 90 days, a pass, "Keep your photos", a venue that has since ended, and what anything
-        // from before the plans was promised — so ending one never shortens another.
-        DateTimeOffset? coveredUntil = null;
-        if (!atVenue)
-        {
-            var end = eventDate.AddDays(PlanCatalog.FreeCoverDays);
-            foreach (var candidate in new[] { pass != EventPassKind.None ? passUntil : null, keepPhotosUntil, venue?.EndedAt, legacyCoverUntil })
-                if (candidate is { } c && c > end) end = c;
-            coveredUntil = end;
-        }
+        // The cover is the latest of the free 90 days, a pass, "Keep your photos", a venue plan that
+        // covered it before venues bought passes, and what anything from before the plans was
+        // promised — so ending one never shortens another.
+        var end = eventDate.AddDays(PlanCatalog.FreeCoverDays);
+        foreach (var candidate in new[] { pass != EventPassKind.None ? passUntil : null, keepPhotosUntil, venue?.EndedAt, legacyCoverUntil })
+            if (candidate is { } c && c > end) end = c;
+        DateTimeOffset? coveredUntil = end;
 
-        var large = kind is PlanKind.WeddingPass or PlanKind.Venue;
+        var large = kind is PlanKind.WeddingPass;
         return new EventPlan(
             kind,
             eventBytes,
-            atVenue ? PlanCatalog.VenueAccountBytes : null,
+            null,
             large ? PlanCatalog.WeddingBuckets : kind == PlanKind.PartyPass ? PlanCatalog.PartyBuckets : PlanCatalog.FreeBuckets,
             large ? PlanCatalog.WeddingWindowDays : kind == PlanKind.PartyPass ? PlanCatalog.PartyWindowDays : PlanCatalog.FreeWindowDays,
             kind switch
@@ -256,8 +252,7 @@ public static class PlanRules
             kind == PlanKind.Free,
             coveredUntil,
             PhaseOf(now, coveredUntil, mediaDeletedAt),
-            ownerUserId,
-            atVenue ? venue!.Value.Id : null);
+            ownerUserId);
     }
 
     public static MediaPhase PhaseOf(DateTimeOffset now, DateTimeOffset? coveredUntil, DateTimeOffset? deletedAt)

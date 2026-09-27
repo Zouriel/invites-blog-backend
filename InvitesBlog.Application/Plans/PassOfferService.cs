@@ -12,9 +12,13 @@ namespace InvitesBlog.Application.Plans;
 /// </summary>
 /// <param name="DiscountPercent">0 without a Studio design.</param>
 /// <param name="DesignedBy">The Studio designer the discount comes from, for "30% off: designed for you by …".</param>
+/// <param name="VenuePercent">The venue discount on an event a venue runs (passes and extensions); 0 otherwise.</param>
+/// <param name="VenueName">That venue.</param>
+/// <param name="ByVenue">Whether the venue discount, not the Studio one, made the pass prices.</param>
 public sealed record PassOfferDto(
     decimal PartyPass, decimal WeddingPass, decimal FullPartyPass, decimal FullWeddingPass,
-    int DiscountPercent, string? DesignedBy, decimal PartyExtension, decimal WeddingExtension)
+    int DiscountPercent, string? DesignedBy, decimal PartyExtension, decimal WeddingExtension,
+    int VenuePercent = 0, string? VenueName = null, bool ByVenue = false)
 {
     public decimal PassPrice(EventPassKind kind) => kind == EventPassKind.Wedding ? WeddingPass : PartyPass;
     public decimal ExtensionPrice(EventPassKind kind) => kind == EventPassKind.Wedding ? WeddingExtension : PartyExtension;
@@ -30,7 +34,8 @@ public sealed class PassOfferService(
     ITemplateRepository templates,
     Abstractions.Persistence.IRepository<Domain.Entities.AppUser> users,
     IPlanService plans,
-    IPriceBook priceBook) : IPassOfferService
+    IPriceBook priceBook,
+    Abstractions.Persistence.IRepository<Domain.Entities.Venue>? venues = null) : IPassOfferService
 {
     public async Task<PassOfferDto> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
@@ -46,10 +51,35 @@ public sealed class PassOfferService(
             && await plans.IsStudioAsync(designerId, ct))
             designer = string.IsNullOrWhiteSpace(template.DesignerName) ? "your designer" : template.DesignerName;
 
-        return designer is null
+        var offer = designer is null
             ? new PassOfferDto(p.PartyPass, p.WeddingPass, p.PartyPass, p.WeddingPass, 0, null, p.PartyExtension, p.WeddingExtension)
             : new PassOfferDto(p.StudioPassPrice(EventPassKind.Party), p.StudioPassPrice(EventPassKind.Wedding),
                 p.PartyPass, p.WeddingPass, p.StudioDiscountPercent, designer, p.PartyExtension, p.WeddingExtension);
+
+        // An event a venue runs: the venue buys its pass, and another year of it, at the venue price.
+        // Given by an admin, so the venue's plan being in force is the only condition. Never stacked
+        // with the Studio discount: the lower price wins.
+        if (campaign?.VenueId is { } venueId && venues is not null
+            && await venues.Query().FirstOrDefaultAsync(v => v.Id == venueId, ct) is { } venue
+            && await users.Query().AnyAsync(u => u.Id == venue.OwnerUserId && u.SubscriptionTier == Domain.Enums.SubscriptionTier.Venue
+                                                 && (u.SubscriptionEndsAt == null || u.SubscriptionEndsAt > DateTimeOffset.UtcNow), ct)
+            && p.VenueDiscountPercent > 0)
+        {
+            var party = p.VenuePassPrice(EventPassKind.Party);
+            var wedding = p.VenuePassPrice(EventPassKind.Wedding);
+            var byVenue = party <= offer.PartyPass && wedding <= offer.WeddingPass;
+            offer = offer with
+            {
+                PartyPass = Math.Min(party, offer.PartyPass),
+                WeddingPass = Math.Min(wedding, offer.WeddingPass),
+                PartyExtension = p.VenueExtensionPrice(EventPassKind.Party),
+                WeddingExtension = p.VenueExtensionPrice(EventPassKind.Wedding),
+                VenuePercent = p.VenueDiscountPercent,
+                VenueName = venue.Name,
+                ByVenue = byVenue,
+            };
+        }
+        return offer;
     }
 
     /// <summary>The event's host is the person the design was made for (their account's email).</summary>

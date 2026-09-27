@@ -122,4 +122,66 @@ public class PassOfferTests
         var none = TestData.Campaign();
         Assert.False(EventPasses.Extend(none, now));
     }
+
+    // ----- venues -----
+
+    private async Task<PassOfferDto> AtVenue(bool venueActive, bool studio = false)
+    {
+        var owner = new AppUser
+        {
+            Id = Guid.NewGuid(), Email = "resort@x.mv", DisplayName = "Resort",
+            SubscriptionTier = venueActive ? SubscriptionTier.Venue : SubscriptionTier.None,
+        };
+        var venue = new Venue { Id = Guid.NewGuid(), OwnerUserId = owner.Id, Name = "Sunset Resort" };
+        var template = Design(studio ? "client@x.mv" : null);
+        var campaign = TestData.Campaign();
+        campaign.TemplateId = template.Id;
+        campaign.CreatedByUserId = _host.Id;
+        campaign.VenueId = venue.Id;
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        _campaigns.Query(Arg.Any<bool>()).Returns(_ => new[] { campaign }.AsAsyncQueryable());
+        _templates.GetByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+        _plans.IsStudioAsync(template.DesignerUserId!.Value, Arg.Any<CancellationToken>()).Returns(studio);
+        var users = Substitute.For<IRepository<AppUser>>();
+        users.Query(Arg.Any<bool>()).Returns(_ => new[] { _host, owner }.AsAsyncQueryable());
+        var venues = Substitute.For<IRepository<Venue>>();
+        venues.Query(Arg.Any<bool>()).Returns(_ => new[] { venue }.AsAsyncQueryable());
+        return await new PassOfferService(_campaigns, _templates, users, _plans, TestData.PriceBook(), venues)
+            .ForCampaignAsync(campaign.Id);
+    }
+
+    /// <summary>A venue buys and renews its events' passes at 40% off, and charges its clients itself.</summary>
+    [Fact]
+    public async Task A_venue_s_event_has_passes_and_extensions_at_40_percent_off()
+    {
+        var o = await AtVenue(venueActive: true);
+
+        Assert.Equal(119m, o.PartyPass);        // 199 less 40%
+        Assert.Equal(419m, o.WeddingPass);      // 699 less 40%
+        Assert.Equal(59m, o.PartyExtension);    // 99 less 40%
+        Assert.Equal(209m, o.WeddingExtension); // 349 less 40%
+        Assert.Equal(40, o.VenuePercent);
+        Assert.Equal("Sunset Resort", o.VenueName);
+        Assert.True(o.ByVenue);
+    }
+
+    [Fact]
+    public async Task A_venue_whose_account_was_taken_away_pays_full_price()
+    {
+        var o = await AtVenue(venueActive: false);
+
+        Assert.Equal(199m, o.PartyPass);
+        Assert.Equal(99m, o.PartyExtension);
+        Assert.Equal(0, o.VenuePercent);
+    }
+
+    /// <summary>Never stacked with the Studio discount: 40% beats 30%, and it's 40% of the full price.</summary>
+    [Fact]
+    public async Task With_a_Studio_design_too_the_venue_price_wins_without_stacking()
+    {
+        var o = await AtVenue(venueActive: true, studio: true);
+
+        Assert.Equal(119m, o.PartyPass);
+        Assert.True(o.ByVenue);
+    }
 }

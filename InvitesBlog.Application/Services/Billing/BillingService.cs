@@ -16,7 +16,7 @@ namespace InvitesBlog.Application.Services.Billing;
 
 public sealed record BillingPricesDto(
     decimal PartyPass, decimal WeddingPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
-    decimal StudioMonthly, decimal StudioYearly, decimal VenueMonthlyFrom, int StudioDiscountPercent,
+    decimal StudioMonthly, decimal StudioYearly, int VenueDiscountPercent, int StudioDiscountPercent,
     decimal PartyExtension, decimal WeddingExtension);
 
 /// <summary>The account's own plan: None, Studio or Venue.</summary>
@@ -120,7 +120,7 @@ public sealed class BillingService(
         return new BillingOverviewDto(
             Enabled, PlanCatalog.Currency, p.MvrPerUsd,
             new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
-                p.StudioMonthly, p.StudioYearly, p.VenueMonthlyFrom, p.StudioDiscountPercent,
+                p.StudioMonthly, p.StudioYearly, p.VenueDiscountPercent, p.StudioDiscountPercent,
                 p.PartyExtension, p.WeddingExtension),
             new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt,
                 PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)),
@@ -167,13 +167,8 @@ public sealed class BillingService(
             campaign = await campaigns.GetByIdAsync(id, ct) ?? throw new NotFoundException("That event no longer exists.");
             if (campaign.Status == CampaignStatus.Cancelled)
                 throw new BusinessRuleException("That event was cancelled.", "event_cancelled");
-            if (kind is PaymentKind.PartyPass or PaymentKind.WeddingPass)
-            {
-                if (campaign.VenueId is not null)
-                    throw new BusinessRuleException("Its venue's plan already covers this event.", "billing_venue_covers");
-                if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
-                    throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
-            }
+            if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
+                throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
             if (kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension
                 && campaign.EventPass != (kind == PaymentKind.WeddingExtension ? EventPassKind.Wedding : EventPassKind.Party))
                 throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
@@ -203,7 +198,11 @@ public sealed class BillingService(
         };
         var description = Describe(kind, quantity, campaign);
         // The discount says where it comes from, on the receipt as on the page.
-        if (kind is PaymentKind.PartyPass or PaymentKind.WeddingPass && offer is { DiscountPercent: > 0 } o)
+        if (offer is { VenuePercent: > 0 } v && kind is PaymentKind.PartyPass or PaymentKind.WeddingPass
+                or PaymentKind.PartyExtension or PaymentKind.WeddingExtension
+            && (v.ByVenue || kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension))
+            description += $" · {v.VenuePercent}% venue price, {v.VenueName}";
+        else if (kind is PaymentKind.PartyPass or PaymentKind.WeddingPass && offer is { DiscountPercent: > 0 } o)
             description += $" · {o.DiscountPercent}% off, designed by {o.DesignedBy}";
 
         if (!Enabled)

@@ -18,7 +18,7 @@ public sealed record Prices(
     decimal KeepPhotosYearly,
     decimal StudioMonthly,
     decimal StudioYearly,
-    decimal VenueMonthlyFrom,
+    int VenueDiscountPercent,
     decimal SendingPerBlock,
     int StudioDiscountPercent,
     decimal MvrPerUsd,
@@ -28,7 +28,7 @@ public sealed record Prices(
     /// <summary>The prices in code, used until an admin saves others.</summary>
     public static Prices Defaults { get; } = new(
         PlanCatalog.PartyPassPrice, PlanCatalog.WeddingPassPrice, PlanCatalog.KeepPhotosYearly,
-        PlanCatalog.StudioMonthly, PlanCatalog.StudioYearly, PlanCatalog.VenueMonthlyFrom,
+        PlanCatalog.StudioMonthly, PlanCatalog.StudioYearly, PlanCatalog.VenuePassDiscountPercent,
         Pricing.PricingCalculator.PricePerBlock, PlanCatalog.StudioPassDiscountPercent, PlanCatalog.MvrPerUsd,
         PlanCatalog.PartyExtension, PlanCatalog.WeddingExtension);
 
@@ -51,6 +51,15 @@ public sealed record Prices(
     public decimal StudioPassPrice(EventPassKind kind) =>
         Math.Round(PassPrice(kind) * (100 - StudioDiscountPercent) / 100m, 0, MidpointRounding.AwayFromZero);
 
+    /// <summary>A pass a venue buys for an event it runs: the venue discount off.</summary>
+    public decimal VenuePassPrice(EventPassKind kind) => Off(PassPrice(kind), VenueDiscountPercent);
+
+    /// <summary>Another year of a pass, bought by a venue: the same discount.</summary>
+    public decimal VenueExtensionPrice(EventPassKind kind) => Off(ExtensionPrice(kind), VenueDiscountPercent);
+
+    private static decimal Off(decimal price, int percent) =>
+        Math.Round(price * (100 - percent) / 100m, 0, MidpointRounding.AwayFromZero);
+
     /// <summary>Why these prices can't be saved, or nothing when they can.</summary>
     public IReadOnlyList<string> Problems()
     {
@@ -65,7 +74,6 @@ public sealed record Prices(
         Positive(KeepPhotosYearly, "Keep your photos");
         Positive(StudioMonthly, "Studio a month");
         Positive(StudioYearly, "Studio a year");
-        Positive(VenueMonthlyFrom, "Venue");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
         Positive(PartyExtension, "Extending a Party pass");
@@ -73,6 +81,7 @@ public sealed record Prices(
         if (PartyExtension > PartyPass) problems.Add("Extending a Party pass can't cost more than the pass.");
         if (WeddingExtension > WeddingPass) problems.Add("Extending a Wedding pass can't cost more than the pass.");
         if (StudioDiscountPercent is < 0 or > 90) problems.Add("The Studio discount must be between 0 and 90%.");
+        if (VenueDiscountPercent is < 0 or > 90) problems.Add("The venue discount must be between 0 and 90%.");
         if (WeddingPass < PartyPass) problems.Add("The Wedding pass can't cost less than the Party pass.");
         if (StudioYearly < StudioMonthly) problems.Add("Studio a year can't cost less than a month.");
         return problems;
@@ -163,7 +172,7 @@ public sealed class PriceBook(
                 D(nameof(Prices.KeepPhotosYearly), p.KeepPhotosYearly),
                 D(nameof(Prices.StudioMonthly), p.StudioMonthly),
                 D(nameof(Prices.StudioYearly), p.StudioYearly),
-                D(nameof(Prices.VenueMonthlyFrom), p.VenueMonthlyFrom),
+                (int)D(nameof(Prices.VenueDiscountPercent), p.VenueDiscountPercent),
                 D(nameof(Prices.SendingPerBlock), p.SendingPerBlock),
                 (int)D(nameof(Prices.StudioDiscountPercent), p.StudioDiscountPercent),
                 D(nameof(Prices.MvrPerUsd), p.MvrPerUsd),

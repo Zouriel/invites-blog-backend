@@ -53,7 +53,8 @@ public sealed class DesignerAccessService(
         if (designer is null) return 0;
         var list = await users.Query(tracking: true)
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .Where(u => u.SubscriptionTier == SubscriptionTier.Studio || u.UserRoles.Any(ur => ur.RoleId == designer.Id))
+            .Where(u => u.SubscriptionTier == SubscriptionTier.Studio || u.SubscriptionTier == SubscriptionTier.Venue
+                        || u.UserRoles.Any(ur => ur.RoleId == designer.Id))
             .ToListAsync(ct);
         var now = DateTimeOffset.UtcNow;
         var changed = list.Count(u => Apply(u, designer, now));
@@ -61,9 +62,10 @@ public sealed class DesignerAccessService(
         return changed;
     }
 
-    /// <summary>Whether this account should design: an active Studio plan, or an admin.</summary>
+    /// <summary>Whether this account should design: an active Studio or Venue plan, or an admin.</summary>
     public static bool ShouldDesign(AppUser user, DateTimeOffset now) =>
-        (user.SubscriptionTier == SubscriptionTier.Studio && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now))
+        (user.SubscriptionTier is SubscriptionTier.Studio or SubscriptionTier.Venue
+         && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now))
         || user.UserRoles.Any(ur => ur.Role?.Name == Roles.Admin);
 
     private static bool Apply(AppUser user, Role designer, DateTimeOffset now)
