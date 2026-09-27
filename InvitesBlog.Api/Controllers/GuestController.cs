@@ -38,8 +38,18 @@ public sealed class GuestController(
     IEventPhotoService photos,
     InviteRenderService renderer,
     RenderedInvitations rendered,
-    RenderTickets tickets) : ControllerBase
+    RenderTickets tickets,
+    ILogger<GuestController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Every refused or stored upload, with why: a phone that can't add photos otherwise leaves no
+    /// trace here, because these refusals are answers, not errors. No token, name or contact is logged.
+    /// </summary>
+    private void Upload(string door, string outcome, IFormFile? file) =>
+        logger.LogWarning("Upload {Outcome} at {Door}: {Bytes} bytes, {Type}, {Agent}",
+            outcome, door, file?.Length ?? 0, file?.ContentType ?? "-",
+            Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? (ua.Length > 160 ? ua[..160] : ua) : "-");
+
     // ---------- admission ----------
 
     /// <summary>The personal link, as sent to the guest. Everything starts here.</summary>
@@ -415,11 +425,11 @@ public sealed class GuestController(
         string renderId, IFormFile? file, IFormFile? poster, CancellationToken ct)
     {
         var inviteId = Admitted(renderId);
-        if (inviteId is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
+        if (inviteId is null) { Upload("camera", "refused: not admitted", file); return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" }); }
 
         var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
-        if (subject is null) return NotFound(new { error = "not_found" });
-        if (file is null || file.Length == 0) return BadRequest(new { error = "empty" });
+        if (subject is null) { Upload("camera", "refused: no invitation", file); return NotFound(new { error = "not_found" }); }
+        if (file is null || file.Length == 0) { Upload("camera", "refused: empty file", file); return BadRequest(new { error = "empty" }); }
 
         try
         {
@@ -428,10 +438,12 @@ public sealed class GuestController(
                 await ReadAsync(file, ct), file.ContentType, file.FileName,
                 poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null, ct);
 
+            Upload("camera", "stored", file);
             return Ok(new { id = photo.Id, thumbUrl = photo.ThumbUrl });
         }
         catch (AppException e)
         {
+            Upload("camera", $"refused: {e.Message}", file);
             // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
             return BadRequest(new { error = e.Message });
         }
@@ -489,8 +501,8 @@ public sealed class GuestController(
         if (staticCamera is not { IsStatic: true }) return NotFound(new { error = "not_found" });
 
         var name = CameraName();
-        if (name is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "name" });
-        if (file is null || file.Length == 0) return BadRequest(new { error = "empty" });
+        if (name is null) { Upload("design camera", "refused: no name", file); return StatusCode(StatusCodes.Status401Unauthorized, new { error = "name" }); }
+        if (file is null || file.Length == 0) { Upload("design camera", "refused: empty file", file); return BadRequest(new { error = "empty" }); }
 
         try
         {
@@ -498,10 +510,12 @@ public sealed class GuestController(
                 staticCamera.BucketId, staticCamera.CampaignId, name,
                 await ReadAsync(file, ct), file.ContentType, file.FileName,
                 poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null, ct);
+            Upload("design camera", "stored", file);
             return Ok(new { id = photo.Id, thumbUrl = photo.ThumbUrl });
         }
         catch (AppException e)
         {
+            Upload("design camera", $"refused: {e.Message}", file);
             // A 4xx tells the queue this frame will never be accepted, so it stops retrying it.
             return BadRequest(new { error = e.Message });
         }

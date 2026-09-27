@@ -43,8 +43,18 @@ public sealed class BucketContributionController(
     IMediaBucketService buckets,
     IEventPhotoService photos,
     IOtpService otp,
-    ContributorTickets tickets) : BaseApiController
+    ContributorTickets tickets,
+    ILogger<BucketContributionController> logger) : BaseApiController
 {
+    /// <summary>
+    /// Every refused or stored upload, with why: a phone that can't add photos otherwise leaves no
+    /// trace here, because these refusals are answers, not errors. No token, name or contact is logged.
+    /// </summary>
+    private void Upload(string door, string outcome, IFormFile? file) =>
+        logger.LogWarning("Upload {Outcome} at {Door}: {Bytes} bytes, {Type}, {Agent}",
+            outcome, door, file?.Length ?? 0, file?.ContentType ?? "-",
+            Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? (ua.Length > 160 ? ua[..160] : ua) : "-");
+
     /// <summary>
     /// What a scanned code opens: whose bucket, and whether a name alone is enough to add to it.
     ///
@@ -190,7 +200,7 @@ public sealed class BucketContributionController(
         CancellationToken ct)
     {
         var admission = await buckets.AdmitAsync(token, ct);
-        if (admission is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
+        if (admission is null) { Upload("qr", "refused: unknown code", file); return NotFound(ApiResponse<object?>.Fail("That code isn't valid.")); }
 
         // The form field is how the app's own picker sends it; the cookie is how the camera page does,
         // because a server-rendered page was handed nothing to put in a field. Same ticket, same
@@ -198,31 +208,49 @@ public sealed class BucketContributionController(
         var holder = tickets.Read(ticket, DateTimeOffset.UtcNow)
                      ?? tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
         if (holder is null)
+        {
+            Upload("qr", ticket is null ? "refused: no ticket" : "refused: ticket unreadable", file);
             return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
+        }
 
         // The ticket has to have been minted for THIS code. Otherwise a ticket earned on a bucket
         // somebody does own would let them write into any other bucket whose token they could read.
         if (holder.QrId != admission.QrId)
+        {
+            Upload("qr", "refused: ticket for another code", file);
             return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
+        }
 
         // A ticket earned by verifying is only good for as long as that contact is still on the
         // guest list. Without this, being taken off took effect only once the ticket expired — and
         // removing somebody means nothing if it does not take effect until tomorrow.
         if (holder.VerifiedContact is { } proved
             && await buckets.GuestForContactAsync(admission.BucketId, proved, ct) is null)
+        {
+            Upload("qr", "refused: contact off the list", file);
             return Unauthorized(ApiResponse<object?>.Fail("That contact isn't on the guest list."));
+        }
 
         if (!admission.CanUpload)
+        {
+            Upload("qr", admission.IsOpen ? "refused: full" : "refused: not open", file);
             return BadRequest(ApiResponse<object?>.Fail(
                 admission.IsOpen ? "This album is full." : "This one isn't open."));
+        }
 
         if (file is null || file.Length == 0)
+        {
+            Upload("qr", "refused: empty file", file);
             return BadRequest(ApiResponse<object?>.Fail("Pick a photo or a video."));
+        }
 
         var bucket = await buckets.GetBucketForContributionAsync(admission.BucketId, ct);
         if (bucket is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
 
-        var added = await photos.AddToBucketAsync(
+        InvitesBlog.Application.Dtos.Photos.EventPhotoDto added;
+        try
+        {
+            added = await photos.AddToBucketAsync(
             admission.BucketId,
             bucket.CampaignId,
             holder.DisplayName,
@@ -231,6 +259,13 @@ public sealed class BucketContributionController(
             file.FileName,
             poster is { Length: > 0 } ? await ReadAsync(poster, ct) : null,
             ct);
+        }
+        catch (Exception e)
+        {
+            Upload("qr", $"failed: {e.GetType().Name}: {e.Message}", file);
+            throw;
+        }
+        Upload("qr", "stored", file);
 
         await buckets.CountContributionAsync(admission.QrId, ct);
 
