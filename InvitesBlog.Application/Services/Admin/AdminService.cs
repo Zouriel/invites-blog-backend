@@ -35,7 +35,8 @@ public sealed class AdminService(
     ISendingAllowanceService allowances,
     IDesignerAccessService designerAccess,
     IEmailSender email,
-    Microsoft.Extensions.Configuration.IConfiguration config) : IAdminService
+    Microsoft.Extensions.Configuration.IConfiguration config,
+    IRepository<Inviter>? inviters = null) : IAdminService
 {
     public async Task<PagedResult<AdminUserDto>> ListUsersAsync(AdminUserFilter filter, CancellationToken ct = default)
     {
@@ -274,8 +275,21 @@ public sealed class AdminService(
 
     public async Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default)
     {
+        // The account's events the way its own Me page finds them: ones it created, and ones sent from
+        // its email or phone (events made before they were tied to accounts have only that). Not
+        // cancelled ones: there is nothing to give a pass to.
+        var user = await users.Query().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        var email = user?.Email;
+        var phone = user?.PhoneE164;
+        var inviterIds = inviters is null || (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(phone))
+            ? []
+            : await inviters.Query()
+                .Where(i => (email != null && i.Email == email) || (phone != null && i.PhoneE164 == phone))
+                .Select(i => i.Id)
+                .ToListAsync(ct);
         var rows = await campaigns.Query()
-            .Where(c => c.CreatedByUserId == userId)
+            .Where(c => (c.CreatedByUserId == userId || (c.InviterId != null && inviterIds.Contains(c.InviterId.Value)))
+                        && c.Status != CampaignStatus.Cancelled)
             .OrderByDescending(c => c.EventStartAt)
             .ToListAsync(ct);
         var list = new List<AdminUserEventDto>();

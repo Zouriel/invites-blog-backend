@@ -6,6 +6,7 @@ using InvitesBlog.Application.Filters.Admin;
 using InvitesBlog.Application.Services.Admin;
 using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
+using InvitesBlog.Domain.Enums;
 using NSubstitute;
 using Xunit;
 
@@ -28,6 +29,37 @@ public class AdminServiceTests
         Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
         TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>(),
         Substitute.For<IEmailSender>(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+
+    /// <summary>
+    /// An account's events for passes: every live one that is theirs, including one made before events
+    /// were tied to accounts (only its sender's email says whose it is), and none that were cancelled.
+    /// </summary>
+    [Fact]
+    public async Task An_account_s_events_are_its_live_ones_found_by_account_or_by_email()
+    {
+        var me = new AppUser { Id = Guid.NewGuid(), Email = "host@test.com", DisplayName = "Host" };
+        _users.Query(Arg.Any<bool>()).Returns(new[] { me }.AsAsyncQueryable());
+        var inviter = new Inviter { Id = Guid.NewGuid(), Email = "host@test.com", Name = "Host" };
+        var inviters = Substitute.For<IRepository<Inviter>>();
+        inviters.Query(Arg.Any<bool>()).Returns(new[] { inviter }.AsAsyncQueryable());
+
+        var cancelled = TestData.Campaign(); cancelled.CreatedByUserId = me.Id; cancelled.Status = CampaignStatus.Cancelled;
+        var byEmail = TestData.Campaign(); byEmail.CreatedByUserId = null; byEmail.InviterId = inviter.Id; byEmail.Status = CampaignStatus.Dispatched;
+        var mine = TestData.Campaign(); mine.CreatedByUserId = me.Id; mine.Status = CampaignStatus.Dispatched;
+        var someoneElses = TestData.Campaign(); someoneElses.CreatedByUserId = Guid.NewGuid();
+        var campaigns = Substitute.For<ICampaignRepository>();
+        campaigns.Query(Arg.Any<bool>()).Returns(new[] { cancelled, byEmail, mine, someoneElses }.AsAsyncQueryable());
+
+        var sut = new AdminService(
+            _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow, campaigns,
+            Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
+            TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>(),
+            Substitute.For<IEmailSender>(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), inviters);
+
+        var ids = (await sut.UserEventsAsync(me.Id)).Select(e => e.Id).ToHashSet();
+
+        Assert.Equal(new HashSet<Guid> { byEmail.Id, mine.Id }, ids);
+    }
 
     // ---------- granting and revoking a role ----------
 
