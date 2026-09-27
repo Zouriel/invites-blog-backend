@@ -103,7 +103,7 @@ public sealed record SetBucketWindowRequest(int Days);
 /// </summary>
 public sealed record MediaBucketQrDto(
     Guid Id,
-    /// <summary>The scannable link. Present only in the response that created the code.</summary>
+    /// <summary>The scannable link. Null only for a code made before links were kept (see TokenSealed).</summary>
     string? Url,
     /// <summary>The rendered code. Always present — this is what the dashboard keeps on show.</summary>
     string ImageUrl,
@@ -114,7 +114,9 @@ public sealed record MediaBucketQrDto(
     int UploadCount,
     bool Revoked,
     DateTimeOffset? LastUsedAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    /// <summary>The same code, straight into the camera: asks for a name first when it has to.</summary>
+    string? CameraUrl = null);
 
 /// <summary>Generating a code: who it is for, and whether they have to say who they are.</summary>
 public sealed record CreateMediaBucketQrRequest(string? Label, bool AllowAnonymous);

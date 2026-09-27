@@ -218,6 +218,13 @@ public sealed class MediaBucketQr
     public string TokenHint { get; set; } = default!;
 
     /// <summary>
+    /// The token, encrypted with a key from the server's configuration (see TokenSeal), so the host can
+    /// copy the code's link again later. Null for codes made before 2026-09-27, whose link was only
+    /// ever shown once.
+    /// </summary>
+    public string? TokenSealed { get; set; }
+
+    /// <summary>
     /// Whether someone may contribute without proving who they are.
     ///
     /// <para>Chosen per code, at the moment it is generated, because it is a decision about a room

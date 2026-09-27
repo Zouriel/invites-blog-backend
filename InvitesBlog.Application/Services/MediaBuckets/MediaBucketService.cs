@@ -1013,6 +1013,7 @@ public sealed class MediaBucketService(
             BucketId = bucketId,
             TokenHash = TokenService.Hash(token),
             TokenHint = token[..HintLength],
+            TokenSealed = TokenSeal.Seal(token, SealSecret, SealPurpose),
             ImageUrl = image,
             AllowAnonymous = req.AllowAnonymous,
             Label = string.IsNullOrWhiteSpace(req.Label) ? null : req.Label.Trim(),
@@ -1022,7 +1023,6 @@ public sealed class MediaBucketService(
         await qrs.AddAsync(code, ct);
         await uow.SaveChangesAsync(ct);
 
-        // The one and only time the token leaves this method.
         return Describe(code, url);
     }
 
@@ -1036,7 +1036,9 @@ public sealed class MediaBucketService(
             .OrderByDescending(q => q.CreatedAt)
             .ToListAsync(ct);
 
-        return rows.Select(row => Describe(row, url: null)).ToList();
+        // The link comes back from its sealed copy; a code made before those were kept has none.
+        return rows.Select(row => Describe(row,
+            TokenSeal.Open(row.TokenSealed, SealSecret, SealPurpose) is { } token ? ContributeUrl(token) : null)).ToList();
     }
 
     public async Task RevokeQrAsync(Guid bucketId, Guid qrId, CancellationToken ct = default)
@@ -1277,6 +1279,10 @@ public sealed class MediaBucketService(
 
     private string ContributeUrl(string token) => $"{ContributeBase}/q/{token}";
 
+    /// <summary>The same secret the contributor tickets are signed with: configuration, never the database.</summary>
+    private string SealSecret => config["Jwt:SigningKey"] ?? "change-this-in-production-please-use-a-long-random-value";
+    private const string SealPurpose = "qr-token-v1";
+
     /// <summary>How an event presents itself: the things a bucket used to duplicate, and where it is held.</summary>
     private sealed record EventFace(
         Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt, Guid? VenueId);
@@ -1317,5 +1323,7 @@ public sealed class MediaBucketService(
         code.UploadCount,
         code.RevokedAt is not null,
         code.LastUsedAt,
-        code.CreatedAt);
+        code.CreatedAt,
+        // The app's page for the code, told to open its camera once it knows who's adding.
+        url is null ? null : url + "?camera=1");
 }
