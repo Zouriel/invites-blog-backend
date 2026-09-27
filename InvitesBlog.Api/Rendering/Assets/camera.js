@@ -21,6 +21,43 @@
   const strip = $('queue');
   const shutter = $('shoot');
 
+  // ---- telling the server what went wrong ----------------------------------------------------
+  // This page runs on phones we don't have in hand, and every failure in it is caught so the page
+  // keeps working, which also made every failure invisible: an iPhone that silently dropped each
+  // photo left no trace anywhere. A few short reports per page, never anything the person typed.
+  let reports = 0;
+  function report(where, err) {
+    if (reports >= 8) return;
+    reports++;
+    try {
+      const body = JSON.stringify({
+        where,
+        message: String((err && (err.message || err.name)) || err || '').slice(0, 300),
+        stack: String((err && err.stack) || '').slice(0, 800),
+      });
+      fetch('/api/client-errors', {
+        method: 'POST', body, keepalive: true, credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => {});
+    } catch {
+      /* Reporting must never be the thing that breaks the camera. */
+    }
+  }
+  window.addEventListener('error', (e) => report('error', e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => report('promise', e.reason));
+
+  /**
+   * One canvas for every capture, emptied after each. iPhone Safari caps the memory all canvases on
+   * a page may hold, and a new full-size canvas per photo, never freed, ran into that cap: from then
+   * on drawing quietly gives nothing, so each shot flashed and vanished, and opening another lens
+   * on top of it could take the tab down.
+   */
+  const captureCanvas = document.createElement('canvas');
+  function free(canvas) {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+
   // ---- filters -------------------------------------------------------------------------------
   // Every one is expressible as a CSS filter for the preview and as the same string on a canvas at
   // capture, so the photograph matches what was on screen. Kept to colour grades: anything that
@@ -634,8 +671,10 @@
     try {
       const blob = await grab();
       if (blob) await enqueue(blob);
-    } catch {
-      /* One bad frame is not worth a broken page; the next press tries again. */
+    } catch (err) {
+      // One bad frame is not worth a broken page; the next press tries again. But it is reported:
+      // swallowed silently, this is exactly how a phone that could not save anything looked fine.
+      report('shoot', err);
     } finally {
       document.body.dataset.busy = '';
     }
@@ -670,10 +709,17 @@
     const h = source.videoHeight || source.height;
     if (!w || !h) return null;
 
-    const canvas = document.createElement('canvas');
+    const canvas = captureCanvas;
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      report('grab: no 2d context', `${w}x${h}`);
+      free(canvas);
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none';
 
     const css = FILTERS[filterIndex].css;
     if (canvasFilterWorks && css !== 'none') ctx.filter = css;
@@ -697,7 +743,10 @@
     // does not match the preview, do the same grade by hand.
     if (!canvasFilterWorks && css !== 'none') grade(ctx, w, h, css);
 
-    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    free(canvas);
+    if (!blob) report('grab: toBlob gave nothing', `${w}x${h}`);
+    return blob;
   }
 
   /** Is there anything to do to the frame? If not, the encoder's own file is the better one. */
@@ -998,7 +1047,9 @@
     // Ungraded and unmirrored, to match the clip it stands for — see startRecording on why the
     // preview's grade comes off for the duration.
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    free(canvas);
+    return blob;
   }
 
   /**
@@ -1354,6 +1405,14 @@
   const STORE = 'pending';
   let db = null;
 
+  /**
+   * Shots the phone wouldn't store. Some Safari versions refuse to put an image into IndexedDB (and
+   * private browsing refuses everything); a refusal used to drop the shot before it was queued, so
+   * nothing was drawn, nothing sent, and nothing warned on leaving. Kept here instead, they upload
+   * all the same; they only lose the survive-a-reload guarantee the disk would have given.
+   */
+  const memory = new Map();
+
   function openDb() {
     return new Promise((resolve) => {
       let req;
@@ -1378,26 +1437,55 @@
 
   function put(item) {
     return new Promise((resolve) => {
-      if (!db) return resolve();
-      const r = tx('readwrite').put(item);
-      r.onsuccess = r.onerror = () => resolve();
+      const keep = (why) => {
+        if (why) report('queue: stored in memory', why);
+        memory.set(item.id, item);
+        resolve();
+      };
+      if (!db) return keep(null);
+      try {
+        const store = tx('readwrite');
+        const r = store.put(item);
+        r.onsuccess = () => {
+          memory.delete(item.id);
+          resolve();
+        };
+        r.onerror = () => keep(r.error);
+        store.transaction.onabort = () => keep(store.transaction.error);
+      } catch (err) {
+        keep(err);
+      }
     });
   }
 
   function drop(id) {
+    memory.delete(id);
     return new Promise((resolve) => {
       if (!db) return resolve();
-      const r = tx('readwrite').delete(id);
-      r.onsuccess = r.onerror = () => resolve();
+      try {
+        const r = tx('readwrite').delete(id);
+        r.onsuccess = r.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
     });
   }
 
   function all() {
     return new Promise((resolve) => {
-      if (!db) return resolve([]);
-      const r = tx('readonly').getAll();
-      r.onsuccess = () => resolve(r.result || []);
-      r.onerror = () => resolve([]);
+      const merge = (stored) => {
+        const byId = new Map(stored.map((i) => [i.id, i]));
+        for (const [id, item] of memory) byId.set(id, item);
+        resolve([...byId.values()]);
+      };
+      if (!db) return merge([]);
+      try {
+        const r = tx('readonly').getAll();
+        r.onsuccess = () => merge(r.result || []);
+        r.onerror = () => merge([]);
+      } catch {
+        merge([]);
+      }
     });
   }
 
@@ -1516,6 +1604,9 @@
     } catch (err) {
       active--;
       inflight.delete(item.id);
+
+      // Once per shot is enough to see a pattern without a report per retry.
+      if (!item.tries) report(err && err.rejected ? 'upload refused' : 'upload failed', err);
 
       // A 4xx means this frame will never be accepted — retrying it forever would block the queue
       // behind a photograph the server has already refused.
