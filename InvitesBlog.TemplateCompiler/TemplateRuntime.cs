@@ -106,6 +106,17 @@ public static class TemplateRuntime
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
         "img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'";
 
+    /// <summary>
+    /// For an uploaded design: the same rules without <c>sandbox</c>. That page is markup we wrote
+    /// around one image or clip, so the sandbox guards nothing there, and it costs every guest the
+    /// download: a sandboxed page has an opaque origin, and Chrome gives an opaque origin a new cache
+    /// on every load (measured: a sandboxed page fetched its image on each of three opens, the same
+    /// page without it once). Designer templates keep the sandbox.
+    /// </summary>
+    public const string UploadedDesignContentSecurityPolicy =
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+        "img-src 'self' data:; media-src 'self'; font-src 'self' data:; base-uri 'none'; form-action 'none'";
+
     /// <summary>Keeps an invite token out of <c>document.referrer</c> on the way into the render.</summary>
     public const string ReferrerPolicy = "no-referrer";
 }

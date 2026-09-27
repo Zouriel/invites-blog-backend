@@ -31,7 +31,7 @@ public sealed class PlanService(
 
         var rows = await buckets.Query()
             .Where(b => b.CampaignId == campaignId)
-            .Select(b => new { b.OwnerUserId, b.CreatedAt, b.CapacityBytes, b.Tier, b.TermEndAt })
+            .Select(b => new { b.OwnerUserId, b.CreatedAt, b.Tier, b.TermEndAt })
             .ToListAsync(ct);
 
         var ownerId = campaign.CreatedByUserId
@@ -48,8 +48,8 @@ public sealed class PlanService(
             venue = (venueId, active, active ? null : venueOwner.SubscriptionEndsAt);
         }
 
-        // Anything from before the plans keeps what it had, and is never removed sooner than 90 days
-        // after the plans arrived, so nobody loses photos the day this ships.
+        // Anything from before the plans is never removed sooner than 90 days after the plans arrived,
+        // so nobody loses photos the day this ships. Its space is the plan's, like everything else.
         var legacy = rows.Where(b => b.CreatedAt < PlanCatalog.IntroducedAt).ToList();
         DateTimeOffset? legacyCover = null;
         if (legacy.Count > 0 || campaign.CreatedAt < PlanCatalog.IntroducedAt)
@@ -70,7 +70,6 @@ public sealed class PlanService(
             campaign.EventPassUntil,
             campaign.KeepPhotosUntil,
             venue,
-            legacy.Sum(b => b.CapacityBytes),
             legacyCover,
             campaign.MediaDeletedAt,
             ownerId is { } id && id != Guid.Empty ? id : null);

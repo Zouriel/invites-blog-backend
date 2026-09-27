@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.IO.Compression;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
@@ -105,7 +106,8 @@ public sealed class EventPhotoService(
     IMediaBucketService bucketService,
     IUnitOfWork uow,
     IRepository<Venue> venues,
-    Plans.IPlanService plans) : IEventPhotoService
+    Plans.IPlanService plans,
+    ILogger<EventPhotoService>? logger = null) : IEventPhotoService
 {
     /// <summary>
     /// What a tap opens. NOT what a download hands over — the original is kept for that, so this is
@@ -276,9 +278,7 @@ public sealed class EventPhotoService(
 
         if (photo.DeletedAt is not null) return;   // deleting twice is not an error
 
-        photo.DeletedAt = DateTimeOffset.UtcNow;
-        photos.Update(photo);
-        await uow.SaveChangesAsync(ct);
+        await RemoveAsync(photo, ct);
     }
 
     public async Task<EventPhotoDto> AddToBucketAsync(
@@ -490,9 +490,42 @@ public sealed class EventPhotoService(
         if (!mine && !await MayHostAsync(campaignId, ct))
             throw new ForbiddenException("Only the host, or whoever took it, can remove this photo.");
 
+        await RemoveAsync(photo, ct);
+    }
+
+    /// <summary>
+    /// A deleted photo is gone: its files are removed and its space given back to the album. There is
+    /// no restore, so keeping the files only kept the space occupied, and a host who deleted a test
+    /// shot saw nothing come back.
+    ///
+    /// <para>The row stays, marked deleted, so comments and the feed that point at it still resolve. It
+    /// is marked first and the files go after: a crash between the two leaves stray files, never a
+    /// live photo pointing at nothing.</para>
+    /// </summary>
+    private async Task RemoveAsync(EventPhoto photo, CancellationToken ct)
+    {
         photo.DeletedAt = DateTimeOffset.UtcNow;
         photos.Update(photo);
         await uow.SaveChangesAsync(ct);
+
+        if (photo.BucketId is { } bucketId)
+            await bucketService.CountUsageAsync(bucketId, -photo.SizeBytes, CancellationToken.None);
+
+        // A video's view and original are the same object, so each key is removed once.
+        foreach (var key in new[] { photo.OriginalUrl, photo.Url, photo.ThumbUrl }
+                     .Select(storage.KeyFor).OfType<string>().Distinct())
+        {
+            try
+            {
+                await storage.DeleteAsync(key, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The photo is already gone for everyone; a file left behind costs storage, not privacy
+                // of anything still shown. Logged so a pattern of these gets noticed.
+                logger?.LogWarning(ex, "Couldn't remove the file {Key} of deleted photo {PhotoId}", key, photo.Id);
+            }
+        }
     }
 
     public async Task WriteArchiveAsync(

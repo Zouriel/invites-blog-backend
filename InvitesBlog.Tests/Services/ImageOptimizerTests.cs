@@ -251,4 +251,43 @@ public class ImageOptimizerTests
         using var stored = Image.Load(result.Content);
         Assert.Null(stored.Metadata.ExifProfile);
     }
+
+    // ----- designs shown full screen -----
+
+    /// <summary>A photographic PNG, the way a Canva export is: noise, which PNG cannot compress.</summary>
+    private static byte[] ArtPng(int w, int h, byte alpha = 255)
+    {
+        using var image = new Image<Rgba32>(w, h);
+        var rng = new Random(7);
+        image.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height; y++)
+                foreach (ref var px in rows.GetRowSpan(y))
+                    px = new Rgba32((byte)rng.Next(256), (byte)rng.Next(256), (byte)rng.Next(256), alpha);
+        });
+        using var ms = new MemoryStream();
+        image.Save(ms, new PngEncoder());
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void An_opaque_design_png_comes_back_as_a_smaller_jpeg_at_screen_size()
+    {
+        var png = ArtPng(1200, 2400);
+
+        var result = Sut().OptimizeForDisplay(png, "image/png", 2048);
+
+        Assert.Equal("image/jpeg", result.ContentType);
+        Assert.Equal(2048, Math.Max(result.Width, result.Height));
+        Assert.True(result.Content.Length < png.Length / 2, $"{result.Content.Length} vs {png.Length}");
+    }
+
+    /// <summary>A JPEG has no transparency: turning this one into one would paint its clear parts black.</summary>
+    [Fact]
+    public void A_design_with_transparency_keeps_its_format()
+    {
+        var result = Sut().OptimizeForDisplay(ArtPng(300, 300, alpha: 128), "image/png", 2048);
+
+        Assert.Equal("image/png", result.ContentType);
+    }
 }

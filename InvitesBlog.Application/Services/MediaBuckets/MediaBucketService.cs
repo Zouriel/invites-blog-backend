@@ -777,8 +777,7 @@ public sealed class MediaBucketService(
         //
         // Their bytes count. Every byte here is being stored on somebody's behalf whether it arrived
         // before or after the row existed, and a usage figure that quietly omits most of a bucket is
-        // worse than no figure. Soft-deleted rows are counted too, for the same reason UsedBytes does
-        // not go down on a delete — the objects behind them outlive the row.
+        // worse than no figure. A deleted photo's files are removed with it, so it counts for nothing.
         var inherited = await photos.Query(tracking: true)
             .Where(p => p.CampaignId == campaignId && p.BucketId == null)
             .ToListAsync(ct);
@@ -788,7 +787,7 @@ public sealed class MediaBucketService(
             photo.BucketId = bucket.Id;
             photos.Update(photo);
         }
-        bucket.UsedBytes = inherited.Sum(p => p.SizeBytes);
+        bucket.UsedBytes = inherited.Where(p => p.DeletedAt == null).Sum(p => p.SizeBytes);
 
         await uow.SaveChangesAsync(ct);
         return bucket;
@@ -920,7 +919,7 @@ public sealed class MediaBucketService(
 
     /// <summary>What a bucket whose event is gone is described with: the free plan.</summary>
     private static readonly EventPlan OrphanPlan = PlanRules.Evaluate(
-        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, EventPassKind.None, null, null, null, 0, null, null, null);
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, EventPassKind.None, null, null, null, null, null, null);
 
     public async Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default)
     {

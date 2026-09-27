@@ -38,6 +38,15 @@ public sealed class LocalFileStorageService : IStorageService
     }
 
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";
+
+    public string? KeyFor(string url) => StorageKeys.KeyFor(_publicBase, url);
+
+    public Task DeleteAsync(string key, CancellationToken ct = default)
+    {
+        var path = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(path)) File.Delete(path);
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>
@@ -147,4 +156,24 @@ public sealed class S3StorageService : IStorageService
     }
 
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";
+
+    public string? KeyFor(string url) => StorageKeys.KeyFor(_publicBase, url);
+
+    // S3 answers 204 for a key that isn't there, so a second delete is already harmless.
+    public async Task DeleteAsync(string key, CancellationToken ct = default) =>
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key }, ct);
+}
+
+/// <summary>Turns a URL the storage handed out back into its key.</summary>
+public static class StorageKeys
+{
+    public static string? KeyFor(string publicBase, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var prefix = publicBase + "/";
+        if (!url.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var key = url[prefix.Length..].Split('?', '#')[0];
+        // Never a path that climbs out of the store.
+        return key.Length == 0 || key.Contains("..", StringComparison.Ordinal) ? null : key;
+    }
 }

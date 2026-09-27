@@ -33,6 +33,15 @@ public sealed class AppUser
     /// </summary>
     public string? ThemePreference { get; set; }
 
+    /// <summary>The profile picture's public URL, or null to show initials.</summary>
+    public string? AvatarUrl { get; set; }
+
+    /// <summary>
+    /// When the person last chose their picture themselves, by uploading or removing one. From then on
+    /// a sign-in with Google never replaces it: Google's picture is only a starting point.
+    /// </summary>
+    public DateTimeOffset? AvatarChosenAt { get; set; }
+
     /// <summary>The account's professional plan (Studio or Venue). Set by an admin until billing exists.</summary>
     public SubscriptionTier SubscriptionTier { get; set; }
 

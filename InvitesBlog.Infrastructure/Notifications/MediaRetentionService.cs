@@ -60,6 +60,7 @@ public sealed class MediaRetentionService(
         var plans = scope.ServiceProvider.GetRequiredService<IPlanService>();
         _keepPrice = (await scope.ServiceProvider.GetRequiredService<IPriceBook>().CurrentAsync(ct)).KeepPhotosYearly;
         var email = scope.ServiceProvider.GetRequiredService<IEmailSender>();
+        _storage = scope.ServiceProvider.GetRequiredService<IStorageService>();
         var now = DateTimeOffset.UtcNow;
 
         // Only events that still hold something.
@@ -70,7 +71,12 @@ public sealed class MediaRetentionService(
         var cancelled = await db.MediaBuckets
             .Where(b => db.Campaigns.Any(c => c.Id == b.CampaignId && c.Status == CampaignStatus.Cancelled))
             .Select(b => b.CampaignId).Distinct().ToListAsync(ct);
-        var ids = withBuckets.Concat(withPhotos).Concat(cancelled).Distinct().ToList();
+        // Albums whose event was deleted. Deleting an event removes its guests and invitations but
+        // used to leave its albums and photos behind, still stored and still counted.
+        var orphaned = await db.MediaBuckets
+            .Where(b => !db.Campaigns.Any(c => c.Id == b.CampaignId))
+            .Select(b => b.CampaignId).Distinct().ToListAsync(ct);
+        var ids = withBuckets.Concat(withPhotos).Concat(cancelled).Concat(orphaned).Distinct().ToList();
 
         foreach (var id in ids)
         {
@@ -90,13 +96,20 @@ public sealed class MediaRetentionService(
         AppDbContext db, IPlanService plans, IEmailSender email, Guid campaignId, DateTimeOffset now, CancellationToken ct)
     {
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, ct);
-        if (campaign is null) return;
+        if (campaign is null)
+        {
+            // The event is gone, so nothing may show these photos again: they go, with their albums.
+            await RemoveMediaAsync(db, campaignId, now, ct);
+            await RemoveBucketsAsync(db, campaignId, ct);
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Removed the albums of deleted event {CampaignId}.", campaignId);
+            return;
+        }
 
         if (campaign.Status == CampaignStatus.Cancelled)
         {
             await RemoveMediaAsync(db, campaignId, now, ct);
-            db.MediaBucketQrs.RemoveRange(db.MediaBucketQrs.Where(q => db.MediaBuckets.Any(b => b.Id == q.BucketId && b.CampaignId == campaignId)));
-            db.MediaBuckets.RemoveRange(db.MediaBuckets.Where(b => b.CampaignId == campaignId));
+            await RemoveBucketsAsync(db, campaignId, ct);
             campaign.MediaDeletedAt ??= now;
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Removed the photos of cancelled event {CampaignId}.", campaignId);
@@ -152,14 +165,42 @@ public sealed class MediaRetentionService(
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task RemoveMediaAsync(AppDbContext db, Guid campaignId, DateTimeOffset now, CancellationToken ct)
+    private IStorageService? _storage;
+
+    private static Task RemoveBucketsAsync(AppDbContext db, Guid campaignId, CancellationToken ct)
+    {
+        db.MediaBucketQrs.RemoveRange(db.MediaBucketQrs.Where(q => db.MediaBuckets.Any(b => b.Id == q.BucketId && b.CampaignId == campaignId)));
+        db.MediaBuckets.RemoveRange(db.MediaBuckets.Where(b => b.CampaignId == campaignId));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Deletes the event's photos: marks every row deleted and removes the files behind them, ones
+    /// deleted earlier included. Marking alone kept every byte stored after the promised deletion.
+    /// </summary>
+    private async Task RemoveMediaAsync(AppDbContext db, Guid campaignId, DateTimeOffset now, CancellationToken ct)
     {
         var bucketIds = await db.MediaBuckets.Where(b => b.CampaignId == campaignId).Select(b => b.Id).ToListAsync(ct);
         var photos = await db.EventPhotos
-            .Where(p => p.DeletedAt == null
-                        && (p.CampaignId == campaignId || (p.BucketId != null && bucketIds.Contains(p.BucketId.Value))))
+            .Where(p => p.CampaignId == campaignId || (p.BucketId != null && bucketIds.Contains(p.BucketId.Value)))
             .ToListAsync(ct);
-        foreach (var photo in photos) photo.DeletedAt = now;
+        foreach (var photo in photos) photo.DeletedAt ??= now;
+
+        if (_storage is { } storage)
+        {
+            foreach (var key in photos.SelectMany(p => new[] { p.OriginalUrl, p.Url, p.ThumbUrl })
+                         .Select(storage.KeyFor).OfType<string>().Distinct())
+            {
+                try
+                {
+                    await storage.DeleteAsync(key, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Couldn't remove {Key} while removing event {CampaignId}'s photos.", key, campaignId);
+                }
+            }
+        }
 
         // In the database directly: UsedBytes is ignored on a tracked save (see AppDbContext), so that
         // no stale copy of it can overwrite an upload counted meanwhile. This commits ahead of the

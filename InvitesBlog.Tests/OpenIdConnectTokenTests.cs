@@ -71,6 +71,30 @@ public class OpenIdConnectTokenTests
     }
 
     [Fact]
+    public async Task Google_s_picture_is_passed_on()
+    {
+        var token = Sign(new Dictionary<string, object>
+        {
+            ["sub"] = "1", ["email"] = "someone@example.com", ["email_verified"] = "true",
+            ["picture"] = "https://lh3.googleusercontent.com/a/ACg8oc=s96-c"
+        });
+
+        Assert.Equal("https://lh3.googleusercontent.com/a/ACg8oc=s96-c", (await Sut().VerifyAsync(token)).PictureUrl);
+    }
+
+    [Fact]
+    public async Task A_picture_that_is_not_https_is_dropped()
+    {
+        var token = Sign(new Dictionary<string, object>
+        {
+            ["sub"] = "1", ["email"] = "someone@example.com", ["email_verified"] = "true",
+            ["picture"] = "http://lh3.googleusercontent.com/a/ACg8oc"
+        });
+
+        Assert.Null((await Sut().VerifyAsync(token)).PictureUrl);
+    }
+
+    [Fact]
     public async Task A_token_with_no_name_falls_back_to_the_email_local_part()
     {
         var token = Sign(new Dictionary<string, object>

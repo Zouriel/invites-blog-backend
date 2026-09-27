@@ -196,7 +196,6 @@ public static class PlanRules
         (eventDate > now ? eventDate : now).AddMonths(PlanCatalog.PassMonths);
 
     /// <param name="venue">The venue the event is at, if any: its id, whether its plan is in force, and when it ended.</param>
-    /// <param name="legacyBytes">Space held by buckets made before <see cref="PlanCatalog.IntroducedAt"/>.</param>
     /// <param name="legacyCoverUntil">The latest date anything from before the plans is covered to.</param>
     public static EventPlan Evaluate(
         DateTimeOffset now,
@@ -205,7 +204,6 @@ public static class PlanRules
         DateTimeOffset? passUntil,
         DateTimeOffset? keepPhotosUntil,
         (Guid Id, bool Active, DateTimeOffset? EndedAt)? venue,
-        long legacyBytes,
         DateTimeOffset? legacyCoverUntil,
         DateTimeOffset? mediaDeletedAt,
         Guid? ownerUserId)
@@ -225,9 +223,9 @@ public static class PlanRules
             PlanKind.Venue => PlanCatalog.VenueEventBytes,
             _ => PlanCatalog.FreeEventBytes,
         };
-        // Buckets made before the plans keep their space until six months after their event.
-        if (legacyBytes > eventBytes && now < eventDate.AddMonths(PlanCatalog.LegacyMonths))
-            eventBytes = legacyBytes;
+        // The plan is the only source of an event's space. Albums from before the plans once kept
+        // their old size, which made an event on Free show and allow more than Free, while its
+        // settings said 1 GB. Only their cover date is still honoured (legacyCoverUntil).
 
         // A venue's plan covers its events while it runs. Otherwise the cover is the latest of the
         // free 90 days, a pass, "Keep your photos", a venue that has since ended, and what anything

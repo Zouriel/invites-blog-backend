@@ -12,7 +12,9 @@ public sealed record ExternalAuthDescriptor(string Provider, string ClientId, st
 /// <param name="SubjectId">The provider's immutable id for this person. The linking key — never the email.</param>
 /// <param name="Email">The verified email address, lowercased.</param>
 /// <param name="DisplayName">Best available display name, falling back to the email's local part.</param>
-public sealed record ExternalIdentity(string Provider, string SubjectId, string Email, string DisplayName);
+/// <param name="PictureUrl">The provider's profile picture (Google's <c>picture</c> claim), https only, or null.</param>
+public sealed record ExternalIdentity(
+    string Provider, string SubjectId, string Email, string DisplayName, string? PictureUrl = null);
 
 /// <summary>
 /// Verifies an ID token issued by an external identity provider (§designer OAuth sign-in). The client

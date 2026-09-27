@@ -39,7 +39,9 @@ public sealed record AccountDto(
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
     /// <summary>Owns a venue or is on a venue's staff, so the venue's page is theirs to open.</summary>
-    bool AtVenue = false);
+    bool AtVenue = false,
+    /// <summary>The profile picture, or null to show initials.</summary>
+    string? AvatarUrl = null);
 
 /// <summary>Sets the account's light/dark preference. Anything but "dark" is treated as light.</summary>
 public sealed record SetThemeRequest(string? Theme);

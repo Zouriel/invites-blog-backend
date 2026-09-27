@@ -88,6 +88,24 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     public async Task<IActionResult> SetTheme([FromBody] SetThemeRequest req, CancellationToken ct) =>
         Success(await accounts.SetThemeAsync(req, ct));
 
+    /// <summary>The signed-in account's profile picture, uploaded as a file.</summary>
+    [HttpPost("me/avatar")]
+    [HasPermission(Permissions.Templates.Read)]
+    [RequestSizeLimit(ProfilePictureService.MaxBytes + 64 * 1024)]
+    public async Task<IActionResult> SetAvatar(IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Application.Common.ApiResponse<object?>.Fail("Choose an image."));
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct);
+        return Success(await accounts.SetAvatarAsync(ms.ToArray(), file.ContentType, ct));
+    }
+
+    [HttpDelete("me/avatar")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> RemoveAvatar(CancellationToken ct) =>
+        Success(await accounts.RemoveAvatarAsync(ct));
+
     /// <summary>
     /// Opt the signed-in account into publishing templates. Gated on being signed in at all, not on
     /// any designer permission — asking for the role is exactly what someone who lacks it does.

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Designs;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Dtos.Campaigns;
@@ -63,7 +64,8 @@ public sealed class ImportedDesignService(
     IRepository<Template> templates,
     ICampaignOwnershipService ownership,
     IStorageService storage,
-    IUnitOfWork uow) : IImportedDesignService
+    IUnitOfWork uow,
+    IImageOptimizer imageOptimizer) : IImportedDesignService
 {
     /// <summary>
     /// Where an imported document lives. Deliberately outside anything the proxy serves — see the
@@ -71,6 +73,9 @@ public sealed class ImportedDesignService(
     /// executing on an origin that holds a session.
     /// </summary>
     public const string DocumentPrefix = "imported";
+
+    /// <summary>A design's stored size: taller than any phone screen, a fraction of a Canva export.</summary>
+    private const int DesignEdge = 2048;
 
     public async Task<(CreateCampaignResponse Campaign, ImportedDesignResult Design)> CreateAsync(
         string title, byte[] content, string fileName, CancellationToken ct = default)
@@ -140,9 +145,22 @@ public sealed class ImportedDesignService(
 
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         var video = IsVideo(ext);
+        var type = ContentTypeFor(fileName);
 
+        // Shown full screen on a phone and nothing else, so it is stored at a screen's size: a Canva
+        // export is often 4000x7000 and several MB, which every guest downloaded in full.
+        if (!video)
+        {
+            var display = imageOptimizer.OptimizeForDisplay(content, type, DesignEdge);
+            content = display.Content;
+            type = display.ContentType;
+            ext = MediaFileTypes.ExtensionFor(type) is var known && known != ".img" ? known : ext;
+        }
+
+        // A new name per upload. Stored files are cached for a year as unchanging, so re-uploading to
+        // the same name kept showing guests the first version.
         var previewUrl = await storage.PutAsync(
-            $"{stem}/design{ext}", content, ContentTypeFor(fileName), ct);
+            $"{stem}/design-{Guid.NewGuid():N}{ext}", content, type, ct);
 
         var documentHtml = Wrap(previewUrl, campaign.Title, video);
 

@@ -103,6 +103,7 @@ public static class DependencyInjection
         // Stateless and thread-safe, so one instance serves every upload. Named *Optimizer rather
         // than *Service, so Scrutor's convention scan doesn't pick it up — registered explicitly.
         services.AddSingleton<IImageOptimizer, Images.ImageSharpOptimizer>();
+        services.AddHttpClient<IRemoteImageFetcher, Images.RemoteImageFetcher>(c => c.Timeout = TimeSpan.FromSeconds(5));
 
         // Drawing a QR is pure computation over a string — no state, no connection, nothing to scope.
         services.AddSingleton<IQrCodeRenderer, QrCodes.QrCoderRenderer>();

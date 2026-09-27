@@ -9,6 +9,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using System.IO.Compression;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -906,6 +907,56 @@ public class EventPhotoServiceTests
         await Sut().DeleteAsync(campaign.Id, photo.Id, null);
 
         Assert.NotNull(photo.DeletedAt);
+    }
+
+    /// <summary>
+    /// A deleted photo gives its space back and its files go. Before, a host who deleted a test shot saw
+    /// the album's usage stay exactly where it was.
+    /// </summary>
+    [Fact]
+    public async Task Removing_a_photo_frees_its_space_and_removes_its_files()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var photo = Existing(campaign.Id, guest.Id);
+        var bucketId = Guid.NewGuid();
+        photo.BucketId = bucketId;
+        photo.SizeBytes = 5_000;
+        photo.OriginalUrl = "/assets/a_o.jpg";
+        _storage.KeyFor(Arg.Any<string>()).Returns(c => c.ArgAt<string>(0).Replace("/assets/", ""));
+
+        await Sut().DeleteAsync(campaign.Id, photo.Id, guest.Id);
+
+        await _buckets.Received().CountUsageAsync(bucketId, -5_000, Arg.Any<CancellationToken>());
+        await _storage.Received().DeleteAsync("a_o.jpg", Arg.Any<CancellationToken>());
+        await _storage.Received().DeleteAsync("a.jpg", Arg.Any<CancellationToken>());
+        await _storage.Received().DeleteAsync("a_t.jpg", Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>The photo is gone for everyone either way; a file that won't delete mustn't undo that.</summary>
+    [Fact]
+    public async Task A_file_that_will_not_delete_does_not_fail_the_removal()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var photo = Existing(campaign.Id, guest.Id);
+        _storage.KeyFor(Arg.Any<string>()).Returns("a.jpg");
+        _storage.DeleteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).ThrowsAsync(new IOException("storage down"));
+
+        await Sut().DeleteAsync(campaign.Id, photo.Id, guest.Id);
+
+        Assert.NotNull(photo.DeletedAt);
+    }
+
+    [Fact]
+    public async Task Removing_a_photo_twice_gives_its_space_back_once()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        var photo = Existing(campaign.Id, guest.Id);
+        photo.BucketId = Guid.NewGuid();
+        photo.DeletedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+        await Sut().DeleteAsync(campaign.Id, photo.Id, guest.Id);
+
+        await _buckets.DidNotReceiveWithAnyArgs().CountUsageAsync(default, default);
     }
 
     /// <summary>A double-tap on a phone at a party should not be an error page.</summary>

@@ -37,6 +37,7 @@ public class AccountServiceTests
     private readonly IInviteeTokenIssuer _tokens = Substitute.For<IInviteeTokenIssuer>();
     private readonly IOtpSender _sms = Substitute.For<IOtpSender>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
+    private readonly IProfilePictureService _pictures = Substitute.For<IProfilePictureService>();
 
     private readonly List<IExternalAuthProvider> _authProviders = [];
     private readonly Guid _customerRoleId = Guid.NewGuid();
@@ -80,7 +81,7 @@ public class AccountServiceTests
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
             _templates, _photos, TestData.NoCelebrants(), _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
             [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config,
-            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>());
+            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _pictures);
     }
 
     private static AppUser User(
@@ -484,6 +485,20 @@ public class AccountServiceTests
         Assert.Equal("brand@new.com", added!.Email);
         // Arriving via a provider grants nothing beyond what any first sign-in grants.
         Assert.Equal(_customerRoleId, Assert.Single(added.UserRoles).RoleId);
+    }
+
+    [Fact]
+    public async Task OAuth_offers_the_provider_s_picture_to_the_account()
+    {
+        var existing = User(email: "someone@test.com", roleNames: Roles.Customer);
+        _users.Query(Arg.Any<bool>()).Returns(new[] { existing }.AsAsyncQueryable());
+        _authProviders.Add(Provider("google", identity:
+            new ExternalIdentity("google", "google-sub-2", "someone@test.com", "Someone", "https://lh3.googleusercontent.com/a/x")));
+
+        await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token"));
+
+        await _pictures.Received().ImportFromProviderAsync(
+            existing, "https://lh3.googleusercontent.com/a/x", Arg.Any<CancellationToken>());
     }
 
     [Fact]

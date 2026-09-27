@@ -160,7 +160,9 @@ public sealed class GuestController(
         html = GuestCreditHtml.InjectIntoInvitation(html, payload.Credit);
         html = GuestCalendarHtml.Inject(html, payload.Data);
 
-        Response.Headers["Content-Security-Policy"] = TemplateRuntime.ContentSecurityPolicy;
+        Response.Headers["Content-Security-Policy"] = IsUploadedDesign(payload.PackageUrl)
+            ? TemplateRuntime.UploadedDesignContentSecurityPolicy
+            : TemplateRuntime.ContentSecurityPolicy;
         Response.Headers["Referrer-Policy"] = TemplateRuntime.ReferrerPolicy;
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         // Personalised, and short-lived by nature: never let a shared cache hold one guest's copy.
@@ -798,4 +800,11 @@ public sealed class GuestController(
     // and the personal-link IP binding silently trusts everyone.
     // The visitor, not the Cloudflare edge in front of the proxy — see RateLimiting.ClientAddress.
     private string? ClientIp() => RateLimiting.ClientAddress.Of(HttpContext)?.ToString();
+
+    /// <summary>
+    /// An uploaded design's package, which lives under its own prefix and is only ever the page
+    /// <see cref="Application.Services.Designs.ImportedDesignService"/> writes around the image.
+    /// </summary>
+    private static bool IsUploadedDesign(string? packageUrl) =>
+        packageUrl?.Contains($"/{Application.Services.Designs.ImportedDesignService.DocumentPrefix}/", StringComparison.Ordinal) == true;
 }

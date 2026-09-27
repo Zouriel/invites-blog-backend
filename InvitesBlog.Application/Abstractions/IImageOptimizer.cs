@@ -71,4 +71,14 @@ public interface IImageOptimizer
     /// failed upload.</para>
     /// </summary>
     OptimizedImage Preserve(byte[] content, string contentType);
+
+    /// <summary>
+    /// An image that is only ever LOOKED AT, full screen: an uploaded invitation design. Resized like
+    /// <see cref="Optimize"/>, and, unlike it, allowed to change format: a picture with no transparent
+    /// pixel comes back as a JPEG, since a design exported as PNG is photographic art that PNG can't
+    /// compress (a 4321x7680 Canva export was 3 MB, and still 2.5 MB as a 2048px PNG, but 312 KB as
+    /// JPEG). One with transparency keeps its format so nothing turns black. Read
+    /// <see cref="OptimizedImage.ContentType"/> for what came back.
+    /// </summary>
+    OptimizedImage OptimizeForDisplay(byte[] content, string contentType, int? maxEdge = null);
 }

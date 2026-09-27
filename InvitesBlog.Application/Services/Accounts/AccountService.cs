@@ -48,7 +48,8 @@ public sealed class AccountService(
     PhoneNormalizer phones,
     IConfiguration config,
     IRepository<Venue> venues,
-    IRepository<VenueStaff> venueStaff) : IAccountService
+    IRepository<VenueStaff> venueStaff,
+    IProfilePictureService pictures) : IAccountService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(14);
 
@@ -192,6 +193,9 @@ public sealed class AccountService(
             }, ct);
             await uow.SaveChangesAsync(ct);
         }
+
+        // Google's picture, until the person picks their own. Best effort: it never fails a sign-in.
+        await pictures.ImportFromProviderAsync(user, identity.PictureUrl, ct);
 
         return await IssueAsync(user, ct);
     }
@@ -585,6 +589,20 @@ public sealed class AccountService(
         return await ToDtoAsync(user, ct);
     }
 
+    public async Task<AccountDto> SetAvatarAsync(byte[] content, string contentType, CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+        await pictures.SetAsync(user, content, contentType, ct);
+        return await ToDtoAsync(user, ct);
+    }
+
+    public async Task<AccountDto> RemoveAvatarAsync(CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+        await pictures.RemoveAsync(user, ct);
+        return await ToDtoAsync(user, ct);
+    }
+
     private async Task<AppUser> CurrentAsync(CancellationToken ct)
     {
         var id = currentUser.UserId ?? throw new UnauthorizedException();
@@ -614,7 +632,8 @@ public sealed class AccountService(
                 ? user.SubscriptionTier.ToString()
                 : "None",
             user.SubscriptionEndsAt,
-            await AtVenueAsync(user, ct));
+            await AtVenueAsync(user, ct),
+            user.AvatarUrl);
     }
 
     /// <summary>Whether the account owns a venue or works at one, so its menu leads there.</summary>

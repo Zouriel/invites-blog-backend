@@ -212,8 +212,7 @@ public class MediaBucketServiceTests
         EventPhoto[] already =
         [
             new() { Id = Guid.NewGuid(), CampaignId = campaignId, SizeBytes = 400 },
-            // Soft-deleted still counts: the stored objects outlive the row, which is the same reason
-            // UsedBytes never goes down on a delete.
+            // A deleted photo's files go with it, so it counts for nothing.
             new() { Id = Guid.NewGuid(), CampaignId = campaignId, SizeBytes = 600, DeletedAt = DateTimeOffset.UtcNow },
         ];
         _photos.Query(Arg.Any<bool>()).Returns(already.AsAsyncQueryable());
@@ -221,7 +220,7 @@ public class MediaBucketServiceTests
         var bucket = await Sut().ForCampaignAsync(campaignId);
 
         Assert.All(already, p => Assert.Equal(bucket.Id, p.BucketId));
-        Assert.Equal(1000, bucket.UsedBytes);
+        Assert.Equal(400, bucket.UsedBytes);
     }
 
     // ---------- counting usage under parallel uploads ----------

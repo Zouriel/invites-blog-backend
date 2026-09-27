@@ -84,8 +84,13 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
                 $"Verify your email address with {Provider} before signing in here.", "oauth_email_unverified");
 
         var name = DisplayName(principal.Claims.ToDictionary(c => c.Type, c => c.Value, StringComparer.Ordinal));
+        // Google puts a picture in the ID token when the `profile` scope was asked for; Microsoft's
+        // tokens carry none. Only an https URL is passed on.
+        var picture = principal.FindFirst("picture")?.Value;
+        if (!Uri.TryCreate(picture, UriKind.Absolute, out var pictureUri) || pictureUri.Scheme != Uri.UriSchemeHttps)
+            picture = null;
         return new ExternalIdentity(Provider, subject, email,
-            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name);
+            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name, picture);
     }
 
     /// <summary>The provider's best display-name claim; null falls back to the email's local part.</summary>

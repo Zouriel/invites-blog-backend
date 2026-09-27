@@ -4,6 +4,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
 namespace InvitesBlog.Infrastructure.Images;
@@ -100,6 +101,44 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
             logger.LogWarning(ex, "Could not optimise an uploaded image ({ContentType}); storing it unchanged.", contentType);
             return Passthrough(content, contentType);
         }
+    }
+
+    /// <inheritdoc />
+    public OptimizedImage OptimizeForDisplay(byte[] content, string contentType, int? maxEdge = null)
+    {
+        var type = (contentType ?? string.Empty).ToLowerInvariant();
+        if (type is not ("image/png" or "image/webp")) return Optimize(content, contentType, maxEdge);
+
+        var resized = Optimize(content, contentType, maxEdge);
+        try
+        {
+            using var image = Image.Load<Rgba32>(resized.Content);
+            if (!IsOpaque(image)) return resized;
+
+            using var output = new MemoryStream();
+            image.Save(output, new JpegEncoder { Quality = JpegQuality });
+            var bytes = output.ToArray();
+            if (bytes.Length >= resized.Content.Length) return resized;
+
+            logger.LogInformation("Design image as JPEG: {OldKb} KB -> {NewKb} KB.", content.Length / 1024, bytes.Length / 1024);
+            return new OptimizedImage(bytes, "image/jpeg", image.Width, image.Height, true);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidImageContentException or ImageFormatException)
+        {
+            return resized;
+        }
+    }
+
+    private static bool IsOpaque(Image<Rgba32> image)
+    {
+        var opaque = true;
+        image.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height && opaque; y++)
+                foreach (ref var px in rows.GetRowSpan(y))
+                    if (px.A != 255) { opaque = false; break; }
+        });
+        return opaque;
     }
 
     /// <inheritdoc />

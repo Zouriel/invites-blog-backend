@@ -1,6 +1,16 @@
 namespace InvitesBlog.Application.Abstractions;
 
 /// <summary>Object storage for compiled template packages and campaign assets (§7.1).</summary>
+/// <summary>
+/// Downloads an image from somewhere else on the web: a profile picture a sign-in provider points at.
+/// Returns null on any failure (timeout, not found, too large), since nothing that calls it may fail
+/// because of it.
+/// </summary>
+public interface IRemoteImageFetcher
+{
+    Task<(byte[] Content, string ContentType)?> FetchAsync(Uri url, int maxBytes, CancellationToken ct = default);
+}
+
 public interface IStorageService
 {
     /// <summary>Stores an object and returns its public URL.</summary>
@@ -8,6 +18,15 @@ public interface IStorageService
     /// <summary>Reads a stored object's bytes, or null if it doesn't exist.</summary>
     Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
     string PublicUrl(string key);
+
+    /// <summary>
+    /// The key behind a URL this service handed out, or null for one it didn't (another host, a
+    /// template asset). The inverse of <see cref="PublicUrl"/>.
+    /// </summary>
+    string? KeyFor(string url);
+
+    /// <summary>Removes an object. Removing one that isn't there is not an error.</summary>
+    Task DeleteAsync(string key, CancellationToken ct = default);
 }
 
 // ----- Delivery (§4.8.4) -----

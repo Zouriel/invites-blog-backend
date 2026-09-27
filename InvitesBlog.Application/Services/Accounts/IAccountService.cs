@@ -40,6 +40,12 @@ public interface IAccountService
     /// </summary>
     Task<AccountDto> SetThemeAsync(SetThemeRequest req, CancellationToken ct = default);
 
+    /// <summary>Replaces the signed-in account's profile picture with an uploaded image.</summary>
+    Task<AccountDto> SetAvatarAsync(byte[] content, string contentType, CancellationToken ct = default);
+
+    /// <summary>Removes the signed-in account's profile picture, back to initials.</summary>
+    Task<AccountDto> RemoveAvatarAsync(CancellationToken ct = default);
+
     /// <summary>Adds the Designer role to the signed-in account and re-issues its token.</summary>
     Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default);
 

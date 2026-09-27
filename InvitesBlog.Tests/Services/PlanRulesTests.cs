@@ -15,11 +15,11 @@ public class PlanRulesTests
     private static EventPlan Evaluate(
         EventPassKind pass = EventPassKind.None, DateTimeOffset? passUntil = null, DateTimeOffset? keep = null,
         bool? venueActive = null, DateTimeOffset? venueEnded = null,
-        long legacyBytes = 0, DateTimeOffset? legacyCover = null, DateTimeOffset? now = null, DateTimeOffset? night = null) =>
+        DateTimeOffset? legacyCover = null, DateTimeOffset? now = null, DateTimeOffset? night = null) =>
         PlanRules.Evaluate(
             now ?? Now, night ?? Night, pass, passUntil, keep,
             venueActive is { } active ? (VenueId, active, venueEnded) : null,
-            legacyBytes, legacyCover, null, Guid.NewGuid());
+            legacyCover, null, Guid.NewGuid());
 
     [Fact]
     public void A_free_event_gets_1_gb_one_album_one_night_90_days_and_the_mark()
@@ -138,13 +138,13 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void Buckets_from_before_the_plans_keep_their_space_for_six_months_after_the_event()
+    public void An_event_from_before_the_plans_gets_its_plan_s_space_and_no_more()
     {
-        var kept = Evaluate(legacyBytes: 20 * PlanCatalog.Gb, now: Night.AddMonths(5));
-        var lapsed = Evaluate(legacyBytes: 20 * PlanCatalog.Gb, now: Night.AddMonths(7));
+        // Covered by the pre-plans promise, and still sized by the plan: Free is 1 GB.
+        var plan = Evaluate(legacyCover: Night.AddMonths(6), now: Night.AddDays(1));
 
-        Assert.Equal(20 * PlanCatalog.Gb, kept.EventBytes);
-        Assert.Equal(1 * PlanCatalog.Gb, lapsed.EventBytes);
+        Assert.Equal(PlanCatalog.FreeEventBytes, plan.EventBytes);
+        Assert.Equal(Night.AddMonths(6), plan.CoveredUntil);
     }
 
     [Fact]
