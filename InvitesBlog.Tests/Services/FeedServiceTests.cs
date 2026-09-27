@@ -110,6 +110,19 @@ public class FeedServiceTests
     }
 
     [Fact]
+    public async Task A_post_and_a_comment_carry_their_people_s_pictures()
+    {
+        _event.CreatedByUserId = _me.Id;
+        _me.AvatarUrl = "/assets/avatars/me/a.jpg";
+
+        var post = Assert.Single((await Sut().FeedAsync(0, 10)).Items);
+        var comment = await Sut().AddCommentAsync(_event.Id, new AddFeedCommentRequest("Hello"));
+
+        Assert.Equal("/assets/avatars/me/a.jpg", post.HostAvatarUrl);
+        Assert.Equal("/assets/avatars/me/a.jpg", comment.AuthorAvatarUrl);
+    }
+
+    [Fact]
     public async Task A_stranger_cannot_comment()
     {
         await Assert.ThrowsAsync<ForbiddenException>(

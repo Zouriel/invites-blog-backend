@@ -26,7 +26,8 @@ public sealed record FeedPostDto(
     string Role,
     bool CanModerate,
     string Link,
-    DateTimeOffset LastActivityAt);
+    DateTimeOffset LastActivityAt,
+    string? HostAvatarUrl = null);
 
 public sealed record FeedPageDto(IReadOnlyList<FeedPostDto> Items, bool HasMore);
 
@@ -40,7 +41,8 @@ public sealed record FeedCommentDto(
     int LikeCount,
     bool LikedByMe,
     bool CanDelete,
-    IReadOnlyList<FeedCommentDto> Replies);
+    IReadOnlyList<FeedCommentDto> Replies,
+    string? AuthorAvatarUrl = null);
 
 public sealed record AddFeedCommentRequest(string Body, Guid? ParentId = null);
 

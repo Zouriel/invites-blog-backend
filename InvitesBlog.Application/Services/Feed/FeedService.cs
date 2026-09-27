@@ -445,8 +445,8 @@ public sealed class FeedService(
         string? hostName = null;
         if (campaign.InviterId is { } inviterId)
             hostName = (await inviters.GetByIdAsync(inviterId, ct))?.Name;
-        if (hostName is null && campaign.CreatedByUserId is { } creator)
-            hostName = (await users.GetByIdAsync(creator, ct))?.DisplayName;
+        var hostUser = campaign.CreatedByUserId is { } creator ? await users.GetByIdAsync(creator, ct) : null;
+        hostName ??= hostUser?.DisplayName;
 
         var (autoCaption, venue) = ReadContent(campaign.CustomContentJson);
 
@@ -467,7 +467,8 @@ public sealed class FeedService(
             role.ToString().ToLowerInvariant(),
             role >= FeedRole.Manager,
             role == FeedRole.Guest ? $"/invitation/{campaign.Id}" : $"/dashboard/{campaign.Id}",
-            activity);
+            activity,
+            hostUser?.AvatarUrl);
     }
 
     private async Task<List<FeedCommentDto>> DescribeCommentsAsync(
@@ -479,8 +480,8 @@ public sealed class FeedService(
         var authorIds = live.Select(c => c.UserId).Distinct().ToList();
         var authors = await users.Query()
             .Where(u => authorIds.Contains(u.Id))
-            .Select(u => new { u.Id, u.DisplayName })
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+            .Select(u => new { u.Id, u.DisplayName, u.AvatarUrl })
+            .ToDictionaryAsync(u => u.Id, ct);
 
         var ids = live.Select(c => c.Id).ToList();
         var likes = await commentLikes.Query()
@@ -491,14 +492,15 @@ public sealed class FeedService(
         FeedCommentDto Describe(PostComment c, IReadOnlyList<FeedCommentDto> replies) => new(
             c.Id,
             c.ParentId,
-            authors.GetValueOrDefault(c.UserId) ?? "Someone",
+            authors.GetValueOrDefault(c.UserId)?.DisplayName ?? "Someone",
             c.UserId == campaign.CreatedByUserId,
             c.Body,
             c.CreatedAt,
             likes.Count(l => l.CommentId == c.Id),
             likes.Any(l => l.CommentId == c.Id && l.UserId == me.Id),
             c.UserId == me.Id || role >= FeedRole.Manager,
-            replies);
+            replies,
+            authors.GetValueOrDefault(c.UserId)?.AvatarUrl);
 
         // A single new reply is described on its own; a full list nests replies under their comment.
         if (live.Count == 1 && live[0].ParentId is not null)
