@@ -48,6 +48,12 @@ public sealed class DesignScene
     /// </summary>
     [JsonPropertyName("stage")] public bool Stage { get; set; }
 
+    /// <summary>
+    /// How far the page scrolls at least, in canvas units — set by dragging the timeline's End. The page
+    /// is as long as its content or this, whichever is longer. Null: just its content.
+    /// </summary>
+    [JsonPropertyName("length")] public double? Length { get; set; }
+
     /// <summary>Theme keys, each becoming <c>--ib-{key}</c>. <c>accent</c>, <c>bg</c> and <c>text</c> are required.</summary>
     [JsonPropertyName("theme")] public List<DesignThemeEntry> Theme { get; set; } = new();
 
@@ -118,7 +124,8 @@ public sealed class DesignScene
         foreach (var (el, _, _) in Walk())
             if (el.Track is { } t && double.IsFinite(t.Start) && double.IsFinite(t.End) && t.End > t.Start)
                 motion = Math.Max(motion, t.End);
-        return Math.Min(DesignCatalog.MaxPageHeight, Math.Max(Math.Max(0, bottom - DesignCanvas.ReferenceViewport), motion));
+        var chosen = Length is { } l && double.IsFinite(l) ? Math.Max(0, l) : 0;
+        return Math.Min(DesignCatalog.MaxPageHeight, Math.Max(Math.Max(Math.Max(0, bottom - DesignCanvas.ReferenceViewport), motion), chosen));
     }
 
     /// <summary>Every element, depth-first, with the group it sits in.</summary>

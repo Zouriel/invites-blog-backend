@@ -43,6 +43,8 @@ public static partial class DesignValidator
         var lowest = scene.Elements.Where(e => double.IsFinite(e.Y) && double.IsFinite(e.H)).Select(e => e.Y + e.H).DefaultIfEmpty(0).Max();
         if (lowest > DesignCatalog.MaxPageHeight)
             Error("page_too_long", $"The page runs longer than {DesignCatalog.MaxPageHeight / DesignCanvas.ReferenceViewport:0} screens — bring things closer together.");
+        if (scene.Length is { } length && !double.IsFinite(length))
+            Error("page_length", "The page's length isn't a number.");
 
         // ----- Theme -----
         var themeKeys = ThemeKeys(scene);

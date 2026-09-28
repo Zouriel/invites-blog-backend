@@ -309,4 +309,20 @@ public class DesignMotionTests
         Assert.Contains("m==='ib-v'", html);
         Assert.Contains("data-sr", html);
     }
+
+    [Fact]
+    public void A_chosen_length_makes_the_page_scroll_further_but_never_cuts_its_content_short()
+    {
+        var moving = Box();
+        moving.Track = new DesignTrack { Start = 0, End = 1200 };
+        moving.Keyframes = [new() { T = 0 }, new() { T = 1, X = 200 }];
+        var scene = Stage(moving);
+        scene.Elements.RemoveAll(e => e.Id == "rsvp");
+        Assert.Equal(1200, scene.ScrollRange());
+        scene.Length = 3000;
+        Assert.Equal(3000, scene.ScrollRange());
+        Assert.Contains($"height:calc({3000 + 844} * var(--u))", DesignCompiler.Compile(scene));
+        scene.Length = 500;
+        Assert.Equal(1200, scene.ScrollRange());
+    }
 }
