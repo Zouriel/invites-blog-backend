@@ -74,6 +74,20 @@ public static class DependencyInjection
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();
         services.AddScoped<IDesignEngine, DesignEngine>();
+
+        // The designer's art library: searched and downloaded server-side through a client that only
+        // connects to public addresses (library results link to hosts we don't control).
+        services.AddHttpClient(Templates.Art.ArtHttp.ClientName, c =>
+            {
+                // Each call sets its own, shorter limit (ArtLibrary); this only stops a runaway.
+                c.Timeout = TimeSpan.FromSeconds(120);
+                c.DefaultRequestHeaders.UserAgent.ParseAdd(Templates.Art.ArtHttp.UserAgent);
+            })
+            .ConfigurePrimaryHttpMessageHandler(Templates.Art.ArtHttp.Handler);
+        services.AddSingleton<Templates.Art.IArtSource, Templates.Art.OpenverseSource>();
+        services.AddSingleton<Templates.Art.IArtSource, Templates.Art.OpenClipartSource>();
+        services.AddSingleton<Templates.Art.IArtSource, Templates.Art.FreeSvgSource>();
+        services.AddScoped<IArtLibrary, Templates.Art.ArtLibrary>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();
         services.AddScoped<TemplateManifestRefresher>();

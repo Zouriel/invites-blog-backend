@@ -89,6 +89,13 @@ public static class DependencyInjection
             options.AddPolicy("design-assets", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 40, Window = TimeSpan.FromMinutes(10) }));
+            // Art library searches follow typing (debounced) and paging; imports download and convert a file each.
+            options.AddPolicy("design-art-search", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 90, Window = TimeSpan.FromMinutes(1) }));
+            options.AddPolicy("design-art-import", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(10) }));
             // Reporting is anonymous; a limiter keeps one address from flooding the admin queue.
             // The camera's own error reports: a phone sends a handful per page at most.
             options.AddPolicy("client-errors", ctx => RateLimitPartition.GetFixedWindowLimiter(

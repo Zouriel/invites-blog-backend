@@ -1,4 +1,5 @@
 using InvitesBlog.Api.Authorization;
+using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Dtos.Designs;
 using InvitesBlog.Application.Services.Designs;
 using InvitesBlog.Domain.Authorization;
@@ -14,7 +15,7 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/designs")]
 [HasPermission(Permissions.Designs.Manage)]
-public sealed class DesignsController(IDesignService designs) : BaseApiController
+public sealed class DesignsController(IDesignService designs, IArtLibrary art) : BaseApiController
 {
     [HttpGet("catalog")]
     public IActionResult Catalog() => Success(designs.Catalog());
@@ -68,6 +69,35 @@ public sealed class DesignsController(IDesignService designs) : BaseApiControlle
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, ct);
         return Success(designs.ImportAsset(buffer.ToArray(), file.FileName, file.ContentType ?? string.Empty));
+    }
+
+    // ----- Art library ----------------------------------------------------------------------------
+
+    [HttpGet("art/sources")]
+    public IActionResult ArtSources() => Success(art.Sources());
+
+    [HttpGet("art/search")]
+    [EnableRateLimiting("design-art-search")]
+    public async Task<IActionResult> ArtSearch(
+        [FromQuery] string source, [FromQuery] string? q, [FromQuery] string? kind, [FromQuery] int page = 1, CancellationToken ct = default) =>
+        Success(await art.SearchAsync(source, q, kind, page, ct));
+
+    /// <summary>Downloads a library picture and returns it ready to place — animation turned into scroll keyframes.</summary>
+    [HttpPost("art/import")]
+    [EnableRateLimiting("design-art-import")]
+    public async Task<IActionResult> ArtImport([FromBody] ArtImportRequest request, CancellationToken ct) =>
+        Success(await art.ImportAsync(request, ct));
+
+    /// <summary>An uploaded SVG or picture, the same way: an animated SVG or GIF comes back as scroll motion.</summary>
+    [HttpPost("art/upload")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    [EnableRateLimiting("design-assets")]
+    public async Task<IActionResult> ArtUpload(IFormFile file, CancellationToken ct)
+    {
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+        return Success(art.ImportFile(buffer.ToArray(), file.FileName, file.ContentType ?? string.Empty));
     }
 
     /// <summary>What the editor needs to open an existing template: nothing (it was designed) or the document to convert.</summary>
