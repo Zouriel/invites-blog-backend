@@ -230,6 +230,62 @@ public sealed class DesignElement
 
     /// <summary>Editor-only: not emitted, never affects output.</summary>
     [JsonPropertyName("locked")] public bool Locked { get; set; }
+
+    // ----- motion extras (2026-09-28) -----
+
+    /// <summary>The point it turns and scales about, as fractions of its box; null is the centre.</summary>
+    [JsonPropertyName("origin")] public DesignOrigin? Origin { get; set; }
+    /// <summary>A repeating motion layered on top of its keyframes (float, sway, pulse…).</summary>
+    [JsonPropertyName("loop")] public DesignLoop? Loop { get; set; }
+    /// <summary><c>inset</c> or <c>circle</c>: the shape its keyframes' <see cref="DesignKeyframe.Clip"/> values cut.</summary>
+    [JsonPropertyName("clipShape")] public string? ClipShape { get; set; }
+    /// <summary>Hidden when turned away from the reader (3D flips: the back of a card).</summary>
+    [JsonPropertyName("backfaceHidden")] public bool BackfaceHidden { get; set; }
+    /// <summary>Tapping it scrolls the page to this position (canvas units) — "tap the seal to open".</summary>
+    [JsonPropertyName("tapScroll")] public double? TapScroll { get; set; }
+    /// <summary>Editor-only: the sticker recipe and seed a group was made from, for Shuffle. Never emitted.</summary>
+    [JsonPropertyName("recipe")] public DesignRecipe? Recipe { get; set; }
+}
+
+public sealed class DesignOrigin
+{
+    [JsonPropertyName("x")] public double X { get; set; } = 0.5;
+    [JsonPropertyName("y")] public double Y { get; set; } = 0.5;
+}
+
+/// <summary>
+/// A motion that repeats across the element's track, on top of (multiplied with) its keyframes: its own
+/// animation on a wrapper inside the element, so an entrance and a float can play at once.
+/// </summary>
+public sealed class DesignLoop
+{
+    /// <summary>One cycle, relative to wherever the keyframes put the element.</summary>
+    [JsonPropertyName("frames")] public List<DesignLoopFrame> Frames { get; set; } = new();
+    /// <summary>Cycles over the track, 1–50.</summary>
+    [JsonPropertyName("repeat")] public int Repeat { get; set; } = 1;
+    /// <summary>Every other cycle plays backwards (a sway there and back from half the frames).</summary>
+    [JsonPropertyName("alternate")] public bool Alternate { get; set; }
+    /// <summary>Editor-only: the preset and strength it was made from.</summary>
+    [JsonPropertyName("preset")] public string? Preset { get; set; }
+    [JsonPropertyName("strength")] public double Strength { get; set; } = 1;
+}
+
+/// <summary>A loop keyframe: offsets in canvas units and degrees, scale and opacity as multipliers.</summary>
+public sealed class DesignLoopFrame
+{
+    [JsonPropertyName("t")] public double T { get; set; }
+    [JsonPropertyName("dx")] public double? Dx { get; set; }
+    [JsonPropertyName("dy")] public double? Dy { get; set; }
+    [JsonPropertyName("rotate")] public double? Rotate { get; set; }
+    [JsonPropertyName("scale")] public double? Scale { get; set; }
+    [JsonPropertyName("opacity")] public double? Opacity { get; set; }
+    [JsonPropertyName("easing")] public string? Easing { get; set; }
+}
+
+public sealed class DesignRecipe
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("seed")] public int Seed { get; set; }
 }
 
 public sealed class DesignTrack
@@ -256,6 +312,24 @@ public sealed class DesignKeyframe
     [JsonPropertyName("easing")] public string? Easing { get; set; }
     /// <summary>enter | exit when a preset created it.</summary>
     [JsonPropertyName("preset")] public string? Preset { get; set; }
+
+    /// <summary>3D turn about the horizontal axis, degrees (a flap folding open).</summary>
+    [JsonPropertyName("rotateX")] public double? RotateX { get; set; }
+    /// <summary>3D turn about the vertical axis, degrees (a card flipping over).</summary>
+    [JsonPropertyName("rotateY")] public double? RotateY { get; set; }
+    [JsonPropertyName("skewX")] public double? SkewX { get; set; }
+    [JsonPropertyName("skewY")] public double? SkewY { get; set; }
+    /// <summary>Blur radius in canvas units, 0–40.</summary>
+    [JsonPropertyName("blur")] public double? Blur { get; set; }
+    /// <summary>
+    /// How much is cut away, in percent: <c>inset</c> takes top, right, bottom, left; <c>circle</c> takes
+    /// its radius. Which one comes from the element's <see cref="DesignElement.ClipShape"/>.
+    /// </summary>
+    [JsonPropertyName("clip")] public List<double>? Clip { get; set; }
+    /// <summary>How much of a shape's outline is drawn, 0–1.</summary>
+    [JsonPropertyName("draw")] public double? Draw { get; set; }
+    /// <summary>Extra letter spacing in em, added to the text's own.</summary>
+    [JsonPropertyName("tracking")] public double? Tracking { get; set; }
 }
 
 /// <summary>One run of a text element: literal text, or a bound variable.</summary>
@@ -289,6 +363,16 @@ public sealed class DesignText
 {
     [JsonPropertyName("runs")] public List<DesignRun> Runs { get; set; } = new();
     [JsonPropertyName("style")] public DesignTypography Style { get; set; } = new();
+    /// <summary>Animates the text word by word or letter by letter instead of as one block.</summary>
+    [JsonPropertyName("split")] public DesignSplit? Split { get; set; }
+}
+
+public sealed class DesignSplit
+{
+    /// <summary>word | letter.</summary>
+    [JsonPropertyName("by")] public string By { get; set; } = "word";
+    /// <summary>How much of the track the starts are spread over, 0–0.9; each piece plays for the rest.</summary>
+    [JsonPropertyName("stagger")] public double Stagger { get; set; } = 0.4;
 }
 
 public sealed class DesignShape

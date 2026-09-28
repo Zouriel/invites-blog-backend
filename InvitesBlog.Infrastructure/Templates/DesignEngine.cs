@@ -31,6 +31,7 @@ public sealed class DesignEngine(
         variables = DesignCatalog.Variables,
         enterPresets = DesignCatalog.EnterPresets,
         exitPresets = DesignCatalog.ExitPresets,
+        loopPresets = DesignCatalog.LoopPresets,
         easings = DesignCatalog.Easings,
         fieldTypes = DesignCatalog.FieldTypes,
         linkPaths = DesignCatalog.LinkPaths,
@@ -46,6 +47,10 @@ public sealed class DesignEngine(
             maxKeyframes = DesignCatalog.MaxKeyframes,
             maxPageHeight = DesignCatalog.MaxPageHeight,
             maxDepth = DesignCatalog.MaxDepth,
+            maxLoopRepeat = DesignCatalog.MaxLoopRepeat,
+            maxBlur = DesignCatalog.MaxBlur,
+            maxSkew = DesignCatalog.MaxSkew,
+            maxSplitPieces = DesignCatalog.MaxSplitPieces,
             maxSceneBytes = MaxSceneBytes,
         },
     };

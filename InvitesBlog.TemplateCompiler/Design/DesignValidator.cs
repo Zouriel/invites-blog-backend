@@ -120,6 +120,7 @@ public static partial class DesignValidator
         var range = scene.ScrollRange();
         var page = scene.PageHeight();
         var animated = 0;
+        var blurred = 0;
         var rsvp = 0;
         var dress = 0;
         var pathsOutsideBlocks = new HashSet<string>(StringComparer.Ordinal);
@@ -151,13 +152,55 @@ public static partial class DesignValidator
                 Error("too_many_keyframes", $"“{label}” has more than {DesignCatalog.MaxKeyframes} keyframes.", el.Id);
             foreach (var k in el.Keyframes)
             {
-                double?[] values = [k.T, k.X, k.Y, k.Rotate, k.Scale, k.Opacity];
+                double?[] values = [k.T, k.X, k.Y, k.Rotate, k.Scale, k.Opacity, k.RotateX, k.RotateY, k.SkewX, k.SkewY, k.Blur, k.Draw, k.Tracking];
                 if (values.Any(v => v is { } d && !double.IsFinite(d)) || k.T is < 0 or > 1)
                     Error("keyframe", $"“{label}” has a keyframe outside its track.", el.Id);
                 if (k.Easing is not null && DesignCss.Easing(k.Easing) is null)
                     Error("easing", $"“{label}” uses an easing we don't recognise.", el.Id);
             }
-            if (el.Keyframes.Count > 0 || el.Pinned) animated++;
+            if (el.Keyframes.Any(k => k.Clip is { } c && c.Any(v => !double.IsFinite(v))))
+                Error("keyframe", $"“{label}” has a clip value that isn't a number.", el.Id);
+            if (el.ClipShape is not null && DesignCompiler.ClipKindOf(el) is null)
+                Error("clip_shape", $"“{label}” has an unknown clip shape.", el.Id);
+            if (el.Keyframes.Any(k => k.Clip is not null) && el.ClipShape is null)
+                Warn("clip_unused", $"“{label}” has clip keyframes but no clip shape, so they do nothing.", el.Id);
+            if (el.Keyframes.Any(k => k.Blur > 0)) blurred++;
+            if (el.Keyframes.Any(k => k.Draw is not null) && !Draws(el))
+                Warn("draw_needs_outline", $"“{label}” draws on, but only a shape's outline can be drawn — give it an outline, or use a line or a drawn shape.", el.Id);
+            if (el.Keyframes.Any(k => k.Tracking is not null) && el.Type != "text")
+                Warn("tracking_not_text", $"“{label}” animates letter spacing, which only text has.", el.Id);
+            if (el.Origin is { } origin && (!double.IsFinite(origin.X) || !double.IsFinite(origin.Y)))
+                Error("origin", $"“{label}” has a pivot point that isn't a number.", el.Id);
+            if (el.TapScroll is { } tap && !double.IsFinite(tap))
+                Error("tap_scroll", $"“{label}” scrolls to a position that isn't a number.", el.Id);
+            if (el.Loop is { } loop)
+            {
+                if (loop.Frames.Count > DesignCatalog.MaxKeyframes)
+                    Error("too_many_keyframes", $"“{label}” has a loop of more than {DesignCatalog.MaxKeyframes} keyframes.", el.Id);
+                if (loop.Repeat is < 1 or > DesignCatalog.MaxLoopRepeat)
+                    Error("loop_repeat", $"“{label}” repeats its loop {loop.Repeat} times — between 1 and {DesignCatalog.MaxLoopRepeat}.", el.Id);
+                foreach (var f in loop.Frames)
+                {
+                    double?[] lv = [f.T, f.Dx, f.Dy, f.Rotate, f.Scale, f.Opacity];
+                    if (lv.Any(v => v is { } d && !double.IsFinite(d)) || f.T is < 0 or > 1)
+                        Error("keyframe", $"“{label}” has a loop keyframe outside its cycle.", el.Id);
+                    if (f.Easing is not null && DesignCss.Easing(f.Easing) is null)
+                        Error("easing", $"“{label}” uses an easing we don't recognise.", el.Id);
+                }
+                var span = DesignCompiler.TrackOf(scene, el);
+                // A cycle shorter than a flick of the thumb reads as flicker, not motion.
+                if (loop.Frames.Count > 0 && loop.Repeat > 0 && (span.End - span.Start) / loop.Repeat < 40)
+                    Warn("loop_fast", $"“{label}” loops every {(span.End - span.Start) / loop.Repeat:0} units of scroll — too fast to see. Repeat it less or lengthen its bar.", el.Id);
+            }
+            if (el.Text?.Split is { } split)
+            {
+                if (split.By is not ("word" or "letter")) Error("split", $"“{label}” splits its text in a way we don't know.", el.Id);
+                if (!double.IsFinite(split.Stagger)) Error("split", $"“{label}” has a stagger that isn't a number.", el.Id);
+                if (el.Keyframes.Count == 0) Warn("split_still", $"“{label}” is split into pieces but doesn't move, so nothing shows it.", el.Id);
+                else if (el.Text.Runs.All(r => !string.IsNullOrWhiteSpace(r.Var)))
+                    Warn("split_bound", $"“{label}” is all fields, and a field moves as one piece — split some fixed text, or don't split.", el.Id);
+            }
+            if (el.Keyframes.Count > 0 || el.Pinned || el.Loop is { Frames.Count: > 0 }) animated++;
 
             if (el.Block is not null && DesignCompiler.Slug(el.Block).Length == 0)
                 Error("block", $"“{label}” has a section-visibility name that's empty.", el.Id);
@@ -260,6 +303,8 @@ public static partial class DesignValidator
             if (dress == 0)
                 Warn("dress_missing", "There's no spot for dress colours, so the platform will add its own section at the end.");
         }
+        if (blurred > DesignCatalog.BlurWarning)
+            Warn("many_filters", $"{blurred} elements blur. Blur is heavy work for older phones — past about {DesignCatalog.BlurWarning} they stutter.");
         if (animated > DesignCatalog.AnimatedElementWarning)
             Warn("many_animations", $"{animated} elements move. Past about {DesignCatalog.AnimatedElementWarning} a phone starts to stutter.");
         foreach (var (path, id) in pathsInsideBlocks.Where(p => !pathsOutsideBlocks.Contains(p.Path)).DistinctBy(p => p.Path))
@@ -267,6 +312,12 @@ public static partial class DesignValidator
 
         return issues;
     }
+
+    /// <summary>Whether drawing on shows anything: a shape with an outline, a line, or a drawn shape with open strokes.</summary>
+    private static bool Draws(DesignElement el) =>
+        el.Type == "shape" && el.Shape is { } shape
+        && (shape.Kind == "line" || shape.StrokeWidth > 0 && !string.IsNullOrWhiteSpace(shape.Stroke)
+            || shape.Kind == "path" && shape.Path?.Contours.Any(c => !c.Closed) == true);
 
     /// <summary>The size checks, which need the compiled document.</summary>
     public static IReadOnlyList<DesignIssue> CheckCompiled(string html)

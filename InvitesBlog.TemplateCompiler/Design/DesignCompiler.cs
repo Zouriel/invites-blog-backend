@@ -70,6 +70,7 @@ public static class DesignCompiler
         html.Append("</head>\n<body>");
         html.Append(body);
         html.Append("\n<script>").Append(FallbackScript).Append("</script>");
+        if (ctx.TapScroll) html.Append("\n<script>").Append(TapScript).Append("</script>");
         if (options.EditorPreview)
         {
             html.Append("\n<script>")
@@ -140,6 +141,10 @@ public static class DesignCompiler
         public Dictionary<string, IReadOnlyList<string>> SvgColors { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImages { get; } = new(StringComparer.Ordinal);
         public int Next;
+        /// <summary>Custom properties already registered with @property.</summary>
+        public HashSet<string> Properties { get; } = new(StringComparer.Ordinal);
+        /// <summary>Some element scrolls the page when tapped: the page needs the tap script.</summary>
+        public bool TapScroll;
     }
 
     // ----- Stylesheet head ---------------------------------------------------------------------------
@@ -189,7 +194,7 @@ public static class DesignCompiler
         css.Append(".t{margin:0;white-space:pre-wrap;overflow-wrap:break-word}");
         css.Append(".b{display:flex;align-items:center;justify-content:center;width:100%;height:100%;text-decoration:none;box-sizing:border-box;text-align:center}");
         css.Append(".s{display:block;width:100%;height:100%;overflow:visible}");
-        css.Append(".ib-fb .e,.ib-fb .a{animation-play-state:paused!important}");
+        css.Append(".ib-fb .e,.ib-fb .a,.ib-fb .l,.ib-fb .p{animation-play-state:paused!important}");
         if (ctx.Options.EditorPreview)
             css.Append("html{scrollbar-width:none}html::-webkit-scrollbar{display:none}");
     }
@@ -225,13 +230,27 @@ public static class DesignCompiler
         var inner = new StringBuilder();
         var boundAnything = false;
 
+        var track = TrackOf(ctx.Scene, el);
+        var animated = el.Keyframes.Count > 0;
+        var moving = animated && track.End > track.Start;
+        var clipKind = ClipKindOf(el);
+        var frames = moving ? ResolveFrames(el, clipKind) : [];
+        var uses = Uses.Of(el, frames);
+        var loopFrames = ResolveLoop(el);
+        var looping = loopFrames.Count > 0 && track.End > track.Start;
+        // A split text moves piece by piece instead of as one block.
+        var split = moving && el.Type == "text" && el.Text?.Split is { } sp && sp.By is "word" or "letter" ? el.Text.Split : null;
+
+        if (uses.Draw && el.Type == "shape") Property(ctx, css, "--d", "'<number>'", "1");
+        if (uses.Tracking && el.Type == "text") Property(ctx, css, "--ls", "'<length>'", "0px");
+
         switch (el.Type)
         {
             case "text":
-                boundAnything = EmitText(ctx, el, inner, css, cls);
+                boundAnything = EmitText(ctx, el, inner, css, cls, uses.Tracking, looping, split, track, n);
                 break;
             case "shape":
-                EmitShape(ctx, el, inner);
+                EmitShape(ctx, el, inner, uses.Draw);
                 break;
             case "svg":
                 EmitSvg(ctx, el, inner, css, cls);
@@ -256,11 +275,10 @@ public static class DesignCompiler
                 break;
         }
 
-        var track = TrackOf(ctx.Scene, el);
-        var animated = el.Keyframes.Count > 0;
+        var origin = OriginOf(el);
 
         body.Append("<div class=\"e e").Append(n).Append('"');
-        if (animated || el.Pinned)
+        if (animated || el.Pinned || looping)
             body.Append(" data-ts=\"").Append(DesignCss.Num(track.Start)).Append("\" data-te=\"")
                 .Append(DesignCss.Num(track.End)).Append('"');
         if (!string.IsNullOrWhiteSpace(el.Block) && Slug(el.Block) is { Length: > 0 } block)
@@ -269,15 +287,27 @@ public static class DesignCompiler
         // nothing in it is worse than no element at all. Hand-written templates can forget this; a
         // designed one can't.
         if (boundAnything) body.Append(" data-optional");
-        body.Append("><div class=\"a\">").Append(inner).Append("</div></div>");
+        // Only a number reaches the page; the platform's own script does the scrolling.
+        if (el.TapScroll is { } tap && double.IsFinite(tap))
+        {
+            body.Append(" data-scroll-to=\"").Append(DesignCss.Num(DesignCss.Clamp(tap, 0, DesignCatalog.MaxPageHeight)))
+                .Append("\" role=\"button\" tabindex=\"0\"");
+            ctx.TapScroll = true;
+        }
+        body.Append("><div class=\"a\">");
+        if (looping) body.Append("<div class=\"l\">").Append(inner).Append("</div>");
+        else body.Append(inner);
+        body.Append("</div></div>");
 
         // Box. Pinning and coming to the front both animate the box itself (the motion is on .a inside
         // it): a transform on .a can't lift the element above its siblings, only z-index on the box can.
-        var frames = animated && track.End > track.Start ? ResolveFrames(el) : [];
         var lifts = frames.Any(f => f.Lift > 0);
         css.Append(cls).Append("{left:").Append(DesignCss.U(el.X)).Append(";top:").Append(DesignCss.U(el.Y))
             .Append(";width:").Append(DesignCss.U(Math.Max(1, el.W))).Append(";height:")
             .Append(DesignCss.U(Math.Max(1, el.H))).Append(';');
+        // 3D turns need depth from the box they turn inside.
+        if (uses.ThreeD) css.Append("perspective:").Append(DesignCss.U(Math.Max(600, 3 * Math.Max(el.W, el.H)))).Append(';');
+        if (el.TapScroll is { } t2 && double.IsFinite(t2)) css.Append("cursor:pointer;");
         var boxAnimations = new List<string>();
         if (el.Pinned && track.End > track.Start) boxAnimations.Add($"p{n}");
         if (lifts) boxAnimations.Add($"z{n}");
@@ -308,17 +338,25 @@ public static class DesignCompiler
         if (baseTransform != "none") rest.Append("transform:").Append(baseTransform).Append(';');
         var opacity = DesignCss.Clamp(el.Opacity, 0, 1);
         if (opacity < 1) rest.Append("opacity:").Append(DesignCss.Num(opacity)).Append(';');
+        if (origin is not null) rest.Append("transform-origin:").Append(origin).Append(';');
+        if (el.BackfaceHidden) rest.Append("backface-visibility:hidden;");
 
-        if (animated && track.End > track.Start)
+        if (moving)
         {
-            rest.Append("animation:k").Append(n).Append(" 1s linear both;animation-timeline:scroll(root);animation-range:")
-                .Append(DesignCss.U(track.Start)).Append(' ').Append(DesignCss.U(track.End)).Append(';');
+            var range = DesignCss.U(track.Start) + " " + DesignCss.U(track.End);
+            if (split is null)
+                rest.Append("animation:k").Append(n).Append(" 1s linear both;animation-timeline:scroll(root);animation-range:")
+                    .Append(range).Append(';');
             css.Append("@keyframes k").Append(n).Append('{');
-            foreach (var frame in ResolveFrames(el))
+            foreach (var frame in frames)
             {
                 css.Append(DesignCss.Num(frame.T * 100)).Append("%{transform:")
-                    .Append(Transform(frame.X - el.X, frame.Y - el.Y, frame.Rotate, frame.Scale))
+                    .Append(Transform(frame.X - el.X, frame.Y - el.Y, frame.Rotate, frame.Scale, frame.RotateX, frame.RotateY, frame.SkewX, frame.SkewY))
                     .Append(";opacity:").Append(DesignCss.Num(frame.Opacity)).Append(';');
+                if (uses.Blur) css.Append("filter:blur(").Append(DesignCss.U(frame.Blur)).Append(");");
+                if (clipKind is not null) css.Append("clip-path:").Append(ClipCss(clipKind, frame.Clip)).Append(';');
+                if (uses.Draw && el.Type == "shape") css.Append("--d:").Append(DesignCss.Num(frame.Draw)).Append(';');
+                if (uses.Tracking && el.Type == "text") css.Append("--ls:").Append(DesignCss.Num(frame.Tracking)).Append("em;");
                 if (frame.Easing is { } easing && easing != "linear")
                     css.Append("animation-timing-function:").Append(easing).Append(';');
                 css.Append('}');
@@ -326,12 +364,101 @@ public static class DesignCompiler
             css.Append('}');
         }
         if (rest.Length > 0) css.Append(cls).Append(">.a{").Append(rest).Append('}');
+
+        if (looping)
+        {
+            var loop = el.Loop!;
+            css.Append(cls).Append(">.a>.l{position:relative;width:100%;height:100%;");
+            if (origin is not null) css.Append("transform-origin:").Append(origin).Append(';');
+            css.Append("animation:l").Append(n).Append(" 1s linear both;animation-iteration-count:")
+                .Append(Math.Clamp(loop.Repeat, 1, DesignCatalog.MaxLoopRepeat)).Append(';');
+            if (loop.Alternate) css.Append("animation-direction:alternate;");
+            css.Append("animation-timeline:scroll(root);animation-range:").Append(DesignCss.U(track.Start)).Append(' ')
+                .Append(DesignCss.U(track.End)).Append(";}");
+            css.Append("@keyframes l").Append(n).Append('{');
+            foreach (var f in loopFrames)
+            {
+                css.Append(DesignCss.Num(f.T * 100)).Append("%{transform:").Append(Transform(f.X, f.Y, f.Rotate, f.Scale))
+                    .Append(";opacity:").Append(DesignCss.Num(f.Opacity)).Append(';');
+                if (f.Easing is { } easing && easing != "linear")
+                    css.Append("animation-timing-function:").Append(easing).Append(';');
+                css.Append('}');
+            }
+            css.Append('}');
+        }
     }
 
-    private static bool EmitText(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)
+    /// <summary>What an element's motion needs beyond transform and opacity.</summary>
+    private readonly record struct Uses(bool ThreeD, bool Blur, bool Draw, bool Tracking)
+    {
+        public static Uses Of(DesignElement el, IReadOnlyList<ResolvedFrame> frames) => new(
+            frames.Any(f => Math.Abs(f.RotateX) > 0.0005 || Math.Abs(f.RotateY) > 0.0005),
+            frames.Any(f => f.Blur > 0.0005),
+            frames.Count > 0 && el.Keyframes.Any(k => k.Draw is not null),
+            frames.Count > 0 && el.Keyframes.Any(k => k.Tracking is not null));
+    }
+
+    /// <summary>
+    /// Registers an animatable custom property the first time a page needs it. Registered, it
+    /// interpolates smoothly; where @property isn't supported it switches halfway, which still ends right.
+    /// </summary>
+    private static void Property(Context ctx, StringBuilder css, string name, string syntax, string initial)
+    {
+        if (!ctx.Properties.Add(name)) return;
+        css.Append("@property ").Append(name).Append("{syntax:").Append(syntax).Append(";inherits:true;initial-value:")
+            .Append(initial).Append('}');
+    }
+
+    public static string? ClipKindOf(DesignElement el) => el.ClipShape is "inset" or "circle" ? el.ClipShape : null;
+
+    /// <summary><c>x% y%</c> for a pivot that isn't the centre, else null (the CSS default).</summary>
+    private static string? OriginOf(DesignElement el)
+    {
+        if (el.Origin is null) return null;
+        var x = DesignCss.Clamp(el.Origin.X, 0, 1);
+        var y = DesignCss.Clamp(el.Origin.Y, 0, 1);
+        if (Math.Abs(x - 0.5) < 0.0005 && Math.Abs(y - 0.5) < 0.0005) return null;
+        return $"{DesignCss.Num(x * 100)}% {DesignCss.Num(y * 100)}%";
+    }
+
+    /// <summary>The full-coverage clip each kind starts from: nothing cut away.</summary>
+    public static double[] FullClip(string kind) => kind == "circle" ? [71] : [0, 0, 0, 0];
+
+    private static string ClipCss(string kind, double[] clip) => kind == "circle"
+        ? $"circle({DesignCss.Num(clip[0])}% at 50% 50%)"
+        : $"inset({DesignCss.Num(clip[0])}% {DesignCss.Num(clip[1])}% {DesignCss.Num(clip[2])}% {DesignCss.Num(clip[3])}%)";
+
+    /// <summary>A keyframe's clip values for a kind, clamped; null when it sets none.</summary>
+    public static double[]? ClipValues(string kind, List<double>? values)
+    {
+        if (values is null || values.Count == 0) return null;
+        var count = kind == "circle" ? 1 : 4;
+        var max = kind == "circle" ? 150 : 100;
+        return Enumerable.Range(0, count).Select(i => DesignCss.Clamp(i < values.Count ? values[i] : 0, 0, max)).ToArray();
+    }
+
+    private static bool EmitText(
+        Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls,
+        bool tracking, bool looping, DesignSplit? split, DesignTrack track, int n)
     {
         var text = el.Text ?? new DesignText();
         var bound = false;
+        // Split text is written as pieces first, then numbered, since each piece's timing needs the count.
+        var pieces = split is null ? null : new List<(bool Piece, string Html)>();
+        var letters = split?.By == "letter";
+        var count = 0;
+        void Literal(string html)
+        {
+            if (pieces is null) inner.Append(html);
+            else pieces.Add((false, html));
+        }
+        void Piece(string html)
+        {
+            if (pieces is null || count >= DesignCatalog.MaxSplitPieces) { Literal(html); return; }
+            pieces.Add((true, html));
+            count++;
+        }
+
         inner.Append("<p class=\"t\">");
         foreach (var run in text.Runs)
         {
@@ -344,21 +471,81 @@ public static class DesignCompiler
             {
                 var span = VariableSpan(ctx, el, run.Var, "var");
                 if (span is null) continue;
-                inner.Append(open).Append(span).Append(close);
+                // A bound value moves as one piece: a name is one word to the animation.
+                Literal(open.ToString());
+                Piece(span);
+                Literal(close.ToString());
                 bound = true;
             }
             else if (!string.IsNullOrEmpty(run.Text))
             {
-                inner.Append(open).Append(WebUtility.HtmlEncode(Truncate(run.Text))).Append(close);
+                var value = Truncate(run.Text);
+                if (pieces is null)
+                {
+                    inner.Append(open).Append(WebUtility.HtmlEncode(value)).Append(close);
+                    continue;
+                }
+                Literal(open.ToString());
+                foreach (var (word, space) in Words(value))
+                {
+                    if (space) { Literal(WebUtility.HtmlEncode(word)); continue; }
+                    if (!letters) { Piece(WebUtility.HtmlEncode(word)); continue; }
+                    // Letters stay inside their word, so a line never breaks mid-word.
+                    Literal("<span class=\"w\">");
+                    foreach (var rune in word.EnumerateRunes()) Piece(WebUtility.HtmlEncode(rune.ToString()));
+                    Literal("</span>");
+                }
+                Literal(close.ToString());
             }
+        }
+        if (pieces is not null)
+        {
+            var total = track.End - track.Start;
+            var stagger = DesignCss.Clamp(split!.Stagger, 0, 0.9);
+            var length = total * (1 - stagger);
+            var step = count > 1 ? total * stagger / (count - 1) : 0;
+            var i = 0;
+            foreach (var (isPiece, html) in pieces)
+            {
+                if (!isPiece) { inner.Append(html); continue; }
+                var start = track.Start + i * step;
+                inner.Append("<span class=\"p\" style=\"--i:").Append(i).Append("\" data-ts=\"").Append(DesignCss.Num(start))
+                    .Append("\" data-te=\"").Append(DesignCss.Num(start + length)).Append("\">").Append(html).Append("</span>");
+                i++;
+            }
+            css.Append(cls).Append(" .p{display:inline-block;animation:k").Append(n)
+                .Append(" 1s linear both;animation-timeline:scroll(root);animation-range:calc((")
+                .Append(DesignCss.Num(track.Start)).Append(" + var(--i) * ").Append(DesignCss.Num(step)).Append(") * var(--u)) calc((")
+                .Append(DesignCss.Num(track.Start + length)).Append(" + var(--i) * ").Append(DesignCss.Num(step)).Append(") * var(--u))}");
+            if (letters) css.Append(cls).Append(" .w{display:inline-block;white-space:nowrap}");
         }
         inner.Append("</p>");
 
-        css.Append(cls).Append(">.a{display:flex;flex-direction:column;justify-content:")
+        css.Append(cls).Append(">.a");
+        if (looping) css.Append(',').Append(cls).Append(">.a>.l");
+        css.Append("{display:flex;flex-direction:column;justify-content:")
             .Append(text.Style.VAlign switch { "top" => "flex-start", "bottom" => "flex-end", _ => "center" })
             .Append('}');
-        css.Append(cls).Append(" .t{").Append(Typography(ctx, text.Style)).Append('}');
+        css.Append(cls).Append(" .t{").Append(Typography(ctx, text.Style));
+        if (tracking)
+            css.Append("letter-spacing:calc(").Append(DesignCss.Num(DesignCss.Clamp(text.Style.LetterSpacing, -0.2, 2)))
+                .Append("em + var(--ls));");
+        css.Append('}');
         return bound;
+    }
+
+    /// <summary>Text as alternating runs of whitespace and not, the way .NET reads whitespace.</summary>
+    private static IEnumerable<(string Text, bool Space)> Words(string value)
+    {
+        var i = 0;
+        while (i < value.Length)
+        {
+            var space = char.IsWhiteSpace(value[i]);
+            var j = i;
+            while (j < value.Length && char.IsWhiteSpace(value[j]) == space) j++;
+            yield return (value[i..j], space);
+            i = j;
+        }
     }
 
     /// <summary>A <c>data-var</c>/<c>data-href</c> span for a scene path, or null when the path isn't allowed.</summary>
@@ -393,7 +580,7 @@ public static class DesignCompiler
         return sb.ToString();
     }
 
-    private static void EmitShape(Context ctx, DesignElement el, StringBuilder inner)
+    private static void EmitShape(Context ctx, DesignElement el, StringBuilder inner, bool draw = false)
     {
         var shape = el.Shape ?? new DesignShape();
         var w = Math.Max(1, el.W);
@@ -403,28 +590,32 @@ public static class DesignCompiler
         var sw = stroke is null ? 0 : DesignCss.Clamp(shape.StrokeWidth, 0, Math.Min(w, h) / 2);
         var style = new StringBuilder("fill:").Append(fill);
         if (sw > 0) style.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(sw));
+        // Drawing on: the outline is dashed as long as itself (pathLength 1) and the dash slides in with
+        // --d; any fill comes up over the last fifth of the drawing.
+        var len = draw ? " pathLength=\"1\"" : "";
+        if (draw) style.Append(DrawStyle);
         var half = sw / 2;
 
         inner.Append("<svg class=\"s\" viewBox=\"0 0 ").Append(DesignCss.Num(w)).Append(' ').Append(DesignCss.Num(h))
             .Append("\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
         if (shape.Kind == "path" && shape.Path is { } drawn)
         {
-            EmitPath(inner, drawn, fill, stroke, sw, DesignCss.Color(shape.Fill, ctx.ThemeKeys));
+            EmitPath(inner, drawn, fill, stroke, sw, DesignCss.Color(shape.Fill, ctx.ThemeKeys), draw);
             return;
         }
         switch (shape.Kind)
         {
             case "ellipse":
-                inner.Append("<ellipse cx=\"").Append(DesignCss.Num(w / 2)).Append("\" cy=\"").Append(DesignCss.Num(h / 2))
+                inner.Append("<ellipse").Append(len).Append(" cx=\"").Append(DesignCss.Num(w / 2)).Append("\" cy=\"").Append(DesignCss.Num(h / 2))
                     .Append("\" rx=\"").Append(DesignCss.Num(Math.Max(0, w / 2 - half))).Append("\" ry=\"")
                     .Append(DesignCss.Num(Math.Max(0, h / 2 - half))).Append("\" style=\"").Append(style).Append("\"/>");
                 break;
             case "line":
                 var lineStroke = DesignCss.Color(shape.Stroke, ctx.ThemeKeys) ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "currentColor";
                 var lw = DesignCss.Clamp(shape.StrokeWidth <= 0 ? 2 : shape.StrokeWidth, 0.5, h);
-                inner.Append("<line x1=\"0\" y1=\"").Append(DesignCss.Num(h / 2)).Append("\" x2=\"").Append(DesignCss.Num(w))
+                inner.Append("<line").Append(len).Append(" x1=\"0\" y1=\"").Append(DesignCss.Num(h / 2)).Append("\" x2=\"").Append(DesignCss.Num(w))
                     .Append("\" y2=\"").Append(DesignCss.Num(h / 2)).Append("\" style=\"stroke:").Append(lineStroke)
-                    .Append(";stroke-width:").Append(DesignCss.Num(lw)).Append("\"/>");
+                    .Append(";stroke-width:").Append(DesignCss.Num(lw)).Append(draw ? DrawStyle : "").Append("\"/>");
                 break;
             case "polygon":
                 var sides = Math.Clamp(shape.Sides, 3, 12);
@@ -433,11 +624,11 @@ public static class DesignCompiler
                     var angle = -Math.PI / 2 + i * 2 * Math.PI / sides;
                     return $"{DesignCss.Num(w / 2 + (w / 2 - half) * Math.Cos(angle))},{DesignCss.Num(h / 2 + (h / 2 - half) * Math.Sin(angle))}";
                 });
-                inner.Append("<polygon points=\"").Append(string.Join(' ', points)).Append("\" style=\"").Append(style).Append("\"/>");
+                inner.Append("<polygon").Append(len).Append(" points=\"").Append(string.Join(' ', points)).Append("\" style=\"").Append(style).Append("\"/>");
                 break;
             default:
                 var r = DesignCss.Clamp(shape.Radius, 0, Math.Min(w, h) / 2);
-                inner.Append("<rect x=\"").Append(DesignCss.Num(half)).Append("\" y=\"").Append(DesignCss.Num(half))
+                inner.Append("<rect").Append(len).Append(" x=\"").Append(DesignCss.Num(half)).Append("\" y=\"").Append(DesignCss.Num(half))
                     .Append("\" width=\"").Append(DesignCss.Num(Math.Max(0, w - sw))).Append("\" height=\"")
                     .Append(DesignCss.Num(Math.Max(0, h - sw))).Append('"');
                 if (r > 0) inner.Append(" rx=\"").Append(DesignCss.Num(r)).Append('"');
@@ -451,8 +642,11 @@ public static class DesignCompiler
     /// A drawn outline, in its own viewBox so it stretches with the element. Closed contours share one
     /// path (filled, non-zero, so overlapping parts read as one shape); open ones are lines.
     /// </summary>
-    private static void EmitPath(StringBuilder inner, DesignPath path, string fill, string? stroke, double strokeWidth, string? fillColor)
+    private const string DrawStyle = ";stroke-dasharray:1 1;stroke-dashoffset:calc(1 - var(--d));fill-opacity:calc((var(--d) - 0.8) * 5)";
+
+    private static void EmitPath(StringBuilder inner, DesignPath path, string fill, string? stroke, double strokeWidth, string? fillColor, bool draw = false)
     {
+        var len = draw ? " pathLength=\"1\"" : "";
         var pw = DesignCss.Clamp(path.Width, 1, 10000);
         var ph = DesignCss.Clamp(path.Height, 1, 10000);
         // Nested in the element's own <svg>, in the path's space, so it stretches with the element's box.
@@ -462,17 +656,19 @@ public static class DesignCompiler
         var open = PathD(path.Contours.Where(c => !c.Closed));
         if (closed.Length > 0)
         {
-            inner.Append("<path d=\"").Append(closed).Append("\" fill-rule=\"nonzero\" style=\"fill:").Append(fill);
+            inner.Append("<path").Append(len).Append(" d=\"").Append(closed).Append("\" fill-rule=\"nonzero\" style=\"fill:").Append(fill);
             if (strokeWidth > 0 && stroke is not null)
                 inner.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(strokeWidth)).Append(";stroke-linejoin:round");
+            if (draw) inner.Append(DrawStyle);
             inner.Append("\"/>");
         }
         if (open.Length > 0)
         {
             var lineColor = stroke ?? fillColor ?? "currentColor";
             var lineWidth = strokeWidth > 0 ? strokeWidth : 2;
-            inner.Append("<path d=\"").Append(open).Append("\" style=\"fill:none;stroke:").Append(lineColor)
-                .Append(";stroke-width:").Append(DesignCss.Num(lineWidth)).Append(";stroke-linecap:round;stroke-linejoin:round\"/>");
+            inner.Append("<path").Append(len).Append(" d=\"").Append(open).Append("\" style=\"fill:none;stroke:").Append(lineColor)
+                .Append(";stroke-width:").Append(DesignCss.Num(lineWidth)).Append(";stroke-linecap:round;stroke-linejoin:round")
+                .Append(draw ? DrawStyle : "").Append("\"/>");
         }
         inner.Append("</svg></svg>");
     }
@@ -660,16 +856,33 @@ public static class DesignCompiler
         return sb.ToString();
     }
 
-    private static string Transform(double dx, double dy, double rotate, double scale)
+    private static string Transform(double dx, double dy, double rotate, double scale,
+        double rotateX = 0, double rotateY = 0, double skewX = 0, double skewY = 0)
     {
         var parts = new List<string>();
         if (Math.Abs(dx) > 0.0005 || Math.Abs(dy) > 0.0005) parts.Add($"translate({DesignCss.U(dx)},{DesignCss.U(dy)})");
         if (Math.Abs(rotate) > 0.0005) parts.Add($"rotate({DesignCss.Num(DesignCss.Clamp(rotate, -3600, 3600))}deg)");
+        if (Math.Abs(rotateX) > 0.0005) parts.Add($"rotateX({DesignCss.Num(DesignCss.Clamp(rotateX, -3600, 3600))}deg)");
+        if (Math.Abs(rotateY) > 0.0005) parts.Add($"rotateY({DesignCss.Num(DesignCss.Clamp(rotateY, -3600, 3600))}deg)");
+        if (Math.Abs(skewX) > 0.0005) parts.Add($"skewX({DesignCss.Num(DesignCss.Clamp(skewX, -DesignCatalog.MaxSkew, DesignCatalog.MaxSkew))}deg)");
+        if (Math.Abs(skewY) > 0.0005) parts.Add($"skewY({DesignCss.Num(DesignCss.Clamp(skewY, -DesignCatalog.MaxSkew, DesignCatalog.MaxSkew))}deg)");
         if (Math.Abs(scale - 1) > 0.0005) parts.Add($"scale({DesignCss.Num(DesignCss.Clamp(scale, 0, 20))})");
         return parts.Count == 0 ? "none" : string.Join(' ', parts);
     }
 
-    public sealed record ResolvedFrame(double T, double X, double Y, double Rotate, double Scale, double Opacity, string? Easing, int Lift = 0);
+    public sealed record ResolvedFrame(double T, double X, double Y, double Rotate, double Scale, double Opacity, string? Easing, int Lift = 0)
+    {
+        public double RotateX { get; init; }
+        public double RotateY { get; init; }
+        public double SkewX { get; init; }
+        public double SkewY { get; init; }
+        public double Blur { get; init; }
+        public double[] Clip { get; init; } = [];
+        public double Draw { get; init; } = 1;
+        public double Tracking { get; init; }
+    }
+
+    public static IReadOnlyList<ResolvedFrame> ResolveFrames(DesignElement el) => ResolveFrames(el, ClipKindOf(el));
 
     /// <summary>
     /// The keyframes with every property filled in. A property a keyframe doesn't set carries over from
@@ -677,7 +890,7 @@ public static class DesignCompiler
     /// are pinned to 0% and 100% so the element HOLDS them outside its keyframes instead of drifting
     /// from its resting state — the way every animation tool behaves.
     /// </summary>
-    public static IReadOnlyList<ResolvedFrame> ResolveFrames(DesignElement el)
+    public static IReadOnlyList<ResolvedFrame> ResolveFrames(DesignElement el, string? clipKind)
     {
         var frames = el.Keyframes
             .Where(k => !double.IsNaN(k.T))
@@ -686,6 +899,8 @@ public static class DesignCompiler
             .ToList();
         var result = new List<ResolvedFrame>();
         double x = el.X, y = el.Y, rotate = el.Rotate, scale = el.Scale, opacity = DesignCss.Clamp(el.Opacity, 0, 1);
+        double rx = 0, ry = 0, kx = 0, ky = 0, blur = 0, draw = 1, tracking = 0;
+        var clip = clipKind is null ? [] : FullClip(clipKind);
         var lift = 0;
         foreach (var k in frames)
         {
@@ -695,12 +910,52 @@ public static class DesignCompiler
             rotate = k.Rotate ?? rotate;
             scale = k.Scale ?? scale;
             opacity = DesignCss.Clamp(k.Opacity ?? opacity, 0, 1);
+            rx = k.RotateX ?? rx;
+            ry = k.RotateY ?? ry;
+            kx = k.SkewX ?? kx;
+            ky = k.SkewY ?? ky;
+            blur = DesignCss.Clamp(k.Blur ?? blur, 0, DesignCatalog.MaxBlur);
+            draw = DesignCss.Clamp(k.Draw ?? draw, 0, 1);
+            tracking = DesignCss.Clamp(k.Tracking ?? tracking, -0.2, 2);
+            if (clipKind is not null && ClipValues(clipKind, k.Clip) is { } c) clip = c;
             var t = DesignCss.Clamp(k.T, 0, 1);
             // Two keyframes at one position: the later wins, as it does when you drop one on another.
             if (result.Count > 0 && Math.Abs(result[^1].T - t) < 0.00001) result.RemoveAt(result.Count - 1);
-            result.Add(new ResolvedFrame(t, x, y, rotate, scale, opacity, DesignCss.Easing(k.Easing), lift));
+            result.Add(new ResolvedFrame(t, x, y, rotate, scale, opacity, DesignCss.Easing(k.Easing), lift)
+            {
+                RotateX = rx, RotateY = ry, SkewX = kx, SkewY = ky, Blur = blur, Clip = clip, Draw = draw, Tracking = tracking,
+            });
         }
         if (result.Count == 0) return result;
+        if (result[0].T > 0) result.Insert(0, result[0] with { T = 0, Easing = null });
+        if (result[^1].T < 1) result.Add(result[^1] with { T = 1, Easing = null });
+        return result;
+    }
+
+    public sealed record LoopFrame(double T, double X, double Y, double Rotate, double Scale, double Opacity, string? Easing);
+
+    /// <summary>A loop's cycle with every value filled in, from no change at all, held at 0% and 100% like keyframes.</summary>
+    public static IReadOnlyList<LoopFrame> ResolveLoop(DesignElement el)
+    {
+        if (el.Loop is not { } loop || loop.Frames.Count == 0) return [];
+        var frames = loop.Frames
+            .Where(k => !double.IsNaN(k.T))
+            .OrderBy(k => DesignCss.Clamp(k.T, 0, 1))
+            .Take(DesignCatalog.MaxKeyframes)
+            .ToList();
+        var result = new List<LoopFrame>();
+        double x = 0, y = 0, rotate = 0, scale = 1, opacity = 1;
+        foreach (var k in frames)
+        {
+            x = DesignCss.Clamp(k.Dx ?? x, -2000, 2000);
+            y = DesignCss.Clamp(k.Dy ?? y, -2000, 2000);
+            rotate = k.Rotate ?? rotate;
+            scale = k.Scale ?? scale;
+            opacity = DesignCss.Clamp(k.Opacity ?? opacity, 0, 1);
+            var t = DesignCss.Clamp(k.T, 0, 1);
+            if (result.Count > 0 && Math.Abs(result[^1].T - t) < 0.00001) result.RemoveAt(result.Count - 1);
+            result.Add(new LoopFrame(t, x, y, rotate, scale, opacity, DesignCss.Easing(k.Easing)));
+        }
         if (result[0].T > 0) result.Insert(0, result[0] with { T = 0, Easing = null });
         if (result[^1].T < 1) result.Add(result[^1] with { T = 1, Easing = null });
         return result;
@@ -806,10 +1061,19 @@ public static class DesignCompiler
         (function(){var d=document.documentElement;if(!d.classList.contains('ib-fb'))return;
         var els=[].slice.call(document.querySelectorAll('[data-ts]')),u=1,q=0;
         function size(){u=Math.min(window.innerWidth||390,480)/390;}
-        function each(el,p){var list=[el,el.firstElementChild];for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=n.getAnimations();for(var j=0;j<a.length;j++){try{a[j].pause();a[j].currentTime=p*1000;}catch(e){}}}}
+        function each(el,p){var a1=el.firstElementChild,l=a1&&a1.firstElementChild,list=[el,a1];if(l&&l.className==='l')list.push(l);for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=n.getAnimations();for(var j=0;j<a.length;j++){try{var t=a[j].effect&&a[j].effect.getComputedTiming?a[j].effect.getComputedTiming().activeDuration:1000;a[j].pause();a[j].currentTime=p*(t>0&&isFinite(t)?t:1000);}catch(e){}}}}
         function run(){q=0;var y=(window.pageYOffset||0)/u;for(var i=0;i<els.length;i++){var el=els[i],s=+el.getAttribute('data-ts'),e=+el.getAttribute('data-te'),p=e>s?(y-s)/(e-s):0;each(el,p<0?0:p>1?1:p);}}
         function tick(){if(!q)q=requestAnimationFrame(run);}
         size();run();addEventListener('scroll',tick,{passive:true});addEventListener('resize',function(){size();tick();});})();
+        """;
+
+    /// <summary>
+    /// Pages with a tap-to-scroll element: a tap (or Enter) on one scrolls smoothly to its numeric target.
+    /// Platform code — the page only supplies the number.
+    /// </summary>
+    private const string TapScript = """
+        (function(){function go(e){var t=e.target&&e.target.closest&&e.target.closest('[data-scroll-to]');if(!t)return;if(e.type==='keydown'&&e.key!=='Enter'&&e.key!==' ')return;e.preventDefault();var u=Math.min(window.innerWidth||390,480)/390;window.scrollTo({top:(+t.getAttribute('data-scroll-to')||0)*u,behavior:'smooth'});}
+        document.addEventListener('click',go);document.addEventListener('keydown',go);})();
         """;
 
     /// <summary>

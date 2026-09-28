@@ -19,6 +19,7 @@ public static class DesignStarters
         new("wedding", "Classic wedding", "Gold on ivory, a cover photo that holds while the details rise past it."),
         new("birthday", "Birthday party", "Bold colours and confetti shapes that spin as you scroll."),
         new("save-the-date", "Save the date", "One screen, big type, straight to the point."),
+        new("envelope", "Envelope", "A sealed envelope that opens as you scroll — or when the seal is tapped — and the card rises out."),
     ];
 
     public static DesignScene? Create(string id) => id switch
@@ -27,6 +28,7 @@ public static class DesignStarters
         "wedding" => Wedding(),
         "birthday" => Birthday(),
         "save-the-date" => SaveTheDate(),
+        "envelope" => Envelope(),
         _ => null,
     };
 
@@ -227,6 +229,121 @@ public static class DesignStarters
         },
     };
 
+    /// <summary>
+    /// The envelope opener every invitation shop sells, built from ordinary elements: it stays put for its
+    /// first screen and a half of scroll while the seal cracks, the flap folds back (a 3D turn about its
+    /// top edge), and the card rises out and comes to the front. Tapping the seal scrolls there for you.
+    /// </summary>
+    private static DesignScene Envelope()
+    {
+        var s = Scene("#8c2f39", "#f4ece2", "#3b2a2a", "cormorant-garamond", "lora");
+        s.Fonts = ["cormorant-garamond", "lora", "great-vibes", "playfair-display"];
+        s.Theme.Add(new DesignThemeEntry { Key = "script-font", Label = "Script font", Value = "great-vibes" });
+        s.Theme.Add(new DesignThemeEntry { Key = "paper", Label = "Card", Value = "#fffaf2" });
+        s.Theme.Add(new DesignThemeEntry { Key = "gold", Label = "Seal", Value = "#c9a45c" });
+        s.Theme.Add(new DesignThemeEntry { Key = "flap", Label = "Envelope flap", Value = "#6f2330" });
+
+        const double hold = 1100; // scroll the opening plays over, while the envelope stays on screen
+        DesignTrack Opening() => new() { Start = 0, End = hold };
+        DesignElement Pin(DesignElement el) { el.Pinned = true; el.Track = Opening(); return el; }
+        static DesignPath Outline(double w, double h, params (double X, double Y)[] points) => new()
+        {
+            Width = w, Height = h,
+            Contours = [new DesignContour { Closed = true, Points = points.Select(p => new DesignPathPoint { X = p.X, Y = p.Y }).ToList() }],
+        };
+        // The envelope goes once the card is out.
+        List<DesignKeyframe> Leave(double y) => [new() { T = 0.72, Y = y, Opacity = 1 }, new() { T = 0.9, Y = y + 260, Opacity = 0, Easing = "ease-in" }];
+
+        s.Elements.Add(Text("hello", 30, 110, 330, 40, [Lit("You have a letter")], Body(15, color: "theme:accent", uppercase: true, spacing: 0.25)));
+        s.Elements[^1].Track = Opening();
+        s.Elements[^1].Pinned = true;
+        s.Elements[^1].Keyframes = [new() { T = 0, Opacity = 1 }, new() { T = 0.12, Opacity = 0 }];
+
+        var back = Pin(Shape("back", 40, 250, 310, 220, "rect", "theme:accent"));
+        back.Name = "Envelope back";
+        back.Shape!.Radius = 6;
+        back.Keyframes = Leave(250);
+        s.Elements.Add(back);
+
+        var card = Pin(new DesignElement
+        {
+            Id = "card", Type = "group", Name = "Card", X = 60, Y = 275, W = 270, H = 190,
+            Children =
+            [
+                new DesignElement
+                {
+                    Id = "paper", Type = "shape", Name = "Card paper", X = 0, Y = 0, W = 270, H = 190,
+                    Shape = new DesignShape { Kind = "rect", Fill = "theme:paper", Radius = 6, Stroke = "theme:gold", StrokeWidth = 1 },
+                },
+                Text("together", 15, 22, 240, 20, [Lit("Together with their families")], Body(11, color: "theme:accent", uppercase: true, spacing: 0.18)),
+                Text("names", 10, 48, 250, 80, [Var("event.title")], Heading(40, font: "theme:script-font", color: "theme:accent")),
+                Text("when", 15, 136, 240, 26, [Var("event.date")], Body(15)),
+            ],
+        });
+        // Rises out once the flap is open, then comes in front of everything and settles larger.
+        card.Keyframes =
+        [
+            new() { T = 0.34, Y = 275, Scale = 1, Lift = 0 },
+            new() { T = 0.56, Y = 120, Scale = 1, Lift = 0, Easing = "ease-out" },
+            new() { T = 0.6, Lift = 20 },
+            new() { T = 0.78, Y = 250, Scale = 1.22, Lift = 20, Easing = "ease-in-out" },
+        ];
+        s.Elements.Add(card);
+
+        // The front folds in from the top corners, so with the flap shut nothing inside shows.
+        var pocket = Pin(Shape("pocket", 40, 250, 310, 220, "path", "theme:accent"));
+        pocket.Name = "Envelope front";
+        pocket.Shape!.Path = Outline(310, 220, (0, 0), (155, 136), (310, 0), (310, 220), (0, 220));
+        pocket.Keyframes = Leave(250);
+        s.Elements.Add(pocket);
+
+        // The flap: folds back about its top edge. In front while closed, behind the card once open.
+        var flap = Pin(Shape("flap", 40, 250, 310, 150, "path", "theme:flap"));
+        flap.Name = "Envelope flap";
+        flap.Shape!.Path = Outline(310, 150, (0, 0), (310, 0), (155, 150));
+        flap.Origin = new DesignOrigin { X = 0.5, Y = 0 };
+        flap.Keyframes =
+        [
+            new() { T = 0.08, RotateX = 0, Lift = 10, Easing = "ease-in-out" },
+            new() { T = 0.3, RotateX = 180, Lift = 10 },
+            new() { T = 0.31, Lift = 0 },
+            .. Leave(250),
+        ];
+        s.Elements.Add(flap);
+
+        // The wax seal: swells, then breaks. Tapping it plays the opening for you.
+        var seal = Pin(Shape("seal", 165, 368, 60, 60, "ellipse", "theme:gold"));
+        seal.Name = "Seal";
+        seal.TapScroll = hold * 0.62;
+        seal.Keyframes = [new() { T = 0, Scale = 1 }, new() { T = 0.05, Scale = 1.15, Easing = "ease-out" }, new() { T = 0.09, Scale = 0.6, Opacity = 0, Easing = "ease-in" }];
+        s.Elements.Add(seal);
+        var initial = Pin(Text("initial", 165, 380, 60, 36, [Lit("&")], Heading(26, font: "theme:script-font", color: "theme:accent")));
+        initial.Keyframes = [new() { T = 0, Opacity = 1 }, new() { T = 0.06, Opacity = 0 }];
+        s.Elements.Add(initial);
+
+        var hint = Pin(Text("hint", 45, 700, 300, 30, [Lit("Scroll, or tap the seal")], Body(14, italic: true, color: "theme:accent")));
+        hint.Keyframes = [new() { T = 0, Opacity = 1 }, new() { T = 0.08, Opacity = 0 }];
+        hint.Loop = new DesignLoop
+        {
+            Preset = "bob", Repeat = 6,
+            Frames = [new() { T = 0, Easing = "ease-out" }, new() { T = 0.5, Dy = 8, Easing = "ease-in" }, new() { T = 1 }],
+        };
+        s.Elements.Add(hint);
+
+        // After the opening: the details, then the reply.
+        var y = 844 + hold;
+        s.Elements.Add(Text("dear", 30, y + 40, 330, 60, [Lit("Dear "), Var("guest.name"), Lit(",")], Heading(30)));
+        s.Elements.Add(Text("invite", 30, y + 110, 330, 90, [Var("event.description")], Body(16)));
+        s.Elements.Add(Text("where-l", 30, y + 230, 330, 24, [Lit("Where")], Body(13, color: "theme:accent", uppercase: true, spacing: 0.25)));
+        s.Elements.Add(Text("venue", 30, y + 260, 330, 44, [Var("event.venue.name")], Heading(28)));
+        s.Elements.Add(Text("address", 30, y + 306, 330, 44, [Var("event.venue.address")], Body(14)));
+        s.Elements.Add(Link("map", 95, y + 360, 200, 44, "event.venue.mapLink", "Open the map"));
+        s.Elements.Add(Dress("dress", 30, y + 440, 330, 120));
+        s.Elements.Add(Rsvp("rsvp", 80, y + 600, 230, 58));
+        foreach (var el in s.Elements.Where(e => e.Y >= y)) FadeUp(s, el, "rise");
+        return s;
+    }
+
     private static DesignElement Dress(string id, double x, double y, double w, double h) => new()
     {
         Id = id, Type = "dress", Name = "Dress colours", X = x, Y = y, W = w, H = h,
@@ -255,6 +372,9 @@ public static class DesignPresets
     public static void Apply(DesignElement el, DesignCatalog.Preset preset, string slot)
     {
         el.Keyframes.RemoveAll(k => k.Preset == slot);
+        if (preset.Origin is [var ox, var oy]) el.Origin = new DesignOrigin { X = ox, Y = oy };
+        if (preset.ClipShape is not null) el.ClipShape = preset.ClipShape;
+        if (preset.Split is { } split && el.Text is not null) el.Text.Split = new DesignSplit { By = split.By, Stagger = split.Stagger };
         foreach (var f in preset.Frames)
         {
             el.Keyframes.Add(new DesignKeyframe
@@ -265,18 +385,50 @@ public static class DesignPresets
                 Rotate = f.DRotate == 0 ? null : el.Rotate + f.DRotate,
                 Scale = Math.Abs(f.ScaleFactor - 1) < 0.0001 ? null : el.Scale * f.ScaleFactor,
                 Opacity = Math.Abs(f.OpacityFactor - 1) < 0.0001 ? null : el.Opacity * f.OpacityFactor,
+                RotateX = f.RotateX, RotateY = f.RotateY, SkewX = f.SkewX, Blur = f.Blur,
+                Clip = f.Clip?.ToList(), Draw = f.Draw, Tracking = f.Tracking,
                 Easing = f.Easing,
                 Preset = slot,
             });
         }
         // Resting values made explicit at the preset's far end, so carry-forward can't leave an
         // enter's starting offset in place for the rest of the track.
-        var last = el.Keyframes.Where(k => k.Preset == slot).MaxBy(k => slot == "enter" ? k.T : -k.T);
+        var tagged = el.Keyframes.Where(k => k.Preset == slot).ToList();
+        var last = tagged.MaxBy(k => slot == "enter" ? k.T : -k.T);
         if (last is not null)
         {
             last.X ??= el.X; last.Y ??= el.Y; last.Rotate ??= el.Rotate; last.Scale ??= el.Scale; last.Opacity ??= el.Opacity;
+            if (tagged.Any(k => k.RotateX is not null)) last.RotateX ??= 0;
+            if (tagged.Any(k => k.RotateY is not null)) last.RotateY ??= 0;
+            if (tagged.Any(k => k.SkewX is not null)) last.SkewX ??= 0;
+            if (tagged.Any(k => k.Blur is not null)) last.Blur ??= 0;
+            if (tagged.Any(k => k.Draw is not null)) last.Draw ??= 1;
+            if (tagged.Any(k => k.Tracking is not null)) last.Tracking ??= 0;
+            if (tagged.Any(k => k.Clip is not null) && el.ClipShape is { } kind) last.Clip ??= [.. DesignCompiler.FullClip(kind)];
         }
         el.Keyframes.Sort((a, b) => a.T.CompareTo(b.T));
         if (slot == "enter") el.Enter = preset.Id; else el.Exit = preset.Id;
+    }
+
+    /// <summary>A loop preset at a strength: offsets and turns scaled, scale and fade scaled about "no change".</summary>
+    public static void ApplyLoop(DesignElement el, DesignCatalog.LoopPreset preset, double strength = 1, int? repeat = null)
+    {
+        strength = Math.Clamp(strength, 0, 3);
+        if (preset.Origin is [var ox, var oy]) el.Origin = new DesignOrigin { X = ox, Y = oy };
+        el.Loop = new DesignLoop
+        {
+            Preset = preset.Id, Strength = strength, Alternate = preset.Alternate,
+            Repeat = Math.Clamp(repeat ?? preset.Repeat, 1, DesignCatalog.MaxLoopRepeat),
+            Frames = preset.Frames.Select(f => new DesignLoopFrame
+            {
+                T = f.T,
+                Dx = f.Dx == 0 ? null : Math.Round(f.Dx * strength, 3),
+                Dy = f.Dy == 0 ? null : Math.Round(f.Dy * strength, 3),
+                Rotate = f.Rotate == 0 ? null : Math.Round(f.Rotate * strength, 3),
+                Scale = f.Scale == 1 ? null : Math.Round(1 + (f.Scale - 1) * strength, 4),
+                Opacity = f.Opacity == 1 ? null : Math.Round(Math.Clamp(1 - (1 - f.Opacity) * strength, 0, 1), 4),
+                Easing = f.Easing,
+            }).ToList(),
+        };
     }
 }
