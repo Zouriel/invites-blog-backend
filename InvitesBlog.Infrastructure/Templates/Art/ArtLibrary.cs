@@ -112,19 +112,24 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine en
         // Flipbook stills are copies of the art: fewer of them when they don't fit.
         foreach (var frames in new[] { 8, 5, 3, 2 })
         {
-            ArtPlan plan;
-            try { plan = SvgArtConverter.Convert(markup, frames); }
-            catch (ArtRejectedException e) { throw new BusinessRuleException(e.Message, "svg_invalid"); }
-
-            var assets = new List<DesignAssetDto>();
-            var layers = new List<ArtLayerDto>();
-            foreach (var layer in plan.Layers)
+            // Heavy art gets its coordinates rounded harder before it's refused: a unit's tenth is
+            // invisible on a 240-unit-wide illustration.
+            ArtPlan plan = null!;
+            List<DesignAssetDto> assets = null!;
+            for (var coarser = 0; ; coarser++)
             {
-                var asset = engine.ImportAsset(Encoding.UTF8.GetBytes(layer.Svg), (layer.Name is { } n ? $"{title} · {n}" : title) + ".svg", "image/svg+xml");
-                assets.Add(asset);
-                layers.Add(new ArtLayerDto(asset.Id, layer.Name,
-                    layer.Frames.Select(f => new ArtFrameDto(f.T, f.Dx, f.Dy, f.Rotate, f.Scale, f.Opacity)).ToList()));
+                try { plan = SvgArtConverter.Convert(markup, frames, coarser); }
+                catch (ArtRejectedException e) { throw new BusinessRuleException(e.Message, "svg_invalid"); }
+                try
+                {
+                    assets = plan.Layers.Select(layer => engine.ImportAsset(Encoding.UTF8.GetBytes(layer.Svg),
+                        (layer.Name is { } n ? $"{title} · {n}" : title) + ".svg", "image/svg+xml")).ToList();
+                    break;
+                }
+                catch (BusinessRuleException e) when (e.ErrorCode == "svg_too_large" && coarser < 2) { }
             }
+            var layers = plan.Layers.Select((layer, i) => new ArtLayerDto(assets[i].Id, layer.Name,
+                layer.Frames.Select(f => new ArtFrameDto(f.T, f.Dx, f.Dy, f.Rotate, f.Scale, f.Opacity)).ToList())).ToList();
             var bytes = assets.Sum(a => a.Bytes);
             best = new ArtImportDto(title, plan.Width, plan.Height, assets, layers, plan.Animated, plan.Seconds, plan.Loops, credit, bytes);
             var flipbook = plan.Layers.Count(l => l.Frames.Count > 0 && l.Frames.All(f => f.Dx == 0 && f.Dy == 0 && f.Rotate == 0 && f.Scale == 1));

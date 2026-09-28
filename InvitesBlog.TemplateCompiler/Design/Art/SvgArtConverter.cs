@@ -77,7 +77,8 @@ public static partial class SvgArtConverter
         "stroke-width", "gradientTransform", "patternTransform", "fx", "fy",
     };
 
-    public static ArtPlan Convert(string markup, int maxFlipFrames = 8)
+    /// <param name="coarser">Decimal places to drop below the usual precision, for art that's too heavy otherwise.</param>
+    public static ArtPlan Convert(string markup, int maxFlipFrames = 8, int coarser = 0)
     {
         var doc = Load(markup);
         var root = doc.Root!;
@@ -85,7 +86,7 @@ public static partial class SvgArtConverter
         var art = new Art(root, box);
         art.Prepare();
 
-        var decimals = box.W >= 2000 || box.H >= 2000 ? 0 : box.W >= 200 || box.H >= 200 ? 1 : box.W >= 20 || box.H >= 20 ? 2 : 3;
+        var decimals = Math.Max(0, (box.W >= 2000 || box.H >= 2000 ? 0 : box.W >= 200 || box.H >= 200 ? 1 : box.W >= 20 || box.H >= 20 ? 2 : 3) - coarser);
         maxFlipFrames = Math.Clamp(maxFlipFrames, 2, MaxFlipFrames);
 
         var timeline = art.Timeline();

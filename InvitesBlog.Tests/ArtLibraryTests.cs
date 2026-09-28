@@ -22,7 +22,8 @@ namespace InvitesBlog.Tests;
 public class ArtLibraryTests
 {
     private static readonly IConfiguration Config =
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Urls:AssetsBase"] = "/assets" }).Build();
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Urls:AssetsBase"] = "/assets" })
+            .AddEnvironmentVariables().Build(); // ArtLibrary__FreeSvg__Email etc. for the live tests
 
     private static DesignEngine Engine() => new(
         new RawTemplatePackager(Substitute.For<IStorageService>()),
@@ -182,6 +183,7 @@ public class ArtLibraryTests
     [InlineData("openverse", "animated", "flower")]
     [InlineData("openverse", "picture", "wedding")]
     [InlineData("openclipart", "vector", "rose")]
+    [InlineData("freesvg", "vector", "rose")]
     public async Task Live_search_and_import(string source, string kind, string query)
     {
         if (Live() is not var (library, sp)) return;

@@ -255,11 +255,13 @@ public sealed partial class OpenClipartSource(IHttpClientFactory http, ILogger<O
 }
 
 /// <summary>
-/// FreeSVG (freesvg.org): CC0 SVGs, API for registered users only — set <c>ArtLibrary:FreeSvg:Email</c>
-/// and <c>Password</c> for the account the server signs in with. Until then it is listed as unavailable.
+/// FreeSVG (freesvg.org): CC0 SVGs, API for registered users only — <c>ArtLibrary:FreeSvg:Email</c> and
+/// <c>Password</c> are the account the server signs in with; without them it's listed as unavailable.
 ///
-/// <para>The API's response shape isn't documented beyond its routes, so items are read loosely: an
-/// id, a title, and whichever fields hold a preview and the SVG.</para>
+/// <para>Shapes as the API really answers (checked 2026-09-28): search and list are Laravel pages —
+/// <c>{data: [{id, name, slug, thumb_url, download_url, license_title}], meta: {last_page, total}}</c>,
+/// with <c>total</c> a string; <c>/svg/{id}</c> is <c>{data: {…same}}</c>; <c>/svg/{id}/download</c> sends
+/// the SVG as octet-stream, and only with the token (without, it redirects to the site).</para>
 /// </summary>
 public sealed class FreeSvgSource(IHttpClientFactory http, IConfiguration config, ILogger<FreeSvgSource> logger)
     : CachedArtSource(http, logger)
@@ -276,14 +278,14 @@ public sealed class FreeSvgSource(IHttpClientFactory http, IConfiguration config
     public override ArtSourceDto Describe() =>
         new(Id, "FreeSVG", Configured, ["vector"], Configured ? "Public-domain SVGs" : "Needs the server's FreeSVG account");
 
-    private async Task<string> TokenAsync(CancellationToken ct)
+    private async Task<string> TokenAsync(CancellationToken ct, bool renew = false)
     {
         if (!Configured) throw new BusinessRuleException("FreeSVG isn't connected yet.", "art_unavailable");
-        if (token is { } t && t.Expires > DateTimeOffset.UtcNow) return t.Token;
+        if (!renew && token is { } t && t.Expires > DateTimeOffset.UtcNow) return t.Token;
         await TokenLock.WaitAsync(ct);
         try
         {
-            if (token is { } again && again.Expires > DateTimeOffset.UtcNow) return again.Token;
+            if (!renew && token is { } again && again.Expires > DateTimeOffset.UtcNow) return again.Token;
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"{Site}/api/v1/auth/login"))
             {
                 Content = JsonContent.Create(new { email = config["ArtLibrary:FreeSvg:Email"], password = config["ArtLibrary:FreeSvg:Password"] }),
@@ -306,55 +308,63 @@ public sealed class FreeSvgSource(IHttpClientFactory http, IConfiguration config
         }
     }
 
+    /// <summary>A call with the token, signing in again once if it has expired.</summary>
+    private async Task<JsonNode> AuthedJsonAsync(Uri url, CancellationToken ct)
+    {
+        try
+        {
+            return await GetJsonAsync(url, ct, await TokenAsync(ct));
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            return await GetJsonAsync(url, ct, await TokenAsync(ct, renew: true));
+        }
+    }
+
     protected override async Task<ArtSearchResultDto> SearchUncachedAsync(string query, string kind, int page, CancellationToken ct)
     {
         if (kind != "vector") return new ArtSearchResultDto([], page, false, 0);
         var path = string.IsNullOrWhiteSpace(query) ? $"svgs?page={page}" : $"search?query={Uri.EscapeDataString(query)}&page={page}";
-        var json = await GetJsonAsync(new Uri($"{Site}/api/v1/{path}"), ct, await TokenAsync(ct));
-        var list = (json as JsonArray) ?? json["data"] as JsonArray ?? json["svgs"] as JsonArray ?? json["results"] as JsonArray ?? [];
+        var json = await AuthedJsonAsync(new Uri($"{Site}/api/v1/{path}"), ct);
         var items = new List<ArtItemDto>();
-        foreach (var node in list)
+        foreach (var node in json["data"] as JsonArray ?? [])
         {
-            if (node is not JsonObject o) continue;
-            var id = o["id"]?.ToString();
-            if (string.IsNullOrEmpty(id)) continue;
-            var thumb = FindUrl(o, "thumb", "preview", "png", "image");
-            if (thumb is null) continue;
-            items.Add(new ArtItemDto(Id, id, Clean((string?)o["title"] ?? (string?)o["name"]) is { Length: > 0 } t ? t : "SVG",
-                thumb, "svg", null, "CC0", $"{Site}/{Clean((string?)o["slug"])}", null, null, false));
+            if (node is not JsonObject o || Number(o["id"]) is not { } id) continue;
+            if (!PublicDomain(o)) continue;
+            var thumb = (string?)o["thumb_url"];
+            if (thumb is null || !thumb.StartsWith(Site + "/", StringComparison.Ordinal)) continue;
+            items.Add(new ArtItemDto(Id, id.ToString(), Clean((string?)o["name"]) is { Length: > 0 } t ? t : "SVG",
+                thumb, "svg", Clean((string?)o["created_by"], 60) is { Length: > 0 } c && c != "Archive" ? c : null,
+                "CC0", $"{Site}/{Clean((string?)o["slug"])}", null, null, false));
         }
-        var last = (int?)json["last_page"] ?? (int?)json["meta"]?["last_page"];
-        var hasMore = last is { } l ? page < l : items.Count >= 25;
-        return new ArtSearchResultDto(items, page, hasMore, (int?)json["total"] ?? (int?)json["meta"]?["total"]);
+        var last = Number(json["meta"]?["last_page"]);
+        return new ArtSearchResultDto(items, page, last is { } l ? page < l : items.Count >= 25, (int?)Number(json["meta"]?["total"]));
     }
 
     public override async Task<ArtFile> FetchAsync(string id, string? title, CancellationToken ct)
     {
         if (!long.TryParse(id, out var number) || number <= 0) throw new NotFoundException("That picture isn't in the library.", "art_not_found");
+        var o = (await AuthedJsonAsync(new Uri($"{Site}/api/v1/svg/{number}"), ct))["data"] as JsonObject
+                ?? throw new NotFoundException("That picture isn't in the library.", "art_not_found");
+        if (!PublicDomain(o))
+            throw new BusinessRuleException("That picture's licence needs a credit, so it can't go into a template.", "art_license");
         var bearer = await TokenAsync(ct);
-        var json = await GetJsonAsync(new Uri($"{Site}/api/v1/svg/{number}"), ct, bearer);
-        var o = (json["data"] as JsonObject) ?? (json as JsonObject) ?? new JsonObject();
-        var file = FindUrl(o, "svg", "file", "download", "url")
-                   ?? throw new NotFoundException("That picture's file isn't available.", "art_not_found");
-        var url = new Uri(file);
-        if (!url.Host.EndsWith("freesvg.org", StringComparison.OrdinalIgnoreCase))
-            throw new NotFoundException("That picture's file isn't available.", "art_not_found");
-        var (content, type) = await ArtHttp.DownloadAsync(Http, url, MaxDownloadBytes, ct);
-        var name = Clean((string?)o["title"] ?? title, 60);
-        return new ArtFile(content, type, name.Length > 0 ? name : "SVG", new ArtCreditDto("FreeSVG", null, "CC0", $"{Site}/{Clean((string?)o["slug"])}"));
+        var (content, type) = await ArtHttp.DownloadAsync(Http, new Uri($"{Site}/api/v1/svg/{number}/download"), MaxDownloadBytes, ct,
+            r => r.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer));
+        var name = Clean((string?)o["name"] ?? title, 60);
+        return new ArtFile(content, type, name.Length > 0 ? name : "SVG",
+            new ArtCreditDto("FreeSVG", null, "CC0", $"{Site}/{Clean((string?)o["slug"])}"));
     }
 
-    /// <summary>The first string field whose name contains one of the hints and reads as a link, made absolute.</summary>
-    private static string? FindUrl(JsonObject o, params string[] hints)
+    /// <summary>FreeSVG is all CC0, but each item says so itself: take its word, and nothing else.</summary>
+    private static bool PublicDomain(JsonObject o)
     {
-        foreach (var hint in hints)
-            foreach (var (key, value) in o)
-            {
-                if (!key.Contains(hint, StringComparison.OrdinalIgnoreCase) || value is not JsonValue v || !v.TryGetValue<string>(out var s)) continue;
-                if (string.IsNullOrWhiteSpace(s)) continue;
-                if (hint == "svg" && !s.Contains('/') && s.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) s = $"/storage/{s}";
-                if (Uri.TryCreate(new Uri(Site), s, out var abs) && abs.Scheme == Uri.UriSchemeHttps) return abs.ToString();
-            }
-        return null;
+        var license = (string?)o["license_title"];
+        return license is null || license.Contains("Public Domain", StringComparison.OrdinalIgnoreCase)
+                               || license.Contains("CC0", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>A number the API may send as a number or a string ("770").</summary>
+    private static long? Number(JsonNode? node) =>
+        node is JsonValue v && (v.TryGetValue<long>(out var n) || v.TryGetValue<string>(out var s) && long.TryParse(s, out n)) ? n : null;
 }
