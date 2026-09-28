@@ -64,7 +64,7 @@ public class CampaignServiceTests
         _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
         TestData.FreePlans(), _allowance, TestData.PriceBook(),
-        TestData.Empty<MediaBucket>(), TestData.Empty<MediaBucketQr>(), TestData.Empty<EventPhoto>());
+        TestData.Empty<MediaBucket>(), TestData.Empty<MediaBucketQr>(), TestData.Empty<EventPhoto>(), _users);
 
     private InvitesBlog.Application.Plans.ISendingAllowanceService _allowance = TestData.Allowance();
 
@@ -899,6 +899,63 @@ public class CampaignServiceTests
     /// stays what was sent — re-pointing a campaign whose invitations are in inboxes would re-render
     /// every one of them.
     /// </summary>
+    /// <summary>
+    /// The new-event flow picks the template after the event exists, and attaches it with the event's
+    /// own link token — which names no account. A template its owner published privately must still
+    /// attach to that owner's event (it used to answer "no longer available"), and to nobody else's.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task A_private_template_attaches_to_its_owners_event_under_the_link_token(bool ownersEvent, bool attaches)
+    {
+        var designer = Guid.NewGuid();
+        var campaign = new Campaign { Id = Guid.NewGuid(), TemplatePackageUrl = string.Empty, CreatedByUserId = ownersEvent ? designer : Guid.NewGuid() };
+        _currentUser.CampaignId.Returns(campaign.Id);
+        _currentUser.UserId.Returns((Guid?)null);
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { campaign }.AsAsyncQueryable());
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        var template = new Template
+        {
+            Id = Guid.NewGuid(), Version = "1.0.0", PackageUrl = "/assets/templates/private-x@1.0.0/", ManifestJson = "{}",
+            Visibility = TemplateVisibility.Private, DesignerUserId = designer, IsActive = true,
+        };
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        if (attaches)
+        {
+            await Sut().AttachTemplateAsync(campaign.Id, template.Id);
+            Assert.Equal(template.Id, campaign.TemplateId);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<TemplateNotAvailableException>(() => Sut().AttachTemplateAsync(campaign.Id, template.Id));
+            Assert.NotEqual(template.Id, campaign.TemplateId);
+        }
+    }
+
+    /// <summary>One made for someone's email attaches to their event under the link token too, by the owner's email.</summary>
+    [Fact]
+    public async Task A_template_made_for_someone_attaches_to_their_event_under_the_link_token()
+    {
+        var owner = new AppUser { Id = Guid.NewGuid(), Email = "hana@example.com", DisplayName = "Hana" };
+        _users.Query(Arg.Any<bool>()).Returns(new[] { owner }.AsAsyncQueryable());
+        var campaign = new Campaign { Id = Guid.NewGuid(), TemplatePackageUrl = string.Empty, CreatedByUserId = owner.Id };
+        _currentUser.CampaignId.Returns(campaign.Id);
+        _currentUser.UserId.Returns((Guid?)null);
+        _campaigns.Query(Arg.Any<bool>()).Returns(new[] { campaign }.AsAsyncQueryable());
+        _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
+        var template = new Template
+        {
+            Id = Guid.NewGuid(), Version = "1.0.0", PackageUrl = "/assets/templates/for-hana@1.0.0/", ManifestJson = "{}",
+            Visibility = TemplateVisibility.Private, DesignerUserId = Guid.NewGuid(), AssignedEmail = "hana@example.com", IsActive = true,
+        };
+        _templates.GetActiveByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
+
+        await Sut().AttachTemplateAsync(campaign.Id, template.Id);
+        Assert.Equal(template.Id, campaign.TemplateId);
+    }
+
     [Fact]
     public async Task An_event_that_already_has_an_invitation_cannot_be_re_pointed()
     {

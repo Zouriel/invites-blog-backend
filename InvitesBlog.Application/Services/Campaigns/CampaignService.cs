@@ -61,7 +61,8 @@ public sealed class CampaignService(
     IPriceBook prices,
     IRepository<MediaBucket> mediaBuckets,
     IRepository<MediaBucketQr> bucketQrs,
-    IRepository<EventPhoto> eventPhotos) : ICampaignService
+    IRepository<EventPhoto> eventPhotos,
+    IRepository<AppUser> users) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -74,7 +75,7 @@ public sealed class CampaignService(
         // no longer start a campaign (matches the disabled card shown in the gallery).
         if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
             throw new TemplateNotAvailableException();
-        if (!CanUsePrivate(template))
+        if (!await CanUsePrivateAsync(template, currentUser.UserId, ct))
             throw new TemplateNotAvailableException();
 
         var rawToken = TokenService.GenerateToken();
@@ -475,7 +476,9 @@ public sealed class CampaignService(
 
         if (template.Visibility == TemplateVisibility.Dedicated && template.IsUsed)
             throw new TemplateNotAvailableException();
-        if (!CanUsePrivate(template))
+        // Whose event this is decides, not how the call was signed: the new-event flow attaches with
+        // the event's own link token, which names no account, so a private template was always refused.
+        if (!await CanUsePrivateAsync(template, currentUser.UserId ?? campaign.CreatedByUserId, ct))
             throw new TemplateNotAvailableException();
 
         // Frozen exactly as ordinary creation freezes it — the version's structure, the package it
@@ -527,12 +530,20 @@ public sealed class CampaignService(
     /// </summary>
     /// <para>One a designer published for someone else is that person's alone — the designer included
     /// out: matched on the email it was made for.</para>
-    private bool CanUsePrivate(Template template) =>
-        template.Visibility != TemplateVisibility.Private
-        || (template.AssignedEmail is null
-            ? currentUser.UserId is { } me && me == template.DesignerUserId
-            : template.AssignedEmail == (currentUser.Contact ?? "").Trim().ToLowerInvariant())
-        || currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage);
+    /// <para>`account` is who the event is for: the signed-in caller, or the event's owner when the
+    /// call carries only the event's link token.</para>
+    private async Task<bool> CanUsePrivateAsync(Template template, Guid? account, CancellationToken ct)
+    {
+        if (template.Visibility != TemplateVisibility.Private) return true;
+        if (currentUser.HasPermission(Domain.Authorization.Permissions.Templates.Manage)) return true;
+        if (template.AssignedEmail is null) return account is { } me && me == template.DesignerUserId;
+        var email = currentUser.UserId is not null
+            ? currentUser.Contact
+            : account is { } owner
+                ? await users.Query().Where(u => u.Id == owner).Select(u => u.Email).FirstOrDefaultAsync(ct)
+                : null;
+        return template.AssignedEmail == (email ?? "").Trim().ToLowerInvariant();
+    }
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
