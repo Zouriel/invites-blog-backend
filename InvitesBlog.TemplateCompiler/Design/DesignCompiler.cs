@@ -532,7 +532,8 @@ public static class DesignCompiler
         if (pieces is not null)
         {
             var total = track.End - track.Start;
-            var stagger = DesignCss.Clamp(split!.Stagger, 0, 0.9);
+            // One piece (a guest's name moves whole) has nothing to wait for: it plays over the whole bar.
+            var stagger = count > 1 ? DesignCss.Clamp(split!.Stagger, 0, 0.9) : 0;
             var length = total * (1 - stagger);
             var step = count > 1 ? total * stagger / (count - 1) : 0;
             var i = 0;

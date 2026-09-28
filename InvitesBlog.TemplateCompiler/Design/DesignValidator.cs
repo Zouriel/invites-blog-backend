@@ -201,7 +201,8 @@ public static partial class DesignValidator
                 if (split.By is not ("word" or "letter")) Error("split", $"“{label}” splits its text in a way we don't know.", el.Id);
                 if (!double.IsFinite(split.Stagger)) Error("split", $"“{label}” has a stagger that isn't a number.", el.Id);
                 if (el.Keyframes.Count == 0) Warn("split_still", $"“{label}” is split into pieces but doesn't move, so nothing shows it.", el.Id);
-                else if (el.Text.Runs.All(r => !string.IsNullOrWhiteSpace(r.Var)))
+                // Spaces between fields aren't pieces either.
+                else if (el.Text.Runs.All(r => !string.IsNullOrWhiteSpace(r.Var) || string.IsNullOrWhiteSpace(r.Text)))
                     Warn("split_bound", $"“{label}” is all fields, and a field moves as one piece — split some fixed text, or don't split.", el.Id);
             }
             if (el.Keyframes.Count > 0 || el.Pinned || el.Loop is { Frames.Count: > 0 }) animated++;

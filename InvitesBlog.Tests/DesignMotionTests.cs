@@ -171,6 +171,24 @@ public class DesignMotionTests
     }
 
     [Fact]
+    public void Split_text_with_one_piece_plays_its_keyframes_over_the_whole_bar()
+    {
+        // A guest's name split by word is one piece: squeezing its keyframes into (1 - stagger) of the bar
+        // made a fade out at 85-100% happen at 34-40%, nowhere near its diamonds on the timeline.
+        var el = new DesignElement
+        {
+            Id = "t", Type = "text", X = 45, Y = 392, W = 300, H = 60,
+            Track = new DesignTrack { Start = 1171, End = 1941 },
+            Keyframes = [new() { T = 0.122, Opacity = 0.4 }, new() { T = 0.452, Opacity = 1 }, new() { T = 0.85, Opacity = 1 }, new() { T = 1, Opacity = 0 }],
+            Text = new DesignText { Runs = [new() { Var = "guest.name" }, new() { Text = " " }], Split = new DesignSplit { By = "word", Stagger = 0.6 } },
+        };
+        var html = DesignCompiler.Compile(Scene(el));
+        Assert.Contains("animation-range:calc((1171 + var(--i) * 0) * var(--u)) calc((1941 + var(--i) * 0) * var(--u))", html);
+        Assert.Contains("data-ts=\"1171\" data-te=\"1941\"", html);        // And Check says splitting it does nothing: a name and a space are still one piece.
+        Assert.Contains(Check(Scene(el)), i => i.Code == "split_bound");
+    }
+
+    [Fact]
     public void Split_text_that_is_all_fields_is_worth_a_warning()
     {
         var el = new DesignElement
