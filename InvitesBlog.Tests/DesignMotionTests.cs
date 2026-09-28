@@ -10,6 +10,7 @@ public class DesignMotionTests
     private static DesignScene Scene(params DesignElement[] elements)
     {
         var scene = DesignStarters.Create("blank")!;
+        scene.Stage = false; // these test the scrolling page; the stage has its own tests below
         scene.Elements.AddRange(elements);
         scene.Elements.Add(new DesignElement
         {
@@ -235,5 +236,77 @@ public class DesignMotionTests
             Assert.InRange(loop.Frames.Length, 2, DesignCatalog.MaxKeyframes);
             Assert.InRange(loop.Repeat, 1, DesignCatalog.MaxLoopRepeat);
         }
+    }
+
+    // ----- Stage ---------------------------------------------------------------------------------
+
+    private static DesignScene Stage(params DesignElement[] elements)
+    {
+        var scene = Scene(elements);
+        scene.Stage = true;
+        return scene;
+    }
+
+    [Fact]
+    public void New_designs_start_on_a_stage_and_old_ones_keep_scrolling()
+    {
+        Assert.True(DesignStarters.Create("blank")!.Stage);
+        Assert.False(DesignStarters.Create("wedding")!.Stage);
+        Assert.False(DesignScene.Parse("""{"schema":3,"elements":[]}""").Stage);
+        Assert.DoesNotContain("ib-stage", DesignCompiler.Compile(DesignStarters.Create("wedding")!));
+    }
+
+    [Fact]
+    public void On_a_stage_everything_sits_in_a_fixed_layer_and_only_motion_lengthens_the_page()
+    {
+        var still = Box("still");
+        still.Y = 3000; // on a stage its y is on the screen: it doesn't make the page scroll
+        var moving = Box("moving");
+        moving.Track = new DesignTrack { Start = 0, End = 2000 };
+        moving.Keyframes = [new() { T = 0, Opacity = 0 }, new() { T = 1, Opacity = 1 }];
+        var scene = Stage(still, moving);
+        scene.Elements.RemoveAll(e => e.Id == "rsvp");
+        Assert.Equal(2000, scene.ScrollRange());
+        var html = DesignCompiler.Compile(scene);
+        Assert.Contains("<main class=\"ib-page\"><div class=\"ib-stage\">", html);
+        Assert.Contains(".ib-stage{position:fixed;top:0;bottom:0;left:50%;width:calc(390 * var(--u));margin-left:calc(-195 * var(--u));overflow:hidden}", html);
+        Assert.Contains(Check(scene), i => i.Code == "below_screen" && i.ElementId == "still");
+    }
+
+    [Fact]
+    public void On_a_stage_a_bar_is_a_clip_shown_only_while_it_is_scrolled_through()
+    {
+        var el = Box();
+        el.Track = new DesignTrack { Start = 200, End = 600 };
+        var html = DesignCompiler.Compile(Stage(el));
+        Assert.Contains("opacity:0;pointer-events:none;animation:ib-v 1s linear none;animation-timeline:scroll(root);animation-range:calc(200 * var(--u)) calc(600 * var(--u));", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "@keyframes ib-v"));
+
+        // Without a bar of its own it's there the whole time.
+        var always = Box("always");
+        always.Track = null;
+        Assert.DoesNotContain("@keyframes ib-v", DesignCompiler.Compile(Stage(always)));
+    }
+
+    [Fact]
+    public void On_a_stage_what_scrolls_slides_up_as_far_as_the_page_goes_and_pins_mean_nothing()
+    {
+        var scroller = Box("scroller");
+        scroller.Track = null;
+        scroller.Scrolls = true;
+        scroller.Y = 1500;
+        var pinned = Box("pinned");
+        pinned.Pinned = true;
+        pinned.Track = new DesignTrack { Start = 0, End = 300 };
+        var scene = Stage(scroller, pinned);
+        var range = scene.ScrollRange();
+        Assert.Equal(1500 + 100 - 844, range);
+        var html = DesignCompiler.Compile(scene);
+        Assert.Contains($"data-sr=\"{range}\"", html);
+        Assert.Contains($"@keyframes s0{{from{{transform:translateY(0px)}}to{{transform:translateY(calc(-{range} * var(--u)))}}}}", html);
+        Assert.DoesNotContain("@keyframes p", html);
+        // The old-browser driver steps the slide by scroll and hides clips outside their bars.
+        Assert.Contains("m==='ib-v'", html);
+        Assert.Contains("data-sr", html);
     }
 }

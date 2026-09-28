@@ -40,6 +40,14 @@ public sealed class DesignScene
 
     [JsonIgnore] public bool IsSaveTheDate => Kind == "saveTheDate";
 
+    /// <summary>
+    /// Stage mode: things stay where they're put on the screen however far the reader scrolls; only
+    /// motion moves them, and an element with a bar shows only during it — a clip, as in a video
+    /// editor. Elements marked <see cref="DesignElement.Scrolls"/> scroll up with the page as usual.
+    /// Off (the default, and every design made before 2026-09-28): the page scrolls, as it always has.
+    /// </summary>
+    [JsonPropertyName("stage")] public bool Stage { get; set; }
+
     /// <summary>Theme keys, each becoming <c>--ib-{key}</c>. <c>accent</c>, <c>bg</c> and <c>text</c> are required.</summary>
     [JsonPropertyName("theme")] public List<DesignThemeEntry> Theme { get; set; } = new();
 
@@ -99,8 +107,10 @@ public sealed class DesignScene
         foreach (var el in Elements)
         {
             if (!double.IsFinite(el.Y) || !double.IsFinite(el.H)) continue;
+            // On a stage only what scrolls has to be scrolled to; the rest is on screen already.
+            if (Stage && !el.Scrolls) continue;
             var end = el.Y + Math.Max(0, el.H);
-            if (el.Pinned && el.Track is { } t && double.IsFinite(t.Start) && double.IsFinite(t.End) && t.End > t.Start)
+            if (!Stage && el.Pinned && el.Track is { } t && double.IsFinite(t.Start) && double.IsFinite(t.End) && t.End > t.Start)
                 end += t.End - Math.Max(0, t.Start);
             bottom = Math.Max(bottom, end);
         }
@@ -230,6 +240,9 @@ public sealed class DesignElement
 
     /// <summary>Editor-only: not emitted, never affects output.</summary>
     [JsonPropertyName("locked")] public bool Locked { get; set; }
+
+    /// <summary>On a stage (<see cref="DesignScene.Stage"/>), a top-level element that scrolls up with the page.</summary>
+    [JsonPropertyName("scrolls")] public bool Scrolls { get; set; }
 
     // ----- motion extras (2026-09-28) -----
 

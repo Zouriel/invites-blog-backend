@@ -38,7 +38,13 @@ public static class DesignStarters
     /// Truly blank: the page's colours and fonts, and nothing on it. (Check asks for an RSVP button before
     /// it can be published — that's the one thing every invitation needs, and the editor says so.)
     /// </summary>
-    private static DesignScene Blank() => Scene("#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
+    private static DesignScene Blank()
+    {
+        // New designs start on a stage: things stay where they're put until they're animated.
+        var s = Scene("#b08d57", "#fbf7f0", "#2b2622", "playfair-display", "inter");
+        s.Stage = true;
+        return s;
+    }
 
     private static DesignScene Wedding()
     {

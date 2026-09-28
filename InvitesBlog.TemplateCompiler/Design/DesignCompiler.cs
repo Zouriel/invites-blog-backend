@@ -41,6 +41,7 @@ public static class DesignCompiler
     {
         options ??= new DesignCompileOptions();
         var ctx = new Context(scene, options);
+        ctx.Range = scene.ScrollRange();
 
         var body = new StringBuilder();
         var css = new StringBuilder();
@@ -49,8 +50,12 @@ public static class DesignCompiler
         EmitSymbols(ctx, body);
 
         body.Append("<main class=\"ib-page\">");
+        // A stage is a screen-sized layer fixed to the viewport: what's on it stays put while the page
+        // (still as long as its motion) scrolls underneath.
+        if (scene.Stage) body.Append("<div class=\"ib-stage\">");
         foreach (var element in scene.Elements)
-            EmitElement(ctx, element, body, css);
+            EmitElement(ctx, element, body, css, topLevel: true);
+        if (scene.Stage) body.Append("</div>");
         body.Append("</main><div class=\"ib-tail\"></div>");
 
         var html = new StringBuilder();
@@ -145,6 +150,10 @@ public static class DesignCompiler
         public HashSet<string> Properties { get; } = new(StringComparer.Ordinal);
         /// <summary>Some element scrolls the page when tapped: the page needs the tap script.</summary>
         public bool TapScroll;
+        /// <summary>The clip-visibility keyframes are in the stylesheet.</summary>
+        public bool Windows;
+        /// <summary>How far the page scrolls, worked out once.</summary>
+        public double Range;
     }
 
     // ----- Stylesheet head ---------------------------------------------------------------------------
@@ -189,6 +198,9 @@ public static class DesignCompiler
         css.Append(".ib-tail{height:max(0px, calc(100lvh - ")
             .Append(DesignCss.Num(DesignCanvas.ReferenceViewport)).Append(" * var(--u)))}");
         css.Append(".ib-sec{position:absolute;left:0;width:100%}");
+        if (ctx.Scene.Stage)
+            css.Append(".ib-stage{position:fixed;top:0;bottom:0;left:50%;width:").Append(DesignCss.U(DesignCanvas.Width))
+                .Append(";margin-left:").Append(DesignCss.U(-DesignCanvas.Width / 2)).Append(";overflow:hidden}");
         css.Append(".e{position:absolute;margin:0}");
         css.Append(".a{position:relative;width:100%;height:100%;transform-origin:50% 50%}");
         css.Append(".t{margin:0;white-space:pre-wrap;overflow-wrap:break-word}");
@@ -220,7 +232,7 @@ public static class DesignCompiler
 
     // ----- Elements ----------------------------------------------------------------------------------
 
-    private static void EmitElement(Context ctx, DesignElement el, StringBuilder body, StringBuilder css)
+    private static void EmitElement(Context ctx, DesignElement el, StringBuilder body, StringBuilder css, bool topLevel = false)
     {
         if (ctx.Options.HiddenElementIds?.Contains(el.Id) == true) return;
         if (!DesignCatalog.ElementTypes.Contains(el.Type)) return;
@@ -232,6 +244,11 @@ public static class DesignCompiler
 
         var track = TrackOf(ctx.Scene, el);
         var animated = el.Keyframes.Count > 0;
+        var stage = ctx.Scene.Stage;
+        // On a stage: pinning means nothing (everything stays); what scrolls is marked; a bar is a clip.
+        var pinned = el.Pinned && !stage;
+        var scrolling = stage && topLevel && el.Scrolls && ctx.Range > 0;
+        var windowed = stage && el.Track is not null && track.End > track.Start;
         var moving = animated && track.End > track.Start;
         var clipKind = ClipKindOf(el);
         var frames = moving ? ResolveFrames(el, clipKind) : [];
@@ -278,7 +295,7 @@ public static class DesignCompiler
         var origin = OriginOf(el);
 
         body.Append("<div class=\"e e").Append(n).Append('"');
-        if (animated || el.Pinned || looping)
+        if (animated || pinned || looping || windowed || scrolling)
             body.Append(" data-ts=\"").Append(DesignCss.Num(track.Start)).Append("\" data-te=\"")
                 .Append(DesignCss.Num(track.End)).Append('"');
         if (!string.IsNullOrWhiteSpace(el.Block) && Slug(el.Block) is { Length: > 0 } block)
@@ -287,6 +304,7 @@ public static class DesignCompiler
         // nothing in it is worse than no element at all. Hand-written templates can forget this; a
         // designed one can't.
         if (boundAnything) body.Append(" data-optional");
+        if (scrolling) body.Append(" data-sr=\"").Append(DesignCss.Num(ctx.Range)).Append('"');
         // Only a number reaches the page; the platform's own script does the scrolling.
         if (el.TapScroll is { } tap && double.IsFinite(tap))
         {
@@ -308,17 +326,30 @@ public static class DesignCompiler
         // 3D turns need depth from the box they turn inside.
         if (uses.ThreeD) css.Append("perspective:").Append(DesignCss.U(Math.Max(600, 3 * Math.Max(el.W, el.H)))).Append(';');
         if (el.TapScroll is { } t2 && double.IsFinite(t2)) css.Append("cursor:pointer;");
-        var boxAnimations = new List<string>();
-        if (el.Pinned && track.End > track.Start) boxAnimations.Add($"p{n}");
-        if (lifts) boxAnimations.Add($"z{n}");
+        // Outside its bar a clip isn't there at all: hidden, and not in the way of taps.
+        if (windowed) css.Append("opacity:0;pointer-events:none;");
+        var trackRange = DesignCss.U(track.Start) + " " + DesignCss.U(track.End);
+        var boxAnimations = new List<(string Name, string Fill, string Range)>();
+        if (pinned && track.End > track.Start) boxAnimations.Add(($"p{n}", "both", trackRange));
+        if (lifts) boxAnimations.Add(($"z{n}", "both", trackRange));
+        // Fill none: the clip is shown only while its bar is being scrolled through.
+        if (windowed) boxAnimations.Add(("ib-v", "none", trackRange));
+        if (scrolling) boxAnimations.Add(($"s{n}", "both", "0px " + DesignCss.U(ctx.Range)));
         if (boxAnimations.Count > 0)
         {
-            var range = DesignCss.U(track.Start) + " " + DesignCss.U(track.End);
-            css.Append("animation:").Append(string.Join(',', boxAnimations.Select(a => a + " 1s linear both")))
+            css.Append("animation:").Append(string.Join(',', boxAnimations.Select(a => $"{a.Name} 1s linear {a.Fill}")))
                 .Append(";animation-timeline:").Append(string.Join(',', boxAnimations.Select(_ => "scroll(root)")))
-                .Append(";animation-range:").Append(string.Join(',', boxAnimations.Select(_ => range))).Append(';');
+                .Append(";animation-range:").Append(string.Join(',', boxAnimations.Select(a => a.Range))).Append(';');
         }
         css.Append('}');
+        if (windowed && !ctx.Windows)
+        {
+            ctx.Windows = true;
+            css.Append("@keyframes ib-v{from,to{opacity:1;pointer-events:auto}}");
+        }
+        if (scrolling)
+            css.Append("@keyframes s").Append(n).Append("{from{transform:translateY(0px)}to{transform:translateY(")
+                .Append(DesignCss.U(-ctx.Range)).Append(")}}");
         if (lifts)
         {
             css.Append("@keyframes z").Append(n).Append('{');
@@ -326,7 +357,7 @@ public static class DesignCompiler
                 css.Append(DesignCss.Num(frame.T * 100)).Append("%{z-index:").Append(frame.Lift).Append('}');
             css.Append('}');
         }
-        if (el.Pinned && track.End > track.Start)
+        if (pinned && track.End > track.Start)
         {
             css.Append("@keyframes p").Append(n).Append("{from{transform:translateY(0px)}to{transform:translateY(")
                 .Append(DesignCss.U(track.End - track.Start)).Append(")}}");
@@ -1059,10 +1090,10 @@ public static class DesignCompiler
     /// </summary>
     private const string FallbackScript = """
         (function(){var d=document.documentElement;if(!d.classList.contains('ib-fb'))return;
-        var els=[].slice.call(document.querySelectorAll('[data-ts]')),u=1,q=0;
+        var els=[].slice.call(document.querySelectorAll('[data-ts]')),u=1,q=0,y=0;
         function size(){u=Math.min(window.innerWidth||390,480)/390;}
-        function each(el,p){var a1=el.firstElementChild,l=a1&&a1.firstElementChild,list=[el,a1];if(l&&l.className==='l')list.push(l);for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=n.getAnimations();for(var j=0;j<a.length;j++){try{var t=a[j].effect&&a[j].effect.getComputedTiming?a[j].effect.getComputedTiming().activeDuration:1000;a[j].pause();a[j].currentTime=p*(t>0&&isFinite(t)?t:1000);}catch(e){}}}}
-        function run(){q=0;var y=(window.pageYOffset||0)/u;for(var i=0;i<els.length;i++){var el=els[i],s=+el.getAttribute('data-ts'),e=+el.getAttribute('data-te'),p=e>s?(y-s)/(e-s):0;each(el,p<0?0:p>1?1:p);}}
+        function each(el,r){var p=r<0?0:r>1?1:r,a1=el.firstElementChild,l=a1&&a1.firstElementChild,list=[el,a1];if(l&&l.className==='l')list.push(l);for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=n.getAnimations();for(var j=0;j<a.length;j++){try{var t=a[j].effect&&a[j].effect.getComputedTiming?a[j].effect.getComputedTiming().activeDuration:1000,m=a[j].animationName||'',sr=+el.getAttribute('data-sr')||1,v=m==='ib-v'?(r<0?-0.001:r>1?1.001:r):/^s[0-9]/.test(m)?Math.min(1,Math.max(0,y/sr)):p;a[j].pause();a[j].currentTime=v*(t>0&&isFinite(t)?t:1000);}catch(e){}}}}
+        function run(){q=0;y=(window.pageYOffset||0)/u;for(var i=0;i<els.length;i++){var el=els[i],s=+el.getAttribute('data-ts'),e=+el.getAttribute('data-te'),r=e>s?(y-s)/(e-s):0;each(el,r);}}
         function tick(){if(!q)q=requestAnimationFrame(run);}
         size();run();addEventListener('scroll',tick,{passive:true});addEventListener('resize',function(){size();tick();});})();
         """;

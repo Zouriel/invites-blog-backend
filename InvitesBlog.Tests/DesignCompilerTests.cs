@@ -528,8 +528,9 @@ public class DesignCompilerTests
 
     private static DesignScene Minimal()
     {
-        // The blank page, with an RSVP button near the top and one line of text.
+        // The blank page as a scrolling page, with an RSVP button near the top and one line of text.
         var scene = DesignStarters.Create("blank")!;
+        scene.Stage = false;
         scene.Elements.Add(new DesignElement
         {
             Id = "rsvp", Type = "rsvp", X = 95, Y = 1968, W = 200, H = 52,

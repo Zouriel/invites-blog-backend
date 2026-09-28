@@ -158,6 +158,8 @@ public static partial class DesignValidator
                 if (k.Easing is not null && DesignCss.Easing(k.Easing) is null)
                     Error("easing", $"“{label}” uses an easing we don't recognise.", el.Id);
             }
+            if (scene.Stage && depth == 0 && !el.Scrolls && el.Y >= DesignCanvas.ReferenceViewport && el.Keyframes.All(k => k.Y is null or >= DesignCanvas.ReferenceViewport))
+                Warn("below_screen", $"“{label}” sits below the screen and stays there — nobody will see it. Move it up, animate it in, or let it scroll with the page.", el.Id);
             if (el.Keyframes.Any(k => k.Clip is { } c && c.Any(v => !double.IsFinite(v))))
                 Error("keyframe", $"“{label}” has a clip value that isn't a number.", el.Id);
             if (el.ClipShape is not null && DesignCompiler.ClipKindOf(el) is null)
