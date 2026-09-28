@@ -153,7 +153,7 @@ public class DesignMotionTests
         {
             Id = "t", Type = "text", X = 20, Y = 300, W = 300, H = 60,
             Track = new DesignTrack { Start = 100, End = 500 },
-            Keyframes = [new() { T = 0, Opacity = 0, Y = 320 }, new() { T = 1 }],
+            Keyframes = [new() { T = 0, Opacity = 0, Y = 320 }, new() { T = 1, Opacity = 1, Y = 300 }],
             Text = new DesignText
             {
                 Runs = [new() { Text = "Dear " }, new() { Var = "guest.name" }, new() { Text = " hi" }],
@@ -163,9 +163,10 @@ public class DesignMotionTests
         var html = DesignCompiler.Compile(Scene(el));
         // D, e, a, r, the name, h, i: 7 pieces over half the track, each playing the other half.
         Assert.Equal(7, System.Text.RegularExpressions.Regex.Matches(html, "class=\"p\"").Count);
-        Assert.Contains("<span class=\"p\" style=\"--i:4\" data-ts=\"233.333\" data-te=\"433.333\"><span data-var=\"guest.name\"", html);
+        Assert.Contains("<span class=\"p\" style=\"--i:4\" data-ts=\"233.333\" data-te=\"433.333\" data-sg=\"233.333 433.333\"><span data-var=\"guest.name\"", html);
         Assert.Contains("<span class=\"w\"><span class=\"p\" style=\"--i:0\"", html);
-        Assert.Contains(".e0 .p{display:inline-block;animation:k0 1s linear both;animation-timeline:scroll(root);animation-range:calc((100 + var(--i) * 33.333) * var(--u)) calc((300 + var(--i) * 33.333) * var(--u))}", html);
+        Assert.Contains(".e0 .p{display:inline-block;animation:k0_0 1s linear both;animation-timeline:scroll(root);animation-range:calc((100 + var(--i) * 33.333) * var(--u)) calc((300 + var(--i) * 33.333) * var(--u))}", html);
+        Assert.Matches(@"@keyframes k0_0\{0%\{transform:translate[^;]+;opacity:0;\}100%\{transform:none;opacity:1;\}\}", html);
         // The block itself doesn't move; its pieces do.
         Assert.DoesNotContain(".e0>.a{animation", html);
     }
@@ -183,9 +184,33 @@ public class DesignMotionTests
             Text = new DesignText { Runs = [new() { Var = "guest.name" }, new() { Text = " " }], Split = new DesignSplit { By = "word", Stagger = 0.6 } },
         };
         var html = DesignCompiler.Compile(Scene(el));
-        Assert.Contains("animation-range:calc((1171 + var(--i) * 0) * var(--u)) calc((1941 + var(--i) * 0) * var(--u))", html);
-        Assert.Contains("data-ts=\"1171\" data-te=\"1941\"", html);        // And Check says splitting it does nothing: a name and a space are still one piece.
+        // Two changes: the way in between its keyframes (1264.94 → 1519.04), the way out between its (1825.5 → 1941).
+        Assert.Contains("animation:k0_0 1s linear both,k0_1 1s linear forwards;animation-timeline:scroll(root),scroll(root);animation-range:"
+            + "calc((1264.94 + var(--i) * 0) * var(--u)) calc((1519.04 + var(--i) * 0) * var(--u)),calc((1825.5 + var(--i) * 0) * var(--u)) calc((1941 + var(--i) * 0) * var(--u))", html);
+        Assert.Contains("data-ts=\"1264.94\" data-te=\"1941\" data-sg=\"1264.94 1519.04 1825.5 1941\"", html);        // And Check says splitting it does nothing: a name and a space are still one piece.
         Assert.Contains(Check(Scene(el)), i => i.Code == "split_bound");
+    }
+
+    [Fact]
+    public void Split_text_spreads_each_change_between_its_own_keyframes()
+    {
+        // In over 0-10% of the bar, out over 90-100%, three words, spread 0.5: in the way in the first
+        // word starts at 0 and the last lands at 100; in the way out the first leaves at 900, the last
+        // is gone at 1000. Between, every word holds.
+        var el = new DesignElement
+        {
+            Id = "t", Type = "text", X = 20, Y = 300, W = 300, H = 60,
+            Track = new DesignTrack { Start = 0, End = 1000 },
+            Keyframes = [new() { T = 0, Opacity = 0 }, new() { T = 0.1, Opacity = 1 }, new() { T = 0.9, Opacity = 1 }, new() { T = 1, Opacity = 0 }],
+            Text = new DesignText { Runs = [new() { Text = "Save the date" }], Split = new DesignSplit { By = "word", Stagger = 0.5 } },
+        };
+        var html = DesignCompiler.Compile(Scene(el));
+        Assert.Contains("data-sg=\"0 50 900 950\">Save", html);
+        Assert.Contains("data-sg=\"50 100 950 1000\">date", html);
+        Assert.Contains("animation-range:calc((0 + var(--i) * 25) * var(--u)) calc((50 + var(--i) * 25) * var(--u)),calc((900 + var(--i) * 25) * var(--u)) calc((950 + var(--i) * 25) * var(--u))", html);
+        Assert.Contains("@keyframes k0_0{0%{transform:none;opacity:0;}100%{transform:none;opacity:1;}}", html);
+        Assert.Contains("@keyframes k0_1{0%{transform:none;opacity:1;}100%{transform:none;opacity:0;}}", html);
+        Assert.DoesNotContain("@keyframes k0{", html);
     }
 
     [Fact]

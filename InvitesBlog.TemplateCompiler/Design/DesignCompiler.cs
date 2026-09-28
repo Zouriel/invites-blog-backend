@@ -185,7 +185,8 @@ public static class DesignCompiler
 
         var bg = ctx.ThemeKeys.Contains("bg") ? "var(--ib-bg)" : "#ffffff";
         var text = ctx.ThemeKeys.Contains("text") ? "var(--ib-text)" : "#111111";
-        css.Append("html{background:").Append(bg).Append(";overflow-x:hidden}");
+        // No scroll anchoring: text reflowing as it animates must not move the guest's scroll.
+        css.Append("html{background:").Append(bg).Append(";overflow-x:hidden;overflow-anchor:none}");
         css.Append("body{margin:0;color:").Append(text)
             .Append(";-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-font-smoothing:antialiased}");
         css.Append(".ib-page{position:relative;display:block;margin:0 auto;overflow:hidden;width:")
@@ -261,10 +262,25 @@ public static class DesignCompiler
         if (uses.Draw && el.Type == "shape") Property(ctx, css, "--d", "'<number>'", "1");
         if (uses.Tracking && el.Type == "text") Property(ctx, css, "--ls", "'<length>'", "0px");
 
+        // What a frame looks like, as the declarations inside a keyframe.
+        string State(ResolvedFrame frame)
+        {
+            var s = new StringBuilder("transform:")
+                .Append(Transform(frame.X - el.X, frame.Y - el.Y, frame.Rotate, frame.Scale, frame.RotateX, frame.RotateY, frame.SkewX, frame.SkewY))
+                .Append(";opacity:").Append(DesignCss.Num(frame.Opacity)).Append(';');
+            if (uses.Blur) s.Append("filter:blur(").Append(DesignCss.U(frame.Blur)).Append(");");
+            if (clipKind is not null) s.Append("clip-path:").Append(ClipCss(clipKind, frame.Clip)).Append(';');
+            if (uses.Draw && el.Type == "shape") s.Append("--d:").Append(DesignCss.Num(frame.Draw)).Append(';');
+            if (uses.Tracking && el.Type == "text") s.Append("--ls:").Append(DesignCss.Num(frame.Tracking)).Append("em;");
+            return s.ToString();
+        }
+        // Split text plays each change between two keyframes as its own step, pieces spread inside it.
+        var segments = split is null ? null : Segments(frames, State);
+
         switch (el.Type)
         {
             case "text":
-                boundAnything = EmitText(ctx, el, inner, css, cls, uses.Tracking, looping, split, track, n);
+                boundAnything = EmitText(ctx, el, inner, css, cls, uses.Tracking, looping, split, segments, track, n);
                 break;
             case "shape":
                 EmitShape(ctx, el, inner, uses.Draw);
@@ -378,21 +394,29 @@ public static class DesignCompiler
             if (split is null)
                 rest.Append("animation:k").Append(n).Append(" 1s linear both;animation-timeline:scroll(root);animation-range:")
                     .Append(range).Append(';');
-            css.Append("@keyframes k").Append(n).Append('{');
-            foreach (var frame in frames)
+            if (segments is not null)
             {
-                css.Append(DesignCss.Num(frame.T * 100)).Append("%{transform:")
-                    .Append(Transform(frame.X - el.X, frame.Y - el.Y, frame.Rotate, frame.Scale, frame.RotateX, frame.RotateY, frame.SkewX, frame.SkewY))
-                    .Append(";opacity:").Append(DesignCss.Num(frame.Opacity)).Append(';');
-                if (uses.Blur) css.Append("filter:blur(").Append(DesignCss.U(frame.Blur)).Append(");");
-                if (clipKind is not null) css.Append("clip-path:").Append(ClipCss(clipKind, frame.Clip)).Append(';');
-                if (uses.Draw && el.Type == "shape") css.Append("--d:").Append(DesignCss.Num(frame.Draw)).Append(';');
-                if (uses.Tracking && el.Type == "text") css.Append("--ls:").Append(DesignCss.Num(frame.Tracking)).Append("em;");
-                if (frame.Easing is { } easing && easing != "linear")
-                    css.Append("animation-timing-function:").Append(easing).Append(';');
+                for (var j = 0; j < segments.Count; j++)
+                {
+                    var (from, to) = segments[j];
+                    css.Append("@keyframes k").Append(n).Append('_').Append(j).Append("{0%{").Append(State(from));
+                    if (from.Easing is { } easing && easing != "linear")
+                        css.Append("animation-timing-function:").Append(easing).Append(';');
+                    css.Append("}100%{").Append(State(to)).Append("}}");
+                }
+            }
+            else
+            {
+                css.Append("@keyframes k").Append(n).Append('{');
+                foreach (var frame in frames)
+                {
+                    css.Append(DesignCss.Num(frame.T * 100)).Append("%{").Append(State(frame));
+                    if (frame.Easing is { } easing && easing != "linear")
+                        css.Append("animation-timing-function:").Append(easing).Append(';');
+                    css.Append('}');
+                }
                 css.Append('}');
             }
-            css.Append('}');
         }
         if (rest.Length > 0) css.Append(cls).Append(">.a{").Append(rest).Append('}');
 
@@ -468,9 +492,22 @@ public static class DesignCompiler
         return Enumerable.Range(0, count).Select(i => DesignCss.Clamp(i < values.Count ? values[i] : 0, 0, max)).ToArray();
     }
 
+    /// <summary>
+    /// The changes a split text makes, keyframe to keyframe: consecutive frames that differ. A text that
+    /// never changes still gets one step over its whole bar, so its pieces show its state.
+    /// </summary>
+    private static List<(ResolvedFrame From, ResolvedFrame To)> Segments(IReadOnlyList<ResolvedFrame> frames, Func<ResolvedFrame, string> state)
+    {
+        var list = new List<(ResolvedFrame, ResolvedFrame)>();
+        for (var i = 0; i + 1 < frames.Count; i++)
+            if (frames[i + 1].T - frames[i].T > 1e-9 && state(frames[i]) != state(frames[i + 1])) list.Add((frames[i], frames[i + 1]));
+        if (list.Count == 0 && frames.Count > 0) list.Add((frames[0], frames[^1]));
+        return list;
+    }
+
     private static bool EmitText(
         Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls,
-        bool tracking, bool looping, DesignSplit? split, DesignTrack track, int n)
+        bool tracking, bool looping, DesignSplit? split, List<(ResolvedFrame From, ResolvedFrame To)>? segments, DesignTrack track, int n)
     {
         var text = el.Text ?? new DesignText();
         var bound = false;
@@ -529,26 +566,39 @@ public static class DesignCompiler
                 Literal(close.ToString());
             }
         }
-        if (pieces is not null)
+        if (pieces is not null && segments is not null)
         {
+            // Each change between two keyframes is spread over the pieces inside that change: the first
+            // piece starts on the earlier keyframe and the last lands on the later one, so at every
+            // keyframe the whole text is exactly as that keyframe says.
             var total = track.End - track.Start;
-            // One piece (a guest's name moves whole) has nothing to wait for: it plays over the whole bar.
+            // One piece (a guest's name moves whole) has nothing to wait for.
             var stagger = count > 1 ? DesignCss.Clamp(split!.Stagger, 0, 0.9) : 0;
-            var length = total * (1 - stagger);
-            var step = count > 1 ? total * stagger / (count - 1) : 0;
+            var steps = segments.Select(g =>
+            {
+                var from = track.Start + g.From.T * total;
+                var length = (g.To.T - g.From.T) * total;
+                return (From: from, Length: length * (1 - stagger), Step: count > 1 ? length * stagger / (count - 1) : 0);
+            }).ToList();
             var i = 0;
             foreach (var (isPiece, html) in pieces)
             {
                 if (!isPiece) { inner.Append(html); continue; }
-                var start = track.Start + i * step;
-                inner.Append("<span class=\"p\" style=\"--i:").Append(i).Append("\" data-ts=\"").Append(DesignCss.Num(start))
-                    .Append("\" data-te=\"").Append(DesignCss.Num(start + length)).Append("\">").Append(html).Append("</span>");
+                var ranges = steps.Select(g => (Start: g.From + i * g.Step, End: g.From + i * g.Step + g.Length)).ToList();
+                inner.Append("<span class=\"p\" style=\"--i:").Append(i).Append("\" data-ts=\"").Append(DesignCss.Num(ranges[0].Start))
+                    .Append("\" data-te=\"").Append(DesignCss.Num(ranges[^1].End))
+                    .Append("\" data-sg=\"").Append(string.Join(' ', ranges.Select(r => DesignCss.Num(r.Start) + " " + DesignCss.Num(r.End))))
+                    .Append("\">").Append(html).Append("</span>");
                 i++;
             }
-            css.Append(cls).Append(" .p{display:inline-block;animation:k").Append(n)
-                .Append(" 1s linear both;animation-timeline:scroll(root);animation-range:calc((")
-                .Append(DesignCss.Num(track.Start)).Append(" + var(--i) * ").Append(DesignCss.Num(step)).Append(") * var(--u)) calc((")
-                .Append(DesignCss.Num(track.Start + length)).Append(" + var(--i) * ").Append(DesignCss.Num(step)).Append(") * var(--u))}");
+            // The first step fills backwards (how it starts); later ones only once they've begun, and the
+            // latest one begun wins — it's either playing or holding where the next starts.
+            css.Append(cls).Append(" .p{display:inline-block;animation:")
+                .Append(string.Join(',', steps.Select((_, j) => $"k{n}_{j} 1s linear {(j == 0 ? "both" : "forwards")}")))
+                .Append(";animation-timeline:").Append(string.Join(',', steps.Select(_ => "scroll(root)")))
+                .Append(";animation-range:").Append(string.Join(',', steps.Select(g =>
+                    $"calc(({DesignCss.Num(g.From)} + var(--i) * {DesignCss.Num(g.Step)}) * var(--u)) calc(({DesignCss.Num(g.From + g.Length)} + var(--i) * {DesignCss.Num(g.Step)}) * var(--u))")))
+                .Append('}');
             if (letters) css.Append(cls).Append(" .w{display:inline-block;white-space:nowrap}");
         }
         inner.Append("</p>");
@@ -1087,13 +1137,16 @@ public static class DesignCompiler
 
     /// <summary>
     /// Old-browser driver. Pauses the page's own CSS animations and scrubs them by scroll position.
-    /// Reads geometry once per resize, never per scroll.
+    /// Reads geometry once per resize, never per scroll. It keeps every animation it has seen: one
+    /// scrubbed past its end drops out of getAnimations(), and has to come back on scrolling up.
     /// </summary>
     private const string FallbackScript = """
         (function(){var d=document.documentElement;if(!d.classList.contains('ib-fb'))return;
-        var els=[].slice.call(document.querySelectorAll('[data-ts]')),u=1,q=0,y=0;
-        function size(){u=Math.min(window.innerWidth||390,480)/390;}
-        function each(el,r){var p=r<0?0:r>1?1:r,a1=el.firstElementChild,l=a1&&a1.firstElementChild,list=[el,a1];if(l&&l.className==='l')list.push(l);for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=n.getAnimations();for(var j=0;j<a.length;j++){try{var t=a[j].effect&&a[j].effect.getComputedTiming?a[j].effect.getComputedTiming().activeDuration:1000,m=a[j].animationName||'',sr=+el.getAttribute('data-sr')||1,v=m==='ib-v'?(r<0?-0.001:r>1?1.001:r):/^s[0-9]/.test(m)?Math.min(1,Math.max(0,y/sr)):p;a[j].pause();a[j].currentTime=v*(t>0&&isFinite(t)?t:1000);}catch(e){}}}}
+        var els=[].slice.call(document.querySelectorAll('[data-ts]')),u=1,q=0,y=0,b=0;
+        function size(){u=Math.min(window.innerWidth||390,480)/390;b=Math.max(0,(d.scrollHeight-(window.innerHeight||0))/u-0.5);}
+        function seg(g,j){var s=+g[2*j],e=+g[2*j+1];if(y<s)return -0.001;return e>s?Math.min(1,(y-s)/(e-s)):1;}
+        function anims(n){var c=n._ib||(n._ib=[]),a=n.getAnimations();for(var i=0;i<a.length;i++)if(c.indexOf(a[i])<0)c.push(a[i]);return c;}
+        function each(el,r){var p=r<0?0:r>1?1:r,a1=el.firstElementChild,l=a1&&a1.firstElementChild,list=[el,a1],g=el.getAttribute('data-sg');g=g?g.split(' '):null;if(l&&l.className==='l')list.push(l);for(var i=0;i<list.length;i++){var n=list[i];if(!n||!n.getAnimations)continue;var a=anims(n);for(var j=0;j<a.length;j++){try{var t=a[j].effect&&a[j].effect.getComputedTiming?a[j].effect.getComputedTiming().activeDuration:1000,m=a[j].animationName||'',sr=+el.getAttribute('data-sr')||1,v=g&&n===el?seg(g,+m.slice(m.lastIndexOf('_')+1)):m==='ib-v'?(r<0?-0.001:r>=1?(y>=b&&+el.getAttribute('data-te')>=b?0.999:1.001):r):/^s[0-9]/.test(m)?Math.min(1,Math.max(0,y/sr)):p;a[j].pause();a[j].currentTime=v*(t>0&&isFinite(t)?t:1000);}catch(e){}}}}
         function run(){q=0;y=(window.pageYOffset||0)/u;for(var i=0;i<els.length;i++){var el=els[i],s=+el.getAttribute('data-ts'),e=+el.getAttribute('data-te'),r=e>s?(y-s)/(e-s):0;each(el,r);}}
         function tick(){if(!q)q=requestAnimationFrame(run);}
         size();run();addEventListener('scroll',tick,{passive:true});addEventListener('resize',function(){size();tick();});})();
