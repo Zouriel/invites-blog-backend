@@ -187,9 +187,9 @@ public sealed class PathGeometry
         }
     }
 
-    private readonly record struct Token(bool IsNumber, double Value, char Command);
+    internal readonly record struct Token(bool IsNumber, double Value, char Command);
 
-    private static List<Token> Tokenize(string d)
+    internal static List<Token> Tokenize(string d)
     {
         var tokens = new List<Token>();
         var i = 0;

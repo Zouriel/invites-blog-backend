@@ -195,7 +195,8 @@ public class SvgArtConverterTests
         var plan = SvgArtConverter.Convert($"""
             <svg {Ns} viewBox="0 0 500 500"><path d="M1.23456,2.34567L100.98765.5"/></svg>
             """);
-        Assert.Contains("d=\"M1.2,2.3L101 0.5\"", plan.Layers[0].Svg);
+        // Relative, one decimal on a 500-unit drawing, separators only where a number needs one; after a moveto, pairs are linetos.
+        Assert.Equal("m1.2 2.3 99.8-1.8", System.Text.RegularExpressions.Regex.Match(plan.Layers[0].Svg, "d=\"([^\"]*)\"").Groups[1].Value);
     }
 
     [Fact]
@@ -225,6 +226,69 @@ public class SvgArtConverterTests
             "<!DOCTYPE svg [<!ENTITY a \"x\"><!ENTITY b \"&a;&a;&a;\">]><svg xmlns=\"http://www.w3.org/2000/svg\">&b;</svg>"));
         Assert.Throws<ArtRejectedException>(() => SvgArtConverter.Convert(
             "<!DOCTYPE svg [<!ENTITY % p SYSTEM \"http://evil/x\"> %p;]><svg xmlns=\"http://www.w3.org/2000/svg\"/>"));
+    }
+
+    [Theory]
+    [InlineData("M10.123456,20.654321 L30.5,40.25 H50 V60 C70,80 90,100 110,120 S150,160 170,180 Q190,200 210,220 T250,260 A30,40 15 1,0 300,310 Z m5,5 l10,0 l0,10 z", 2)]
+    [InlineData("m0,0 1,1 2,2 .5.5-3-3", 1)]
+    [InlineData("M0 0h100v100h-100zM20 20l60 0 0 60-60 0z", 0)]
+    public void Compacted_path_data_draws_the_same_shape(string d, int decimals)
+    {
+        var compact = PathData.Compact(d, decimals);
+        Assert.True(compact.Length <= d.Length, compact);
+        var a = PathGeometry.Parse(d).Polylines.SelectMany(l => l).ToList();
+        var b = PathGeometry.Parse(compact).Polylines.SelectMany(l => l).ToList();
+        Assert.Equal(a.Count, b.Count);
+        var tolerance = Math.Pow(10, -decimals) * 1.01;
+        for (var i = 0; i < a.Count; i++)
+        {
+            Assert.True(Math.Abs(a[i].X - b[i].X) <= tolerance * 2 && Math.Abs(a[i].Y - b[i].Y) <= tolerance * 2,
+                $"point {i}: {a[i]} vs {b[i]} in {compact}");
+        }
+    }
+
+    [Fact]
+    public void Rounding_does_not_drift_along_a_long_path()
+    {
+        var d = "M0,0" + string.Concat(Enumerable.Range(0, 2000).Select(_ => "l0.3333,0.3333"));
+        var end = PathGeometry.Parse(PathData.Compact(d, 1)).Polylines[0][^1];
+        Assert.Equal(666.6, end.X, 0);
+        Assert.Equal(666.6, end.Y, 0);
+    }
+
+    [Fact]
+    public void A_heavy_svg_is_cut_into_layers_under_the_limit_in_paint_order()
+    {
+        var paths = string.Concat(Enumerable.Range(0, 3000).Select(i =>
+            $"<path fill=\"#{i % 256:x2}0000\" d=\"M{i * 0.123456:0.######},{i * 0.654321:0.######} L{i + 10.123456},{i + 20.654321} L{i + 3.3},{i + 7.7} Z\"/>"));
+        var markup = $"<svg {Ns} viewBox=\"0 0 4000 4000\"><g id=\"layer1\" inkscape=\"x\"><g>{paths}</g></g></svg>";
+        var plan = SvgArtConverter.Convert(markup, maxLayerBytes: 40 * 1024);
+        Assert.True(plan.Layers.Count > 1, $"{plan.Layers.Count} layers");
+        Assert.All(plan.Layers, l => Assert.True(System.Text.Encoding.UTF8.GetByteCount(l.Svg) <= 40 * 1024 || l.Svg.Split("<path").Length == 2));
+        // Every path is in exactly one layer, and the order is kept.
+        var fills = plan.Layers.SelectMany(l => System.Text.RegularExpressions.Regex.Matches(l.Svg, "fill=\"#([0-9a-f]{2})0000\"").Select(m => m.Groups[1].Value)).ToList();
+        Assert.Equal(Enumerable.Range(0, 3000).Select(i => (i % 256).ToString("x2")), fills);
+        // Nothing left of the unused id or the empty nesting.
+        Assert.DoesNotContain("layer1", plan.Layers[0].Svg);
+        Assert.DoesNotContain("<g>", plan.Layers[0].Svg);
+        Assert.All(plan.Layers, l => SvgSanitizer.Sanitize(l.Svg));
+    }
+
+    [Fact]
+    public void Hidden_parts_are_dropped_unless_something_uses_them()
+    {
+        var plan = SvgArtConverter.Convert($"""
+            <svg {Ns} viewBox="0 0 10 10">
+              <g style="display:none"><rect width="1" height="1" fill="#111111"/></g>
+              <rect id="tpl" width="2" height="2" fill="#222222" visibility="hidden"/>
+              <use href="#tpl"/>
+              <circle r="3" fill="#333333"/>
+            </svg>
+            """);
+        var svg = string.Concat(plan.Layers.Select(l => l.Svg));
+        Assert.DoesNotContain("#111111", svg);
+        Assert.Contains("#222222", svg);
+        Assert.Contains("#333333", svg);
     }
 
     [Fact]

@@ -127,6 +127,17 @@ public class ArtLibraryTests
         Assert.Empty(Assert.Single(art.Layers).Frames);
     }
 
+    [Fact]
+    public void A_padded_rendering_is_trimmed_to_what_it_draws()
+    {
+        using var png = new Image<Rgba32>(60, 60, new Rgba32(0, 0, 0, 0));
+        for (var y = 20; y < 40; y++) for (var x = 0; x < 60; x++) png[x, y] = new Rgba32(200, 0, 0, 255);
+        using var ms = new MemoryStream();
+        png.SaveAsPng(ms);
+        using var trimmed = Image.Load(ArtLibrary.TrimTransparent(ms.ToArray()));
+        Assert.Equal((60, 20), (trimmed.Width, trimmed.Height));
+    }
+
     [Theory]
     [InlineData("127.0.0.1", false)]
     [InlineData("10.1.2.3", false)]
@@ -178,12 +189,37 @@ public class ArtLibraryTests
         return (Library(sp.GetServices<IArtSource>()), sp);
     }
 
+    /// <summary>ART_IDS=source:id,… — imports exactly those, logging how each came in.</summary>
+    [Fact]
+    public async Task Live_import_named_items()
+    {
+        var ids = Environment.GetEnvironmentVariable("ART_IDS");
+        if (string.IsNullOrEmpty(ids) || Live() is not var (library, sp)) return;
+        using var _ = sp;
+        var log = new StringBuilder();
+        foreach (var pair in ids.Split(','))
+        {
+            var (source, id) = (pair.Split(':')[0], pair.Split(':')[1]);
+            try
+            {
+                var art = await library.ImportAsync(new ArtImportRequest(source, id, null));
+                log.AppendLine($"{pair}: {(art.AsPicture ? "picture" : "vector")} {art.Width}x{art.Height}, {art.Layers.Count} layers, {art.Bytes / 1024}KB");
+                Assert.DoesNotContain(Place(art), x => x.Severity == "error" && x.Code != "rsvp_required");
+            }
+            catch (AppException e) { log.AppendLine($"{pair}: {e.ErrorCode} {e.Message}"); }
+            await Task.Delay(3000);
+        }
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "art-ids.log"), log.ToString());
+    }
+
     [Theory]
     [InlineData("openverse", "vector", "flower")]
     [InlineData("openverse", "animated", "flower")]
     [InlineData("openverse", "picture", "wedding")]
     [InlineData("openclipart", "vector", "rose")]
     [InlineData("freesvg", "vector", "rose")]
+    [InlineData("freesvg", "vector", "floral frame")]
+    [InlineData("freesvg", "vector", "wedding")]
     public async Task Live_search_and_import(string source, string kind, string query)
     {
         if (Live() is not var (library, sp)) return;
@@ -192,21 +228,64 @@ public class ArtLibraryTests
         Assert.NotEmpty(results.Items);
         var log = new StringBuilder($"{source}/{kind}/{query}: {results.Total} results\n");
         var imported = 0;
-        foreach (var item in results.Items.Where(i => !i.TooLarge).Take(4))
+        var take = int.TryParse(Environment.GetEnvironmentVariable("ART_TAKE"), out var n) ? n : 4;
+        foreach (var item in results.Items.Where(i => !i.TooLarge).Take(take))
         {
             try
             {
                 var art = await library.ImportAsync(new ArtImportRequest(source, item.Id, item.Title));
-                log.AppendLine($"  ok {item.Title}: {art.Layers.Count} layers, animated={art.Animated}, {art.Bytes / 1024}KB");
+                log.AppendLine($"  ok {item.Id} {item.Title}: {art.Layers.Count} layers, animated={art.Animated}, {art.Bytes / 1024}KB");
                 Assert.DoesNotContain(Place(art), x => x.Severity == "error" && x.Code != "rsvp_required");
                 imported++;
             }
             catch (AppException e)
             {
-                log.AppendLine($"  refused {item.Title}: {e.ErrorCode} {e.Message}");
+                log.AppendLine($"  refused {item.Id} {item.Title}: {e.ErrorCode} {e.Message}");
             }
         }
         File.AppendAllText(Path.Combine(Path.GetTempPath(), "art-live.log"), log.ToString());
         Assert.True(imported > 0, log.ToString());
+    }
+}
+
+public class ArtFileProbe
+{
+    /// <summary>ART_DIR=folder of real SVG/GIF files: imports each and logs what came of it. Not run otherwise.</summary>
+    [Fact]
+    public void Import_every_file_in_ART_DIR()
+    {
+        var dir = Environment.GetEnvironmentVariable("ART_DIR");
+        if (string.IsNullOrEmpty(dir)) return;
+        var engine = new DesignEngine(new RawTemplatePackager(Substitute.For<IStorageService>()),
+            new ImageSharpOptimizer(NullLogger<ImageSharpOptimizer>.Instance),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Urls:AssetsBase"] = "/assets" }).Build());
+        var library = new ArtLibrary([], engine, NullLogger<ArtLibrary>.Instance);
+        var log = new StringBuilder();
+        foreach (var file in Directory.GetFiles(dir).Where(f => f.EndsWith(".svg") || f.EndsWith(".gif")).Order())
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var art = library.ImportFile(File.ReadAllBytes(file), Path.GetFileName(file), "");
+                log.AppendLine($"{Path.GetFileName(file)} {new FileInfo(file).Length / 1024}KB → {art.Layers.Count} layers, {art.Bytes / 1024}KB, largest {art.Assets.Max(a => a.Bytes) / 1024}KB ({sw.ElapsedMilliseconds}ms)");
+            }
+            catch (AppException e)
+            {
+                log.AppendLine($"{Path.GetFileName(file)} {new FileInfo(file).Length / 1024}KB → {e.ErrorCode}: {e.Message} ({sw.ElapsedMilliseconds}ms)");
+            }
+        }
+        foreach (var file in Directory.GetFiles(dir).Where(f => f.EndsWith(".svg")).Order())
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var plan = InvitesBlog.TemplateCompiler.Design.Art.SvgArtConverter.Convert(File.ReadAllText(file), 8, 0, 150 * 1024);
+                var convert = sw.ElapsedMilliseconds;
+                var clean = plan.Layers.Sum(l => SvgSanitizer.Sanitize(l.Svg).Document.Length);
+                log.AppendLine($"  timing {Path.GetFileName(file)}: convert {convert}ms, sanitize {sw.ElapsedMilliseconds - convert}ms, raw {plan.Layers.Sum(l => l.Svg.Length) / 1024}KB → clean {clean / 1024}KB in {plan.Layers.Count}");
+            }
+            catch (Exception e) { log.AppendLine($"  timing {Path.GetFileName(file)}: {e.GetType().Name} {e.Message}"); }
+        }
+        File.WriteAllText(Path.Combine(dir, "result.log"), log.ToString());
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -47,6 +48,8 @@ public static partial class SvgArtConverter
     public const int MaxLayers = 16;
     public const int MaxFlipFrames = 10;
     public const double MaxSeconds = 30;
+    /// <summary>Elements per layer, under the sanitiser's node limit with room for text nodes.</summary>
+    public const int MaxLayerNodes = 6000;
     private const double Epsilon = 0.0015;
     private const string Marker = "data-art-k";
 
@@ -78,7 +81,9 @@ public static partial class SvgArtConverter
     };
 
     /// <param name="coarser">Decimal places to drop below the usual precision, for art that's too heavy otherwise.</param>
-    public static ArtPlan Convert(string markup, int maxFlipFrames = 8, int coarser = 0)
+    /// <param name="maxLayerBytes">A layer bigger than this (or with too many elements for the sanitiser) is cut
+    /// into several, in paint order, which stack back into the same picture.</param>
+    public static ArtPlan Convert(string markup, int maxFlipFrames = 8, int coarser = 0, int maxLayerBytes = int.MaxValue)
     {
         var doc = Load(markup);
         var root = doc.Root!;
@@ -89,9 +94,32 @@ public static partial class SvgArtConverter
         var decimals = Math.Max(0, (box.W >= 2000 || box.H >= 2000 ? 0 : box.W >= 200 || box.H >= 200 ? 1 : box.W >= 20 || box.H >= 20 ? 2 : 3) - coarser);
         maxFlipFrames = Math.Clamp(maxFlipFrames, 2, MaxFlipFrames);
 
+        // Renders a segment, cutting it in two (by weight, keeping paint order) while it's too big.
+        void Emit(Segment segment, string? name, IReadOnlyList<ArtFrame> frames, List<ArtLayerPlan> into)
+        {
+            var svg = art.Layer(segment, decimals);
+            if ((Encoding.UTF8.GetByteCount(svg) > maxLayerBytes || svg.Count(c => c == '<') > MaxLayerNodes) && segment.Leaves.Count > 1)
+            {
+                var weights = segment.Leaves.Select(l => (double)l.ToString(SaveOptions.DisableFormatting).Length).ToList();
+                var half = weights.Sum() / 2;
+                var cut = 1;
+                for (double run = weights[0]; cut < weights.Count - 1 && run + weights[cut] <= half; cut++) run += weights[cut];
+                Emit(new Segment { Owner = segment.Owner, Leaves = segment.Leaves[..cut] }, name, frames, into);
+                Emit(new Segment { Owner = segment.Owner, Leaves = segment.Leaves[cut..] }, name, frames, into);
+                return;
+            }
+            into.Add(new ArtLayerPlan(svg, name, frames));
+        }
+
         var timeline = art.Timeline();
         if (timeline is null)
-            return new ArtPlan(box.W, box.H, [new ArtLayerPlan(art.Layer(null, decimals), null, [])], false, 0, 1);
+        {
+            var still = new List<ArtLayerPlan>();
+            if (art.Segments() is { Count: > 0 } parts)
+                foreach (var part in parts) Emit(part, null, [], still);
+            else still.Add(new ArtLayerPlan(art.Layer(null, decimals), null, []));
+            return new ArtPlan(box.W, box.H, still, false, 0, 1);
+        }
 
         var (seconds, loops) = timeline.Value;
         var segments = art.Segments();
@@ -104,9 +132,9 @@ public static partial class SvgArtConverter
         foreach (var segment in segments)
         {
             if (segment.Owner is null)
-                layers.Add(new ArtLayerPlan(art.Layer(segment, decimals), null, []));
+                Emit(segment, null, [], layers);
             else if (art.Moves(segment.Owner))
-                layers.Add(new ArtLayerPlan(art.Layer(segment, decimals), art.NameOf(segment.Owner), art.Motion(segment, seconds)));
+                Emit(segment, art.NameOf(segment.Owner), art.Motion(segment, seconds), layers);
             else
                 layers.AddRange(art.Flipbook(segment, seconds, loops, framesEach, decimals, art.NameOf(segment.Owner)));
         }
@@ -426,7 +454,7 @@ public static partial class SvgArtConverter
                 el.SetAttributeValue(Marker, k++);
                 if ((string?)el.Attribute("id") is { Length: > 0 } id) byId.TryAdd(id, el);
             }
-            if (k > 20_000) throw new ArtRejectedException("That SVG is too complex.");
+            if (k > 100_000) throw new ArtRejectedException("That SVG is too complex.");
 
             sheet = MiniCss.Parse(string.Join('\n', root.Descendants().Where(e => e.Name.LocalName == "style").Select(e => e.Value)));
             InlineStyles();
@@ -1089,16 +1117,23 @@ public static partial class SvgArtConverter
                 foreach (var leaf in segment.Leaves)
                     for (var a = leaf; a is not null; a = a.Parent) keep.Add(keys[a]);
 
+            // Children are rebuilt in one go rather than removed one by one: XNode.Remove walks the
+            // sibling list, so removing thousands of siblings singly is quadratic (10 s on one frame).
             void Prune(XElement el)
             {
-                foreach (var child in el.Elements().ToList())
+                var kept = new List<XNode>();
+                var changed = false;
+                foreach (var node in el.Nodes())
                 {
+                    if (node is not XElement child) { kept.Add(node); continue; }
                     var name = child.Name.LocalName;
-                    if (AnimationTags.Contains(name) || Ignored.Contains(name)) { child.Remove(); continue; }
-                    if (Resources.Contains(name)) continue;
-                    if (segment is not null && !keep.Contains((int)child.Attribute(Marker)!)) { child.Remove(); continue; }
-                    if (!Leaves.Contains(name)) Prune(child);
+                    var drop = AnimationTags.Contains(name) || Ignored.Contains(name)
+                               || !Resources.Contains(name) && segment is not null && !keep.Contains((int)child.Attribute(Marker)!);
+                    if (drop) { changed = true; continue; }
+                    kept.Add(child);
+                    if (!Resources.Contains(name) && !Leaves.Contains(name)) Prune(child);
                 }
+                if (changed) el.ReplaceNodes(kept);
             }
             Prune(clone);
             foreach (var junk in clone.Descendants().Where(e => AnimationTags.Contains(e.Name.LocalName) || Ignored.Contains(e.Name.LocalName)).ToList())
@@ -1120,14 +1155,33 @@ public static partial class SvgArtConverter
                 }
             }
 
+            // What never shows (Inkscape's hidden layers) and nothing animates into view is dead weight —
+            // unless it's drawn elsewhere through <use>.
+            var used = new HashSet<string>(clone.DescendantsAndSelf().SelectMany(References), StringComparer.Ordinal);
+            foreach (var el in clone.Descendants().Where(e => !Resources.Contains(e.Name.LocalName) && !InResource(e)).ToList())
+                if (el.Parent is not null && t is null && Hidden(el) && !Animated(byKey[(int)el.Attribute(Marker)!])
+                    && !el.DescendantsAndSelf().Any(d => (string?)d.Attribute("id") is { } id && used.Contains(id)))
+                    el.Remove();
+
+            if (t is null) MergeRuns(clone);
             PruneUnused(clone);
+            var referenced = new HashSet<string>(clone.DescendantsAndSelf().SelectMany(References), StringComparer.Ordinal);
             foreach (var el in clone.DescendantsAndSelf())
             {
                 el.SetAttributeValue(Marker, null);
                 el.SetAttributeValue("class", null);
+                if ((string?)el.Attribute("id") is { } id && !referenced.Contains(id)) el.SetAttributeValue("id", null);
                 if (decimals >= 0)
                     foreach (var attr in el.Attributes().Where(a => CompactAttributes.Contains(a.Name.LocalName)).ToList())
-                        attr.Value = ArtValues.Compact(attr.Value, attr.Name.LocalName.EndsWith("ransform", StringComparison.Ordinal) ? Math.Max(decimals, 4) : decimals);
+                        attr.Value = attr.Name.LocalName == "d"
+                            ? PathData.Compact(attr.Value, decimals)
+                            : ArtValues.Compact(attr.Value, attr.Name.LocalName.EndsWith("ransform", StringComparison.Ordinal) ? Math.Max(decimals, 4) : decimals);
+            }
+            // Groups that carry nothing are just nesting: lift their children out; empty ones go.
+            foreach (var g in clone.Descendants().Where(e => e.Name.LocalName == "g").Reverse().ToList())
+            {
+                if (!g.HasElements) g.Remove();
+                else if (!g.HasAttributes) g.ReplaceWith(g.Elements());
             }
             clone.SetAttributeValue("viewBox", string.Join(' ', new[] { box.X, box.Y, box.W, box.H }.Select(ArtValues.Format)));
             clone.SetAttributeValue("width", null);
@@ -1135,6 +1189,128 @@ public static partial class SvgArtConverter
             clone.SetAttributeValue("style", null);
             clone.SetAttributeValue("transform", null);
             return clone.ToString(SaveOptions.DisableFormatting);
+        }
+
+        /// <summary>
+        /// Merges runs of neighbouring rectangles and polygons that look the same (every attribute but
+        /// their geometry equal) into one path each. Traced and mosaic art is tens of thousands of these —
+        /// one real frame was 16,000 shapes in 43 runs. Only neighbours merge, so paint order holds; each
+        /// piece is one outline, turned to the same winding, so overlaps can't cut holes under nonzero
+        /// fill; anything whose look depends on being separate (opacity, an id something points at) stays.
+        /// Zero-sized shapes, which draw nothing, go.
+        /// </summary>
+        private static void MergeRuns(XElement root)
+        {
+            foreach (var parent in root.DescendantsAndSelf().Where(e => e.HasElements && !e.Name.LocalName.StartsWith("text", StringComparison.Ordinal)).ToList())
+            {
+                var output = new List<XNode>();
+                var changed = false;
+                var run = new List<(XElement El, string D)>();
+                string? signature = null;
+                void Flush()
+                {
+                    if (run.Count > 1)
+                    {
+                        var first = run[0].El;
+                        output.Add(new XElement(first.Name.Namespace + "path",
+                            first.Attributes().Where(a => !Geometry(a.Name.LocalName) && a.Name.LocalName != "fill-rule"),
+                            new XAttribute("d", string.Concat(run.Select(r => r.D)))));
+                        changed = true;
+                    }
+                    else output.AddRange(run.Select(r => r.El));
+                    run.Clear();
+                    signature = null;
+                }
+                foreach (var node in parent.Nodes())
+                {
+                    // Whitespace between shapes means nothing outside text; it mustn't end a run.
+                    if (node is XText { Value: var text } && string.IsNullOrWhiteSpace(text)) { changed = true; continue; }
+                    if (node is not XElement child) { Flush(); output.Add(node); continue; }
+                    if (Invisible(child)) { changed = true; continue; }
+                    var d = Outline(child);
+                    var sig = d is null ? null : Signature(child);
+                    if (sig is null) { Flush(); output.Add(child); continue; }
+                    if (sig != signature) Flush();
+                    signature = sig;
+                    run.Add((child, d!));
+                }
+                Flush();
+                if (changed) parent.ReplaceNodes(output);
+            }
+        }
+
+        private static bool Geometry(string name) => name is "x" or "y" or "width" or "height" or "points" or "rx" or "ry" or Marker;
+
+        /// <summary>Everything about how a shape looks except where it is, or null when it mustn't merge.</summary>
+        private static string? Signature(XElement el)
+        {
+            var attrs = el.Attributes().Where(a => !Geometry(a.Name.LocalName)).ToList();
+            foreach (var a in attrs)
+            {
+                var name = a.Name.LocalName;
+                if (name is "id" or "opacity" or "fill-opacity" or "stroke-opacity" or "filter" or "mask" or "clip-path") return null;
+                if (name == "style" && (a.Value.Contains("opacity", StringComparison.Ordinal) || a.Value.Contains("filter", StringComparison.Ordinal))) return null;
+                if (name == "fill" && a.Value.Contains("url(", StringComparison.Ordinal)) return null; // a gradient spans each shape's own box
+            }
+            return string.Join('\u0001', attrs.OrderBy(a => a.Name.LocalName, StringComparer.Ordinal).Select(a => a.Name.LocalName + "=" + a.Value));
+        }
+
+        /// <summary>A rectangle or polygon as one outline wound the same way (positive area, y down), or null.</summary>
+        private static string? Outline(XElement el)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            switch (el.Name.LocalName)
+            {
+                case "rect":
+                {
+                    if (el.Attribute("rx") is not null || el.Attribute("ry") is not null) return null;
+                    var w = ArtValues.Number((string?)el.Attribute("width"));
+                    var h = ArtValues.Number((string?)el.Attribute("height"));
+                    if (w is not > 0 || h is not > 0 || ((string?)el.Attribute("width"))!.Contains('%') || ((string?)el.Attribute("height"))!.Contains('%')) return null;
+                    var x = ArtValues.Number((string?)el.Attribute("x")) ?? 0;
+                    var y = ArtValues.Number((string?)el.Attribute("y")) ?? 0;
+                    return string.Create(inv, $"M{x},{y}h{w}v{h}h{-w}z");
+                }
+                case "polygon":
+                {
+                    var n = Affine.Numbers((string?)el.Attribute("points"));
+                    if (n.Count < 6) return null;
+                    var pts = Enumerable.Range(0, n.Count / 2).Select(k => (X: n[2 * k], Y: n[2 * k + 1])).ToList();
+                    double area = 0;
+                    for (var k = 0; k < pts.Count; k++)
+                    {
+                        var (ax, ay) = pts[k];
+                        var (bx, by) = pts[(k + 1) % pts.Count];
+                        area += ax * by - bx * ay;
+                    }
+                    if (area < 0) pts.Reverse();
+                    return "M" + string.Join('L', pts.Select(p => string.Create(inv, $"{p.X},{p.Y}"))) + "z";
+                }
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>A shape with no size draws nothing (traced art is full of r="0" circles).</summary>
+        private static bool Invisible(XElement el)
+        {
+            if (el.HasElements || el.Attribute("id") is not null) return false;
+            double? A(string n) => ArtValues.Number((string?)el.Attribute(n));
+            return el.Name.LocalName switch
+            {
+                "circle" => A("r") is not > 0,
+                "ellipse" => A("rx") is not > 0 || A("ry") is not > 0,
+                "rect" => el.Attribute("width") is not null && A("width") is not > 0 || el.Attribute("height") is not null && A("height") is not > 0,
+                _ => false,
+            };
+        }
+
+        private static bool Hidden(XElement el)
+        {
+            if ((string?)el.Attribute("display") == "none" || (string?)el.Attribute("visibility") == "hidden") return true;
+            var style = (string?)el.Attribute("style");
+            return style is not null && MiniCss.Declarations(style).Any(d =>
+                d.Key == "display" && d.Value == "none" || d.Key == "visibility" && d.Value == "hidden");
         }
 
         /// <summary>Writes an element's animated values at a moment into its attributes and style.</summary>

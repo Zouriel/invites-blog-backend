@@ -17,7 +17,16 @@ namespace InvitesBlog.Infrastructure.Templates.Art;
 public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine engine, ILogger<ArtLibrary> logger) : IArtLibrary
 {
     /// <summary>What one piece of art may add to a page; a published page's hard limit is 800 KB for everything.</summary>
-    public const int BudgetBytes = 360 * 1024;
+    public const int BudgetBytes = 450 * 1024;
+
+    /// <summary>Largest single layer before it's cut in two; the sanitiser's limit is 200 KB and recolouring adds some.</summary>
+    private const int LayerBytes = 150 * 1024;
+
+    /// <summary>
+    /// Files fetched recently, by source and id: a designer trying the same art twice, or a library
+    /// that rate-limits hard (FreeSVG answers 429 after a few downloads), shouldn't cost another download.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset At, ArtFile File)> Recent = new();
     private const int MaxGifFrames = 12;
 
     private static readonly string[] Kinds = ["vector", "animated", "picture"];
@@ -45,8 +54,32 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine en
         var s = Find(request.Source);
         if (!s.Describe().Available) throw new BusinessRuleException($"{s.Describe().Name} isn't connected yet.", "art_unavailable");
         if (string.IsNullOrWhiteSpace(request.Id) || request.Id.Length > 64) throw new NotFoundException("That picture isn't in the library.", "art_not_found");
-        var file = await Limited(s.Describe().Name, FetchTimeout, ct, token => s.FetchAsync(request.Id.Trim(), request.Title, token));
-        return Build(file.Content, file.ContentType, file.Title, file.Credit);
+        var id = request.Id.Trim();
+        var key = $"{s.Id}:{id}";
+        if (!Recent.TryGetValue(key, out var hit) || DateTimeOffset.UtcNow - hit.At > TimeSpan.FromMinutes(30))
+        {
+            var fetched = await Limited(s.Describe().Name, FetchTimeout, ct, token => s.FetchAsync(id, request.Title, token));
+            if (Recent.Sum(r => (long)r.Value.File.Content.Length) > 64 * 1024 * 1024) Recent.Clear();
+            Recent[key] = hit = (DateTimeOffset.UtcNow, fetched);
+        }
+        var file = hit.File;
+        try
+        {
+            return Build(file.Content, file.ContentType, file.Title, file.Credit);
+        }
+        catch (BusinessRuleException e) when (LooksSvg(file.Content, file.ContentType)
+                                              && e.ErrorCode is "svg_too_large" or "svg_invalid" or "art_too_large")
+        {
+            // Too detailed to embed as a vector: the library's own picture of it looks the same, and a
+            // picture is shrunk to fit. Only its colours can't be changed afterwards.
+            var picture = await Limited(s.Describe().Name, FetchTimeout, ct, token => s.FetchPictureAsync(id, token));
+            if (picture is not { } p || ImageSniffer.Detect(p.Content) is not ("image/png" or "image/jpeg" or "image/webp")) throw;
+            logger.LogInformation("Art {Key} imported as a picture ({Reason})", key, e.ErrorCode);
+            var content = TrimTransparent(p.Content);
+            var still = engine.ImportAsset(content, file.Title + Extension(content), ImageSniffer.Detect(content)!);
+            return new ArtImportDto(file.Title, still.Width, still.Height, [still], [new ArtLayerDto(still.Id, null, [])],
+                false, 0, 1, file.Credit, still.Bytes, AsPicture: true);
+        }
     }
 
     /// <summary>
@@ -89,6 +122,44 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine en
         return new ArtImportDto(title, still.Width, still.Height, [still], [new ArtLayerDto(still.Id, null, [])], false, 0, 1, credit, still.Bytes);
     }
 
+    /// <summary>
+    /// A picture cut down to where it isn't fully transparent. Libraries pad their renderings to a
+    /// square (FreeSVG sends a 3:2 frame on a 600×600 canvas), which would make the element the wrong shape.
+    /// </summary>
+    public static byte[] TrimTransparent(byte[] content)
+    {
+        try
+        {
+            using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(content);
+            int minX = image.Width, minY = image.Height, maxX = -1, maxY = -1;
+            image.ProcessPixelRows(rows =>
+            {
+                for (var y = 0; y < rows.Height; y++)
+                {
+                    var row = rows.GetRowSpan(y);
+                    for (var x = 0; x < row.Length; x++)
+                    {
+                        if (row[x].A <= 8) continue;
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            });
+            if (maxX < 0 || minX == 0 && minY == 0 && maxX == image.Width - 1 && maxY == image.Height - 1) return content;
+            var box = new SixLabors.ImageSharp.Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+            SixLabors.ImageSharp.Processing.ProcessingExtensions.Mutate(image, x => SixLabors.ImageSharp.Processing.CropExtensions.Crop(x, box));
+            using var ms = new MemoryStream();
+            SixLabors.ImageSharp.ImageExtensions.SaveAsPng(image, ms);
+            return ms.ToArray();
+        }
+        catch (SixLabors.ImageSharp.ImageFormatException)
+        {
+            return content;
+        }
+    }
+
     private static string Extension(byte[] content) => ImageSniffer.Detect(content) switch
     {
         "image/png" => ".png",
@@ -116,17 +187,22 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine en
             // invisible on a 240-unit-wide illustration.
             ArtPlan plan = null!;
             List<DesignAssetDto> assets = null!;
-            for (var coarser = 0; ; coarser++)
+            for (var coarser = 0; coarser <= 2; coarser++)
             {
-                try { plan = SvgArtConverter.Convert(markup, frames, coarser); }
+                ArtPlan attemptPlan;
+                try { attemptPlan = SvgArtConverter.Convert(markup, frames, coarser, LayerBytes); }
                 catch (ArtRejectedException e) { throw new BusinessRuleException(e.Message, "svg_invalid"); }
+                List<DesignAssetDto> attempt;
                 try
                 {
-                    assets = plan.Layers.Select(layer => engine.ImportAsset(Encoding.UTF8.GetBytes(layer.Svg),
+                    attempt = attemptPlan.Layers.Select(layer => engine.ImportAsset(Encoding.UTF8.GetBytes(layer.Svg),
                         (layer.Name is { } n ? $"{title} · {n}" : title) + ".svg", "image/svg+xml")).ToList();
-                    break;
                 }
-                catch (BusinessRuleException e) when (e.ErrorCode == "svg_too_large" && coarser < 2) { }
+                catch (BusinessRuleException e) when (e.ErrorCode is "svg_too_large" or "svg_invalid" && coarser < 2) { continue; }
+                var improved = assets is null || attempt.Sum(a => a.Bytes) < assets.Sum(a => a.Bytes) * 0.97;
+                if (improved) (plan, assets) = (attemptPlan, attempt);
+                // Over budget: rounding harder may bring it in; once it stops helping, stop.
+                if (assets.Sum(a => a.Bytes) <= BudgetBytes || !improved) break;
             }
             var layers = plan.Layers.Select((layer, i) => new ArtLayerDto(assets[i].Id, layer.Name,
                 layer.Frames.Select(f => new ArtFrameDto(f.T, f.Dx, f.Dy, f.Rotate, f.Scale, f.Opacity)).ToList())).ToList();

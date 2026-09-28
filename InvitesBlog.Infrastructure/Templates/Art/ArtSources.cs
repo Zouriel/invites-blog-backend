@@ -22,6 +22,12 @@ public interface IArtSource
     ArtSourceDto Describe();
     Task<ArtSearchResultDto> SearchAsync(string query, string kind, int page, CancellationToken ct);
     Task<ArtFile> FetchAsync(string id, string? title, CancellationToken ct);
+
+    /// <summary>
+    /// The library's own raster rendering of an item, for a vector too detailed to embed. Null when the
+    /// library has none.
+    /// </summary>
+    Task<(byte[] Content, string ContentType)?> FetchPictureAsync(string id, CancellationToken ct);
 }
 
 /// <summary>Search results are cached briefly: typing, paging back and a second designer searching "roses" all hit the same pages.</summary>
@@ -36,6 +42,8 @@ public abstract class CachedArtSource(IHttpClientFactory http, ILogger logger) :
     public abstract string Id { get; }
     public abstract ArtSourceDto Describe();
     public abstract Task<ArtFile> FetchAsync(string id, string? title, CancellationToken ct);
+    public virtual Task<(byte[] Content, string ContentType)?> FetchPictureAsync(string id, CancellationToken ct) =>
+        Task.FromResult<(byte[], string)?>(null);
     protected abstract Task<ArtSearchResultDto> SearchUncachedAsync(string query, string kind, int page, CancellationToken ct);
 
     public async Task<ArtSearchResultDto> SearchAsync(string query, string kind, int page, CancellationToken ct)
@@ -169,12 +177,21 @@ public sealed class OpenverseSource(IHttpClientFactory http, IConfiguration conf
 
     private static string LicenseLabel(string? license) => license == "pdm" ? "Public domain" : "CC0";
 
+    public override async Task<(byte[] Content, string ContentType)?> FetchPictureAsync(string id, CancellationToken ct)
+    {
+        if (!Guid.TryParse(id, out var guid)) return null;
+        var detail = await GetJsonAsync(new Uri($"{Api}images/{guid}/"), ct, await TokenAsync(ct));
+        if ((string?)detail["license"] is not ("cc0" or "pdm")) return null;
+        var thumb = WikimediaThumb((string?)detail["url"], 1280);
+        return thumb is null ? null : await ArtHttp.DownloadAsync(Http, new Uri(thumb), MaxDownloadBytes, ct);
+    }
+
     /// <summary>
     /// Wikimedia's own preview for a Commons file. Openverse can't thumbnail an SVG (it answers 424), and
     /// most of its SVGs are on Commons, which renders any file as a PNG at its standard widths — 250px
     /// is one; other widths are refused.
     /// </summary>
-    public static string? WikimediaThumb(string? url)
+    public static string? WikimediaThumb(string? url, int width = 250)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Host != "upload.wikimedia.org") return null;
         var parts = uri.AbsolutePath.Split('/');
@@ -183,7 +200,7 @@ public sealed class OpenverseSource(IHttpClientFactory http, IConfiguration conf
         var name = parts[5];
         var png = name.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".tif", StringComparison.OrdinalIgnoreCase)
                   || name.EndsWith(".tiff", StringComparison.OrdinalIgnoreCase) ? ".png" : "";
-        return $"https://upload.wikimedia.org/wikipedia/{parts[2]}/thumb/{parts[3]}/{parts[4]}/{name}/250px-{name}{png}";
+        return $"https://upload.wikimedia.org/wikipedia/{parts[2]}/thumb/{parts[3]}/{parts[4]}/{name}/{width}px-{name}{png}";
     }
 
     public override async Task<ArtFile> FetchAsync(string id, string? title, CancellationToken ct)
@@ -252,6 +269,11 @@ public sealed partial class OpenClipartSource(IHttpClientFactory http, ILogger<O
         return new ArtFile(content, type, name.Length > 0 ? name : "Clip art",
             new ArtCreditDto("Openclipart", null, "Public domain", $"{Site}/detail/{number}"));
     }
+
+    public override async Task<(byte[] Content, string ContentType)?> FetchPictureAsync(string id, CancellationToken ct) =>
+        long.TryParse(id, out var number) && number > 0
+            ? await ArtHttp.DownloadAsync(Http, new Uri($"{Site}/image/1600px/{number}"), MaxDownloadBytes, ct)
+            : null;
 }
 
 /// <summary>
@@ -292,6 +314,8 @@ public sealed class FreeSvgSource(IHttpClientFactory http, IConfiguration config
             };
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var response = await Http.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                throw new BusinessRuleException("FreeSVG is busy — try again in a minute.", "art_busy");
             var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
             var access = (string?)body?["token"];
             if (!response.IsSuccessStatusCode || access is null)
@@ -354,6 +378,14 @@ public sealed class FreeSvgSource(IHttpClientFactory http, IConfiguration config
         var name = Clean((string?)o["name"] ?? title, 60);
         return new ArtFile(content, type, name.Length > 0 ? name : "SVG",
             new ArtCreditDto("FreeSVG", null, "CC0", $"{Site}/{Clean((string?)o["slug"])}"));
+    }
+
+    public override async Task<(byte[] Content, string ContentType)?> FetchPictureAsync(string id, CancellationToken ct)
+    {
+        if (!long.TryParse(id, out var number) || number <= 0) return null;
+        var bearer = await TokenAsync(ct);
+        return await ArtHttp.DownloadAsync(Http, new Uri($"{Site}/api/v1/svg/{number}/png"), MaxDownloadBytes, ct,
+            r => r.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer));
     }
 
     /// <summary>FreeSVG is all CC0, but each item says so itself: take its word, and nothing else.</summary>

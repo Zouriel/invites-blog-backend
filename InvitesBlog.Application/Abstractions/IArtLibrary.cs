@@ -28,9 +28,10 @@ public sealed record ArtCreditDto(string Source, string? Creator, string License
 /// <param name="Seconds">How long the original animation ran over the track.</param>
 /// <param name="Loops">How many times a repeating animation plays over the track.</param>
 /// <param name="Bytes">What it adds to the published page, roughly.</param>
+/// <param name="AsPicture">A vector too detailed for an invitation, brought in as the library's own picture of it instead.</param>
 public sealed record ArtImportDto(
     string Name, double Width, double Height, IReadOnlyList<DesignAssetDto> Assets, IReadOnlyList<ArtLayerDto> Layers,
-    bool Animated, double Seconds, int Loops, ArtCreditDto? Credit, int Bytes);
+    bool Animated, double Seconds, int Loops, ArtCreditDto? Credit, int Bytes, bool AsPicture = false);
 
 /// <summary>
 /// Free illustration libraries for the designer — searched and imported on the server, so the browser

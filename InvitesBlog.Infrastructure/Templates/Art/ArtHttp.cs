@@ -90,6 +90,8 @@ public static class ArtHttp
         {
             if (response.RequestMessage?.RequestUri is { } final && final.Scheme != Uri.UriSchemeHttps)
                 throw new BusinessRuleException("That file isn't available over a secure link.", "art_unavailable");
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                throw new BusinessRuleException("The library is busy — try again in a minute.", "art_busy");
             if (!response.IsSuccessStatusCode)
                 throw new BusinessRuleException($"The library couldn't send that file ({(int)response.StatusCode}).", "art_unavailable");
             if (response.Content.Headers.ContentLength > maxBytes) throw TooLarge(maxBytes);
