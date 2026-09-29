@@ -32,7 +32,8 @@ public sealed partial class ResendEmailSender(
         var request = new ResendEmailRequest(
             From: from,
             To: new[] { message.To },
-            Subject: message.Subject,
+            // A non-production copy (staging) marks every subject, so its mail is never mistaken for the live site's.
+            Subject: string.IsNullOrWhiteSpace(config["Email:SubjectPrefix"]) ? message.Subject : $"{config["Email:SubjectPrefix"]} {message.Subject}",
             Html: message.Html,
             Text: message.Text ?? ToPlainText(message.Html),
             ReplyTo: message.ReplyTo,

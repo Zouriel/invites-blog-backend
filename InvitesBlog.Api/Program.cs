@@ -16,6 +16,7 @@ builder.Services.AddHostedService<PhotoDigestService>();
 // Emails organisers as an event's photo cover runs out, and removes the photos 90 days after.
 builder.Services.AddHostedService<MediaRetentionService>();
 builder.Services.AddHostedService<PassReminderSweeper>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.PaymentSweeper>();
 
 var app = builder.Build();
 

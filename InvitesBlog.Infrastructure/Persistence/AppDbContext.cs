@@ -254,6 +254,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Quantity).HasDefaultValue(1);
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.Amount).HasColumnType("numeric(10,2)");
+            e.Property(x => x.TermsVersion).HasMaxLength(32);
         });
 
         b.Entity<Refund>(e =>
@@ -406,6 +407,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // phone-only customer and an email-only designer coexist until they're linked.
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_users_email");
             e.HasIndex(x => x.PhoneE164).IsUnique().HasDatabaseName("idx_users_phone_e164");
+            e.Property(x => x.PaymentCustomerId).HasMaxLength(64);
         });
 
         b.Entity<UserExternalLogin>(e =>
