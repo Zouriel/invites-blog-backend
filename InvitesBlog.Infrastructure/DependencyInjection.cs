@@ -145,9 +145,28 @@ public static class DependencyInjection
         services.AddScoped<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
 
         services.AddScoped<DispatchService>();
+        services.AddScoped<Payments.PaymentOutcomes>();
 
-        // Payments
-        services.AddSingleton<IPaymentProvider, FakePaymentProvider>();
+        // Payments: Bank of Maldives (BML Connect) when configured, the no-network fake otherwise.
+        if (string.Equals(config["Payments:Provider"], "Bml", StringComparison.OrdinalIgnoreCase))
+        {
+            // No resilience handler on purpose: a retried "create transaction" or "charge card" is a
+            // second charge. BmlPaymentProvider lets a failure surface instead.
+            services.AddHttpClient(BmlPaymentProvider.ClientName, c =>
+            {
+                c.BaseAddress = new Uri((config["Payments:Bml:BaseUrl"] ?? BmlPaymentProvider.UatBaseUrl).TrimEnd('/') + "/");
+                c.Timeout = TimeSpan.FromSeconds(30);
+            });
+            services.AddSingleton<BmlPaymentProvider>();
+            services.AddSingleton<IPaymentProvider>(sp => sp.GetRequiredService<BmlPaymentProvider>());
+            services.AddSingleton<IRecurringPaymentProvider>(sp => sp.GetRequiredService<BmlPaymentProvider>());
+        }
+        else
+        {
+            services.AddSingleton<FakePaymentProvider>();
+            services.AddSingleton<IPaymentProvider>(sp => sp.GetRequiredService<FakePaymentProvider>());
+            services.AddSingleton<IRecurringPaymentProvider>(sp => sp.GetRequiredService<FakePaymentProvider>());
+        }
 
         return services;
     }
