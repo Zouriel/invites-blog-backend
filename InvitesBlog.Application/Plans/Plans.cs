@@ -38,7 +38,7 @@ public enum MediaPhase
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
 /// everything small, a Party pass, a Wedding pass. Studio is a subscription for designers and
-/// planners. Venue (resorts and halls) is given by an admin, free: a venue buys and renews passes for
+/// planners. Venue (resorts and halls) is a monthly subscription: a venue buys and renews passes for
 /// the events it runs at the venue discount, and charges its clients itself. Prices are in rufiyaa,
 /// shown with dollars alongside.</para>
 /// </summary>
@@ -94,6 +94,9 @@ public static class PlanCatalog
     public const decimal StudioMonthly = 450m;
     public const decimal StudioYearly = 4500m;
 
+    /// <summary>A venue account, a month.</summary>
+    public const decimal VenueMonthly = 2300m;
+
     /// <summary>What a venue pays for a pass, or another year of one, for an event it runs: 40% off.</summary>
     public const int VenuePassDiscountPercent = 40;
 
@@ -127,8 +130,8 @@ public static class PlanCatalog
                     ExtensionPrice: p.WeddingExtension),
                 new PlanDto("Studio", "Studio", p.StudioMonthly, "per month", p.StudioYearly, null,
                     null, null, null, null, null, 0, false, false),
-                // Given by an admin, never bought: what it offers is the discount on its events' passes.
-                new PlanDto("Venue", "Venue", 0m, "by invitation", null, null,
+                // What it offers is the discount on its events' passes, and the designer.
+                new PlanDto("Venue", "Venue", p.VenueMonthly, "per month", null, null,
                     null, null, null, null, null, 0, false, false),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),

@@ -72,6 +72,7 @@ public enum PaymentKind
     StudioWeddingCredits,   // retired
     PartyExtension,
     WeddingExtension,
+    VenueMonthly,
 }
 
 public enum PaymentStatus

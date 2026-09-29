@@ -17,7 +17,7 @@ namespace InvitesBlog.Application.Services.Billing;
 public sealed record BillingPricesDto(
     decimal PartyPass, decimal WeddingPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
     decimal StudioMonthly, decimal StudioYearly, int VenueDiscountPercent, int StudioDiscountPercent,
-    decimal PartyExtension, decimal WeddingExtension);
+    decimal PartyExtension, decimal WeddingExtension, decimal VenueMonthly);
 
 /// <summary>The account's own plan: None, Studio or Venue.</summary>
 public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active);
@@ -121,7 +121,7 @@ public sealed class BillingService(
             Enabled, PlanCatalog.Currency, p.MvrPerUsd,
             new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 p.StudioMonthly, p.StudioYearly, p.VenueDiscountPercent, p.StudioDiscountPercent,
-                p.PartyExtension, p.WeddingExtension),
+                p.PartyExtension, p.WeddingExtension, p.VenueMonthly),
             new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt,
                 PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)),
             events,
@@ -181,6 +181,8 @@ public sealed class BillingService(
             if (kind is PaymentKind.StudioMonthly or PaymentKind.StudioYearly
                 && active && user.SubscriptionTier == SubscriptionTier.Venue)
                 throw new BusinessRuleException("This account is on the Venue plan. Talk to us about changing it.", "billing_venue_account");
+            if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Studio)
+                throw new BusinessRuleException("This account is on Studio. Talk to us about changing it.", "billing_studio_account");
         }
 
         var offer = campaign is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
@@ -194,6 +196,7 @@ public sealed class BillingService(
             PaymentKind.Sending => p.SendingPerBlock * quantity,
             PaymentKind.StudioMonthly => p.StudioMonthly,
             PaymentKind.StudioYearly => p.StudioYearly,
+            PaymentKind.VenueMonthly => p.VenueMonthly,
             _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
         };
         var description = Describe(kind, quantity, campaign);
@@ -277,18 +280,20 @@ public sealed class BillingService(
                 break;
             case PaymentKind.StudioMonthly:
             case PaymentKind.StudioYearly:
+            case PaymentKind.VenueMonthly:
                 if (payment.UserId is not { } buyer) break;
                 var user = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == buyer, ct);
                 if (user is null) break;
-                var running = user.SubscriptionTier == SubscriptionTier.Studio
+                var tier = payment.Kind == PaymentKind.VenueMonthly ? SubscriptionTier.Venue : SubscriptionTier.Studio;
+                var running = user.SubscriptionTier == tier
                               && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-                // Studio given with no end date stays open-ended; otherwise the new period follows the old.
+                // A plan given with no end date stays open-ended; otherwise the new period follows the old.
                 if (!(running && user.SubscriptionEndsAt is null))
                 {
                     var start = running && user.SubscriptionEndsAt > now ? user.SubscriptionEndsAt!.Value : now;
                     user.SubscriptionEndsAt = payment.Kind == PaymentKind.StudioYearly ? start.AddYears(1) : start.AddMonths(1);
                 }
-                user.SubscriptionTier = SubscriptionTier.Studio;
+                user.SubscriptionTier = tier;
                 studioChanged = true;
                 break;
         }
@@ -324,6 +329,7 @@ public sealed class BillingService(
         "sending" => PaymentKind.Sending,
         "studio-monthly" => PaymentKind.StudioMonthly,
         "studio-yearly" => PaymentKind.StudioYearly,
+        "venue-monthly" => PaymentKind.VenueMonthly,
         "party-extension" => PaymentKind.PartyExtension,
         "wedding-extension" => PaymentKind.WeddingExtension,
         _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
@@ -337,6 +343,7 @@ public sealed class BillingService(
         PaymentKind.Sending or PaymentKind.Initial or PaymentKind.TopUp => "sending",
         PaymentKind.StudioMonthly => "studio-monthly",
         PaymentKind.StudioYearly => "studio-yearly",
+        PaymentKind.VenueMonthly => "venue-monthly",
         PaymentKind.PartyExtension => "party-extension",
         PaymentKind.WeddingExtension => "wedding-extension",
         PaymentKind.StudioPartyCredits => "studio-party-credits",
@@ -357,6 +364,7 @@ public sealed class BillingService(
             PaymentKind.Sending => $"{quantity * PricingCalculator.BlockSize} emailed invitations{on}",
             PaymentKind.StudioMonthly => "Studio, a month",
             PaymentKind.StudioYearly => "Studio, a year",
+            PaymentKind.VenueMonthly => "Venue, a month",
             PaymentKind.StudioPartyCredits => $"{quantity} Party pass{(quantity == 1 ? "" : "es")} for clients",
             PaymentKind.StudioWeddingCredits => $"{quantity} Wedding pass{(quantity == 1 ? "" : "es")} for clients",
             _ => kind.ToString(),
@@ -370,6 +378,7 @@ public sealed class BillingService(
         PaymentKind.KeepPhotos => "keep",
         PaymentKind.Sending => "sending",
         PaymentKind.StudioMonthly or PaymentKind.StudioYearly => "studio",
+        PaymentKind.VenueMonthly => "venue",
         _ => "studio-passes",
     };
 }

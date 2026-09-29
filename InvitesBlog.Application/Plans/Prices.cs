@@ -23,14 +23,15 @@ public sealed record Prices(
     int StudioDiscountPercent,
     decimal MvrPerUsd,
     decimal PartyExtension = PlanCatalog.PartyExtension,
-    decimal WeddingExtension = PlanCatalog.WeddingExtension)
+    decimal WeddingExtension = PlanCatalog.WeddingExtension,
+    decimal VenueMonthly = PlanCatalog.VenueMonthly)
 {
     /// <summary>The prices in code, used until an admin saves others.</summary>
     public static Prices Defaults { get; } = new(
         PlanCatalog.PartyPassPrice, PlanCatalog.WeddingPassPrice, PlanCatalog.KeepPhotosYearly,
         PlanCatalog.StudioMonthly, PlanCatalog.StudioYearly, PlanCatalog.VenuePassDiscountPercent,
         Pricing.PricingCalculator.PricePerBlock, PlanCatalog.StudioPassDiscountPercent, PlanCatalog.MvrPerUsd,
-        PlanCatalog.PartyExtension, PlanCatalog.WeddingExtension);
+        PlanCatalog.PartyExtension, PlanCatalog.WeddingExtension, PlanCatalog.VenueMonthly);
 
     public decimal PassPrice(EventPassKind kind) => kind switch
     {
@@ -74,6 +75,7 @@ public sealed record Prices(
         Positive(KeepPhotosYearly, "Keep your photos");
         Positive(StudioMonthly, "Studio a month");
         Positive(StudioYearly, "Studio a year");
+        Positive(VenueMonthly, "Venue a month");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
         Positive(PartyExtension, "Extending a Party pass");
@@ -177,7 +179,8 @@ public sealed class PriceBook(
                 (int)D(nameof(Prices.StudioDiscountPercent), p.StudioDiscountPercent),
                 D(nameof(Prices.MvrPerUsd), p.MvrPerUsd),
                 D(nameof(Prices.PartyExtension), p.PartyExtension),
-                D(nameof(Prices.WeddingExtension), p.WeddingExtension));
+                D(nameof(Prices.WeddingExtension), p.WeddingExtension),
+                D(nameof(Prices.VenueMonthly), p.VenueMonthly));
             return read.Problems().Count == 0 ? read : p;
         }
         catch (JsonException)
