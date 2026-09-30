@@ -126,7 +126,7 @@ public class PaymentServiceTests
     }
 
     [Fact]
-    public async Task Webhook_unknown_payment_not_handled()
+    public async Task Webhook_for_a_transaction_that_isnt_ours_is_acknowledged_and_changes_nothing()
     {
         _provider.HandleWebhookAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>())
             .Returns(new PaymentWebhookResult(WebhookEventKind.PaymentSucceeded, "sess_x", "pay_x", null, "k"));
@@ -134,7 +134,9 @@ public class PaymentServiceTests
 
         var res = await Sut().HandleWebhookAsync("{}", NoHeaders);
 
-        Assert.False(res.Handled);
+        Assert.True(res.Handled);
+        Assert.Null(res.FulfilPaymentId);
+        Assert.Null(res.DispatchCampaignId);
     }
 
     [Fact]
