@@ -232,7 +232,13 @@ public sealed class PaymentService(
         if (evt.Kind == WebhookEventKind.Ignored) return new WebhookProcessResult(true, null);
 
         var payment = await payments.GetBySessionIdAsync(evt.ProviderSessionId!, ct);
-        if (payment is null) return new WebhookProcessResult(false, null);
+        if (payment is null)
+        {
+            // Verified by the gateway but not one of ours: the global webhook (set in BML's dashboard)
+            // reports every transaction on the merchant account. Acknowledged so it isn't resent.
+            logger.LogInformation("Payment update for {Session} ignored: not a payment of ours.", evt.ProviderSessionId);
+            return new WebhookProcessResult(true, null);
+        }
 
         // The gateway's transaction must be the one made for this payment, for its amount, in its
         // currency. A result that says otherwise is recorded as nothing: a payment is only ever marked
