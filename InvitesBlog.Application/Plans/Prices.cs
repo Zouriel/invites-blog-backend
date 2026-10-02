@@ -16,11 +16,9 @@ public sealed record Prices(
     decimal PartyPass,
     decimal WeddingPass,
     decimal KeepPhotosYearly,
-    decimal StudioMonthly,
-    decimal StudioYearly,
+    decimal PremiumMonthly,
     int VenueDiscountPercent,
     decimal SendingPerBlock,
-    int StudioDiscountPercent,
     decimal MvrPerUsd,
     decimal PartyExtension = PlanCatalog.PartyExtension,
     decimal WeddingExtension = PlanCatalog.WeddingExtension,
@@ -29,8 +27,8 @@ public sealed record Prices(
     /// <summary>The prices in code, used until an admin saves others.</summary>
     public static Prices Defaults { get; } = new(
         PlanCatalog.PartyPassPrice, PlanCatalog.WeddingPassPrice, PlanCatalog.KeepPhotosYearly,
-        PlanCatalog.StudioMonthly, PlanCatalog.StudioYearly, PlanCatalog.VenuePassDiscountPercent,
-        Pricing.PricingCalculator.PricePerBlock, PlanCatalog.StudioPassDiscountPercent, PlanCatalog.MvrPerUsd,
+        PlanCatalog.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
+        Pricing.PricingCalculator.PricePerBlock, PlanCatalog.MvrPerUsd,
         PlanCatalog.PartyExtension, PlanCatalog.WeddingExtension, PlanCatalog.VenueMonthly);
 
     public decimal PassPrice(EventPassKind kind) => kind switch
@@ -47,10 +45,6 @@ public sealed record Prices(
         EventPassKind.Wedding => WeddingExtension,
         _ => 0m,
     };
-
-    /// <summary>A pass for a client, on a design a Studio account made for them: the Studio discount off.</summary>
-    public decimal StudioPassPrice(EventPassKind kind) =>
-        Math.Round(PassPrice(kind) * (100 - StudioDiscountPercent) / 100m, 0, MidpointRounding.AwayFromZero);
 
     /// <summary>A pass a venue buys for an event it runs: the venue discount off.</summary>
     public decimal VenuePassPrice(EventPassKind kind) => Off(PassPrice(kind), VenueDiscountPercent);
@@ -73,8 +67,7 @@ public sealed record Prices(
         Positive(PartyPass, "The Party pass");
         Positive(WeddingPass, "The Wedding pass");
         Positive(KeepPhotosYearly, "Keep your photos");
-        Positive(StudioMonthly, "Studio a month");
-        Positive(StudioYearly, "Studio a year");
+        Positive(PremiumMonthly, "Premium a month");
         Positive(VenueMonthly, "Venue a month");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
@@ -82,10 +75,8 @@ public sealed record Prices(
         Positive(WeddingExtension, "Extending a Wedding pass");
         if (PartyExtension > PartyPass) problems.Add("Extending a Party pass can't cost more than the pass.");
         if (WeddingExtension > WeddingPass) problems.Add("Extending a Wedding pass can't cost more than the pass.");
-        if (StudioDiscountPercent is < 0 or > 90) problems.Add("The Studio discount must be between 0 and 90%.");
         if (VenueDiscountPercent is < 0 or > 90) problems.Add("The venue discount must be between 0 and 90%.");
         if (WeddingPass < PartyPass) problems.Add("The Wedding pass can't cost less than the Party pass.");
-        if (StudioYearly < StudioMonthly) problems.Add("Studio a year can't cost less than a month.");
         return problems;
     }
 }
@@ -172,11 +163,10 @@ public sealed class PriceBook(
                 D(nameof(Prices.PartyPass), p.PartyPass),
                 D(nameof(Prices.WeddingPass), p.WeddingPass),
                 D(nameof(Prices.KeepPhotosYearly), p.KeepPhotosYearly),
-                D(nameof(Prices.StudioMonthly), p.StudioMonthly),
-                D(nameof(Prices.StudioYearly), p.StudioYearly),
+                // Saved before Studio became Premium: its monthly price carries over.
+                D(nameof(Prices.PremiumMonthly), D("StudioMonthly", p.PremiumMonthly)),
                 (int)D(nameof(Prices.VenueDiscountPercent), p.VenueDiscountPercent),
                 D(nameof(Prices.SendingPerBlock), p.SendingPerBlock),
-                (int)D(nameof(Prices.StudioDiscountPercent), p.StudioDiscountPercent),
                 D(nameof(Prices.MvrPerUsd), p.MvrPerUsd),
                 D(nameof(Prices.PartyExtension), p.PartyExtension),
                 D(nameof(Prices.WeddingExtension), p.WeddingExtension),

@@ -23,7 +23,7 @@ public interface IAdminService
     Task<AdminUserDto> SetUserRoleAsync(
         Guid userId, SetUserRoleRequest req, CancellationToken ct = default);
 
-    /// <summary>Sets an account's professional plan (None, Studio or Venue) and optional end date.</summary>
+    /// <summary>Sets an account's plan (None, Premium or Venue) and optional end date.</summary>
     Task<AdminUserDto> SetSubscriptionAsync(Guid userId, SetSubscriptionRequest req, CancellationToken ct = default);
 
     /// <summary>The events an account organised, with their passes.</summary>

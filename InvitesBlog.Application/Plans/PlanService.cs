@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Plans;
 
-/// <summary>Works out which plan covers an event: its pass, its venue, and anything bought to keep its photos.</summary>
+/// <summary>Works out which plan covers an event: its pass, its organiser's Premium, and anything bought to keep its photos.</summary>
 public interface IPlanService
 {
     Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
@@ -14,8 +14,8 @@ public interface IPlanService
     /// <summary>Space used by every event at a venue, which the venue's plan counts together.</summary>
     Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default);
 
-    /// <summary>Whether this account's Studio plan is in force.</summary>
-    Task<bool> IsStudioAsync(Guid userId, CancellationToken ct = default);
+    /// <summary>Whether this account's Premium subscription is in force.</summary>
+    Task<bool> IsPremiumAsync(Guid userId, CancellationToken ct = default);
 }
 
 public sealed class PlanService(
@@ -63,6 +63,13 @@ public sealed class PlanService(
             }
         }
 
+        // The organiser's Premium lifts every event they organise while it lasts.
+        (bool, DateTimeOffset?)? premium = null;
+        if (ownerId is { } owner && owner != Guid.Empty
+            && await users.GetByIdAsync(owner, ct) is { SubscriptionTier: SubscriptionTier.Premium } organiser)
+            premium = (PlanRules.IsActive(organiser.SubscriptionTier, organiser.SubscriptionEndsAt, DateTimeOffset.UtcNow),
+                       organiser.SubscriptionEndsAt);
+
         return PlanRules.Evaluate(
             DateTimeOffset.UtcNow,
             campaign.EventStartAt,
@@ -72,7 +79,8 @@ public sealed class PlanService(
             venue,
             legacyCover,
             campaign.MediaDeletedAt,
-            ownerId is { } id && id != Guid.Empty ? id : null);
+            ownerId is { } id && id != Guid.Empty ? id : null,
+            premium);
     }
 
     public async Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default)
@@ -83,8 +91,8 @@ public sealed class PlanService(
             .SumAsync(b => b.UsedBytes, ct);
     }
 
-    public async Task<bool> IsStudioAsync(Guid userId, CancellationToken ct = default) =>
-        await users.GetByIdAsync(userId, ct) is { SubscriptionTier: SubscriptionTier.Studio } user
+    public async Task<bool> IsPremiumAsync(Guid userId, CancellationToken ct = default) =>
+        await users.GetByIdAsync(userId, ct) is { SubscriptionTier: SubscriptionTier.Premium } user
         && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow);
 
 }

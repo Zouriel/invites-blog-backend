@@ -8,102 +8,31 @@ using Xunit;
 namespace InvitesBlog.Tests.Services;
 
 /// <summary>
-/// The one discount: a design a Studio published FOR this client takes the Studio percentage off a
-/// pass, with no code to enter. Nothing else is discounted, and a lapsed Studio's designs aren't.
+/// The one discount is a venue's: an event a venue runs has its passes and extensions at half price.
+/// A design made for someone is full price (the Studio discount went with Studio).
 /// </summary>
 public class PassOfferTests
 {
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
-    private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
-    private readonly IPlanService _plans = Substitute.For<IPlanService>();
 
     private readonly AppUser _host = new() { Id = Guid.NewGuid(), Email = "client@x.mv", DisplayName = "Client" };
 
-    /// <param name="earlier">Other events already made from the same design, before this one.</param>
-    private async Task<PassOfferDto> OfferFor(Template template, bool studioActive, AppUser? host = null, int earlier = 0, bool someoneElseFirst = false)
+    [Fact]
+    public async Task A_design_made_for_the_client_pays_full_price()
     {
         var campaign = TestData.Campaign();
-        campaign.TemplateId = template.Id;
-        campaign.CreatedByUserId = (host ?? _host).Id;
-        campaign.CreatedAt = DateTimeOffset.UtcNow;
-        var rows = new List<Campaign> { campaign };
-        for (var i = 0; i < earlier; i++)
-        {
-            var other = TestData.Campaign();
-            other.TemplateId = template.Id;
-            other.CreatedByUserId = campaign.CreatedByUserId;
-            other.CreatedAt = campaign.CreatedAt.AddDays(-1 - i);
-            rows.Add(other);
-        }
-        if (someoneElseFirst)
-        {
-            var theirs = TestData.Campaign();
-            theirs.TemplateId = template.Id;
-            theirs.CreatedByUserId = Guid.NewGuid();
-            theirs.CreatedAt = campaign.CreatedAt.AddDays(-3);
-            rows.Add(theirs);
-        }
+        campaign.CreatedByUserId = _host.Id;
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
-        _campaigns.Query(Arg.Any<bool>()).Returns(_ => rows.AsAsyncQueryable());
-        _templates.GetByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
         var users = Substitute.For<IRepository<AppUser>>();
-        users.Query(Arg.Any<bool>()).Returns(_ => new[] { _host, host ?? _host }.Distinct().AsAsyncQueryable());
-        if (template.DesignerUserId is { } d) _plans.IsStudioAsync(d, Arg.Any<CancellationToken>()).Returns(studioActive);
-        return await new PassOfferService(_campaigns, _templates, users, _plans, TestData.PriceBook()).ForCampaignAsync(campaign.Id);
-    }
+        users.Query(Arg.Any<bool>()).Returns(_ => new[] { _host }.AsAsyncQueryable());
 
-    private static Template Design(string? assignedTo) => new()
-    {
-        Id = Guid.NewGuid(), Name = "D", Version = "1", DesignerUserId = Guid.NewGuid(), DesignerName = "Aishath",
-        AssignedEmail = assignedTo, Visibility = assignedTo is null ? TemplateVisibility.Public : TemplateVisibility.Dedicated,
-    };
+        var o = await new PassOfferService(_campaigns, users, TestData.PriceBook()).ForCampaignAsync(campaign.Id);
 
-    [Fact]
-    public async Task A_design_made_for_the_client_by_a_Studio_is_30_percent_off_the_pass()
-    {
-        var o = await OfferFor(Design("client@x.mv"), studioActive: true);
-        Assert.Equal(30, o.DiscountPercent);
-        Assert.Equal("Aishath", o.DesignedBy);
-        Assert.Equal(139m, o.PartyPass);
-        Assert.Equal(489m, o.WeddingPass);
-        Assert.Equal(199m, o.FullPartyPass);
-        // Extensions are never discounted.
+        Assert.Equal(199m, o.PartyPass);
+        Assert.Equal(699m, o.WeddingPass);
         Assert.Equal(99m, o.PartyExtension);
         Assert.Equal(349m, o.WeddingExtension);
-    }
-
-    [Fact]
-    public async Task A_public_design_or_a_lapsed_Studio_pays_full_price()
-    {
-        var gallery = await OfferFor(Design(null), studioActive: true);
-        var lapsed = await OfferFor(Design("client@x.mv"), studioActive: false);
-        Assert.Equal(0, gallery.DiscountPercent);
-        Assert.Equal(199m, gallery.PartyPass);
-        Assert.Equal(0, lapsed.DiscountPercent);
-        Assert.Equal(699m, lapsed.WeddingPass);
-    }
-
-    [Fact]
-    public async Task Only_the_person_it_was_made_for_and_only_its_first_event()
-    {
-        var design = Design("client@x.mv");
-        var stranger = new AppUser { Id = Guid.NewGuid(), Email = "someone@else.mv", DisplayName = "S" };
-
-        // Made public later and used by somebody else: full price.
-        var other = await OfferFor(design, studioActive: true, host: stranger);
-        Assert.Equal(0, other.DiscountPercent);
-        Assert.Equal(199m, other.PartyPass);
-
-        // The client again, on a second event from the same design: full price.
-        var second = await OfferFor(design, studioActive: true, earlier: 1);
-        Assert.Equal(0, second.DiscountPercent);
-
-        // Someone else (a designer trying it, an admin) used it first: the client's first is still theirs.
-        Assert.Equal(30, (await OfferFor(design, studioActive: true, someoneElseFirst: true)).DiscountPercent);
-
-        // The client's first event: discounted, whatever the case of their email.
-        _host.Email = "Client@X.mv";
-        Assert.Equal(30, (await OfferFor(design, studioActive: true)).DiscountPercent);
+        Assert.Equal(0, o.VenuePercent);
     }
 
     [Fact]
@@ -125,7 +54,7 @@ public class PassOfferTests
 
     // ----- venues -----
 
-    private async Task<PassOfferDto> AtVenue(bool venueActive, bool studio = false)
+    private async Task<PassOfferDto> AtVenue(bool venueActive)
     {
         var owner = new AppUser
         {
@@ -133,36 +62,30 @@ public class PassOfferTests
             SubscriptionTier = venueActive ? SubscriptionTier.Venue : SubscriptionTier.None,
         };
         var venue = new Venue { Id = Guid.NewGuid(), OwnerUserId = owner.Id, Name = "Sunset Resort" };
-        var template = Design(studio ? "client@x.mv" : null);
         var campaign = TestData.Campaign();
-        campaign.TemplateId = template.Id;
         campaign.CreatedByUserId = _host.Id;
         campaign.VenueId = venue.Id;
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
-        _campaigns.Query(Arg.Any<bool>()).Returns(_ => new[] { campaign }.AsAsyncQueryable());
-        _templates.GetByIdAsync(template.Id, Arg.Any<CancellationToken>()).Returns(template);
-        _plans.IsStudioAsync(template.DesignerUserId!.Value, Arg.Any<CancellationToken>()).Returns(studio);
         var users = Substitute.For<IRepository<AppUser>>();
         users.Query(Arg.Any<bool>()).Returns(_ => new[] { _host, owner }.AsAsyncQueryable());
         var venues = Substitute.For<IRepository<Venue>>();
         venues.Query(Arg.Any<bool>()).Returns(_ => new[] { venue }.AsAsyncQueryable());
-        return await new PassOfferService(_campaigns, _templates, users, _plans, TestData.PriceBook(), venues)
-            .ForCampaignAsync(campaign.Id);
+        return await new PassOfferService(_campaigns, users, TestData.PriceBook(), venues).ForCampaignAsync(campaign.Id);
     }
 
-    /// <summary>A venue buys and renews its events' passes at 40% off, and charges its clients itself.</summary>
+    /// <summary>A venue buys and renews its events' passes at half price, and charges its clients itself.</summary>
     [Fact]
-    public async Task A_venue_s_event_has_passes_and_extensions_at_40_percent_off()
+    public async Task A_venue_s_event_has_passes_and_extensions_at_half_price()
     {
         var o = await AtVenue(venueActive: true);
 
-        Assert.Equal(119m, o.PartyPass);        // 199 less 40%
-        Assert.Equal(419m, o.WeddingPass);      // 699 less 40%
-        Assert.Equal(59m, o.PartyExtension);    // 99 less 40%
-        Assert.Equal(209m, o.WeddingExtension); // 349 less 40%
-        Assert.Equal(40, o.VenuePercent);
+        Assert.Equal(100m, o.PartyPass);        // half of 199, rounded
+        Assert.Equal(350m, o.WeddingPass);      // half of 699
+        Assert.Equal(50m, o.PartyExtension);    // half of 99
+        Assert.Equal(175m, o.WeddingExtension); // half of 349
+        Assert.Equal(199m, o.FullPartyPass);
+        Assert.Equal(50, o.VenuePercent);
         Assert.Equal("Sunset Resort", o.VenueName);
-        Assert.True(o.ByVenue);
     }
 
     [Fact]
@@ -173,15 +96,5 @@ public class PassOfferTests
         Assert.Equal(199m, o.PartyPass);
         Assert.Equal(99m, o.PartyExtension);
         Assert.Equal(0, o.VenuePercent);
-    }
-
-    /// <summary>Never stacked with the Studio discount: 40% beats 30%, and it's 40% of the full price.</summary>
-    [Fact]
-    public async Task With_a_Studio_design_too_the_venue_price_wins_without_stacking()
-    {
-        var o = await AtVenue(venueActive: true, studio: true);
-
-        Assert.Equal(119m, o.PartyPass);
-        Assert.True(o.ByVenue);
     }
 }

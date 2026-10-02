@@ -77,14 +77,13 @@ public sealed class AccountService(
     /// </para>
     /// </summary>
     /// <summary>
-    /// Retired. Everyone signs up the same way (as a host); the template designer comes with the
-    /// Studio plan (DesignerAccessService), bought or given by an admin.
+    /// Retired. Everyone signs up the same way, and every account can use the template designer.
     /// </summary>
     public Task<AuthResultDto> RegisterDesignerAsync(RegisterDesignerRequest request, CancellationToken ct = default) =>
-        throw new BusinessRuleException(DesignerNeedsStudio, "designer_needs_studio");
+        throw new BusinessRuleException(DesignerForEveryone, "designer_for_everyone");
 
-    private const string DesignerNeedsStudio =
-        "Create an account the usual way. The template designer comes with the Studio plan.";
+    private const string DesignerForEveryone =
+        "Create an account the usual way. Every account can use the template designer.";
 
     // ----- Sign in -----------------------------------------------------------------------------
 
@@ -212,9 +211,9 @@ public sealed class AccountService(
     public async Task<AuthResultDto> RefreshAsync(CancellationToken ct = default) =>
         await IssueAsync(await CurrentAsync(ct), ct);
 
-    /// <summary>Retired: the designer comes with Studio, not from a button.</summary>
+    /// <summary>Retired: every account can use the designer, so there is nothing to become.</summary>
     public Task<AuthResultDto> BecomeDesignerAsync(CancellationToken ct = default) =>
-        throw new BusinessRuleException(DesignerNeedsStudio, "designer_needs_studio");
+        throw new BusinessRuleException(DesignerForEveryone, "designer_for_everyone");
 
     // ----- Linking a second identifier ----------------------------------------------------------
 

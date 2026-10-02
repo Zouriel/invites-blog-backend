@@ -43,7 +43,7 @@ public class PassReminderTests
         mail.SendAsync(Arg.Do<EmailMessage>(sent.Add), Arg.Any<CancellationToken>()).Returns(DeliveryResult.Ok("x"));
         var offers = Substitute.For<IPassOfferService>();
         offers.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(new PassOfferDto(199, 699, 199, 699, 0, null, 99, 349));
+            .Returns(new PassOfferDto(199, 699, 199, 699, 99, 349));
         var sut = new PassReminderService(new CampaignRepository(db), new BaseRepository<AppUser>(db), offers, mail,
             new ConfigurationBuilder().Build(), new UnitOfWork(db));
 

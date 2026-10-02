@@ -10,9 +10,9 @@ public sealed record DesignerAdminDto(
     IReadOnlyList<string> LinkedProviders,
     int PublishedTemplates,
     DateTimeOffset JoinedAt,
-    /// <summary>Whether their Studio plan is in force, and when it ends (null: no end, or never had one).</summary>
-    bool StudioActive = false,
-    DateTimeOffset? StudioEndsAt = null,
+    /// <summary>Whether their Premium subscription is in force, and when it ends (null: no end, or never had one).</summary>
+    bool PremiumActive = false,
+    DateTimeOffset? PremiumEndsAt = null,
     /// <summary>Templates they published FOR someone: their clients.</summary>
     int ClientTemplates = 0);
 
@@ -40,10 +40,9 @@ public sealed record MyTemplatesPageDto(IReadOnlyList<MyTemplateRowDto> Template
 /// own) — or to an admin; a stranger who picked a public design stays "a host".
 /// </summary>
 /// <param name="Status">"Not finished", "Live" or "Cancelled".</param>
-/// <param name="Discounted">Their pass is (or would be) the Studio discount: made for them, first use.</param>
 public sealed record TemplateUseDto(
     Guid CampaignId, string EventTitle, DateTimeOffset UsedAt, DateTimeOffset EventStartAt, string Status,
-    string Kind, string? HostName, string? HostEmail, string Pass, bool Discounted);
+    string Kind, string? HostName, string? HostEmail, string Pass);
 
 /// <summary>What a delete actually did — unlisting is not the same as removing.</summary>
 public sealed record DeleteTemplateResultDto(bool Deleted, bool Unlisted, int CampaignCount, string Message);

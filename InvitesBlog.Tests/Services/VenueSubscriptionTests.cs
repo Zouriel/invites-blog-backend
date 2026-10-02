@@ -14,12 +14,11 @@ using Xunit;
 
 namespace InvitesBlog.Tests.Services;
 
-/// <summary>Venue is a monthly subscription, bought and renewed like a month of Studio.</summary>
+/// <summary>Venue is a monthly subscription, bought and renewed like a month of Premium.</summary>
 public class VenueSubscriptionTests
 {
     private readonly AppUser _user = new() { Id = Guid.NewGuid(), Email = "resort@test.com" };
     private readonly List<Payment> _payments = [];
-    private readonly IDesignerAccessService _designer = Substitute.For<IDesignerAccessService>();
 
     private BillingService Service(bool paymentsOn = false)
     {
@@ -37,7 +36,7 @@ public class VenueSubscriptionTests
             me, config, TestData.PriceBook(), TestData.FreePlans(), Substitute.For<ICampaignOwnershipService>(),
             Substitute.For<ICampaignRepository>(), users, payments, Substitute.For<IPassOfferService>(),
             Substitute.For<IPaymentProvider>(), TestData.Allowance(), Substitute.For<IMediaBucketService>(),
-            _designer, Substitute.For<IRepository<AuditLog>>(), Substitute.For<IUnitOfWork>());
+            Substitute.For<IRepository<AuditLog>>(), Substitute.For<IUnitOfWork>());
     }
 
     private Payment Paid()
@@ -63,13 +62,12 @@ public class VenueSubscriptionTests
     }
 
     [Fact]
-    public async Task A_paid_month_makes_the_account_a_venue_for_a_month_and_gives_it_the_designer()
+    public async Task A_paid_month_makes_the_account_a_venue_for_a_month()
     {
         await Service().FulfilAsync(Paid().Id);
 
         Assert.Equal(SubscriptionTier.Venue, _user.SubscriptionTier);
         Assert.InRange(_user.SubscriptionEndsAt!.Value, DateTimeOffset.UtcNow.AddMonths(1).AddMinutes(-1), DateTimeOffset.UtcNow.AddMonths(1).AddMinutes(1));
-        await _designer.Received().SyncAsync(_user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -96,13 +94,13 @@ public class VenueSubscriptionTests
     }
 
     [Fact]
-    public async Task A_running_studio_is_not_swapped_for_a_venue_at_checkout()
+    public async Task A_running_premium_is_not_swapped_for_a_venue_at_checkout()
     {
-        _user.SubscriptionTier = SubscriptionTier.Studio;
+        _user.SubscriptionTier = SubscriptionTier.Premium;
         _user.SubscriptionEndsAt = DateTimeOffset.UtcNow.AddDays(20);
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Service().CheckoutAsync(new CheckoutRequest("venue-monthly", null, 1, null)));
-        Assert.Equal("billing_studio_account", ex.ErrorCode);
+        Assert.Equal("billing_premium_account", ex.ErrorCode);
     }
 
     [Fact]

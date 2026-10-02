@@ -33,7 +33,6 @@ public sealed class AdminService(
     MediaBuckets.IMediaBucketService buckets,
     IPlanService plans,
     ISendingAllowanceService allowances,
-    IDesignerAccessService designerAccess,
     IEmailSender email,
     Microsoft.Extensions.Configuration.IConfiguration config,
     IRepository<Inviter>? inviters = null) : IAdminService
@@ -54,8 +53,8 @@ public sealed class AdminService(
 
         switch (filter.Plan?.Trim().ToLowerInvariant())
         {
-            case "studio":
-                query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Studio);
+            case "premium":
+                query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Premium);
                 break;
             case "venue":
                 query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Venue);
@@ -158,7 +157,7 @@ public sealed class AdminService(
         var name = (req.Role ?? string.Empty).Trim();
         if (string.Equals(name, Roles.Designer, StringComparison.OrdinalIgnoreCase))
             throw new BusinessRuleException(
-                "The designer comes with the Studio plan. Give them Studio instead.", "designer_comes_with_studio");
+                "Every account can use the designer already.", "designer_for_everyone");
 
         // Matched case-insensitively but compared against the canonical list, so "subscriber" works
         // from a hand-written request while "Subscribers" does not quietly become a new role.
@@ -220,8 +219,8 @@ public sealed class AdminService(
         PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
 
     /// <summary>
-    /// Sets an account's professional plan by hand, until billing exists: Studio for designers and
-    /// planners, Venue for a resort or hall.
+    /// Sets an account's plan by hand: Premium (3 GB events, kept while it lasts), or Venue for a
+    /// resort or hall.
     ///
     /// <para>Choosing None ends an active plan now rather than erasing it, because the end date is
     /// when a venue's events stopped being covered and their photo retention counts from it.</para>
@@ -230,7 +229,7 @@ public sealed class AdminService(
         Guid userId, SetSubscriptionRequest req, CancellationToken ct = default)
     {
         if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier) || !Enum.IsDefined(tier))
-            throw new BusinessRuleException("Choose None, Studio or Venue.", "tier_unknown");
+            throw new BusinessRuleException("Choose None, Premium or Venue.", "tier_unknown");
 
         var now = DateTimeOffset.UtcNow;
         if (tier != SubscriptionTier.None && req.EndsAt is { } requested && requested <= now)
@@ -268,8 +267,6 @@ public sealed class AdminService(
         }, ct);
 
         await uow.SaveChangesAsync(ct);
-        // Studio is what gives the designer: on with it, off without it.
-        await designerAccess.SyncAsync(user.Id, ct);
         return Describe(user);
     }
 

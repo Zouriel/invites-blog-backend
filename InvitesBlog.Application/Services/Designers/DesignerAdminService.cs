@@ -16,12 +16,22 @@ public sealed class DesignerAdminService(
     IRepository<AppUser> users,
     IRepository<UserExternalLogin> externalLogins,
     ITemplateRepository templates,
+    IRepository<TemplateDesign> designs,
     IUnitOfWork uow) : IDesignerAdminService
 {
+    /// <summary>
+    /// Designers: every account can use the designer now, so it's the accounts that have used it — a
+    /// design or a published template — plus anyone who held the Designer role from before.
+    /// </summary>
+    private IQueryable<AppUser> Designers() => users.Query().Where(u =>
+        u.UserRoles.Any(ur => ur.Role.Name == Roles.Designer)
+        || designs.Query().Any(d => d.OwnerUserId == u.Id)
+        || templates.Query().Any(t => t.DesignerUserId == u.Id));
+
     public async Task<PagedResult<DesignerAdminDto>> ListAsync(
         DesignerFilter filter, CancellationToken ct = default)
     {
-        var query = users.Query().Where(u => u.UserRoles.Any(ur => ur.Role.Name == Roles.Designer));
+        var query = Designers();
 
         if (filter.IsActive is { } active) query = query.Where(u => u.IsActive == active);
         if (!string.IsNullOrWhiteSpace(filter.Search))
@@ -59,8 +69,8 @@ public sealed class DesignerAdminService(
             providers.GetValueOrDefault(u.Id, []),
             published.GetValueOrDefault(u.Id),
             u.CreatedAt,
-            u.SubscriptionTier == SubscriptionTier.Studio && PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now),
-            u.SubscriptionTier == SubscriptionTier.Studio ? u.SubscriptionEndsAt : null,
+            u.SubscriptionTier == SubscriptionTier.Premium && PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now),
+            u.SubscriptionTier == SubscriptionTier.Premium ? u.SubscriptionEndsAt : null,
             forClients.GetValueOrDefault(u.Id))).ToList();
 
         return PagedResult<DesignerAdminDto>.Create(items, total, filter);
@@ -74,7 +84,7 @@ public sealed class DesignerAdminService(
                        .FirstOrDefaultAsync(u => u.Id == designerUserId, ct)
                    ?? throw new NotFoundException("That designer doesn't exist.", "designer_not_found");
 
-        if (!user.UserRoles.Any(ur => ur.Role.Name == Roles.Designer))
+        if (!await Designers().AnyAsync(u => u.Id == designerUserId, ct))
             throw new BusinessRuleException("That account isn't a designer.", "not_a_designer");
 
         user.IsActive = !suspended;

@@ -35,7 +35,7 @@ public sealed record AccountDto(
     IReadOnlyList<string> LinkedProviders,
     /// <summary>"light" or "dark", or null to take the default. Follows the account, not the browser.</summary>
     string? ThemePreference = null,
-    /// <summary>The professional plan in force right now: None, Studio or Venue.</summary>
+    /// <summary>The account's plan in force right now: None, Premium or Venue.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
     /// <summary>Owns a venue or is on a venue's staff, so the venue's page is theirs to open.</summary>

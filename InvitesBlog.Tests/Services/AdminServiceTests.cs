@@ -27,7 +27,7 @@ public class AdminServiceTests
         _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow,
         Substitute.For<ICampaignRepository>(),
         Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
-        TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>(),
+        TestData.FreePlans(), TestData.Allowance(),
         Substitute.For<IEmailSender>(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
 
     /// <summary>
@@ -53,7 +53,7 @@ public class AdminServiceTests
         var sut = new AdminService(
             _users, _roles, _permissions, _suppression, _auditLogs, _userRoles, _currentUser, _uow, campaigns,
             Substitute.For<InvitesBlog.Application.Services.MediaBuckets.IMediaBucketService>(),
-            TestData.FreePlans(), TestData.Allowance(), Substitute.For<InvitesBlog.Application.Plans.IDesignerAccessService>(),
+            TestData.FreePlans(), TestData.Allowance(),
             Substitute.For<IEmailSender>(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), inviters);
 
         var ids = (await sut.UserEventsAsync(me.Id)).Select(e => e.Id).ToHashSet();
@@ -159,14 +159,14 @@ public class AdminServiceTests
         Assert.Equal("role_not_grantable", ex.ErrorCode);
     }
 
-    /// <summary>The designer comes with Studio: the admin gives the plan, not the role.</summary>
+    /// <summary>Every account can design, so there is no Designer role to give by hand.</summary>
     [Fact]
     public async Task Designer_is_not_granted_by_hand()
     {
         var user = Account(Roles.Customer);
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Sut().SetUserRoleAsync(user.Id, new SetUserRoleRequest("designer", true)));
-        Assert.Equal("designer_comes_with_studio", ex.ErrorCode);
+        Assert.Equal("designer_for_everyone", ex.ErrorCode);
     }
 
     [Fact]

@@ -66,8 +66,8 @@ public enum PaymentKind
     WeddingPass,
     KeepPhotos,
     Sending,
-    StudioMonthly,
-    StudioYearly,
+    PremiumMonthly,         // was StudioMonthly: Studio became Premium (2026-10)
+    StudioYearly,           // retired: Premium is monthly only
     StudioPartyCredits,     // retired: Studio clients get the discount automatically now
     StudioWeddingCredits,   // retired
     PartyExtension,
@@ -145,14 +145,15 @@ public enum MediaBucketTier
 
 /// <summary>
 /// An account's plan for professionals. Hosts buy a pass per event instead (<see cref="EventPassKind"/>).
-/// The numbers are stored: 1 was Basic, retired in the 2026-09 plans, and 2 was Premium, which became Studio.
+/// The numbers are stored: 1 was Basic, retired in the 2026-09 plans; 2 was Premium, then Studio, and
+/// is Premium again since 2026-10.
 /// </summary>
 public enum SubscriptionTier
 {
     None = 0,
-    /// <summary>Designers and planners: their clients' events in one place, a credit on the invitations they
-    /// design, and passes at a discount to give to clients.</summary>
-    Studio = 2,
+    /// <summary>A monthly subscription: every event the account organises gets 3 GB, no "Made with
+    /// invites.blog" mark, and keeps its photos for as long as the subscription lasts.</summary>
+    Premium = 2,
     /// <summary>A resort or hall: albums for every event at the property, under its own name, run by its staff.</summary>
     Venue = 3,
 }

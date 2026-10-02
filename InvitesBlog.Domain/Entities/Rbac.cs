@@ -42,7 +42,7 @@ public sealed class AppUser
     /// </summary>
     public DateTimeOffset? AvatarChosenAt { get; set; }
 
-    /// <summary>The account's professional plan (Studio or Venue). Set by an admin until billing exists.</summary>
+    /// <summary>The account's plan (Premium or Venue): bought, or given by an admin.</summary>
     public SubscriptionTier SubscriptionTier { get; set; }
 
     /// <summary>

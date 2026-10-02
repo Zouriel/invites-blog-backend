@@ -173,7 +173,7 @@ public static class Roles
     /// than to an account. Granting one to a user would put a row in the table that no sign-in ever
     /// reads, which looks like it worked and does nothing.</para>
     /// </summary>
-    // Designer is not granted by hand: it comes with the Studio plan (DesignerAccessService).
+    // Designer is not granted by hand: every account (Customer) can use the designer.
     public static IReadOnlyList<string> Grantable { get; } = [Admin, Customer];
 
     public static IReadOnlyDictionary<string, string[]> Definitions { get; } = new Dictionary<string, string[]>
@@ -199,7 +199,7 @@ public static class Roles
         // These permissions say "may do this KIND of thing", never "may do it to THIS campaign".
         // Every campaign-scoped action re-checks ownership through ICampaignOwnershipService, so a
         // customer still cannot touch a campaign that isn't theirs. Designer.Manage and Designs.Manage
-        // are withheld: making and publishing templates is the Designer role's.
+        // too: since 2026-10 every account can make and publish templates in the designer.
         [Customer] = new[]
         {
             Permissions.Templates.Read, Permissions.Dashboard.Read, Permissions.Inbox.Read,
@@ -209,6 +209,7 @@ public static class Roles
             Permissions.Guests.Resend, Permissions.Payments.Read,
             Permissions.Photos.Read, Permissions.Photos.Upload, Permissions.Photos.Moderate,
             Permissions.Buckets.Read, Permissions.Buckets.Manage,
+            Permissions.Designer.Manage, Permissions.Designs.Manage,
         },
 
         [Inviter] = new[]

@@ -3,7 +3,7 @@ using InvitesBlog.Domain.Enums;
 
 namespace InvitesBlog.Application.Plans;
 
-/// <summary>Putting a pass on an event, the one way an admin, a checkout and a Studio giving one to a client all do it.</summary>
+/// <summary>Putting a pass on an event, the one way an admin and a checkout both do it.</summary>
 public static class EventPasses
 {
     /// <summary>Whether the event has a pass in force right now, and which.</summary>

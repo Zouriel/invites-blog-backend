@@ -60,7 +60,7 @@ public sealed record InviteRenderData(
     string PackageUrl, JsonObject Data, bool RequiresOtp, string CampaignStatus, GuestCredit? Credit = null);
 
 /// <summary>
-/// The small line a guest-facing page carries: "Made with invites.blog" on a Free event, the Studio
+/// The small line a guest-facing page carries: "Made with invites.blog" on a Free event, the Premium
 /// designer who made the invitation, and the venue whose albums they are.
 /// </summary>
 public sealed record GuestCredit(bool MadeWith, string? DesignedBy, string? VenueName, string? VenueLogoUrl)

@@ -30,10 +30,9 @@ public class MyTemplatesServiceTests
 
     private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
-    private readonly InvitesBlog.Application.Plans.IPassOfferService _offers = Substitute.For<InvitesBlog.Application.Plans.IPassOfferService>();
 
     private MyTemplatesService Sut() =>
-        new(_currentUser, _templates, _campaigns, _uow, _users, _inviters, _offers);
+        new(_currentUser, _templates, _campaigns, _uow, _users, _inviters);
 
     private void AsAdmin() => _currentUser.HasPermission(Permissions.Templates.Manage).Returns(true);
 
@@ -188,8 +187,6 @@ public class MyTemplatesServiceTests
         _campaigns.Query(Arg.Any<bool>()).Returns(new[] { e }.AsAsyncQueryable());
         _users.Query(Arg.Any<bool>()).Returns(new[] { host }.AsAsyncQueryable());
         _inviters.Query(Arg.Any<bool>()).Returns(Array.Empty<Inviter>().AsAsyncQueryable());
-        _offers.ForCampaignAsync(e.Id, Arg.Any<CancellationToken>())
-            .Returns(new InvitesBlog.Application.Plans.PassOfferDto(139, 489, 199, 699, 30, "Me", 99, 349));
         return (t, e, host);
     }
 
@@ -202,7 +199,6 @@ public class MyTemplatesServiceTests
         Assert.Equal("Aisha", use.HostName);
         Assert.Equal(host.Email, use.HostEmail);
         Assert.Equal("Not finished", use.Status);
-        Assert.True(use.Discounted);
     }
 
     [Fact]
@@ -212,7 +208,6 @@ public class MyTemplatesServiceTests
         var use = Assert.Single(await Sut().UsesAsync(t.Id));
         Assert.Null(use.HostName);
         Assert.Null(use.HostEmail);
-        Assert.False(use.Discounted);
 
         AsAdmin();
         Assert.Equal("Aisha", Assert.Single(await Sut().UsesAsync(t.Id)).HostName);

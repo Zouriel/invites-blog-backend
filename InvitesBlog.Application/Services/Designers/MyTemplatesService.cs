@@ -20,8 +20,7 @@ public sealed class MyTemplatesService(
     ICampaignRepository campaigns,
     IUnitOfWork uow,
     IRepository<AppUser> users,
-    IInviterRepository inviters,
-    Plans.IPassOfferService offers) : IMyTemplatesService
+    IInviterRepository inviters) : IMyTemplatesService
 {
     public async Task<IReadOnlyList<TemplateUseDto>> UsesAsync(Guid templateId, CancellationToken ct = default)
     {
@@ -64,8 +63,7 @@ public sealed class MyTemplatesService(
                 InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind),
                 named ? inviter?.Name ?? account?.DisplayName : null,
                 named ? account?.Email ?? inviter?.Email : null,
-                pass.ToString(),
-                template.AssignedEmail is not null && (await offers.ForCampaignAsync(c.Id, ct)).DiscountPercent > 0));
+                pass.ToString()));
         }
         return list;
     }

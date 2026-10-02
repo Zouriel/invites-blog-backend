@@ -62,7 +62,7 @@ public sealed class AdminController(IAdminService admin, IPriceBook prices, ICur
     public async Task<IActionResult> SetRole(Guid id, [FromBody] SetUserRoleRequest req, CancellationToken ct) =>
         Success(await admin.SetUserRoleAsync(id, req, ct));
 
-    /// <summary>Sets an account's Studio or Venue plan. Until billing exists, this is how anyone gets one.</summary>
+    /// <summary>Sets an account's Premium or Venue plan by hand.</summary>
     [HttpPut("users/{id:guid}/subscription")]
     [HasPermission(Permissions.Admin.ManageUsers)]
     public async Task<IActionResult> SetSubscription(Guid id, [FromBody] SetSubscriptionRequest req, CancellationToken ct) =>

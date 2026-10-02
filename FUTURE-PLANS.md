@@ -839,3 +839,21 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   a year more from its end, without invitations. `PassReminderService` (6-hourly) emails the host a
   month and a week before a pass ends (`Campaign.PassNoticeStage`, reset on extension); the dashboard
   and billing page offer "Extend a year" from a month before.
+
+## Premium pass replaces Studio; the designer is for everyone — *2026-10-02*
+
+- **Passes:** Party pass 25 GB (was 10), Wedding pass 50 GB (was 100). Free stays 1 GB.
+- **Premium pass** replaces Studio (`SubscriptionTier.Premium` = 2, the number Studio had, so the
+  accounts that were on Studio are on Premium with the same end date). MVR 450 a month, monthly only
+  (`premium-monthly`; `StudioYearly` is retired). Every event the subscriber organises
+  (`Campaign.CreatedByUserId`) is on `PlanKind.Premium` unless a pass outranks it: 3 GB, one album,
+  Free's window and emails, no "Made with" mark, and its photos are kept while the subscription
+  lasts (`CoveredUntil` null with no end date, else the end date; the lapse counts from there).
+  Invitations made from a Premium subscriber's designs say "Designed by" them.
+- **The Studio discount is gone** (30% off a design made for someone). The only discount is a
+  venue's: **50% off** its events' passes and renewals (`Prices.VenueDiscountPercent`, default 50).
+- **The template designer is open to every account:** `Customer` holds `designer.manage` and
+  `designs.manage`; `DesignerAccessService` and its sweeper are deleted. The admin Designers list
+  is the accounts that have used the designer (a design or a published template, or the old role).
+- **Designer Check:** no RSVP button is a warning (`rsvp_missing`), not an error — some cards don't
+  take replies.

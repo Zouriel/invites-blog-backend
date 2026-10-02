@@ -6,8 +6,8 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Application.Plans;
 
 /// <summary>
-/// What an event is on right now. A venue outranks a Wedding pass, which outranks a Party pass.
-/// Studio is an ACCOUNT plan and changes nothing an event may do, so it isn't one of these.
+/// What an event is on right now. A Wedding pass outranks a Party pass, which outranks Premium (its
+/// organiser's subscription), which outranks Free.
 /// </summary>
 public enum PlanKind
 {
@@ -15,6 +15,7 @@ public enum PlanKind
     PartyPass,
     WeddingPass,
     Venue,
+    Premium,
 }
 
 /// <summary>
@@ -37,9 +38,10 @@ public enum MediaPhase
 /// the pricing page, so the two can't disagree.
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
-/// everything small, a Party pass, a Wedding pass. Studio is a subscription for designers and
-/// planners. Venue (resorts and halls) is a monthly subscription: a venue buys and renews passes for
-/// the events it runs at the venue discount, and charges its clients itself. Prices are in rufiyaa,
+/// everything small, a Party pass, a Wedding pass. Premium is a monthly subscription that lifts every
+/// event its subscriber organises to 3 GB, without the mark, kept while it lasts. Venue (resorts and
+/// halls) is a monthly subscription: a venue buys and renews passes for the events it runs at the
+/// venue discount, and charges its clients itself. The template designer is open to every account. Prices are in rufiyaa,
 /// shown with dollars alongside.</para>
 /// </summary>
 public static class PlanCatalog
@@ -48,8 +50,9 @@ public static class PlanCatalog
     public const long Gb = 1024L * Mb;
 
     public const long FreeEventBytes = 1 * Gb;
-    public const long PartyEventBytes = 10 * Gb;
-    public const long WeddingEventBytes = 100 * Gb;
+    public const long PremiumEventBytes = 3 * Gb;
+    public const long PartyEventBytes = 25 * Gb;
+    public const long WeddingEventBytes = 50 * Gb;
 
     public const int FreeBuckets = 1;
     public const int PartyBuckets = 2;
@@ -91,17 +94,13 @@ public static class PlanCatalog
     /// <summary>Another year of a pass, without invitations: half the pass.</summary>
     public const decimal PartyExtension = 99m;
     public const decimal WeddingExtension = 349m;
-    public const decimal StudioMonthly = 450m;
-    public const decimal StudioYearly = 4500m;
+    public const decimal PremiumMonthly = 450m;
 
     /// <summary>A venue account, a month.</summary>
     public const decimal VenueMonthly = 2300m;
 
-    /// <summary>What a venue pays for a pass, or another year of one, for an event it runs: 40% off.</summary>
-    public const int VenuePassDiscountPercent = 40;
-
-    /// <summary>What a Studio account pays for a pass it gives to a client: 30% off.</summary>
-    public const int StudioPassDiscountPercent = 30;
+    /// <summary>What a venue pays for a pass, or another year of one, for an event it runs: half.</summary>
+    public const int VenuePassDiscountPercent = 50;
 
     /// <summary>
     /// When per-event plans replaced per-bucket sizes. Anything made before it keeps the space it had
@@ -120,39 +119,39 @@ public static class PlanCatalog
             Currency,
             p.MvrPerUsd,
             [
-                new PlanDto("Free", "Free", 0m, "every event", null, null,
-                    FreeEventBytes, null, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
-                new PlanDto("PartyPass", "Party pass", p.PartyPass, "per event", null, p.StudioPassPrice(EventPassKind.Party),
-                    PartyEventBytes, null, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false,
+                new PlanDto("Free", "Free", 0m, "every event",
+                    FreeEventBytes, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
+                new PlanDto("PartyPass", "Party pass", p.PartyPass, "per event",
+                    PartyEventBytes, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false,
                     ExtensionPrice: p.PartyExtension),
-                new PlanDto("WeddingPass", "Wedding pass", p.WeddingPass, "per event", null, p.StudioPassPrice(EventPassKind.Wedding),
-                    WeddingEventBytes, null, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false,
+                new PlanDto("WeddingPass", "Wedding pass", p.WeddingPass, "per event",
+                    WeddingEventBytes, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false,
                     ExtensionPrice: p.WeddingExtension),
-                new PlanDto("Studio", "Studio", p.StudioMonthly, "per month", p.StudioYearly, null,
-                    null, null, null, null, null, 0, false, false),
+                // Every event its subscriber organises, kept while it lasts (no retention days).
+                new PlanDto("Premium", "Premium pass", p.PremiumMonthly, "per month",
+                    PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
                 // What it offers is the discount on its events' passes, and the designer.
-                new PlanDto("Venue", "Venue", p.VenueMonthly, "per month", null, null,
-                    null, null, null, null, null, 0, false, false),
+                new PlanDto("Venue", "Venue", p.VenueMonthly, "per month",
+                    null, null, null, null, 0, false, false),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
             new SendingPriceDto(p.SendingPerBlock, PricingCalculator.BlockSize),
             new LapseDto(ReminderDay, OrganiserOnlyDay, FinalNoticeDay, DeleteDay),
-            p.StudioDiscountPercent,
             p.VenueDiscountPercent);
     }
 }
 
-/// <summary>One plan as the pricing page shows it. Studio has no event limits of its own: nulls.</summary>
-/// <param name="StudioPrice">What a client pays for this pass on a design a Studio made for them; null for the rest.</param>
+/// <summary>One plan as the pricing page shows it. Venue has no event limits of its own: nulls.</summary>
 /// <param name="ExtensionPrice">Another year of this pass, without invitations; null for the rest.</param>
 /// <param name="RetentionDays">How long photos are kept from the event day; null while a subscription covers them.</param>
+/// <param name="EventBytes">Space for each event; for Premium, each event its subscriber organises.</param>
 /// <param name="IncludedInvites">Invitations sent for the event without charge.</param>
 /// <param name="PrivateAlbums">Whether an album can be closed to some guests.</param>
 /// <param name="Branded">Whether the invitation and album carry a small "Made with invites.blog".</param>
 /// <param name="From">The price is the smallest; larger ones are quoted.</param>
 public sealed record PlanDto(
-    string Kind, string Name, decimal Price, string Billing, decimal? YearlyPrice, decimal? StudioPrice,
-    long? EventBytes, long? AccountBytes, int? MaxBuckets, int? MaxWindowDays, int? RetentionDays,
+    string Kind, string Name, decimal Price, string Billing,
+    long? EventBytes, int? MaxBuckets, int? MaxWindowDays, int? RetentionDays,
     int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false, decimal? ExtensionPrice = null);
 
 /// <summary>"Keep your photos": how much a year, and how many months each one adds.</summary>
@@ -165,12 +164,12 @@ public sealed record LapseDto(int ReminderDay, int OrganiserOnlyDay, int FinalNo
 
 public sealed record PlanCatalogDto(
     string Currency, decimal MvrPerUsd, IReadOnlyList<PlanDto> Plans, KeepPhotosDto KeepPhotos,
-    SendingPriceDto Sending, LapseDto Lapse, int StudioDiscountPercent, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent);
+    SendingPriceDto Sending, LapseDto Lapse, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent);
 
 /// <summary>What one event may do right now, and how long it is covered for.</summary>
 /// <param name="AccountBytes">A venue's space across all of its events; null for everything else.</param>
 /// <param name="IncludedInvites">Invitations invites.blog sends for it without charging.</param>
-/// <param name="CoveredUntil">When its cover ends; null while a venue's plan covers it.</param>
+/// <param name="CoveredUntil">When its cover ends; null while its organiser's Premium (with no end) covers it.</param>
 /// <param name="OwnerUserId">Whoever organised the event: the one told when its photos are ending.</param>
 /// <param name="VenueId">The venue whose plan covers it, when one does. Its space is counted across the venue.</param>
 public sealed record EventPlan(
@@ -203,6 +202,11 @@ public static class PlanRules
     /// Kept for its end date, which still never shortens a cover.
     /// </param>
     /// <param name="legacyCoverUntil">The latest date anything from before the plans is covered to.</param>
+    /// <param name="premium">
+    /// The organiser's Premium subscription, if they have or had one: whether it is in force and when it
+    /// ends (null: no end). While it lasts their events get Premium's space and keep their photos; once it
+    /// ends, the photos' lapse counts from its end.
+    /// </param>
     public static EventPlan Evaluate(
         DateTimeOffset now,
         DateTimeOffset eventDate,
@@ -212,18 +216,22 @@ public static class PlanRules
         (Guid Id, bool Active, DateTimeOffset? EndedAt)? venue,
         DateTimeOffset? legacyCoverUntil,
         DateTimeOffset? mediaDeletedAt,
-        Guid? ownerUserId)
+        Guid? ownerUserId,
+        (bool Active, DateTimeOffset? EndsAt)? premium = null)
     {
         var passActive = pass != EventPassKind.None && passUntil is { } until && until > now;
+        var premiumActive = premium is { Active: true };
 
         var kind = passActive && pass == EventPassKind.Wedding ? PlanKind.WeddingPass
             : passActive && pass == EventPassKind.Party ? PlanKind.PartyPass
+            : premiumActive ? PlanKind.Premium
             : PlanKind.Free;
 
         var eventBytes = kind switch
         {
             PlanKind.PartyPass => PlanCatalog.PartyEventBytes,
             PlanKind.WeddingPass => PlanCatalog.WeddingEventBytes,
+            PlanKind.Premium => PlanCatalog.PremiumEventBytes,
             _ => PlanCatalog.FreeEventBytes,
         };
         // The plan is the only source of an event's space. Albums from before the plans once kept
@@ -231,12 +239,13 @@ public static class PlanRules
         // settings said 1 GB. Only their cover date is still honoured (legacyCoverUntil).
 
         // The cover is the latest of the free 90 days, a pass, "Keep your photos", a venue plan that
-        // covered it before venues bought passes, and what anything from before the plans was
-        // promised — so ending one never shortens another.
+        // covered it before venues bought passes, the organiser's Premium, and what anything from
+        // before the plans was promised — so ending one never shortens another.
         var end = eventDate.AddDays(PlanCatalog.FreeCoverDays);
-        foreach (var candidate in new[] { pass != EventPassKind.None ? passUntil : null, keepPhotosUntil, venue?.EndedAt, legacyCoverUntil })
+        foreach (var candidate in new[] { pass != EventPassKind.None ? passUntil : null, keepPhotosUntil, venue?.EndedAt, legacyCoverUntil, premium?.EndsAt })
             if (candidate is { } c && c > end) end = c;
-        DateTimeOffset? coveredUntil = end;
+        // Premium with no end keeps the photos for as long as it lasts: no end date at all.
+        DateTimeOffset? coveredUntil = premium is { Active: true, EndsAt: null } ? null : end;
 
         var large = kind is PlanKind.WeddingPass;
         return new EventPlan(

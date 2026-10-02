@@ -15,11 +15,12 @@ public class PlanRulesTests
     private static EventPlan Evaluate(
         EventPassKind pass = EventPassKind.None, DateTimeOffset? passUntil = null, DateTimeOffset? keep = null,
         bool? venueActive = null, DateTimeOffset? venueEnded = null,
-        DateTimeOffset? legacyCover = null, DateTimeOffset? now = null, DateTimeOffset? night = null) =>
+        DateTimeOffset? legacyCover = null, DateTimeOffset? now = null, DateTimeOffset? night = null,
+        (bool, DateTimeOffset?)? premium = null) =>
         PlanRules.Evaluate(
             now ?? Now, night ?? Night, pass, passUntil, keep,
             venueActive is { } active ? (VenueId, active, venueEnded) : null,
-            legacyCover, null, Guid.NewGuid());
+            legacyCover, null, Guid.NewGuid(), premium);
 
     [Fact]
     public void A_free_event_gets_1_gb_one_album_one_night_90_days_and_the_mark()
@@ -39,13 +40,13 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void A_party_pass_gets_10_gb_two_albums_three_days_100_invitations_and_no_mark()
+    public void A_party_pass_gets_25_gb_two_albums_three_days_100_invitations_and_no_mark()
     {
         var until = PlanRules.PassUntil(Night, Now);
         var plan = Evaluate(EventPassKind.Party, until);
 
         Assert.Equal(PlanKind.PartyPass, plan.Kind);
-        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(25 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(2, plan.MaxBuckets);
         Assert.Equal(3, plan.MaxWindowDays);
         Assert.Equal(100, plan.IncludedInvites);
@@ -55,17 +56,59 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void A_wedding_pass_gets_100_gb_five_albums_five_days_500_invitations_and_private_albums()
+    public void A_wedding_pass_gets_50_gb_five_albums_five_days_500_invitations_and_private_albums()
     {
         var plan = Evaluate(EventPassKind.Wedding, Now.AddMonths(6));
 
         Assert.Equal(PlanKind.WeddingPass, plan.Kind);
-        Assert.Equal(100 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(50 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(MediaBucket.MaxPerCampaign, plan.MaxBuckets);
         Assert.Equal(5, plan.MaxWindowDays);
         Assert.Equal(500, plan.IncludedInvites);
         Assert.True(plan.PrivateAlbums);
         Assert.False(plan.Branded);
+    }
+
+    [Fact]
+    public void Premium_gives_3_gb_no_mark_and_keeps_the_photos_while_it_lasts()
+    {
+        // Long after the free 90 days, the organiser still subscribed with no end date.
+        var plan = Evaluate(now: Night.AddDays(400), premium: (true, null));
+
+        Assert.Equal(PlanKind.Premium, plan.Kind);
+        Assert.Equal(3 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(1, plan.MaxBuckets);
+        Assert.Equal(1, plan.MaxWindowDays);
+        Assert.Equal(0, plan.IncludedInvites);
+        Assert.False(plan.Branded);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    [Fact]
+    public void A_monthly_premium_covers_to_its_end_and_the_lapse_counts_from_there()
+    {
+        var ends = Night.AddDays(200);
+        var running = Evaluate(now: Night.AddDays(150), premium: (true, ends));
+        Assert.Equal(PlanKind.Premium, running.Kind);
+        Assert.Equal(ends, running.CoveredUntil);
+
+        // Ended: back to Free's space and the mark, and the photos lapse from when it ended.
+        var ended = Evaluate(now: ends.AddDays(10), premium: (false, ends));
+        Assert.Equal(PlanKind.Free, ended.Kind);
+        Assert.Equal(1 * PlanCatalog.Gb, ended.EventBytes);
+        Assert.True(ended.Branded);
+        Assert.Equal(ends, ended.CoveredUntil);
+        Assert.Equal(MediaPhase.UploadsClosed, ended.Phase);
+    }
+
+    [Fact]
+    public void A_pass_outranks_premium()
+    {
+        var plan = Evaluate(EventPassKind.Party, PlanRules.PassUntil(Night, Now), premium: (true, null));
+        Assert.Equal(PlanKind.PartyPass, plan.Kind);
+        Assert.Equal(25 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Null(plan.CoveredUntil);
     }
 
     [Fact]
@@ -159,22 +202,22 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void Studio_passes_cost_30_percent_less()
+    public void Venue_passes_cost_half()
     {
-        Assert.Equal(139m, Prices.Defaults.StudioPassPrice(EventPassKind.Party));
-        Assert.Equal(489m, Prices.Defaults.StudioPassPrice(EventPassKind.Wedding));
+        Assert.Equal(100m, Prices.Defaults.VenuePassPrice(EventPassKind.Party));
+        Assert.Equal(350m, Prices.Defaults.VenuePassPrice(EventPassKind.Wedding));
     }
 
     [Fact]
     public void The_catalogue_shows_the_price_book_not_the_defaults()
     {
-        var changed = Prices.Defaults with { PartyPass = 249m, SendingPerBlock = 60m, StudioDiscountPercent = 20 };
+        var changed = Prices.Defaults with { PartyPass = 249m, SendingPerBlock = 60m, VenueDiscountPercent = 20, PremiumMonthly = 500m };
         var c = PlanCatalog.Describe(changed);
         var party = c.Plans.Single(p => p.Kind == "PartyPass");
         Assert.Equal(249m, party.Price);
-        Assert.Equal(199m, party.StudioPrice);
+        Assert.Equal(500m, c.Plans.Single(p => p.Kind == "Premium").Price);
         Assert.Equal(60m, c.Sending.PerBlock);
-        Assert.Equal(20, c.StudioDiscountPercent);
+        Assert.Equal(20, c.VenueDiscountPercent);
         // Limits are not prices: they stay where the code enforces them.
         Assert.Equal(PlanCatalog.PartyEventBytes, party.EventBytes);
     }
@@ -185,8 +228,8 @@ public class PlanRulesTests
         Assert.Empty(Prices.Defaults.Problems());
         Assert.NotEmpty((Prices.Defaults with { PartyPass = 0 }).Problems());
         Assert.NotEmpty((Prices.Defaults with { WeddingPass = 100 }).Problems());
-        Assert.NotEmpty((Prices.Defaults with { StudioYearly = 100 }).Problems());
-        Assert.NotEmpty((Prices.Defaults with { StudioDiscountPercent = 95 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { PremiumMonthly = 0 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { VenueDiscountPercent = 95 }).Problems());
     }
 
     [Fact]
@@ -195,17 +238,20 @@ public class PlanRulesTests
         var catalog = PlanCatalog.Describe();
 
         Assert.Equal("MVR", catalog.Currency);
-        Assert.Equal(["Free", "PartyPass", "WeddingPass", "Studio", "Venue"], catalog.Plans.Select(p => p.Kind));
-        // Venue is a monthly subscription, and it offers 40% off its events' passes.
+        Assert.Equal(["Free", "PartyPass", "WeddingPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
+        // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
         Assert.Equal([0m, 199m, 699m, 450m, 2300m], catalog.Plans.Select(p => p.Price));
-        Assert.Equal(40, catalog.VenueDiscountPercent);
+        Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
+        Assert.Equal([1 * PlanCatalog.Gb, 25 * PlanCatalog.Gb, 50 * PlanCatalog.Gb, 3 * PlanCatalog.Gb, (long?)null],
+            catalog.Plans.Select(p => p.EventBytes));
+        Assert.Equal(50, catalog.VenueDiscountPercent);
         Assert.Equal(150m, catalog.KeepPhotos.Price);
         Assert.Equal(50m, catalog.Sending.PerBlock);
         Assert.Equal(100, catalog.Sending.BlockSize);
     }
 }
 
-/// <summary>Putting a pass on an event: the one rule the admin, a checkout and a Studio share.</summary>
+/// <summary>Putting a pass on an event: the one rule the admin and a checkout share.</summary>
 public class EventPassesTests
 {
     private static readonly DateTimeOffset Now = new(2027, 3, 1, 12, 0, 0, TimeSpan.Zero);

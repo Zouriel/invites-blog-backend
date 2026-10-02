@@ -3,12 +3,12 @@ namespace InvitesBlog.Application.Dtos.Admin;
 /// <summary>An application user with the names of the roles assigned to them.</summary>
 public sealed record AdminUserDto(
     Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles,
-    /// <summary>None, Studio or Venue, as set, whether or not it has ended.</summary>
+    /// <summary>None, Premium or Venue, as set, whether or not it has ended.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
     bool SubscriptionActive = false);
 
-/// <summary>Sets an account's professional plan: None, Studio or Venue. <c>None</c> ends it now.</summary>
+/// <summary>Sets an account's plan: None, Premium or Venue. <c>None</c> ends it now.</summary>
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
 
 /// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>

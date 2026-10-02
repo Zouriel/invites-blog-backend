@@ -545,7 +545,7 @@ public class AccountServiceTests
     }
 
     /// <summary>
-    /// Everyone signs up the same way now; the template designer comes with the Studio plan
+    /// Everyone signs up the same way now; every account can use the template designer
     /// (DesignerAccessService), so neither old door hands out the role any more.
     /// </summary>
     [Fact]
@@ -555,7 +555,7 @@ public class AccountServiceTests
         var a = await Assert.ThrowsAsync<BusinessRuleException>(() =>
             sut.RegisterDesignerAsync(new RegisterDesignerRequest("new@example.test", "a-long-password", "New")));
         var b = await Assert.ThrowsAsync<BusinessRuleException>(() => sut.BecomeDesignerAsync());
-        Assert.Equal("designer_needs_studio", a.ErrorCode);
-        Assert.Equal("designer_needs_studio", b.ErrorCode);
+        Assert.Equal("designer_for_everyone", a.ErrorCode);
+        Assert.Equal("designer_for_everyone", b.ErrorCode);
     }
 }
