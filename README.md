@@ -38,9 +38,10 @@ moderates.
 A bucket owns its **window** and its **audience** and little else: its cover, its date and its
 guest list are the event's, shared with the invitation, and its space is the event's plan's. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
-(`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or a venue's plan
-for events held there. Studio (designers and planners) and Venue (resorts and halls) are the only
-subscriptions; hosts pay per event. Prices are in rufiyaa.
+(`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or the organiser's
+Premium pass. The Premium pass (3 GB on every event, kept while it lasts) and Venue (resorts and
+halls, passes at half price) are the only subscriptions; hosts pay per event. The template designer
+is open to every account. Prices are in rufiyaa.
 
 A bucket is an occasion rather than a drive, so it only **takes** anything around its event: open
 from the start of the day before (Malé time) until the day after ends — or, with a pass, until 3 or
@@ -206,7 +207,7 @@ dotnet test          # 883 tests
 Worth knowing before reading the pricing code:
 
 - **Plans are not billed.** The plans and their limits are real (`PlanCatalog`) and enforced, but
-  passes, "Keep your photos", Studio, Venue and Studio pass credits are all granted by an admin in
+  passes, "Keep your photos", the Premium pass and Venue are all granted by an admin in
   Admin settings; nothing is sold online yet (a Bank of Maldives gateway is being registered).
 - **Prices are data, limits are code.** What things cost comes from `IPriceBook` (the `prices` row of
   `app_settings`, edited in Admin → Prices, audited as `prices.set`), falling back to the defaults in

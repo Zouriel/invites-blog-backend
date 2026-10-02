@@ -211,9 +211,9 @@ A few of these need explaining:
 
 When an invitation is served, the server adds one small pill fixed to the **bottom-right corner**
 (about 10px from the edges): "Made with invites.blog" on a Free event, and "Designed by {your name}"
-when the template's designer is on the Studio plan. Keep that corner free of anything a guest needs
+when the template's designer is on the Premium pass. Keep that corner free of anything a guest needs
 to tap; a pass on the event removes the "Made with" part, and "Designed by" shows only while the
-designer's Studio plan runs.
+designer's Premium pass runs.
 
 ## 4. Roles
 

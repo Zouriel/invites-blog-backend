@@ -4,7 +4,7 @@ using InvitesBlog.Application.Dtos.Invites;
 namespace InvitesBlog.Api.Rendering;
 
 /// <summary>
-/// The credit line a guest sees: "Made with invites.blog" on a Free event, the Studio designer who
+/// The credit line a guest sees: "Made with invites.blog" on a Free event, the Premium designer who
 /// made the invitation, the venue whose albums they are. Kept small and out of the way — it is a
 /// signature, not an advert — and every value is encoded on the way in.
 /// </summary>
