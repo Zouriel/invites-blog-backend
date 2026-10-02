@@ -113,7 +113,7 @@ public class ArtLibraryTests
         Assert.Equal(1, art.Layers[0].Frames[0].Opacity);
         Assert.Equal(0, art.Layers[1].Frames[0].Opacity);
         Assert.Equal(1, art.Layers[2].Frames[^1].Opacity);
-        Assert.DoesNotContain(Place(art), x => x.Severity == "error" && x.Code != "rsvp_required");
+        Assert.DoesNotContain(Place(art), x => x.Severity == "error");
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class ArtLibraryTests
             {
                 var art = await library.ImportAsync(new ArtImportRequest(source, id, null));
                 log.AppendLine($"{pair}: {(art.AsPicture ? "picture" : "vector")} {art.Width}x{art.Height}, {art.Layers.Count} layers, {art.Bytes / 1024}KB");
-                Assert.DoesNotContain(Place(art), x => x.Severity == "error" && x.Code != "rsvp_required");
+                Assert.DoesNotContain(Place(art), x => x.Severity == "error");
             }
             catch (AppException e) { log.AppendLine($"{pair}: {e.ErrorCode} {e.Message}"); }
             await Task.Delay(3000);
@@ -235,7 +235,7 @@ public class ArtLibraryTests
             {
                 var art = await library.ImportAsync(new ArtImportRequest(source, item.Id, item.Title));
                 log.AppendLine($"  ok {item.Id} {item.Title}: {art.Layers.Count} layers, animated={art.Animated}, {art.Bytes / 1024}KB");
-                Assert.DoesNotContain(Place(art), x => x.Severity == "error" && x.Code != "rsvp_required");
+                Assert.DoesNotContain(Place(art), x => x.Severity == "error");
                 imported++;
             }
             catch (AppException e)

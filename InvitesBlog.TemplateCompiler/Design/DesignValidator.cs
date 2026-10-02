@@ -303,8 +303,9 @@ public static partial class DesignValidator
         }
         else
         {
+            // Not every card asks for a reply (a thank-you, an announcement), so it's a nudge, not a rule.
             if (rsvp == 0)
-                Error("rsvp_required", "Add an RSVP button — every invitation has to let guests reply.");
+                Warn("rsvp_missing", "There's no RSVP button, so guests can't reply from this design. Add one if the event needs replies.");
             if (dress == 0)
                 Warn("dress_missing", "There's no spot for dress colours, so the platform will add its own section at the end.");
         }

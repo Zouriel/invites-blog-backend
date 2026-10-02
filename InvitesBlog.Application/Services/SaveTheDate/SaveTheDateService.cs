@@ -56,7 +56,10 @@ public sealed class SaveTheDateService(
             && await campaigns.Query().AnyAsync(c => c.Id == madeId && c.Status != CampaignStatus.Cancelled, ct))
             return new MadeInvitationDto(madeId, AlreadyMade: true, GuestsCopied: 0);
 
-        var created = await campaignService.CreateBareAsync(std.Title, std.EventStartAt, ct, CampaignKind.Invitation, std.AllDay);
+        // The save the date's day may have passed (or moved): the invitation is still made, and the
+        // details step asks for a date that hasn't.
+        var created = await campaignService.CreateBareAsync(std.Title, std.EventStartAt, ct, CampaignKind.Invitation, std.AllDay,
+            allowPastDate: true);
         var invitation = await campaigns.Query(tracking: true).FirstAsync(c => c.Id == created.CampaignId, ct);
         var now = DateTimeOffset.UtcNow;
 

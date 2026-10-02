@@ -36,9 +36,13 @@ public interface ICampaignService
     /// on the request being served. Checking would refuse everybody who is not already signed in —
     /// which is most of the people the unguarded create page exists for.
     /// </param>
+    /// <param name="allowPastDate">
+    /// Takes a date that has passed as it is: the invitation made from a save the date whose day has
+    /// gone by. The host picks the new date on the details step, which refuses a past one there.
+    /// </param>
     Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false);
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false);
 
     /// <summary>
     /// Finishes an event that has no invitation (photos only) on its plan as it stands: it stops

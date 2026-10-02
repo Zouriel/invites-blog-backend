@@ -494,11 +494,14 @@ public class DesignCompilerTests
     }
 
     [Fact]
-    public void Check_requires_an_rsvp_button()
+    public void Check_only_warns_when_there_is_no_rsvp_button()
     {
+        // Some cards don't ask for replies: no RSVP button is a warning, never what blocks publishing.
         var scene = Minimal();
         scene.Elements.RemoveAll(e => e.Type == "rsvp");
-        Assert.Contains(DesignValidator.Validate(scene), i => i.Code == "rsvp_required");
+        var issues = DesignValidator.Validate(scene);
+        Assert.Contains(issues, i => i.Code == "rsvp_missing" && i.Severity == "warning");
+        Assert.DoesNotContain(issues, i => i.Severity == "error");
     }
 
     [Fact]

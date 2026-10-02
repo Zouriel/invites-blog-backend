@@ -547,13 +547,13 @@ public sealed class CampaignService(
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false)
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
         if (eventDate is null)
             throw new BusinessRuleException("Pick the date of your event.", "event_date_required");
-        if (IsBeforeToday(eventDate.Value))
+        if (!allowPastDate && IsBeforeToday(eventDate.Value))
             throw new BusinessRuleException("Pick today or a later date.", "event_date_in_past");
 
         // A placeholder to pin. Marked Imported, which every gallery read already fails to match, so

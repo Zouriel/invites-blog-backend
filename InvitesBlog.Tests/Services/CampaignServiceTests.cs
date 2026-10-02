@@ -857,6 +857,32 @@ public class CampaignServiceTests
         Assert.Equal(TimeSpan.Zero, saved.EventStartAt.Offset);
     }
 
+    /// <summary>
+    /// A new event can't be for a day that has passed, except the invitation made from a save the date
+    /// whose day has gone by: refusing that left "Make the invitation" with nothing but an error.
+    /// </summary>
+    [Fact]
+    public async Task A_past_date_is_refused_unless_the_caller_allows_it()
+    {
+        Template? placeholder = null;
+        _templates.When(t => t.AddAsync(Arg.Any<Template>(), Arg.Any<CancellationToken>()))
+            .Do(c => placeholder = c.Arg<Template>());
+        _templates.GetActiveByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(_ => placeholder);
+        Campaign? saved = null;
+        _campaigns.When(c => c.AddAsync(Arg.Any<Campaign>(), Arg.Any<CancellationToken>()))
+            .Do(c => saved = c.Arg<Campaign>());
+        _campaigns.Query(Arg.Any<bool>()).Returns(_ =>
+            (saved is null ? Array.Empty<Campaign>() : [saved]).AsAsyncQueryable());
+
+        var lastMonth = DateTimeOffset.UtcNow.AddDays(-30);
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().CreateBareAsync("Testing", lastMonth));
+        Assert.Equal("event_date_in_past", refused.ErrorCode);
+
+        await Sut().CreateBareAsync("Testing", lastMonth, allowPastDate: true);
+        Assert.Equal(lastMonth.ToUniversalTime(), saved!.EventStartAt);
+    }
+
     // ---------- gaining an invitation after the fact ----------
 
     /// <summary>
