@@ -240,7 +240,7 @@ public class PlanRulesTests
         Assert.Equal("MVR", catalog.Currency);
         Assert.Equal(["Free", "PartyPass", "WeddingPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
         // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
-        Assert.Equal([0m, 199m, 699m, 450m, 2300m], catalog.Plans.Select(p => p.Price));
+        Assert.Equal([0m, 199m, 699m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
         Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
         Assert.Equal([1 * PlanCatalog.Gb, 25 * PlanCatalog.Gb, 50 * PlanCatalog.Gb, 3 * PlanCatalog.Gb, (long?)null],
             catalog.Plans.Select(p => p.EventBytes));

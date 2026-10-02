@@ -94,7 +94,7 @@ public static class PlanCatalog
     /// <summary>Another year of a pass, without invitations: half the pass.</summary>
     public const decimal PartyExtension = 99m;
     public const decimal WeddingExtension = 349m;
-    public const decimal PremiumMonthly = 450m;
+    public const decimal PremiumMonthly = 200m;
 
     /// <summary>A venue account, a month.</summary>
     public const decimal VenueMonthly = 2300m;

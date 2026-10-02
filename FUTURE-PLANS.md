@@ -844,7 +844,7 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
 
 - **Passes:** Party pass 25 GB (was 10), Wedding pass 50 GB (was 100). Free stays 1 GB.
 - **Premium pass** replaces Studio (`SubscriptionTier.Premium` = 2, the number Studio had, so the
-  accounts that were on Studio are on Premium with the same end date). MVR 450 a month, monthly only
+  accounts that were on Studio are on Premium with the same end date). MVR 200 a month, monthly only
   (`premium-monthly`; `StudioYearly` is retired). Every event the subscriber organises
   (`Campaign.CreatedByUserId`) is on `PlanKind.Premium` unless a pass outranks it: 3 GB, one album,
   Free's window and emails, no "Made with" mark, and its photos are kept while the subscription
