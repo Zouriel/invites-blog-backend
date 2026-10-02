@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Dtos.Payments;
 
 namespace InvitesBlog.Application.Services.Payments;
@@ -12,8 +13,17 @@ public interface IPaymentService
     /// <summary>Capacity top-up checkout (§4.7.4). Verifies ownership; returns a message when no top-up is needed.</summary>
     Task<TopUpResponse> TopUpAsync(Guid campaignId, CancellationToken ct = default);
 
-    /// <summary>Verifies + processes a provider webhook idempotently (§10.5).</summary>
-    Task<WebhookProcessResult> HandleWebhookAsync(string rawBody, string? signature, CancellationToken ct = default);
+    /// <summary>Verifies + processes a provider webhook idempotently (§10.5). The primary way a payment's result arrives.</summary>
+    Task<WebhookProcessResult> HandleWebhookAsync(string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default);
+
+    /// <summary>
+    /// Asks the gateway for one pending payment's state and records it: for a webhook that never
+    /// arrived, and for the buyer landing back before it did. A payment already settled is left as is.
+    /// </summary>
+    Task<WebhookProcessResult> SyncAsync(Guid paymentId, CancellationToken ct = default);
+
+    /// <summary>Records a result the gateway gave directly (a saved-card charge), exactly as a webhook's would be.</summary>
+    Task<WebhookProcessResult> ApplyAsync(PaymentWebhookResult result, CancellationToken ct = default);
 
     /// <summary>Renders the local dev fake-checkout page (Fake provider only).</summary>
     string BuildDevCheckoutPage(string session, string payment, decimal amount, string success, string cancel);

@@ -51,6 +51,21 @@ public sealed class AppUser
     /// </summary>
     public DateTimeOffset? SubscriptionEndsAt { get; set; }
 
+    /// <summary>This account's customer at the payment gateway, which its saved card belongs to. Null until it first pays for a plan.</summary>
+    public string? PaymentCustomerId { get; set; }
+
+    /// <summary>
+    /// What renews by itself when <see cref="SubscriptionEndsAt"/> comes (PremiumMonthly
+    /// or VenueMonthly), charging the card saved when the plan was bought. Null: nothing renews.
+    /// </summary>
+    public PaymentKind? AutoRenewKind { get; set; }
+
+    /// <summary>Automatic renewals that failed in a row. Auto-renew turns off after three.</summary>
+    public int RenewalFailures { get; set; }
+
+    /// <summary>When a renewal was last tried, so a failed one is retried a day later rather than every sweep.</summary>
+    public DateTimeOffset? RenewalLastTriedAt { get; set; }
+
     /// <summary>
     /// When an admin removed one of this account's gallery templates for abuse. From then on the
     /// designer still publishes privately, but can't put anything in the public gallery.

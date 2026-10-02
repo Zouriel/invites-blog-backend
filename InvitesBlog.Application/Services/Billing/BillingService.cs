@@ -4,6 +4,7 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Campaigns;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Exceptions;
+using InvitesBlog.Application.Legal;
 using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Pricing;
 using InvitesBlog.Application.Services.Campaigns;
@@ -20,7 +21,13 @@ public sealed record BillingPricesDto(
     decimal PartyExtension, decimal WeddingExtension, decimal VenueMonthly);
 
 /// <summary>The account's own plan: None, Premium or Venue.</summary>
-public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active);
+/// <param name="AutoRenew">What renews by itself at <paramref name="EndsAt"/> (premium-monthly,
+/// venue-monthly), charging the saved card; null when nothing does.</param>
+public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active, string? AutoRenew = null);
+
+/// <summary>Where one payment stands, for the page the buyer lands on after the gateway.</summary>
+/// <param name="Status">Pending, Paid or Failed.</param>
+public sealed record PaymentStatusDto(Guid Id, string Item, string Description, decimal Amount, string Currency, string Status);
 
 /// <summary>One of the account's events, with everything that can be bought for it.</summary>
 /// <param name="Pass">The pass it has or last had (None, Party, Wedding) — what an extension extends.</param>
@@ -43,7 +50,24 @@ public sealed record BillingOverviewDto(
 /// premium-monthly or venue-monthly.</param>
 /// <param name="Quantity">Blocks of emails. 1 for the rest.</param>
 /// <param name="ReturnPath">A path on this site to come back to after paying (the plan step); the billing page by default.</param>
-public sealed record CheckoutRequest(string Item, Guid? CampaignId, int? Quantity, string? ReturnPath = null);
+/// <param name="AcceptedTerms">The buyer ticked "I agree" on the review step. Required to pay.</param>
+/// <param name="TermsVersion">The version of the terms that review step showed (<see cref="LegalTerms.Version"/>).</param>
+public sealed record CheckoutRequest(
+    string Item, Guid? CampaignId, int? Quantity, string? ReturnPath = null,
+    bool AcceptedTerms = false, string? TermsVersion = null);
+
+/// <summary>
+/// What paying for an item would be, for the review step shown before the gateway: the bank's card
+/// rules require the total, the currency and the terms to be on screen, and accepted, before paying.
+/// </summary>
+/// <param name="Available">Online payment is on. When it isn't, <paramref name="Message"/> and
+/// <paramref name="InquireTopic"/> say where to go instead.</param>
+/// <param name="Amount">The price, in <paramref name="Currency"/> (rufiyaa).</param>
+/// <param name="ChargeAmount">What the card is charged, in <paramref name="ChargeCurrency"/>: the same as
+/// the price in production; in dollars where the gateway account only takes dollars (<see cref="ChargeCurrency"/>).</param>
+public sealed record CheckoutQuoteDto(
+    bool Available, string Item, string Description, decimal Amount, string Currency, decimal MvrPerUsd,
+    string TermsVersion, string? Message, string? InquireTopic, decimal ChargeAmount, string ChargeCurrency);
 
 /// <summary>
 /// Where to pay, or — while online payment isn't switched on — that it isn't yet, and which
@@ -57,7 +81,18 @@ public interface IBillingService
 
     /// <summary>One event's plan and what it can have: what the plan step before sending shows.</summary>
     Task<BillingEventDto> EventAsync(Guid campaignId, CancellationToken ct = default);
+    /// <summary>What an item costs and what it is, checked the same way paying for it is, without paying.</summary>
+    Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default);
     Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// One of the buyer's payments, asking the gateway first if it's still pending (and applying it if
+    /// it has gone through): the buyer can land back before the webhook does.
+    /// </summary>
+    Task<PaymentStatusDto> PaymentStatusAsync(Guid paymentId, CancellationToken ct = default);
+
+    /// <summary>Stops the account's plan renewing by itself. It runs to the end of what's paid.</summary>
+    Task<BillingAccountDto> StopAutoRenewAsync(CancellationToken ct = default);
 
     /// <summary>Applies what a paid payment bought, once. Called after the gateway confirms payment.</summary>
     Task FulfilAsync(Guid paymentId, CancellationToken ct = default);
@@ -87,7 +122,9 @@ public sealed class BillingService(
     ISendingAllowanceService allowances,
     MediaBuckets.IMediaBucketService buckets,
     IRepository<AuditLog> auditLogs,
-    IUnitOfWork uow) : IBillingService
+    IUnitOfWork uow,
+    IRecurringPaymentProvider? recurring = null,
+    Payments.IPaymentService? paymentService = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -121,8 +158,7 @@ public sealed class BillingService(
             new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 p.PremiumMonthly, p.VenueDiscountPercent,
                 p.PartyExtension, p.WeddingExtension, p.VenueMonthly),
-            new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt,
-                PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)),
+            Account(user, now),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
                 x.Amount, x.Currency, x.Status.ToString(), x.CreatedAt, x.PaidAt, x.CampaignId)).ToList());
@@ -149,9 +185,108 @@ public sealed class BillingService(
             c.Status == CampaignStatus.Draft);
     }
 
+    public async Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default)
+    {
+        var me = RequireUser();
+        var priced = await PriceAsync(me, req, ct);
+        var p = await priceBook.CurrentAsync(ct);
+        var (charge, chargeCurrency) = ChargeCurrency.For(config, priced.Amount, p.MvrPerUsd);
+        return new CheckoutQuoteDto(Enabled, ItemName(priced.Kind), priced.Description, priced.Amount, PlanCatalog.Currency,
+            p.MvrPerUsd, LegalTerms.Version, Enabled ? null : NotYetMessage, InquireTopic(priced.Kind), charge, chargeCurrency);
+    }
+
+    private const string NotYetMessage = "Online payment is being set up. Ask us and we'll add it for you.";
+
     public async Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default)
     {
         var me = RequireUser();
+        var (kind, quantity, campaign, price, description) = await PriceAsync(me, req, ct);
+        var now = DateTimeOffset.UtcNow;
+        // What the card is charged, which is what the payment records and the gateway must confirm.
+        var (amount, currency) = ChargeCurrency.For(config, price, (await priceBook.CurrentAsync(ct)).MvrPerUsd);
+
+        if (!Enabled)
+            return new CheckoutResultDto(false, null, NotYetMessage, InquireTopic(kind), null);
+
+        // The terms have to be on screen and accepted before paying, and the ones accepted have to be
+        // the ones in force: a page opened before they changed must be reloaded, not paid through.
+        if (!req.AcceptedTerms)
+            throw new BusinessRuleException("Please read and accept the terms before paying.", "billing_terms_not_accepted");
+        if (req.TermsVersion != LegalTerms.Version)
+            throw new BusinessRuleException("Our terms have changed since this page opened. Please reload it and review them.",
+                "billing_terms_changed");
+
+        // A plan is bought with its card saved, so it can renew by itself: the gateway keeps the card
+        // for this account's customer there. Not for an account with no email (the gateway needs one).
+        var saveCard = false;
+        string? customerId = null;
+        if (IsSubscription(kind) && recurring is not null)
+        {
+            var buyer = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == me, ct);
+            if (buyer is { Email: { Length: > 0 } email })
+            {
+                try
+                {
+                    buyer.PaymentCustomerId ??= await recurring.CreateCustomerAsync(buyer.DisplayName, email, ct);
+                    customerId = buyer.PaymentCustomerId;
+                    saveCard = true;
+                }
+                catch (HttpRequestException)
+                {
+                    // The gateway's customer couldn't be made: the plan is still bought, just not set to
+                    // renew by itself. Paying matters more than the convenience.
+                }
+            }
+        }
+
+        var payment = new Payment
+        {
+            Id = Guid.NewGuid(),
+            AutoRenew = saveCard,
+            CampaignId = campaign?.Id,
+            UserId = me,
+            Kind = kind,
+            Quantity = quantity,
+            InviteCount = kind == PaymentKind.Sending ? quantity * PricingCalculator.BlockSize : 0,
+            Amount = amount,
+            Currency = currency,
+            Description = description,
+            Status = PaymentStatus.Pending,
+            Provider = provider.Name,
+            CreatedAt = now,
+            TermsAcceptedAt = now,
+            TermsVersion = LegalTerms.Version,
+        };
+        await payments.AddAsync(payment, ct);
+        await uow.SaveChangesAsync(ct);
+
+        var inviterBase = config.InviterBase();
+        var back = string.IsNullOrWhiteSpace(req.ReturnPath) || !req.ReturnPath.StartsWith('/') || req.ReturnPath.StartsWith("//")
+            ? "/billing" : req.ReturnPath;
+        var session = await provider.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest(
+            campaign?.Id ?? Guid.Empty, kind.ToString(), amount, currency, payment.InviteCount,
+            $"{inviterBase}{back}{(back.Contains('?') ? '&' : '?')}paid={payment.Id}", $"{inviterBase}{back}")
+        {
+            PaymentId = payment.Id,
+            Description = description,
+            CustomerId = customerId,
+            SaveCard = saveCard,
+        }, ct);
+        payment.ProviderSessionId = session.SessionId;
+        await uow.SaveChangesAsync(ct);
+
+        return new CheckoutResultDto(true, session.CheckoutUrl, null, null, payment.Id);
+    }
+
+    private sealed record Priced(PaymentKind Kind, int Quantity, Campaign? Campaign, decimal Amount, string Description);
+
+    /// <summary>
+    /// What an item is and costs for this buyer, after every check that decides whether they may buy it.
+    /// The quote and the payment both go through here, so the review step never shows a price the
+    /// payment wouldn't charge.
+    /// </summary>
+    private async Task<Priced> PriceAsync(Guid me, CheckoutRequest req, CancellationToken ct)
+    {
         var kind = ParseItem(req.Item);
         var p = await priceBook.CurrentAsync(ct);
         var now = DateTimeOffset.UtcNow;
@@ -202,38 +337,7 @@ public sealed class BillingService(
                 or PaymentKind.PartyExtension or PaymentKind.WeddingExtension)
             description += $" · {v.VenuePercent}% venue price, {v.VenueName}";
 
-        if (!Enabled)
-            return new CheckoutResultDto(false, null,
-                "Online payment is being set up. Ask us and we'll add it for you.", InquireTopic(kind), null);
-
-        var payment = new Payment
-        {
-            Id = Guid.NewGuid(),
-            CampaignId = campaign?.Id,
-            UserId = me,
-            Kind = kind,
-            Quantity = quantity,
-            InviteCount = kind == PaymentKind.Sending ? quantity * PricingCalculator.BlockSize : 0,
-            Amount = amount,
-            Currency = PlanCatalog.Currency,
-            Description = description,
-            Status = PaymentStatus.Pending,
-            Provider = provider.Name,
-            CreatedAt = now,
-        };
-        await payments.AddAsync(payment, ct);
-        await uow.SaveChangesAsync(ct);
-
-        var inviterBase = config.InviterBase();
-        var back = string.IsNullOrWhiteSpace(req.ReturnPath) || !req.ReturnPath.StartsWith('/') || req.ReturnPath.StartsWith("//")
-            ? "/billing" : req.ReturnPath;
-        var session = await provider.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest(
-            campaign?.Id ?? Guid.Empty, kind.ToString(), amount, PlanCatalog.Currency, payment.InviteCount,
-            $"{inviterBase}{back}{(back.Contains('?') ? '&' : '?')}paid={payment.Id}", $"{inviterBase}{back}"), ct);
-        payment.ProviderSessionId = session.SessionId;
-        await uow.SaveChangesAsync(ct);
-
-        return new CheckoutResultDto(true, session.CheckoutUrl, null, null, payment.Id);
+        return new Priced(kind, quantity, campaign, amount, description);
     }
 
     public async Task FulfilAsync(Guid paymentId, CancellationToken ct = default)
@@ -287,6 +391,12 @@ public sealed class BillingService(
                     user.SubscriptionEndsAt = payment.Kind == PaymentKind.StudioYearly ? start.AddYears(1) : start.AddMonths(1);
                 }
                 user.SubscriptionTier = tier;
+                // Bought with the card saved (or renewed with it): it goes on renewing the same way.
+                if (payment.AutoRenew)
+                {
+                    user.AutoRenewKind = payment.Kind;
+                    user.RenewalFailures = 0;
+                }
                 break;
         }
 
@@ -305,6 +415,58 @@ public sealed class BillingService(
 
         if (raiseWindows && campaign is not null) await buckets.RaiseWindowsToPlanAsync(campaign.Id, ct);
     }
+
+    public async Task<PaymentStatusDto> PaymentStatusAsync(Guid paymentId, CancellationToken ct = default)
+    {
+        var me = RequireUser();
+        var payment = await payments.Query().FirstOrDefaultAsync(x => x.Id == paymentId && x.UserId == me, ct)
+                      ?? throw new NotFoundException("That payment isn't on this account.");
+
+        if (payment.Status is PaymentStatus.Pending or PaymentStatus.Created && paymentService is not null)
+        {
+            var synced = await paymentService.SyncAsync(paymentId, ct);
+            if (synced.FulfilPaymentId is { } paid) await FulfilAsync(paid, ct);
+            payment = await payments.Query().FirstAsync(x => x.Id == paymentId, ct);
+        }
+
+        var status = payment.Status switch
+        {
+            PaymentStatus.Paid or PaymentStatus.Refunded or PaymentStatus.PartiallyRefunded => "Paid",
+            PaymentStatus.Failed => "Failed",
+            _ => "Pending",
+        };
+        return new PaymentStatusDto(payment.Id, ItemName(payment.Kind), payment.Description ?? ItemName(payment.Kind),
+            payment.Amount, payment.Currency, status);
+    }
+
+    public async Task<BillingAccountDto> StopAutoRenewAsync(CancellationToken ct = default)
+    {
+        var me = RequireUser();
+        var user = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == me, ct)
+                   ?? throw new NotFoundException("That account no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+        if (user.AutoRenewKind is not null)
+        {
+            user.AutoRenewKind = null;
+            await auditLogs.AddAsync(new AuditLog
+            {
+                Id = Guid.NewGuid(), Action = "billing.autorenew.off", Actor = me.ToString(), CreatedAt = now,
+                DataJson = JsonSerializer.Serialize(new { tier = user.SubscriptionTier.ToString(), user.SubscriptionEndsAt }),
+            }, ct);
+            await uow.SaveChangesAsync(ct);
+        }
+        return Account(user, now);
+    }
+
+    private static BillingAccountDto Account(AppUser user, DateTimeOffset now)
+    {
+        var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+        return new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt, active,
+            active && user.AutoRenewKind is { } k ? ItemName(k) : null);
+    }
+
+    public static bool IsSubscription(PaymentKind kind) =>
+        kind is PaymentKind.PremiumMonthly or PaymentKind.VenueMonthly;
 
     private Guid RequireUser() => currentUser.UserId ?? throw new ForbiddenException("Sign in to see your billing.");
 
@@ -325,7 +487,7 @@ public sealed class BillingService(
         _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
     };
 
-    private static string ItemName(PaymentKind kind) => kind switch
+    public static string ItemName(PaymentKind kind) => kind switch
     {
         PaymentKind.PartyPass => "party-pass",
         PaymentKind.WeddingPass => "wedding-pass",
@@ -341,7 +503,7 @@ public sealed class BillingService(
         _ => "other",
     };
 
-    private static string Describe(PaymentKind kind, int quantity, Campaign? c)
+    public static string Describe(PaymentKind kind, int quantity, Campaign? c)
     {
         var on = c is null ? "" : $" · {c.Title}";
         return kind switch

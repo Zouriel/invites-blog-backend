@@ -10,7 +10,7 @@ namespace InvitesBlog.Infrastructure.Payments;
 /// a signed webhook to <c>/api/payments/webhook</c> — exercising the real idempotent webhook path
 /// (§10.5 / §14) without Stripe. Replace with a real <see cref="IPaymentProvider"/> in production.
 /// </summary>
-public sealed class FakePaymentProvider(IConfiguration config) : IPaymentProvider
+public sealed class FakePaymentProvider(IConfiguration config) : IPaymentProvider, IRecurringPaymentProvider
 {
     public string Name => "Fake";
 
@@ -30,7 +30,29 @@ public sealed class FakePaymentProvider(IConfiguration config) : IPaymentProvide
         return Task.FromResult(new CheckoutSessionResult(sessionId, url));
     }
 
-    public PaymentWebhookResult HandleWebhook(string rawBody, string? signatureHeader)
+    public Task<PaymentWebhookResult> HandleWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct) =>
+        Task.FromResult(HandleWebhook(rawBody, headers.TryGetValue("X-Signature", out var sig) ? sig : null));
+
+    /// <summary>The fake gateway has no API to ask: its payments are finished from the dev checkout page.</summary>
+    public Task<PaymentWebhookResult> GetStatusAsync(string providerSessionId, CancellationToken ct) =>
+        Task.FromResult(new PaymentWebhookResult(WebhookEventKind.Ignored, providerSessionId, null, null, null));
+
+    // Saved cards, faked: every customer has a card and every charge goes through, so renewals can be
+    // run end to end on a developer's machine.
+    public Task<string> CreateCustomerAsync(string name, string email, CancellationToken ct) =>
+        Task.FromResult($"cus_fake_{Guid.NewGuid():N}");
+
+    public Task<bool> HasSavedCardAsync(string customerId, CancellationToken ct) => Task.FromResult(true);
+
+    public Task<PaymentWebhookResult> ChargeSavedCardAsync(SavedCardCharge charge, CancellationToken ct) =>
+        Task.FromResult(new PaymentWebhookResult(
+            WebhookEventKind.PaymentSucceeded, $"cs_fake_{Guid.NewGuid():N}", $"pi_fake_{Guid.NewGuid():N}", null, null)
+        {
+            Amount = charge.Amount, Currency = charge.Currency, LocalId = charge.PaymentId.ToString(),
+        });
+
+    private PaymentWebhookResult HandleWebhook(string rawBody, string? signatureHeader)
     {
         // The dev checkout page signs the body with the shared secret (§14 webhook signature).
         if (signatureHeader != WebhookSecret)
