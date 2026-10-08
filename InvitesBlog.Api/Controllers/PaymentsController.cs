@@ -17,7 +17,8 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 public sealed class PaymentsController(
     IPaymentService payments, DispatchService dispatch, IWebHostEnvironment env,
-    InvitesBlog.Application.Services.Billing.IBillingService billing) : BaseApiController
+    InvitesBlog.Application.Services.Billing.IBillingService billing,
+    InvitesBlog.Infrastructure.Payments.PaymentOutcomes outcomes) : BaseApiController
 {
     // POST /api/campaigns/{id}/checkout [campaign-token]
     [HttpPost("/api/campaigns/{id:guid}/checkout")]
@@ -38,18 +39,13 @@ public sealed class PaymentsController(
     {
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync(ct);
-        var signature = Request.Headers["X-Signature"].FirstOrDefault();
+        var headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
 
-        var result = await payments.HandleWebhookAsync(body, signature, ct);
+        var result = await payments.HandleWebhookAsync(body, headers, ct);
         if (!result.Handled) throw new PaymentWebhookInvalidException();
-        // Something from the billing page: apply what was bought (once — a retried webhook finds it done).
-        if (result.FulfilPaymentId is Guid paid)
-            await billing.FulfilAsync(paid, CancellationToken.None);
-        if (result.DispatchCampaignId is Guid campaignId)
-            // Use None, not the request token: a payment provider disconnecting/retrying must not
-            // cancel a partially-completed dispatch (the retry short-circuits on Status==Paid and
-            // would leave the campaign stuck in Dispatching with only some guests sent).
-            await dispatch.DispatchCampaignAsync(campaignId, CancellationToken.None);
+        // Apply what was paid for: a pass or plan, or a campaign's sending (once — a retried webhook
+        // finds it done). CancellationToken.None inside: a provider disconnecting must not cut it short.
+        await outcomes.ApplyAsync(result);
 
         return Success(new WebhookAckResponse(true));
     }

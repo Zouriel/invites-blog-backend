@@ -9,7 +9,10 @@ using InvitesBlog.Application.Pricing;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using InvitesBlog.Application.Plans;
 namespace InvitesBlog.Application.Services.Payments;
@@ -29,8 +32,11 @@ public sealed class PaymentService(
     IPaymentProvider provider,
     IConfiguration config,
     IPlanService plans,
-    IPriceBook prices) : IPaymentService
+    IPriceBook prices,
+    ILogger<PaymentService>? log = null) : IPaymentService
 {
+    private readonly ILogger logger = (ILogger?)log ?? NullLogger.Instance;
+
     private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";
 
@@ -114,11 +120,29 @@ public sealed class PaymentService(
         return new TopUpResponse(session.CheckoutUrl, topUp, null);
     }
 
-    public async Task<WebhookProcessResult> HandleWebhookAsync(string rawBody, string? signature, CancellationToken ct = default)
+    public async Task<WebhookProcessResult> HandleWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
     {
-        var evt = provider.HandleWebhook(rawBody, signature);
+        var evt = await provider.HandleWebhookAsync(rawBody, headers, ct);
+        logger.LogInformation("Payment webhook: {Kind} for {Session}.", evt.Kind, evt.ProviderSessionId);
         return await ProcessAsync(evt, ct);
     }
+
+    public async Task<WebhookProcessResult> SyncAsync(Guid paymentId, CancellationToken ct = default)
+    {
+        var payment = await payments.Query().FirstOrDefaultAsync(p => p.Id == paymentId, ct);
+        // Only a payment still waiting, made through the gateway in use, can be asked about.
+        if (payment is null || payment.ProviderSessionId is null || payment.Provider != provider.Name
+            || payment.Status is not (PaymentStatus.Pending or PaymentStatus.Created))
+            return new WebhookProcessResult(true, null);
+        var evt = await provider.GetStatusAsync(payment.ProviderSessionId, ct);
+        if (evt.Kind != WebhookEventKind.Ignored)
+            logger.LogInformation("Payment {PaymentId} status check: {Kind}.", paymentId, evt.Kind);
+        return await ProcessAsync(evt, ct);
+    }
+
+    public Task<WebhookProcessResult> ApplyAsync(PaymentWebhookResult result, CancellationToken ct = default) =>
+        ProcessAsync(result, ct);
 
     public string BuildDevCheckoutPage(string session, string payment, decimal amount, string success, string cancel)
     {
@@ -183,8 +207,9 @@ public sealed class PaymentService(
             idempotencyKey = $"evt_{session}"
         });
         // The fake provider signs with the shared webhook secret; a real provider ignores this dev path.
-        var signature = provider.Name == "Fake" ? WebhookSecret : null;
-        var evt = provider.HandleWebhook(body, signature);
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (provider.Name == "Fake") headers["X-Signature"] = WebhookSecret;
+        var evt = await provider.HandleWebhookAsync(body, headers, ct);
         return await ProcessAsync(evt, ct);
     }
 
@@ -203,12 +228,40 @@ public sealed class PaymentService(
     private async Task<WebhookProcessResult> ProcessAsync(PaymentWebhookResult evt, CancellationToken ct)
     {
         if (evt.Kind == WebhookEventKind.Unknown) return new WebhookProcessResult(false, null);
+        // Genuine but nothing to record (still waiting, a card saved): acknowledged so it isn't resent.
+        if (evt.Kind == WebhookEventKind.Ignored) return new WebhookProcessResult(true, null);
 
         var payment = await payments.GetBySessionIdAsync(evt.ProviderSessionId!, ct);
-        if (payment is null) return new WebhookProcessResult(false, null);
+        if (payment is null)
+        {
+            // Verified by the gateway but not one of ours: the global webhook (set in BML's dashboard)
+            // reports every transaction on the merchant account. Acknowledged so it isn't resent.
+            logger.LogInformation("Payment update for {Session} ignored: not a payment of ours.", evt.ProviderSessionId);
+            return new WebhookProcessResult(true, null);
+        }
+
+        // The gateway's transaction must be the one made for this payment, for its amount, in its
+        // currency. A result that says otherwise is recorded as nothing: a payment is only ever marked
+        // paid for exactly what it asked for.
+        if (evt.LocalId is { } localId && !string.Equals(localId, payment.Id.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning("Payment {PaymentId}: the gateway's transaction {Session} belongs to {LocalId}; ignored.",
+                payment.Id, evt.ProviderSessionId, localId);
+            return new WebhookProcessResult(true, null);
+        }
+        if (evt.Kind == WebhookEventKind.PaymentSucceeded
+            && ((evt.Amount is { } paidAmount && paidAmount != payment.Amount)
+                || (evt.Currency is { } paidCurrency && !string.Equals(paidCurrency, payment.Currency, StringComparison.OrdinalIgnoreCase))))
+        {
+            logger.LogError("Payment {PaymentId}: the gateway confirmed {Currency} {Amount} but {ExpectedCurrency} {Expected} was due; not marked paid.",
+                payment.Id, evt.Currency, evt.Amount, payment.Currency, payment.Amount);
+            return new WebhookProcessResult(true, null);
+        }
 
         if (evt.Kind == WebhookEventKind.PaymentFailed)
         {
+            // A late "failed" (an abandoned attempt, say) never undoes a payment that went through.
+            if (payment.Status == PaymentStatus.Paid) return new WebhookProcessResult(true, null);
             payment.Status = PaymentStatus.Failed;
             var failedCampaign = payment.CampaignId is { } failedId ? await campaigns.GetByIdAsync(failedId, ct) : null;
             if (failedCampaign is not null && failedCampaign.Status == CampaignStatus.PendingPayment)
@@ -225,6 +278,7 @@ public sealed class PaymentService(
         payment.Status = PaymentStatus.Paid;
         payment.PaidAt = DateTimeOffset.UtcNow;
         payment.ProviderPaymentId = evt.ProviderPaymentId;
+        logger.LogInformation("Payment {PaymentId} paid: {Currency} {Amount} ({Kind}).", payment.Id, payment.Currency, payment.Amount, payment.Kind);
 
         // What the billing page sells is applied by BillingService, once the payment is recorded as
         // paid — the caller hands it over (FulfilPaymentId).

@@ -29,6 +29,15 @@ public sealed class Payment
     public string? ProviderPaymentId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? PaidAt { get; set; }
+    /// <summary>When the buyer ticked "I agree" at checkout. The bank's card rules require that acceptance.</summary>
+    public DateTimeOffset? TermsAcceptedAt { get; set; }
+    /// <summary>Which version of the Terms, Refund and Privacy pages they accepted (<c>LegalTerms.Version</c>).</summary>
+    public string? TermsVersion { get; set; }
+    /// <summary>
+    /// A plan bought with its card saved on file: once paid, the plan renews by itself
+    /// (<see cref="AppUser.AutoRenewKind"/>). Also set on the renewals themselves.
+    /// </summary>
+    public bool AutoRenew { get; set; }
 }
 
 /// <summary>A refund linked to a payment (§8.2 Refund, §14.3).</summary>

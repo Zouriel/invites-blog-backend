@@ -814,9 +814,12 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   marks it paid (`PaymentService`) and `BillingService.FulfilAsync` applies it once — the same changes an
   admin grant makes. **`Payments:Enabled` (default false)** gates checkout: off, the API answers
   "not yet" with the "Ask us" topic and the page sends people there.
-- **To go live with BML:** implement `IPaymentProvider` for BML (create session → hosted payment page,
-  verify webhook signature, refunds), register it instead of `FakePaymentProvider`, set
-  `Payments:Enabled=true`. Nothing else changes.
+- **BML provider — built 2026-09-29, waiting on UAT access.** `BmlPaymentProvider` (Redirect method,
+  webhook with signature + API re-fetch, status sweep for lost webhooks, card-on-file renewals for
+  Studio/Venue), the "Review and pay" step with terms acceptance, and BML's website rules (company details,
+  card logos, refund/security/contact pages). See `PAYMENTS.md`. **To go live:** run the UAT test in
+  `PAYMENTS.md` with BML's test cards, then set `PAYMENTS_PROVIDER=Bml`, the production `BML_BASE_URL` and
+  `BML_API_KEY`, and `PAYMENTS_ENABLED=true`. Refunds stay manual (BML has no refund API).
 
 
 ## The plan step, drafts, the automatic Studio discount and pass extensions — *shipped 2026-09-19*
