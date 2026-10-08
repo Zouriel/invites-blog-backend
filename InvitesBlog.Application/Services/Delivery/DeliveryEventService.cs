@@ -7,6 +7,16 @@ using Microsoft.Extensions.Logging;
 
 namespace InvitesBlog.Application.Services.Delivery;
 
+/// <summary>
+/// Applies Infobip's Viber delivery reports. Implemented in Infrastructure because it emails the guest
+/// instead when a Viber message comes back undeliverable.
+/// </summary>
+public interface IInfobipReportHandler
+{
+    /// <summary>Parse a raw Infobip delivery-report body and apply every result. Idempotent.</summary>
+    Task HandleReportAsync(string rawBody, CancellationToken ct = default);
+}
+
 public interface IDeliveryEventService
 {
     Task ProcessAsync(string eventType, string? providerMessageId, IReadOnlyList<string> recipients, CancellationToken ct = default);
