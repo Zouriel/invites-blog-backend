@@ -3,6 +3,7 @@ using InvitesBlog.Application.Exceptions.Templates;
 using InvitesBlog.Application.Filters.Templates;
 using InvitesBlog.Application.Services.Templates;
 using InvitesBlog.Domain.Entities;
+using InvitesBlog.Domain.Enums;
 using NSubstitute;
 using Xunit;
 
@@ -12,7 +13,10 @@ public class TemplateServiceTests
 {
     private readonly ITemplateRepository _templates = Substitute.For<ITemplateRepository>();
     private readonly InvitesBlog.Application.Abstractions.ICurrentUser _user = Substitute.For<InvitesBlog.Application.Abstractions.ICurrentUser>();
-    private TemplateService Sut() => new(_templates, _user);
+    private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
+    private TemplateService Sut() => new(_templates, _campaigns, _user);
+
+    public TemplateServiceTests() => _campaigns.Query().Returns(Array.Empty<Campaign>().AsAsyncQueryable());
 
     [Fact]
     public async Task GetBySlug_unknown_throws_TemplateNotFound()
@@ -108,6 +112,25 @@ public class TemplateServiceTests
         var wedding = await Sut().ListAsync(new TemplateFilter { Category = "wedding" });
         Assert.Equal(1, wedding.TotalCount);
         Assert.Equal("Alpha", wedding.Items[0].Name);
+    }
+
+    [Fact]
+    public async Task List_counts_the_events_using_each_template()
+    {
+        var popular = TestData.Template(); popular.Name = "Alpha";
+        var unused = TestData.Template(); unused.Name = "Beta";
+        _templates.Query().Returns(new[] { popular, unused }.AsAsyncQueryable());
+        _campaigns.Query().Returns(new[]
+        {
+            TestData.Campaign(templateId: popular.Id),
+            TestData.Campaign(templateId: popular.Id, status: CampaignStatus.Dispatched),
+            TestData.Campaign(templateId: Guid.NewGuid()),
+        }.AsAsyncQueryable());
+
+        var page = await Sut().ListAsync(new TemplateFilter());
+
+        Assert.Equal(2, page.Items.Single(t => t.Id == popular.Id).UseCount);
+        Assert.Equal(0, page.Items.Single(t => t.Id == unused.Id).UseCount);
     }
 
 }

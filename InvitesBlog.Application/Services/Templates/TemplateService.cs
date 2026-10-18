@@ -9,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace InvitesBlog.Application.Services.Templates;
 
 /// <summary>Template gallery business logic (spec §Services). Coordinates the repository + filter.</summary>
-public sealed class TemplateService(ITemplateRepository templates, Abstractions.ICurrentUser currentUser) : ITemplateService
+public sealed class TemplateService(
+    ITemplateRepository templates, ICampaignRepository campaigns, Abstractions.ICurrentUser currentUser) : ITemplateService
 {
     public async Task<PagedResult<TemplateListItemDto>> ListAsync(TemplateFilter filter, CancellationToken ct = default)
     {
@@ -34,7 +35,7 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
             .Select(t => ToListItem(t))
             .ToListAsync(ct);
 
-        return PagedResult<TemplateListItemDto>.Create(items, total, filter);
+        return PagedResult<TemplateListItemDto>.Create(await WithUseCountsAsync(items, ct), total, filter);
     }
 
     public async Task<TemplateDetailDto> GetBySlugAsync(string slug, CancellationToken ct = default)
@@ -57,22 +58,40 @@ public sealed class TemplateService(ITemplateRepository templates, Abstractions.
     {
         var normalized = (email ?? "").Trim().ToLowerInvariant();
         if (normalized.Length == 0) return [];
-        return await templates.Query()
+        var items = await templates.Query()
             .Where(t => t.IsActive && t.AssignedEmail == normalized
                 && (t.Visibility == TemplateVisibility.Dedicated || t.Visibility == TemplateVisibility.Private))
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => ToListItem(t))
             .ToListAsync(ct);
+        return await WithUseCountsAsync(items, ct);
     }
 
     public async Task<IReadOnlyList<TemplateListItemDto>> GetMineAsync(CancellationToken ct = default)
     {
         if (currentUser.UserId is not { } me) return [];
-        return await templates.Query()
+        var items = await templates.Query()
             .Where(t => t.IsActive && t.DesignerUserId == me)
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => ToListItem(t))
             .ToListAsync(ct);
+        return await WithUseCountsAsync(items, ct);
+    }
+
+    /// <summary>
+    /// Fills in how many events use each template, in one grouped query. Counted the same way as the
+    /// designer's "In use" column: every event pointing at the template.
+    /// </summary>
+    private async Task<List<TemplateListItemDto>> WithUseCountsAsync(List<TemplateListItemDto> items, CancellationToken ct)
+    {
+        if (items.Count == 0) return items;
+        var ids = items.Select(t => t.Id).ToList();
+        var usage = await campaigns.Query()
+            .Where(c => ids.Contains(c.TemplateId))
+            .GroupBy(c => c.TemplateId)
+            .Select(g => new { TemplateId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TemplateId, x => x.Count, ct);
+        return items.Select(t => t with { UseCount = usage.GetValueOrDefault(t.Id) }).ToList();
     }
 
     private static TemplateListItemDto ToListItem(Template t) => new(
