@@ -31,7 +31,15 @@ public class CampaignServiceTests
     private readonly IRepository<AuditLog> _auditLogs = Substitute.For<IRepository<AuditLog>>();
     private readonly IRepository<Refund> _refunds = Substitute.For<IRepository<Refund>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
-    private readonly IEmailSender _email = Substitute.For<IEmailSender>();
+    private readonly IEmailSender _email = SendsOk();
+
+    // The first send now reads what the sender says (a failed send is no longer counted as sent).
+    private static IEmailSender SendsOk()
+    {
+        var e = Substitute.For<IEmailSender>();
+        e.SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>()).Returns(DeliveryResult.Ok("em-1"));
+        return e;
+    }
     private readonly IStorageService _storage = Substitute.For<IStorageService>();
     private readonly IPaymentProvider _provider = Substitute.For<IPaymentProvider>();
     private readonly IConfiguration _config = Substitute.For<IConfiguration>();
@@ -55,12 +63,16 @@ public class CampaignServiceTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<
                 InvitesBlog.Infrastructure.Images.ImageSharpOptimizer>.Instance);
 
+    /// <summary>Set to give the event a Viber channel (it has none unless Infobip is configured).</summary>
+    private FakeProvider? _viber;
+
     private CampaignService Sut() => new(
         _currentUser, _imageOptimizer, Ownership(), _campaigns, _inviters, _guests, _invites, _payments, _templates,
         _rsvp, _attempts, _assets, _uploads, _auditLogs, _refunds, _uow, _email,
         // The REAL email channel over the substituted sender: what the first send mails is exactly
         // what these tests are about, and a stub provider would let the email itself drift.
-        new IInviteDeliveryProvider[] { new InvitesBlog.Infrastructure.Delivery.EmailInviteDeliveryProvider(_email) },
+        new IInviteDeliveryProvider[] { new InvitesBlog.Infrastructure.Delivery.EmailInviteDeliveryProvider(_email) }
+            .Concat(_viber is null ? [] : [_viber]),
         _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
         TestData.FreePlans(), _allowance, TestData.PriceBook(),
@@ -761,6 +773,35 @@ public class CampaignServiceTests
             Arg.Is<EmailMessage>(m => m.Html.Contains("/i/")), Arg.Any<CancellationToken>());
         await _email.DidNotReceive().SendAsync(
             Arg.Is<EmailMessage>(m => m.Html.Contains("/e/")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Finalize_sends_Viber_to_guests_with_a_phone_and_emails_the_rest()
+    {
+        var c = TestData.Campaign();
+        c.DeliverySettingsJson = "{\"channels\":[\"email\"]}";
+        Own(c);
+        _viber = new FakeProvider("viber", true);
+        var both = TestData.Guest(c.Id, email: "a@test.com");
+        both.PhoneE164 = "+9607771234";
+        var phoneOnly = TestData.Guest(c.Id, email: null);
+        phoneOnly.PhoneE164 = "+9607775678";
+        var emailOnly = TestData.Guest(c.Id, email: "c@test.com", phone: null);
+        var neither = TestData.Guest(c.Id, email: null, phone: null);
+        _guests.ListByCampaignAsync(c.Id, false, Arg.Any<CancellationToken>()).Returns(new[] { both, phoneOnly, emailOnly, neither });
+        _invites.GetByGuestIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((Invite?)null);
+        _config["Urls:InviteeBase"].Returns("https://me.example.com");
+
+        var res = await Sut().FinalizeAsync(c.Id);
+
+        Assert.Equal(3, res.Emailed);
+        Assert.Equal(["+9607771234", "+9607775678"], _viber.Calls.Select(m => m.RecipientAddress));
+        Assert.All(_viber.Calls, m => Assert.StartsWith("https://me.example.com/i/", m.InviteLink));
+        await _email.Received(1).SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>());
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.To == "c@test.com"), Arg.Any<CancellationToken>());
+        // Each send is on record, so Viber's delivery report can find the guest it was for.
+        await _attempts.Received(2).AddAsync(Arg.Is<DeliveryAttempt>(a => a.Channel == "viber" && a.ProviderMessageId != null),
+            Arg.Any<CancellationToken>());
     }
 
     /// <summary>

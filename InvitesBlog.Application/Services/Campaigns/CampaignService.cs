@@ -342,20 +342,19 @@ public sealed class CampaignService(
         var left = allowance.Left;
         if (settings.Uses("email"))
         {
-            // The same provider — and so the same email, §15.2 removal link included — that resends
-            // and "add and send now" go through (DispatchService). This path used to build its own
-            // HTML, which left the very first invitation a guest received without that link.
-            var emailChannel = deliveryProviders.First(p =>
-                p.Channel.Equals("email", StringComparison.OrdinalIgnoreCase));
+            // The same providers, route and letter — §15.2 removal link included — that resends and
+            // "add and send now" use (DispatchService): Viber for a guest with a phone number, email
+            // for one without (or when Viber fails). This path used to build its own email HTML.
             var inviter = campaign.InviterId is { } inviterId ? await inviters.GetByIdAsync(inviterId, ct) : null;
 
             foreach (var g in guestList)
             {
-                if (string.IsNullOrWhiteSpace(g.Email)) continue;
+                var route = GuestRoute.For(g, settings, deliveryProviders);
+                if (route.Count == 0) continue;
 
-                // Emailing is counted per guest, once: somebody already emailed is re-sent for free,
-                // and a new guest past what the event includes is left for the host to share a link
-                // with (or for more to be added). See SendingAllowanceService.
+                // Sending is counted per guest, once, by Viber or email alike: somebody already sent to
+                // is re-sent for free, and a new guest past what the event includes is left for the
+                // host to share a link with (or for more to be added). See SendingAllowanceService.
                 var existing = await invites.GetByGuestIdAsync(g.Id, ct);
                 var firstTime = existing?.FirstEmailedAt is null;
                 if (firstTime && left <= 0)
@@ -364,7 +363,7 @@ public sealed class CampaignService(
                     continue;
                 }
 
-                // Emailed links are per-guest tokenized: clicking opens the invite directly — the raw
+                // Sent links are per-guest tokenized: clicking opens the invite directly — the raw
                 // token IS the key, no OTP. (The SHARE button link, by contrast, is the gated /e/{id}.)
                 // We can't recover a raw token from its stored hash, so mint a fresh one each finalize.
                 var rawToken = TokenService.GenerateToken();
@@ -378,7 +377,7 @@ public sealed class CampaignService(
                         GuestId = g.Id,
                         TokenHash = TokenService.Hash(rawToken),
                         RequiresOtp = campaign.IsSensitive, // sensitive campaigns still gate behind OTP
-                        Status = InviteStatus.Sent,
+                        Status = InviteStatus.Queued,
                         RsvpStatus = RsvpStatus.NoResponse,
                         CreatedAt = DateTimeOffset.UtcNow
                     };
@@ -388,13 +387,20 @@ public sealed class CampaignService(
                 {
                     invite.TokenHash = TokenService.Hash(rawToken);
                     invite.RequiresOtp = campaign.IsSensitive;
-                    if (invite.Status == InviteStatus.Created || invite.Status == InviteStatus.Queued)
-                        invite.Status = InviteStatus.Sent;
                 }
 
                 var letter = InviteLetter.For(
                     campaign, g, invite.Id, settings, inviteeBase, rawToken, inviter?.Name, inviter?.Email);
-                await emailChannel.SendAsync(letter.To("email", g.Email), ct);
+                var (sent, attempts) = await GuestRoute.SendAsync(invite.Id, route, letter, deliveryProviders, ct);
+                foreach (var a in attempts) await deliveryAttempts.AddAsync(a, ct);
+                if (!sent)
+                {
+                    if (invite.Status is InviteStatus.Created or InviteStatus.Queued) invite.Status = InviteStatus.Failed;
+                    continue;
+                }
+
+                if (invite.Status is InviteStatus.Created or InviteStatus.Queued or InviteStatus.Failed or InviteStatus.NotSent)
+                    invite.Status = InviteStatus.Sent;
                 emailed++;
                 if (firstTime)
                 {

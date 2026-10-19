@@ -59,6 +59,15 @@ public interface IInviteDeliveryProvider
     Task<DeliveryResult> SendAsync(InviteDeliveryMessage message, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// A delivery channel that may only be tried for some addresses (Viber's test-numbers-only mode). A
+/// guest it can't send to goes straight to the next channel, with no failed attempt on record.
+/// </summary>
+public interface IAddressGatedProvider
+{
+    bool CanSendTo(string address);
+}
+
 // ----- OTP + transactional email (§11.1) -----
 
 public interface IOtpSender

@@ -25,9 +25,9 @@ public sealed class DispatchService(
     ILogger<DispatchService> logger,
     ISendingAllowanceService allowances)
 {
-    /// <summary>What the dashboard shows beside a guest held back by the event's emailed-invitation limit.</summary>
+    /// <summary>What the dashboard shows beside a guest held back by the event's sent-invitation limit.</summary>
     public const string OverLimitMessage =
-        "Not sent: this event's emailed invitations are used up. Share their link, or ask us to add more.";
+        "Not sent: this event's sent invitations are used up. Share their link, or ask us to add more.";
 
 
     public async Task DispatchCampaignAsync(Guid campaignId, CancellationToken ct = default)
@@ -55,9 +55,9 @@ public sealed class DispatchService(
                 continue; // already delivered — never double-send
             }
 
-            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
+            var ok = await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, emailOnly: false, ct);
             if (ok) sent++;
-            else if (HasAnyContact(guest, settings)) failed++;
+            else if (HasAnyContact(guest)) failed++;
             else notSent++;   // §product rule: no phone (Viber) and no email — recorded, not a failure
         }
 
@@ -102,7 +102,32 @@ public sealed class DispatchService(
         var inviter = campaign.InviterId is null ? null
             : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
         var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
-        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
+        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, emailOnly: false, ct);
+    }
+
+    /// <summary>
+    /// Emails a guest whose Viber message came back undeliverable (they aren't on Viber, or it expired).
+    /// Only once, and only while that Viber message is still the latest thing sent to them: a report for
+    /// an old message must not re-send after a newer one went out. Free — the guest was already counted.
+    /// </summary>
+    public async Task<bool> FallbackToEmailAsync(Guid inviteId, Guid failedAttemptId, CancellationToken ct = default)
+    {
+        var invite = await db.Invites.FirstOrDefaultAsync(i => i.Id == inviteId, ct);
+        if (invite is null) return false;
+        var failed = await db.DeliveryAttempts.FirstOrDefaultAsync(a => a.Id == failedAttemptId, ct);
+        if (failed is null) return false;
+        var later = await db.DeliveryAttempts.AnyAsync(
+            a => a.InviteId == inviteId && a.Id != failed.Id && a.AttemptedAt >= failed.AttemptedAt, ct);
+        if (later) return false;
+
+        var guest = await db.Guests.FirstOrDefaultAsync(g => g.Id == invite.GuestId, ct);
+        if (guest is null || guest.OptedOut || string.IsNullOrWhiteSpace(guest.Email)) return false;
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == invite.CampaignId, ct);
+        if (campaign is null) return false;
+        var inviter = campaign.InviterId is null ? null
+            : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
+        var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
+        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, emailOnly: true, ct);
     }
 
     /// <summary>
@@ -111,7 +136,8 @@ public sealed class DispatchService(
     /// (<c>CampaignService.FinalizeAsync</c>) composes, so every path mails the same email.
     /// </summary>
     private async Task<bool> DeliverToGuestAsync(
-        Campaign campaign, Guest guest, DeliverySettings settings, string? inviterName, string? inviterEmail, CancellationToken ct)
+        Campaign campaign, Guest guest, DeliverySettings settings, string? inviterName, string? inviterEmail,
+        bool emailOnly, CancellationToken ct)
     {
         var invite = await db.Invites.FirstOrDefaultAsync(i => i.GuestId == guest.Id, ct);
         var rawToken = TokenService.GenerateToken();
@@ -130,19 +156,23 @@ public sealed class DispatchService(
             db.Invites.Add(invite);
         }
         invite.TokenHash = TokenService.Hash(rawToken);
+        invite.RequiresOtp = campaign.IsSensitive;
 
-        // Emailing is counted per guest, once (SendingAllowanceService): a guest already emailed is
-        // re-sent for free; a new one past what the event includes is held back, and says so.
-        var emailsThem = settings.Uses("email") && !string.IsNullOrWhiteSpace(guest.Email);
-        var firstTime = emailsThem && invite.FirstEmailedAt is null;
+        // Viber when they have a phone, else email (GuestRoute). A fallback after Viber failed is email only.
+        var route = GuestRoute.For(guest, settings, providers);
+        if (emailOnly) route = route.Where(r => r.Channel == "email").ToList();
+
+        // Sending is counted per guest, once, by Viber or email alike (SendingAllowanceService): a guest
+        // already sent to is re-sent for free; a new one past what the event includes is held back.
+        var firstTime = route.Count > 0 && invite.FirstEmailedAt is null;
         if (firstTime && (await allowances.ForCampaignAsync(campaign.Id, ct)).Left <= 0)
         {
             db.DeliveryAttempts.Add(new DeliveryAttempt
             {
                 Id = Guid.NewGuid(),
                 InviteId = invite.Id,
-                Channel = "email",
-                RecipientAddress = guest.Email!,
+                Channel = route[0].Channel,
+                RecipientAddress = route[0].Address,
                 Status = DeliveryStatus.Skipped,
                 ErrorMessage = OverLimitMessage,
                 AttemptedAt = DateTimeOffset.UtcNow
@@ -155,63 +185,32 @@ public sealed class DispatchService(
         var letter = InviteLetter.For(
             campaign, guest, invite.Id, settings, config.InviteeBase(), rawToken, inviterName, inviterEmail);
 
-        var ok = await TryDeliverAsync(invite, guest, settings, letter, ct);
+        var ok = await TryDeliverAsync(invite, guest, route, letter, ct);
         if (ok && firstTime) invite.FirstEmailedAt = DateTimeOffset.UtcNow;
         // Distinguish "not sent — no deliverable contact" from a provider failure (§product rule).
-        invite.Status = ok
-            ? InviteStatus.Sent
-            : (HasAnyContact(guest, settings) ? InviteStatus.Failed : InviteStatus.NotSent);
+        // Opening the invite moves it on to Viewed; a re-send must not move it back.
+        if (!(ok && invite.Status == InviteStatus.Viewed))
+            invite.Status = ok
+                ? InviteStatus.Sent
+                : (route.Count > 0 ? InviteStatus.Failed : InviteStatus.NotSent);
         await db.SaveChangesAsync(ct);
         return ok;
     }
 
     /// <summary>True if any configured/fallback channel could reach this guest (has the contact it needs).</summary>
-    private static bool HasAnyContact(Guest g, DeliverySettings s) =>
+    private static bool HasAnyContact(Guest g) =>
         !string.IsNullOrWhiteSpace(g.Email) || !string.IsNullOrWhiteSpace(g.PhoneE164);
 
-    /// <summary>Try the configured channels in order, then the fallback, per §13.2.</summary>
+    /// <summary>Send down the guest's route (§13.2), recording every attempt.</summary>
     private async Task<bool> TryDeliverAsync(
-        Invite invite, Guest guest, DeliverySettings settings, InviteLetter letter, CancellationToken ct)
+        Invite invite, Guest guest, IReadOnlyList<(string Channel, string Address)> route, InviteLetter letter,
+        CancellationToken ct)
     {
-        var order = new List<string>(settings.Channels);
-        if (settings.FallbackChannel is not null && !order.Contains(settings.FallbackChannel))
-            order.Add(settings.FallbackChannel);
-
-        var anyAddressable = false;
-
-        foreach (var channel in order)
-        {
-            var address = AddressFor(channel, guest);
-            if (address is null) continue; // channel needs contact info the guest lacks
-
-            var provider = providers.FirstOrDefault(p =>
-                p.Channel.Equals(channel, StringComparison.OrdinalIgnoreCase));
-            if (provider is null) continue;
-
-            anyAddressable = true;
-            var result = await provider.SendAsync(letter.To(channel, address), ct);
-
-            db.DeliveryAttempts.Add(new DeliveryAttempt
-            {
-                Id = Guid.NewGuid(),
-                InviteId = invite.Id,
-                Channel = channel,
-                RecipientAddress = address,
-                Status = result.Success ? DeliveryStatus.Sent : DeliveryStatus.Failed,
-                ProviderMessageId = result.ProviderMessageId,
-                ErrorMessage = result.Error,
-                AttemptedAt = DateTimeOffset.UtcNow
-            });
-
-            if (result.Success) return true;
-        }
-
-        if (!anyAddressable)
+        if (route.Count == 0)
         {
             // Nothing configured can reach this guest — record it plainly so the dashboard shows who
             // was missed and what to do, rather than leaving a silent gap in the delivery report.
-            // A guest with a phone but no email lands here (email is the only sending channel), and
-            // they are NOT stuck: the shared campaign link accepts their number at the invite gate.
+            // They are NOT stuck: the shared campaign link lets them in at the invite gate.
             db.DeliveryAttempts.Add(new DeliveryAttempt
             {
                 Id = Guid.NewGuid(),
@@ -219,20 +218,16 @@ public sealed class DispatchService(
                 Channel = "none",
                 RecipientAddress = "-",
                 Status = DeliveryStatus.Skipped,
-                ErrorMessage = string.IsNullOrWhiteSpace(guest.Email)
-                    ? "Not sent: no email address on file. Share the invitation link with them — they can open it and verify with their phone number."
+                ErrorMessage = string.IsNullOrWhiteSpace(guest.Email) && string.IsNullOrWhiteSpace(guest.PhoneE164)
+                    ? "Not sent: no phone number or email on file. Share the invitation link with them."
                     : "Not sent: no delivery channel could reach this guest.",
                 AttemptedAt = DateTimeOffset.UtcNow
             });
+            return false;
         }
-        return false;
-    }
 
-    private static string? AddressFor(string channel, Guest g) => channel.ToLowerInvariant() switch
-    {
-        "email" => string.IsNullOrWhiteSpace(g.Email) ? null : g.Email,
-        "sms" or "whatsapp" or "viber" or "telegram" => string.IsNullOrWhiteSpace(g.PhoneE164) ? null : g.PhoneE164,
-        "direct" => "direct-link",
-        _ => null
-    };
+        var (sent, attempts) = await GuestRoute.SendAsync(invite.Id, route, letter, providers, ct);
+        db.DeliveryAttempts.AddRange(attempts);
+        return sent;
+    }
 }

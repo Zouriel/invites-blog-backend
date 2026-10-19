@@ -139,10 +139,25 @@ public static class DependencyInjection
             services.AddScoped<IOtpSender>(sp => sp.GetRequiredService<ConsoleSmsOtpSender>());
         }
 
-        // Delivery: email only. Each guest is mailed their own tokenized /i/{token} link; the first
-        // send (CampaignService.FinalizeAsync) and resends (DispatchService) both go through this one
-        // provider, so every invitation email is the same email.
+        // Delivery: each guest is sent their own tokenized /i/{token} link, by Viber when they have a
+        // phone number and Viber is configured, else by email (Application.Delivery.GuestRoute). The
+        // first send (CampaignService.FinalizeAsync) and resends (DispatchService) share these providers.
         services.AddScoped<IInviteDeliveryProvider, EmailInviteDeliveryProvider>();
+        if (!string.IsNullOrWhiteSpace(config["Infobip:ApiKey"]) && !string.IsNullOrWhiteSpace(config["Infobip:BaseUrl"]))
+        {
+            services.AddHttpClient<InfobipViberSender>(c =>
+            {
+                // Ends in "/" so request paths stay relative to it (an account host can carry a path).
+                c.BaseAddress = new Uri(config["Infobip:BaseUrl"]!.TrimEnd('/') + "/");
+                c.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("App", config["Infobip:ApiKey"]);
+                c.Timeout = TimeSpan.FromSeconds(15);
+            });
+            services.AddScoped<IInviteDeliveryProvider>(sp => sp.GetRequiredService<InfobipViberSender>());
+        }
+        // Without a key there is no Viber provider at all, so every guest is emailed: a log-only stand-in
+        // would "succeed" and swallow the invitations of everyone with a phone number.
+        services.AddScoped<Application.Services.Delivery.IInfobipReportHandler, InfobipReportHandler>();
 
         services.AddScoped<DispatchService>();
         services.AddScoped<Payments.PaymentOutcomes>();
