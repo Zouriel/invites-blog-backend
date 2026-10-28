@@ -280,11 +280,11 @@ public static class GuestPages
     public sealed record JoinValues(string? Name, string? Contact, string? GuestCount, string? Comment);
 
     /// <summary>The open guest list is off, or the link was changed: the invitation still opens, replies don't.</summary>
-    public static string JoinClosed(string eventTitle, string backPath) => Shell("Replies closed", $"""
+    public static string JoinClosed(string eventTitle, string backPath, GuestPalette? palette = null) => Shell("Replies closed", $"""
         <h1>{E(eventTitle)}</h1>
         <p>This invitation isn't taking replies here any more. If you're coming, let the host know directly.</p>
         <p><a href="{E(backPath)}">Back to the invitation</a></p>
-        """);
+        """, palette);
 
     public static string RsvpDone(string status, string renderId, GuestPalette? palette = null) =>
         Shell("Thank you", $"""

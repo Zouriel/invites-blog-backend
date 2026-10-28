@@ -197,3 +197,22 @@ public sealed record DashboardResponse(
     IReadOnlyList<RsvpQuestionDto>? RsvpQuestions = null,
     /// <summary>What invites.blog may still email for this event. Sharing links is always free.</summary>
     InvitesBlog.Application.Plans.SendingAllowanceDto? Sending = null);
+
+// ----- Guest colours: the reply button and guest pages, and the printed QR card -----
+
+/// <summary>Three colours, each <c>#rrggbb</c>: buttons and borders, the ground, and the words.</summary>
+public sealed record ColourSetDto(string Accent, string Background, string Text);
+
+public sealed record SuggestedColoursDto(string Name, ColourSetDto Colours);
+
+/// <param name="IsImported">Reply colours are offered only for an uploaded design; a template's come from its Theme step.</param>
+/// <param name="Reply">The colours chosen for the reply button and guest pages, or null for the default.</param>
+/// <param name="Card">The colours chosen for the QR table card, or null for the default.</param>
+/// <param name="Suggested">Sets read off the uploaded picture. Empty for a video or a template.</param>
+/// <param name="DesignImageUrl">The uploaded picture, for the page's preview.</param>
+public sealed record GuestColoursResponse(
+    bool IsImported, bool SaveTheDate, ColourSetDto? Reply, ColourSetDto? Card,
+    IReadOnlyList<SuggestedColoursDto> Suggested, string? DesignImageUrl);
+
+/// <summary>Both sections, every time. Null puts a section back to its default.</summary>
+public sealed record SetGuestColoursRequest(ColourSetDto? Reply, ColourSetDto? Card);

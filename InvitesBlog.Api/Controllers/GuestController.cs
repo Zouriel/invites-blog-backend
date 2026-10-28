@@ -291,8 +291,9 @@ public sealed class GuestController(
 
         var list = await invites.OpenListAsync(campaignId.Value, ct);
         if (list is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
-        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}"));
-        return Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, null));
+        var palette = await PaletteForAsync(null, campaignId, ct);
+        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}", palette));
+        return Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, null, palette: palette));
     }
 
     /// <summary>
@@ -316,18 +317,19 @@ public sealed class GuestController(
 
         var list = await invites.OpenListAsync(campaignId.Value, ct);
         if (list is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
-        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}"));
+        var palette = await PaletteForAsync(null, campaignId, ct);
+        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}", palette));
 
         var typed = new GuestPages.JoinValues(name, contact, guestCount, comment);
         IActionResult Again(string error) =>
-            Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, error, typed));
+            Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, error, typed, palette));
 
         // Filled in only by something that fills in every field. It is told it worked, and nothing
         // is written, so there is nothing to learn from trying again.
         if (!string.IsNullOrEmpty(website))
         {
             logger.LogWarning("Open guest list reply dropped: hidden field filled");
-            return Html(GuestPages.RsvpDone(status == "Going" ? "Going" : "NotGoing", renderId));
+            return Html(GuestPages.RsvpDone(status == "Going" ? "Going" : "NotGoing", renderId, palette));
         }
 
         int? count = null;
@@ -580,7 +582,7 @@ public sealed class GuestController(
         if (trimmed.Length == 0)
             return Html(GuestPages.CameraName(
                 $"/r/{renderId}/camera/name", staticCamera.EventTitle, "Please type your name.",
-                await PaletteForAsync(inviteId, ct)));
+                await PaletteForAsync(inviteId, staticCamera.CampaignId, ct)));
 
         // An hour, and sent only to the invitation's own pages. Long enough to put the phone down and
         // pick it up again without being asked twice; short enough that a phone handed to someone
@@ -639,7 +641,7 @@ public sealed class GuestController(
     private async Task<IActionResult> StaticCameraPageAsync(
         string renderId, Guid? inviteId, StaticCameraInfo camera, CancellationToken ct)
     {
-        var palette = await PaletteForAsync(inviteId, ct);
+        var palette = await PaletteForAsync(inviteId, camera.CampaignId, ct);
         if (camera.IsCancelled)
             return Html(GuestPages.Cancelled("This event has been cancelled, so its camera is closed."));
         if (!camera.IsOpen)
@@ -668,9 +670,17 @@ public sealed class GuestController(
         return campaignId is null ? null : await invites.StaticCameraAsync(campaignId.Value, ct);
     }
 
-    /// <summary>The guest's own palette on a personal link; the open link has no guest to take one from.</summary>
-    private async Task<GuestPalette> PaletteForAsync(Guid? inviteId, CancellationToken ct) =>
-        inviteId is null ? GuestPalette.Fallback : await PaletteAsync(inviteId.Value, ct);
+    /// <summary>
+    /// The guest's own palette on a personal link. The open link has no guest, so it takes the event's:
+    /// the same colours the invitation it came from is painted in.
+    /// </summary>
+    private async Task<GuestPalette> PaletteForAsync(Guid? inviteId, Guid? campaignId, CancellationToken ct)
+    {
+        if (inviteId is not null) return await PaletteAsync(inviteId.Value, ct);
+        if (campaignId is null) return GuestPalette.Fallback;
+        var theme = await invites.CampaignThemeAsync(campaignId.Value, ct);
+        return theme is null ? GuestPalette.Fallback : GuestPalette.From(theme.Accent, theme.Background, theme.Text);
+    }
 
     private const string CameraNameCookie = "ib_camera_name";
 
