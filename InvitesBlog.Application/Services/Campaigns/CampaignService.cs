@@ -757,9 +757,11 @@ public sealed class CampaignService(
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: true, ct);
         var inviteList = await invites.ListByCampaignAsync(id, ct);
 
+        // Nothing was sent to someone who added themselves from the link, so they don't count as sent.
+        var selfAddedIds = guestList.Where(g => g.SelfAdded).Select(g => g.Id).ToHashSet();
         var report = new DashboardReportDto(
             Total: inviteList.Count,
-            Sent: inviteList.Count(i => i.Status is InviteStatus.Sent or InviteStatus.Viewed),
+            Sent: inviteList.Count(i => (i.Status is InviteStatus.Sent or InviteStatus.Viewed) && !selfAddedIds.Contains(i.GuestId)),
             Failed: inviteList.Count(i => i.Status == InviteStatus.Failed),
             Viewed: inviteList.Count(i => i.ViewedAt != null),
             NotSent: inviteList.Count(i => i.Status == InviteStatus.NotSent),

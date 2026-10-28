@@ -66,7 +66,8 @@ public interface IInviteService
         Guid inviteId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
 
     /// <summary>
-    /// The invitation as somebody who followed the OPEN LINK sees it: no guest, no RSVP, no gallery.
+    /// The invitation as somebody who followed the OPEN LINK sees it: no guest, no gallery, and no RSVP
+    /// unless the event is an open guest list, whose reply button leads to the join form.
     /// Null when the event has no open link, which is also how a revoked one stops working.
     ///
     /// <para>Writes nothing — see the implementation for why a placeholder guest row would quietly

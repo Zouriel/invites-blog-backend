@@ -75,7 +75,8 @@ public sealed class GuestController(
     ///
     /// <para>No token to verify against a guest, no IP trust, no OTP: possession of the code is the
     /// whole of it, which is the point. What that buys is deliberately less than a personal link
-    /// buys — no RSVP and no media bucket, see <see cref="IInviteService.RenderOpenAsync"/>.</para>
+    /// buys — no RSVP and no media bucket, see <see cref="IInviteService.RenderOpenAsync"/>. An open
+    /// guest list adds a reply button, and replying (not viewing) makes the visitor a guest.</para>
     ///
     /// <para>A bad code and a revoked one answer identically, and with the same page a bad personal
     /// token gets. Whether a code was ever real is exactly what somebody guessing at them is asking,
