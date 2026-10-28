@@ -71,6 +71,37 @@ public class RenderTicketTests
     // --- the cross-host handoff ---
 
     [Fact]
+    public void A_joined_cookie_remembers_every_list_joined_newest_first()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var sut = Sut();
+
+        var joined = sut.Joined(sut.Joined(null, first, Now), second, Now);
+
+        Assert.Equal([second, first], sut.ReadJoined(joined, Now));
+        // Long-lived on purpose: still there months later, gone after its lifetime.
+        Assert.Equal([second, first], sut.ReadJoined(joined, Now.AddDays(170)));
+        Assert.Empty(sut.ReadJoined(joined, Now.Add(RenderTickets.JoinedLifetime).AddMinutes(1)));
+    }
+
+    /// <summary>
+    /// Separate contexts: the joined cookie lasts half a year, so if it read as a ticket it would be
+    /// a six-month admission nobody issued.
+    /// </summary>
+    [Fact]
+    public void A_joined_cookie_and_a_ticket_cannot_stand_in_for_each_other()
+    {
+        var invite = Guid.NewGuid();
+        var sut = Sut();
+
+        Assert.Empty(sut.ReadTicket(sut.Joined(null, invite, Now), Now));
+        Assert.Empty(sut.ReadJoined(sut.IssueTicket([invite], Now), Now));
+        // And one signed with another key is nobody's.
+        Assert.Empty(Sut("another-key-entirely-0123456789-abcdef").ReadJoined(sut.Joined(null, invite, Now), Now));
+    }
+
+    [Fact]
     public void A_handoff_reads_back_as_the_invitation_it_admits()
     {
         var invite = Guid.NewGuid();

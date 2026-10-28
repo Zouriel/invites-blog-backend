@@ -65,9 +65,20 @@ public static class DependencyInjection
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             // The same envelope as every other refusal, so the apps can show why.
-            options.OnRejected = (context, ct) => new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
-                Application.Common.ApiResponse<object?>.Fail("Too many requests. Please wait a few minutes and try again."),
-                ct));
+            options.OnRejected = (context, ct) =>
+            {
+                // The guest pages are plain forms a person is looking at, so they get a page rather
+                // than an envelope only the apps can read.
+                var path = context.HttpContext.Request.Path;
+                if (path.StartsWithSegments("/r") || path.StartsWithSegments("/o"))
+                {
+                    context.HttpContext.Response.ContentType = "text/html; charset=utf-8";
+                    return new ValueTask(context.HttpContext.Response.WriteAsync(Rendering.GuestPages.TooMany(), ct));
+                }
+                return new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
+                    Application.Common.ApiResponse<object?>.Fail("Too many requests. Please wait a few minutes and try again."),
+                    ct));
+            };
 
             // Every policy is keyed on ClientAddress, never on RemoteIpAddress directly: behind
             // Cloudflare the remote address is an edge server that can change from request to request,
@@ -81,6 +92,11 @@ public static class DependencyInjection
             options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
+            // Each reply through an open guest list adds a guest. Enough for a family replying one by
+            // one from one phone; not enough for a script to fill a host's list.
+            options.AddPolicy("open-list-join", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10) }));
             options.AddPolicy(RateLimiting.RateLimitPolicies.CreateEvent, RateLimiting.RateLimitPolicies.CreateEventPartition);
             // The designer previews on every edit (debounced in the editor); this only stops a runaway client.
             options.AddPolicy("design-preview", ctx => RateLimitPartition.GetFixedWindowLimiter(

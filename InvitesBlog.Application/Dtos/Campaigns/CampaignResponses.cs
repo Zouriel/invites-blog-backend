@@ -57,7 +57,9 @@ public sealed record CampaignSummaryDto(
     /// <summary>"invitation" or "saveTheDate" — what the wizard's steps and wording follow.</summary>
     string Kind = "invitation",
     /// <summary>The host gave a day but no time.</summary>
-    bool AllDay = false);
+    bool AllDay = false,
+    /// <summary>People who open the link can add themselves by replying (Campaign.OpenGuestList).</summary>
+    bool OpenGuestList = false);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
@@ -87,6 +89,9 @@ public sealed record OpenLinkResponse(string Url, bool AllowsAnonymous);
 /// why the page says so beside the box.</para>
 /// </param>
 public sealed record SetOpenLinkRequest(bool AllowAnonymous);
+
+/// <summary>Turns the open guest list on or off (Campaign.OpenGuestList).</summary>
+public sealed record SetOpenGuestListRequest(bool Enabled);
 
 /// <summary>Result of cancelling a campaign (§14.3).</summary>
 public sealed record CancelCampaignResponse(bool Cancelled, bool Refunded, string? Note = null);
@@ -155,7 +160,9 @@ public sealed record DashboardCampaignDto(
     bool AllDay = false,
     DateTimeOffset? EventStartAt = null,
     /// <summary>On a save the date: the invitation made from it, once there is one.</summary>
-    Guid? InvitationCampaignId = null);
+    Guid? InvitationCampaignId = null,
+    /// <summary>People who open the link can add themselves by replying (Campaign.OpenGuestList).</summary>
+    bool OpenGuestList = false);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 
@@ -176,7 +183,11 @@ public sealed record DashboardGuestDto(
     /// <summary>Their latest answers, keyed by question. Empty until they reply.</summary>
     IReadOnlyDictionary<string, string>? RsvpAnswers = null,
     /// <summary>Every role the guest holds; <c>Role</c> is the first of them.</summary>
-    IReadOnlyList<string>? Roles = null);
+    IReadOnlyList<string>? Roles = null,
+    /// <summary>They added themselves from the open guest list.</summary>
+    bool SelfAdded = false,
+    /// <summary>What a self-added guest typed as a phone or email, unchecked. Hidden like Email and PhoneE164.</summary>
+    string? TypedContact = null);
 
 public sealed record DashboardResponse(
     DashboardCampaignDto Campaign,

@@ -29,6 +29,8 @@ public sealed class GuestService(
     ISuppressionRepository suppression,
     IRepository<UploadedGuestFile> uploads,
     IRepository<DeliveryAttempt> deliveryAttempts,
+    IRepository<RsvpResponse> rsvpResponses,
+    IRepository<EventPhoto> photos,
     IUnitOfWork uow,
     GuestUploadParser parser,
     PhoneNormalizer phones,
@@ -196,6 +198,36 @@ public sealed class GuestService(
     }
 
     /// <summary>The caller must own this campaign — by possession token or by account; loads it for pricing/state.</summary>
+    public async Task RemoveSelfAddedAsync(Guid campaignId, Guid guestId, CancellationToken ct = default)
+    {
+        await EnsureCampaignAsync(campaignId, ct);
+
+        var guest = await guests.Query(tracking: true)
+                        .FirstOrDefaultAsync(g => g.Id == guestId && g.CampaignId == campaignId, ct)
+                    ?? throw new GuestNotFoundException(guestId);
+        // Only people who added themselves. Removing somebody the host invited would also have to
+        // answer what happens to the link already in their inbox, which this doesn't try to.
+        if (!guest.SelfAdded)
+            throw new Exceptions.BusinessRuleException(
+                "Only people who added themselves from the link can be removed.", "guest_not_self_added");
+
+        var inviteRows = await invites.Query(tracking: true)
+            .Where(i => i.GuestId == guest.Id).ToListAsync(ct);
+        var inviteIds = inviteRows.Select(i => i.Id).ToList();
+        rsvpResponses.RemoveRange(await rsvpResponses.ListAsync(r => inviteIds.Contains(r.InviteId), ct));
+        deliveryAttempts.RemoveRange(await deliveryAttempts.ListAsync(a => inviteIds.Contains(a.InviteId), ct));
+        invites.RemoveRange(inviteRows);
+
+        // Their photos stay in the album: they were taken at the event, and the host can delete them
+        // there. They just stop pointing at a guest who no longer exists.
+        foreach (var photo in await photos.Query(tracking: true).Where(p => p.GuestId == guest.Id).ToListAsync(ct))
+            photo.GuestId = null;
+
+        // Bucket admissions go with the guest (cascade on media_bucket_members).
+        guests.Remove(guest);
+        await uow.SaveChangesAsync(ct);
+    }
+
     private async Task<Campaign> EnsureCampaignAsync(Guid campaignId, CancellationToken ct)
     {
         if (!await ownership.OwnsAsync(campaignId, ct))

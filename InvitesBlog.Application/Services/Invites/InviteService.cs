@@ -168,6 +168,11 @@ public sealed class InviteService(
 
         Anonymize(payload.Data);
 
+        // An open guest list puts the reply button back, pointing at the form that adds a name to
+        // the list. Same bar a personal invitation gets (RenderedInvitations.WithRsvp).
+        if (OpenListIsOn(campaign, template))
+            payload.Data["rsvp"] = new JsonObject { ["link"] = $"{inviteLink}/join", ["label"] = "Reply now" };
+
         return new InviteRenderData(
             payload.PackageUrl, payload.Data, false, campaign.Status.ToString(),
             await CreditAsync(campaign, template, ct));
@@ -219,6 +224,100 @@ public sealed class InviteService(
                 campaign.EventStartAt, DateTimeOffset.UtcNow, bucket.UploadWindowDays),
             IsCancelled: campaign.Status == CampaignStatus.Cancelled);
     }
+
+    /// <summary>
+    /// Whether people may add themselves to this event right now: an open guest list, on an uploaded
+    /// design, behind a live open link, for an event that is neither cancelled nor a save the date
+    /// (which takes no replies at all).
+    /// </summary>
+    private static bool OpenListIsOn(Campaign campaign, Template? template) =>
+        campaign is { OpenGuestList: true, OpenLinkCode: not null }
+        && campaign.Kind != CampaignKind.SaveTheDate
+        && campaign.Status != CampaignStatus.Cancelled
+        && template?.Visibility == TemplateVisibility.Imported;
+
+    public async Task<OpenListInfo?> OpenListAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null) return null;
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        return new OpenListInfo(campaign.Id, campaign.Title, OpenListIsOn(campaign, template));
+    }
+
+    public async Task<Guid> JoinOpenListAsync(Guid campaignId, JoinOpenListRequest req, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new InviteNotFoundException();
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        // Checked on every reply, not just when the form was drawn: turning the list or the link off
+        // closes it at once, even for a form already open on somebody's phone.
+        if (!OpenListIsOn(campaign, template))
+            throw new BusinessRuleException("This invitation isn't taking replies any more.", "open_list_closed");
+
+        var name = (req.Name ?? string.Empty).Trim();
+        if (name.Length == 0) throw new BusinessRuleException("Please type your name.", "name_required");
+        if (name.Length > MaxJoinNameLength)
+            throw new BusinessRuleException($"Please keep your name under {MaxJoinNameLength} characters.", "name_too_long");
+
+        var contact = string.IsNullOrWhiteSpace(req.Contact) ? null : req.Contact.Trim();
+        if (contact is { Length: > MaxTypedContactLength })
+            throw new BusinessRuleException("That phone number or email is too long.", "contact_too_long");
+
+        // Only a real answer. RecordRsvpAsync parses any RsvpStatus, and "ViewedOnly" or "NoResponse"
+        // from an open form would put a guest on the list who said nothing at all.
+        if (!Enum.TryParse<RsvpStatus>(req.Status, true, out var status)
+            || status is not (RsvpStatus.Going or RsvpStatus.Maybe or RsvpStatus.NotGoing))
+            throw new InvalidRsvpStatusException(req.Status ?? string.Empty);
+        if (req.GuestCount is < 1 or > MaxJoinPartySize)
+            throw new BusinessRuleException($"Please enter a number from 1 to {MaxJoinPartySize}.", "guest_count_range");
+
+        // A ceiling, so a script can't fill a host's list with thousands of names. Far above any real
+        // party; a host who reaches it can still add people themselves.
+        var selfAdded = await guests.CountAsync(g => g.CampaignId == campaign.Id && g.SelfAdded, ct);
+        if (selfAdded >= MaxSelfAddedGuests)
+            throw new BusinessRuleException(
+                "This guest list is full. Please let the host know you're coming.", "open_list_full");
+
+        var now = DateTimeOffset.UtcNow;
+        var guest = new Guest
+        {
+            Id = Guid.NewGuid(),
+            CampaignId = campaign.Id,
+            Name = name,
+            SelfAdded = true,
+            TypedContact = contact,
+            CreatedAt = now,
+        };
+        await guests.AddAsync(guest, ct);
+
+        var invite = new Invite
+        {
+            Id = Guid.NewGuid(),
+            CampaignId = campaign.Id,
+            GuestId = guest.Id,
+            // Never sent anywhere: this guest comes back through their browser's cookie. NOT NULL,
+            // so it is a real random token nobody holds.
+            TokenHash = TokenService.Hash(TokenService.GenerateToken()),
+            // They are reading it right now. Viewed, not Sent: nothing was sent, and the dashboard
+            // must not offer to "send" an invitation to someone who already answered it.
+            Status = InviteStatus.Viewed,
+            ViewedAt = now,
+            RsvpStatus = RsvpStatus.NoResponse,
+            CreatedAt = now,
+        };
+        await invites.AddAsync(invite, ct);
+
+        await RecordRsvpAsync(invite,
+            new RsvpRequest(status.ToString(), req.GuestCount, null,
+                string.IsNullOrWhiteSpace(req.Comment) ? null : req.Comment.Trim(), null, null, null), ct);
+        return invite.Id;
+    }
+
+    /// <summary>Longest name the open form takes. The camera trims names to 60 for the same reason.</summary>
+    public const int MaxJoinNameLength = 80;
+    /// <summary>Matches the column (Guest.TypedContact).</summary>
+    public const int MaxTypedContactLength = 120;
+    public const int MaxJoinPartySize = 50;
+    public const int MaxSelfAddedGuests = 2000;
 
     public async Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default)
     {

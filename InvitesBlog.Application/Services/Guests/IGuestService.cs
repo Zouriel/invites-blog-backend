@@ -20,4 +20,10 @@ public interface IGuestService
     /// send is performed by the caller via the dispatch service (Infrastructure).
     /// </summary>
     Task PrepareResendAsync(Guid campaignId, Guid guestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Takes somebody who added themselves from the open guest list off the list, with their invite
+    /// and replies. Refuses guests the host added.
+    /// </summary>
+    Task RemoveSelfAddedAsync(Guid campaignId, Guid guestId, CancellationToken ct = default);
 }

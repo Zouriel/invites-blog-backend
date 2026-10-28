@@ -481,6 +481,36 @@ public class CampaignServiceTests
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// Someone who added themselves from the open guest list is counted, shown with what they typed,
+    /// and NOT counted as sent: nothing was sent to them.
+    /// </summary>
+    [Fact]
+    public async Task Dashboard_shows_self_added_guests_and_does_not_count_them_as_sent()
+    {
+        var c = TestData.Campaign();
+        var invited = TestData.Guest(c.Id);
+        var joined = TestData.Guest(c.Id, email: null, phone: null);
+        joined.SelfAdded = true;
+        joined.TypedContact = "7771234";
+        _campaigns.GetByDashboardTokenHashAsync(c.Id, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(c);
+        _guests.ListByCampaignAsync(c.Id, true, Arg.Any<CancellationToken>()).Returns(new[] { invited, joined });
+        _invites.ListByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(new[]
+        {
+            TestData.Invite(c.Id, invited.Id, tokenHash: "a", status: InviteStatus.Sent),
+            TestData.Invite(c.Id, joined.Id, tokenHash: "b", status: InviteStatus.Viewed, rsvp: RsvpStatus.Going),
+        });
+        _attempts.Query().Returns(Array.Empty<DeliveryAttempt>().AsAsyncQueryable());
+
+        var res = await Sut().GetDashboardAsync(c.Id, "good");
+
+        Assert.Equal(2, res.Report.Total);
+        Assert.Equal(1, res.Report.Sent);
+        Assert.Equal(1, res.Report.Rsvp.Going);
+        var row = Assert.Single(res.Guests, g => g.SelfAdded);
+        Assert.Equal("7771234", row.TypedContact);
+    }
+
     [Fact]
     public async Task Dashboard_success_builds_report()
     {
@@ -638,6 +668,52 @@ public class CampaignServiceTests
             () => Sut().EnableOpenLinkAsync(c.Id, new SetOpenLinkRequest(AllowAnonymous: true)));
         Assert.Equal("open_link_needs_imported_design", ex.ErrorCode);
         Assert.Null(c.OpenLinkCode);
+    }
+
+    [Theory]
+    [InlineData(false, false)]   // a gallery template
+    [InlineData(true, true)]     // an uploaded save the date
+    public async Task Opening_the_guest_list_is_refused_where_nobody_could_reply(bool imported, bool saveTheDate)
+    {
+        var c = TestData.Campaign();
+        if (saveTheDate) c.Kind = CampaignKind.SaveTheDate;
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = imported ? TemplateVisibility.Imported : TemplateVisibility.Public });
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(true)));
+        Assert.False(c.OpenGuestList);
+    }
+
+    [Fact]
+    public async Task Opening_and_closing_the_guest_list_on_an_uploaded_design()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Imported });
+
+        await Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(true));
+        Assert.True(c.OpenGuestList);
+
+        await Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(false));
+        Assert.False(c.OpenGuestList);
+    }
+
+    /// <summary>Turning the link off closes the list without forgetting the event is one.</summary>
+    [Fact]
+    public async Task Turning_the_open_link_off_keeps_the_guest_list_setting()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        c.OpenGuestList = true;
+        Own(c);
+
+        await Sut().DisableOpenLinkAsync(c.Id);
+
+        Assert.Null(c.OpenLinkCode);
+        Assert.True(c.OpenGuestList);
     }
 
     /// <summary>

@@ -64,9 +64,17 @@ public sealed class Campaign
     /// <para>What it does NOT grant: the media bucket. Whoever opens it is on no guest list, so
     /// <c>MediaBucketService.MayViewAsync</c> refuses them — which is only true because the open
     /// link renders with a synthetic guest and writes no Guest row. See
-    /// <c>InviteService.RenderOpenAsync</c>.</para>
+    /// <c>InviteService.RenderOpenAsync</c>. With an <see cref="OpenGuestList"/>, a viewer who REPLIES
+    /// becomes a guest, and gets what any guest gets; only replying does that, never viewing.</para>
     /// </summary>
     public string? OpenLinkCode { get; set; }
+
+    /// <summary>
+    /// An open guest list: whoever follows the open link can reply with their name, and that adds
+    /// them to the guest list as a real guest (see <see cref="Guest.SelfAdded"/>). Only for an
+    /// uploaded design, and only works while <see cref="OpenLinkCode"/> is set.
+    /// </summary>
+    public bool OpenGuestList { get; set; }
     public string Title { get; set; } = default!;
     public string Slug { get; set; } = default!;
     public CampaignStatus Status { get; set; }

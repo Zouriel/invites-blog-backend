@@ -5,6 +5,7 @@ using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Guests;
+using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Exceptions.Campaigns;
 using InvitesBlog.Application.Exceptions.Guests;
 using InvitesBlog.Application.Guests;
@@ -29,13 +30,15 @@ public class GuestServiceTests
     private readonly IRepository<UploadedGuestFile> _uploads = Substitute.For<IRepository<UploadedGuestFile>>();
     private readonly IRepository<DeliveryAttempt> _attempts = Substitute.For<IRepository<DeliveryAttempt>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IRepository<RsvpResponse> _rsvps = Substitute.For<IRepository<RsvpResponse>>();
+    private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
     private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
     private readonly IInviterRepository _inviters = Substitute.For<IInviterRepository>();
     private IValidator<ConfirmUploadRequest> _confirmV = TestData.PassingValidator<ConfirmUploadRequest>();
 
     private GuestService Sut() => new(
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
-        _campaigns, _guests, _invites, _suppression, _uploads, _attempts, _uow,
+        _campaigns, _guests, _invites, _suppression, _uploads, _attempts, _rsvps, _photos, _uow,
         new GuestUploadParser(new PhoneNormalizer()), new PhoneNormalizer(), _confirmV);
 
     private Campaign Own(CampaignStatus status = CampaignStatus.Draft, int paidCapacity = 100)
@@ -283,5 +286,53 @@ public class GuestServiceTests
         _attempts.Query().Returns(Array.Empty<DeliveryAttempt>().AsAsyncQueryable());
 
         await Sut().PrepareResendAsync(c.Id, guestId); // should not throw
+    }
+
+    // ----- removing a self-added guest -----
+
+    [Fact]
+    public async Task Removing_refuses_a_guest_the_host_added()
+    {
+        var c = Own();
+        var g = TestData.Guest(c.Id);
+        _guests.Query(true).Returns(new[] { g }.AsAsyncQueryable());
+
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().RemoveSelfAddedAsync(c.Id, g.Id));
+        _guests.DidNotReceive().Remove(Arg.Any<Guest>());
+    }
+
+    [Fact]
+    public async Task Removing_a_self_added_guest_takes_their_invite_and_replies_and_keeps_their_photos()
+    {
+        var c = Own();
+        var g = TestData.Guest(c.Id, email: null, phone: null);
+        g.SelfAdded = true;
+        var inv = TestData.Invite(c.Id, g.Id);
+        var photo = new EventPhoto { Id = Guid.NewGuid(), CampaignId = c.Id, GuestId = g.Id };
+        _guests.Query(true).Returns(new[] { g }.AsAsyncQueryable());
+        _invites.Query(true).Returns(new[] { inv }.AsAsyncQueryable());
+        _photos.Query(true).Returns(new[] { photo }.AsAsyncQueryable());
+        var reply = new RsvpResponse { Id = Guid.NewGuid(), InviteId = inv.Id };
+        _rsvps.ListAsync(Arg.Any<System.Linq.Expressions.Expression<Func<RsvpResponse, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { reply });
+        _attempts.ListAsync(Arg.Any<System.Linq.Expressions.Expression<Func<DeliveryAttempt, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<DeliveryAttempt>());
+
+        await Sut().RemoveSelfAddedAsync(c.Id, g.Id);
+
+        _guests.Received(1).Remove(g);
+        _invites.Received(1).RemoveRange(Arg.Is<IEnumerable<Invite>>(x => x.Single() == inv));
+        _rsvps.Received(1).RemoveRange(Arg.Is<IEnumerable<RsvpResponse>>(x => x.Single() == reply));
+        Assert.Null(photo.GuestId);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Removing_a_guest_of_someone_elses_event_is_refused()
+    {
+        Own();
+        _currentUser.CampaignId.Returns(Guid.NewGuid());
+        await Assert.ThrowsAnyAsync<AppException>(() => Sut().RemoveSelfAddedAsync(Guid.NewGuid(), Guid.NewGuid()));
+        _guests.DidNotReceive().Remove(Arg.Any<Guest>());
     }
 }

@@ -59,6 +59,9 @@ public static class GuestPages
         .err { color:var(--bad); font-size:.9rem; margin:.8rem 0 0; }
         .foot { margin-top:1.6rem; font-size:.8rem; color:var(--muted); }
         a { color:var(--accent); }
+        .opt { opacity:.75; }
+        /* A field people never see, so only a script filling every input fills it in. */
+        .hp { position:absolute; left:-10000px; width:1px; height:1px; overflow:hidden; }
         """;
 
     /// <summary>
@@ -241,6 +244,48 @@ public static class GuestPages
         return Shell("RSVP", body, palette);
     }
 
+    /// <summary>
+    /// The reply form behind an open guest list. Unlike <see cref="Rsvp"/> we don't know who this
+    /// is, so it asks for a name first; the phone or email is optional and only shown to the host.
+    /// The answer buttons come last so the name and count are filled in before one is pressed.
+    /// </summary>
+    public static string Join(string action, string eventTitle, string? error, JoinValues? values = null,
+        GuestPalette? palette = null)
+    {
+        var v = values ?? new JoinValues(null, null, null, null);
+        var body = $"""
+            <h1>{E(eventTitle)}</h1>
+            <p>Let the host know if you're coming.</p>
+            <form method="post" action="{E(action)}">
+              <label for="name">Your name</label>
+              <input class="text" id="name" name="name" maxlength="80" autocomplete="name" required value="{E(v.Name ?? "")}">
+              <label for="contact">Phone or email <span class="opt">(optional)</span></label>
+              <input class="text" id="contact" name="contact" maxlength="120" value="{E(v.Contact ?? "")}">
+              <label for="guestCount">How many of you, including yourself?</label>
+              <input class="text" id="guestCount" name="guestCount" inputmode="numeric" value="{E(v.GuestCount ?? "1")}">
+              <label for="comment">Anything the host should know? <span class="opt">(optional)</span></label>
+              <input class="text" id="comment" name="comment" maxlength="500" value="{E(v.Comment ?? "")}">
+              <div class="hp" aria-hidden="true"><label for="website">Leave this empty</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+              {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
+              <button type="submit" name="status" value="Going">Yes, I'll be there</button>
+              <button class="ghost" type="submit" name="status" value="Maybe">I'm not sure yet</button>
+              <button class="ghost" type="submit" name="status" value="NotGoing">Sorry, I can't make it</button>
+            </form>
+            <p class="foot">Only the host sees your name and details.</p>
+            """;
+        return Shell("Reply", body, palette);
+    }
+
+    /// <summary>What was typed into <see cref="Join"/>, put back when it has to be shown again with an error.</summary>
+    public sealed record JoinValues(string? Name, string? Contact, string? GuestCount, string? Comment);
+
+    /// <summary>The open guest list is off, or the link was changed: the invitation still opens, replies don't.</summary>
+    public static string JoinClosed(string eventTitle, string backPath) => Shell("Replies closed", $"""
+        <h1>{E(eventTitle)}</h1>
+        <p>This invitation isn't taking replies here any more. If you're coming, let the host know directly.</p>
+        <p><a href="{E(backPath)}">Back to the invitation</a></p>
+        """);
+
     public static string RsvpDone(string status, string renderId, GuestPalette? palette = null) =>
         Shell("Thank you", $"""
         <h1>{(status == "Going" ? "Thanks, see you there" : "Thank you for letting us know")}</h1>
@@ -361,6 +406,11 @@ public static class GuestPages
             </form>
             <p class="foot"><a href="{E(backTo)}">Keep it and go back to the photos</a></p>
             """, palette);
+
+    public static string TooMany() => Shell("Please wait", """
+        <h1>Please wait a few minutes</h1>
+        <p>Lots of replies have come from this connection just now. Try again in a few minutes.</p>
+        """);
 
     public static string Cancelled(string? message) => Shell("Event cancelled", $"""
         <h1>This event has been cancelled</h1>

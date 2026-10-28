@@ -109,6 +109,12 @@ public interface ICampaignService
     /// <summary>Turns it off. The code is dropped, so the link stops resolving immediately.</summary>
     Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>
+    /// Turns the open guest list on or off: whoever opens the anonymous link can reply with their
+    /// name and so join the guest list. Uploaded designs only, never a save the date.
+    /// </summary>
+    Task SetOpenGuestListAsync(Guid id, SetOpenGuestListRequest req, CancellationToken ct = default);
+
     Task<CancelCampaignResponse> CancelAsync(Guid id, CancellationToken ct = default);
     Task<DeleteCampaignResponse> DeleteAsync(Guid id, CancellationToken ct = default);
 }

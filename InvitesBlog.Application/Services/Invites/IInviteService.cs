@@ -66,7 +66,8 @@ public interface IInviteService
         Guid inviteId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
 
     /// <summary>
-    /// The invitation as somebody who followed the OPEN LINK sees it: no guest, no RSVP, no gallery.
+    /// The invitation as somebody who followed the OPEN LINK sees it: no guest, no gallery, and no RSVP
+    /// unless the event is an open guest list, whose reply button leads to the join form.
     /// Null when the event has no open link, which is also how a revoked one stops working.
     ///
     /// <para>Writes nothing — see the implementation for why a placeholder guest row would quietly
@@ -83,6 +84,17 @@ public interface IInviteService
     /// never real. One answer for all three on purpose — see the route.
     /// </summary>
     Task<Guid?> CampaignForOpenLinkAsync(string code, CancellationToken ct = default);
+
+    /// <summary>Whether this event's open guest list is taking replies, for drawing the form. Null when the event is gone.</summary>
+    Task<OpenListInfo?> OpenListAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Somebody who followed the open link replies, and so joins the guest list: a new self-added
+    /// guest, an invite for them (already viewed) and their reply. Returns the invite, which the
+    /// caller admits this browser to. Performs no admission check of its own — the caller has
+    /// already checked the browser holds the open link — but does refuse when the list is closed.
+    /// </summary>
+    Task<Guid> JoinOpenListAsync(Guid campaignId, JoinOpenListRequest req, CancellationToken ct = default);
 
     /// <summary>
     /// What the camera on an uploaded (static) design needs: the event's default bucket, whether the

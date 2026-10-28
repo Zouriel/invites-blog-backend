@@ -81,5 +81,11 @@ public delegate InviteRenderData InviteRenderer(
     string? inviterName, string? inviterPhone, string? inviterEmail, int bucketWindowDays);
 
 /// <summary>The camera on a static invitation. See <c>IInviteService.StaticCameraAsync</c>.</summary>
+/// <summary>A reply through an open guest list. Contact is optional and kept as typed (Guest.TypedContact).</summary>
+public sealed record JoinOpenListRequest(
+    string? Name, string? Contact, string? Status, int? GuestCount, string? Comment);
+
+public sealed record OpenListInfo(Guid CampaignId, string EventTitle, bool IsOpen);
+
 public sealed record StaticCameraInfo(
     Guid CampaignId, Guid BucketId, string EventTitle, bool IsStatic, bool IsOpen, bool IsCancelled);

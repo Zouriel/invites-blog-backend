@@ -290,7 +290,8 @@ public sealed class ImportedDesignService(
     private const string Css = """
         :root { --ib-bg:#101014; --ib-text:#f4eef6; --ib-accent:#c9a227; }
         html,body { margin:0; background:var(--ib-bg); color:var(--ib-text); }
-        body { min-height:100dvh; display:flex; align-items:center; justify-content:center; }
+        /* A column, so the reply and photo bars appended after the art go under it, not beside it. */
+        body { min-height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; }
         /* Contained, not cropped: this is somebody's finished artwork, and taking a corner off it to
            fill a screen would be worse than the letterboxing around it. */
         .art { display:block; max-width:100%; max-height:100dvh; width:auto; height:auto;

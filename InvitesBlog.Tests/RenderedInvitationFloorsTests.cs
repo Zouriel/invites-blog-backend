@@ -141,4 +141,31 @@ public class RenderedInvitationFloorsTests
         Assert.NotNull(html);
         Assert.Contains("z-index:2147483000", html);
     }
+
+    // ---------- uploaded designs stack top to bottom ----------
+
+    /// <summary>
+    /// An uploaded design centres its art with a flex row, so the reply bar used to sit beside the
+    /// picture and widen the page past the phone. Pinned packages keep that CSS, so the render fixes it.
+    /// </summary>
+    [Fact]
+    public async Task An_uploaded_design_is_stacked_so_its_bars_go_under_the_art()
+    {
+        var design = """<html><head><style>body{display:flex}</style></head><body><img class="art" src="design.png"></body></html>""";
+        var data = Data();
+        data["invitation"] = new JsonObject { ["kind"] = "static" };
+
+        var html = (await RenderAsync(design, data))!;
+
+        var column = html.IndexOf("body{flex-direction:column}", StringComparison.Ordinal);
+        Assert.True(column > html.IndexOf("body{display:flex}", StringComparison.Ordinal), "the column rule must come after the design's own");
+        Assert.True(column < html.IndexOf("</head>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_template_invitation_is_left_as_it_was_laid_out()
+    {
+        var html = (await RenderAsync(BareDesign, Data()))!;
+        Assert.DoesNotContain("flex-direction:column", html);
+    }
 }

@@ -28,7 +28,22 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
         if (bytes is null || bytes.Length == 0) return null;
 
         var html = ServerBinder.Bind(Encoding.UTF8.GetString(bytes), data);
-        return WithPhotoBox(WithRsvp(WithDressColors(html, data), data), data);
+        return Stacked(WithPhotoBox(WithRsvp(WithDressColors(html, data), data), data), data);
+    }
+
+    /// <summary>
+    /// Lays an uploaded design out top to bottom. Its page centres the artwork with a flex row on
+    /// <c>body</c>, so every section appended after it (the reply bar, dress colours) used to land
+    /// BESIDE the picture and push the page wider than a phone. Campaigns pin their package, so the
+    /// generator's own fix only reaches new uploads; this is the same rule for the ones already sent.
+    /// A column with the same centring draws the picture alone exactly as before.
+    /// </summary>
+    private static string Stacked(string html, JsonObject data)
+    {
+        if (data["invitation"]?["kind"]?.ToString() != "static") return html;
+        const string style = "<style>body{flex-direction:column}</style>";
+        var head = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+        return head < 0 ? style + html : html[..head] + style + html[head..];
     }
 
     /// <summary>
