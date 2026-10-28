@@ -59,6 +59,15 @@ public sealed class GuestsController(IGuestService guests, DispatchService dispa
         return NoContent();
     }
 
+    // DELETE /api/campaigns/{id}/guests/{guestId} — only someone who added themselves from the open guest list
+    [HttpDelete("{guestId:guid}")]
+    [HasPermission(Permissions.Guests.Write)]
+    public async Task<IActionResult> RemoveSelfAdded(Guid id, Guid guestId, CancellationToken ct)
+    {
+        await guests.RemoveSelfAddedAsync(id, guestId, ct);
+        return NoContent();
+    }
+
     // POST /api/campaigns/{id}/guests/{guestId}/resend — free, max 3 per 24h (§4.7.4)
     [HttpPost("{guestId:guid}/resend")]
     [HasPermission(Permissions.Guests.Resend)]

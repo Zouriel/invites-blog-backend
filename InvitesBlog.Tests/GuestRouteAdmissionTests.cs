@@ -61,7 +61,10 @@ public class GuestRouteAdmissionTests
         Assert.True(renderScoped.Count >= 5, $"Only found {renderScoped.Count} render-scoped routes.");
 
         var unguarded = renderScoped
-            .Where(x => !x.Body.Contains("Admitted(renderId)", StringComparison.Ordinal))
+            // Either admission counts: a personal invite, or the open link (the open guest list's
+            // reply form is reachable only through the latter).
+            .Where(x => !x.Body.Contains("Admitted(renderId)", StringComparison.Ordinal)
+                        && !x.Body.Contains("AdmittedOpen(renderId)", StringComparison.Ordinal))
             .Select(x => x.Route)
             .ToList();
 

@@ -28,6 +28,20 @@ public sealed class Guest
     public string Gender { get; set; } = "unspecified";
     public string MetadataJson { get; set; } = "{}";
     public bool OptedOut { get; set; }                 // §15.3
+
+    /// <summary>
+    /// Added by the guest themselves, from an event's open guest list (see
+    /// <see cref="Campaign.OpenGuestList"/>), rather than by the host.
+    /// </summary>
+    public bool SelfAdded { get; set; }
+
+    /// <summary>
+    /// A phone number or email a self-added guest typed in, kept as they wrote it. Never copied into
+    /// <see cref="Email"/> or <see cref="PhoneE164"/>: those are what sign-in codes, the gated link
+    /// and the inbox trust, and anybody can type anybody's number into an open form. The host sees it
+    /// on the dashboard, and can move it into the real field by editing the guest.
+    /// </summary>
+    public string? TypedContact { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>Every role, or the single legacy <see cref="Role"/> for a row that predates the list.</summary>

@@ -86,9 +86,12 @@ public sealed class GuestController(
     public async Task<IActionResult> OpenLink(string code, CancellationToken ct)
     {
         var campaignId = await invites.CampaignForOpenLinkAsync(code, ct);
-        return campaignId is null
-            ? Html(GuestPages.NotFound(), StatusCodes.Status404NotFound)
-            : AdmitOpen(campaignId.Value);
+        if (campaignId is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        // Somebody who already replied through this link is a guest now: they get their own
+        // invitation (their reply, their photos), not the open one with its "Reply now" again.
+        if (await JoinedInviteForAsync(campaignId.Value, ct) is { } mine) return Admit(mine);
+        return AdmitOpen(campaignId.Value);
     }
 
     /// <summary>Sends the reauth code. No contact is taken from the caller — see the service.</summary>
@@ -155,6 +158,12 @@ public sealed class GuestController(
         var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
         if (inviteId is null && openCampaignId is null)
             return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        // The open page reached again after replying (the back button, an old tab): send them to
+        // their own invitation, so the reply button there changes their answer instead of adding
+        // them twice.
+        if (openCampaignId is not null && await JoinedInviteForAsync(openCampaignId.Value, ct) is { } joined)
+            return Admit(joined);
 
         // The invitation's own links point back at the path the guest arrived by, so its RSVP button
         // stays inside the server-rendered flow instead of bouncing to a page that wants a session.
@@ -264,6 +273,109 @@ public sealed class GuestController(
             return Html(GuestPages.Rsvp($"/r/{renderId}/rsvp", "Friend", "You're invited", e.Message,
                 await PaletteAsync(inviteId.Value, ct)));
         }
+    }
+
+    // ---------- the open guest list ----------
+
+    /// <summary>
+    /// The reply form on an open guest list: reached from the "Reply now" button the open
+    /// invitation carries when the host chose that kind of invitation.
+    /// </summary>
+    [HttpGet("/r/{renderId}/join")]
+    public async Task<IActionResult> JoinForm(string renderId, CancellationToken ct)
+    {
+        var campaignId = AdmittedOpen(renderId);
+        if (campaignId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        if (await JoinedInviteForAsync(campaignId.Value, ct) is { } mine) return AdmitTo(mine, "/rsvp");
+
+        var list = await invites.OpenListAsync(campaignId.Value, ct);
+        if (list is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}"));
+        return Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, null));
+    }
+
+    /// <summary>
+    /// A reply from the open guest list. Adds the person to the list, then admits this browser to
+    /// their own new invitation, and remembers that it did (see <see cref="RenderTickets.Joined"/>).
+    /// </summary>
+    [HttpPost("/r/{renderId}/join")]
+    [EnableRateLimiting("open-list-join")]
+    public async Task<IActionResult> JoinSubmit(
+        string renderId,
+        [FromForm] string? name, [FromForm] string? contact, [FromForm] string? status,
+        // Taken as text: a number field bound as int? turns "two" into a bare 400 from model binding
+        // instead of the form coming back with a message.
+        [FromForm] string? guestCount, [FromForm] string? comment, [FromForm] string? website,
+        CancellationToken ct)
+    {
+        var campaignId = AdmittedOpen(renderId);
+        if (campaignId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+        // A second submit (a double tap, or the form resent from history) changes nothing.
+        if (await JoinedInviteForAsync(campaignId.Value, ct) is { } mine) return AdmitTo(mine, "/rsvp");
+
+        var list = await invites.OpenListAsync(campaignId.Value, ct);
+        if (list is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+        if (!list.IsOpen) return Html(GuestPages.JoinClosed(list.EventTitle, $"/r/{renderId}"));
+
+        var typed = new GuestPages.JoinValues(name, contact, guestCount, comment);
+        IActionResult Again(string error) =>
+            Html(GuestPages.Join($"/r/{renderId}/join", list.EventTitle, error, typed));
+
+        // Filled in only by something that fills in every field. It is told it worked, and nothing
+        // is written, so there is nothing to learn from trying again.
+        if (!string.IsNullOrEmpty(website))
+        {
+            logger.LogWarning("Open guest list reply dropped: hidden field filled");
+            return Html(GuestPages.RsvpDone(status == "Going" ? "Going" : "NotGoing", renderId));
+        }
+
+        int? count = null;
+        if (!string.IsNullOrWhiteSpace(guestCount))
+        {
+            if (!int.TryParse(guestCount.Trim(), out var n))
+                return Again("Please type how many of you are coming as a number.");
+            count = n;
+        }
+
+        Guid inviteId;
+        try
+        {
+            inviteId = await invites.JoinOpenListAsync(campaignId.Value,
+                new JoinOpenListRequest(name, contact, status, count, comment), ct);
+        }
+        catch (AppException e)
+        {
+            return Again(e.Message);
+        }
+
+        AppendTicket(inviteId);
+        Response.Cookies.Append(RenderTickets.JoinedCookieName,
+            tickets.Joined(Request.Cookies[RenderTickets.JoinedCookieName], inviteId, DateTimeOffset.UtcNow),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = "/",
+                Expires = DateTimeOffset.UtcNow.Add(RenderTickets.JoinedLifetime),
+            });
+        // The camera asks for a name; they have just given one.
+        AppendCameraName(name!.Trim());
+
+        var personal = tickets.RenderId(inviteId);
+        return Html(GuestPages.RsvpDone(status ?? "", personal, await PaletteAsync(inviteId, ct)));
+    }
+
+    /// <summary>
+    /// The invite this browser joined the campaign's open guest list as, if it did and that guest
+    /// is still on the list. A host who removes a self-added guest sends that browser back to the
+    /// open page, where it can reply again.
+    /// </summary>
+    private async Task<Guid?> JoinedInviteForAsync(Guid campaignId, CancellationToken ct)
+    {
+        foreach (var id in tickets.ReadJoined(Request.Cookies[RenderTickets.JoinedCookieName], DateTimeOffset.UtcNow))
+            if ((await invites.InviteSubjectAsync(id, ct))?.CampaignId == campaignId) return id;
+        return null;
     }
 
     // ---------- the event photo box ----------
@@ -472,7 +584,12 @@ public sealed class GuestController(
         // An hour, and sent only to the invitation's own pages. Long enough to put the phone down and
         // pick it up again without being asked twice; short enough that a phone handed to someone
         // else later that night doesn't credit their photos to the first person.
-        Response.Cookies.Append(CameraNameCookie, Uri.EscapeDataString(trimmed.Length > 60 ? trimmed[..60] : trimmed),
+        AppendCameraName(trimmed);
+        return Redirect($"/r/{renderId}/camera");
+    }
+
+    private void AppendCameraName(string name) =>
+        Response.Cookies.Append(CameraNameCookie, Uri.EscapeDataString(name.Length > 60 ? name[..60] : name),
             new CookieOptions
             {
                 HttpOnly = true,
@@ -481,9 +598,6 @@ public sealed class GuestController(
                 Path = "/r/",
                 MaxAge = TimeSpan.FromHours(1),
             });
-
-        return Redirect($"/r/{renderId}/camera");
-    }
 
     /// <summary>One frame or clip from the static camera, into the event's default bucket under the typed name.</summary>
     [HttpPost("/r/{renderId}/camera/upload")]
@@ -699,7 +813,16 @@ public sealed class GuestController(
     }
 
     /// <summary>Issues the cookie and sends the guest on to a URL that authorizes nothing.</summary>
-    private IActionResult Admit(Guid inviteId)
+    private IActionResult Admit(Guid inviteId) => AdmitTo(inviteId, "");
+
+    /// <summary>Admits the browser to an invite and sends it to that invitation's page, or one under it.</summary>
+    private IActionResult AdmitTo(Guid inviteId, string under)
+    {
+        AppendTicket(inviteId);
+        return Redirect($"/r/{tickets.RenderId(inviteId)}{under}");
+    }
+
+    private void AppendTicket(Guid inviteId)
     {
         Response.Cookies.Append(
             RenderTickets.CookieName,
@@ -715,8 +838,6 @@ public sealed class GuestController(
                 // No Domain: host-only, so it never travels to the account app on a sibling host.
                 Expires = DateTimeOffset.UtcNow.Add(RenderTickets.TicketLifetime),
             });
-
-        return Redirect($"/r/{tickets.RenderId(inviteId)}");
     }
 
     /// <summary>

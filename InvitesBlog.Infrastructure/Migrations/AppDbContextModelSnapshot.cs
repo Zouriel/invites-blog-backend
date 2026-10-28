@@ -265,6 +265,12 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("media_notice_stage");
 
+                    b.Property<bool>("OpenGuestList")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("open_guest_list");
+
                     b.Property<string>("OpenLinkCode")
                         .HasColumnType("text")
                         .HasColumnName("open_link_code");
@@ -690,6 +696,17 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("text[]")
                         .HasColumnName("roles")
                         .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<bool>("SelfAdded")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("self_added");
+
+                    b.Property<string>("TypedContact")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("typed_contact");
 
                     b.HasKey("Id");
 

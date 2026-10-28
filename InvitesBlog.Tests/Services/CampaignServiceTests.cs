@@ -640,6 +640,52 @@ public class CampaignServiceTests
         Assert.Null(c.OpenLinkCode);
     }
 
+    [Theory]
+    [InlineData(false, false)]   // a gallery template
+    [InlineData(true, true)]     // an uploaded save the date
+    public async Task Opening_the_guest_list_is_refused_where_nobody_could_reply(bool imported, bool saveTheDate)
+    {
+        var c = TestData.Campaign();
+        if (saveTheDate) c.Kind = CampaignKind.SaveTheDate;
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = imported ? TemplateVisibility.Imported : TemplateVisibility.Public });
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(true)));
+        Assert.False(c.OpenGuestList);
+    }
+
+    [Fact]
+    public async Task Opening_and_closing_the_guest_list_on_an_uploaded_design()
+    {
+        var c = TestData.Campaign();
+        Own(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, Visibility = TemplateVisibility.Imported });
+
+        await Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(true));
+        Assert.True(c.OpenGuestList);
+
+        await Sut().SetOpenGuestListAsync(c.Id, new SetOpenGuestListRequest(false));
+        Assert.False(c.OpenGuestList);
+    }
+
+    /// <summary>Turning the link off closes the list without forgetting the event is one.</summary>
+    [Fact]
+    public async Task Turning_the_open_link_off_keeps_the_guest_list_setting()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        c.OpenGuestList = true;
+        Own(c);
+
+        await Sut().DisableOpenLinkAsync(c.Id);
+
+        Assert.Null(c.OpenLinkCode);
+        Assert.True(c.OpenGuestList);
+    }
+
     /// <summary>
     /// Re-enabling mints a DIFFERENT code. Re-ticking the box is the only way anybody has to retire
     /// an address they over-shared, and handing back the old one would make that impossible.

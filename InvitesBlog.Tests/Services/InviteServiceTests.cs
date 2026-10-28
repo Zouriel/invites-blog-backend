@@ -152,6 +152,127 @@ public class InviteServiceTests
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    // ----- the open guest list -----
+
+    /// <summary>An uploaded design with its open link live and, by default, its guest list open.</summary>
+    private Campaign OpenListEvent(bool openList = true, bool imported = true)
+    {
+        var c = TestData.Campaign(status: CampaignStatus.Dispatched);
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        c.OpenGuestList = openList;
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template
+            {
+                Id = c.TemplateId, PackageUrl = "/assets/p/",
+                Visibility = imported ? TemplateVisibility.Imported : TemplateVisibility.Public,
+            });
+        return c;
+    }
+
+    [Fact]
+    public async Task Open_guest_list_puts_a_reply_button_on_the_open_invitation()
+    {
+        var c = OpenListEvent();
+        var payload = await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", FullRenderer);
+
+        Assert.Equal("https://me.example.com/r/x/join", payload!.Data["rsvp"]!["link"]!.ToString());
+        // The album stays shut to somebody who has only looked.
+        Assert.Null(payload.Data["photos"]!["link"]);
+    }
+
+    [Theory]
+    [InlineData(false, true, false)]   // list off
+    [InlineData(true, false, false)]   // a gallery template, somehow flagged
+    [InlineData(true, true, true)]     // a save the date takes no replies
+    public async Task No_reply_button_unless_the_list_is_really_open(bool openList, bool imported, bool saveTheDate)
+    {
+        var c = OpenListEvent(openList, imported);
+        if (saveTheDate) c.Kind = CampaignKind.SaveTheDate;
+
+        var payload = await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", FullRenderer);
+
+        Assert.Null(payload!.Data["rsvp"]!["link"]);
+        Assert.False((await Sut().OpenListAsync(c.Id))!.IsOpen);
+    }
+
+    [Fact]
+    public async Task Joining_adds_a_self_added_guest_whose_typed_contact_is_never_trusted()
+    {
+        var c = OpenListEvent();
+        Guest? added = null;
+        Invite? invite = null;
+        RsvpResponse? reply = null;
+        await _guests.AddAsync(Arg.Do<Guest>(g => added = g), Arg.Any<CancellationToken>());
+        await _invites.AddAsync(Arg.Do<Invite>(i => invite = i), Arg.Any<CancellationToken>());
+        await _rsvp.AddAsync(Arg.Do<RsvpResponse>(r => reply = r), Arg.Any<CancellationToken>());
+
+        var inviteId = await Sut().JoinOpenListAsync(c.Id,
+            new JoinOpenListRequest("  Mariyam Ali  ", " mariyam@example.com ", "going", 3, " See you "));
+
+        Assert.NotNull(added);
+        Assert.Equal("Mariyam Ali", added!.Name);
+        Assert.True(added.SelfAdded);
+        Assert.Equal("mariyam@example.com", added.TypedContact);
+        // The real contact fields stay empty: sign-in codes, the gated link and the inbox read those.
+        Assert.Null(added.Email);
+        Assert.Null(added.PhoneE164);
+
+        Assert.Equal(inviteId, invite!.Id);
+        Assert.Equal(added.Id, invite.GuestId);
+        Assert.Equal(InviteStatus.Viewed, invite.Status);
+        Assert.Equal(RsvpStatus.Going, invite.RsvpStatus);
+        Assert.Equal(3, reply!.GuestCount);
+        Assert.Equal("See you", reply.Comment);
+        await _uow.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("", "Going", 1)]
+    [InlineData("   ", "Going", 1)]
+    [InlineData("Ali", "ViewedOnly", 1)]
+    [InlineData("Ali", "NoResponse", 1)]
+    [InlineData("Ali", "", 1)]
+    [InlineData("Ali", "Going", 0)]
+    [InlineData("Ali", "Going", 51)]
+    public async Task Joining_refuses_a_reply_that_says_nothing_usable(string name, string status, int count)
+    {
+        var c = OpenListEvent();
+        await Assert.ThrowsAnyAsync<AppException>(() =>
+            Sut().JoinOpenListAsync(c.Id, new JoinOpenListRequest(name, null, status, count, null)));
+        await _guests.DidNotReceive().AddAsync(Arg.Any<Guest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Joining_refuses_once_the_link_is_turned_off()
+    {
+        var c = OpenListEvent();
+        c.OpenLinkCode = null;
+        await Assert.ThrowsAnyAsync<AppException>(() =>
+            Sut().JoinOpenListAsync(c.Id, new JoinOpenListRequest("Ali", null, "Going", 1, null)));
+        await _guests.DidNotReceive().AddAsync(Arg.Any<Guest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Joining_refuses_a_cancelled_event()
+    {
+        var c = OpenListEvent();
+        c.Status = CampaignStatus.Cancelled;
+        await Assert.ThrowsAnyAsync<AppException>(() =>
+            Sut().JoinOpenListAsync(c.Id, new JoinOpenListRequest("Ali", null, "Going", 1, null)));
+    }
+
+    [Fact]
+    public async Task Joining_stops_at_the_ceiling()
+    {
+        var c = OpenListEvent();
+        _guests.CountAsync(Arg.Any<System.Linq.Expressions.Expression<Func<Guest, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(InviteService.MaxSelfAddedGuests);
+        var e = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            Sut().JoinOpenListAsync(c.Id, new JoinOpenListRequest("Ali", null, "Going", 1, null)));
+        Assert.Equal("open_list_full", e.ErrorCode);
+    }
+
     [Fact]
     public async Task Open_link_lookup_answers_null_for_an_unknown_code()
     {

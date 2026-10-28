@@ -718,7 +718,7 @@ public sealed class CampaignService(
             campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
             inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization,
             await allowances.ForCampaignAsync(id, ct),
-            SaveTheDates.Name(campaign.Kind), campaign.AllDay);
+            SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.OpenGuestList);
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -801,7 +801,9 @@ public sealed class CampaignService(
                 inv?.ViewedAt,
                 channel,
                 answers,
-                g.AllRoles());
+                g.AllRoles(),
+                g.SelfAdded,
+                showContacts ? g.TypedContact : null);
         }).ToList();
 
         return new DashboardResponse(
@@ -823,7 +825,8 @@ public sealed class CampaignService(
                     _ => "organiser",
                 },
                 SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.EventStartAt,
-                campaign.InvitationCampaignId),
+                campaign.InvitationCampaignId,
+                campaign.OpenGuestList),
             report, guestRows, questions, await allowances.ForCampaignAsync(campaign.Id, ct));
     }
 
@@ -970,6 +973,29 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
 
         return new OpenLinkResponse(OpenLinkUrl(campaign.OpenLinkCode), true);
+    }
+
+    public async Task SetOpenGuestListAsync(Guid id, SetOpenGuestListRequest req, CancellationToken ct = default)
+    {
+        var campaign = await LoadOwnedAsync(id, ct);
+        if (req.Enabled)
+        {
+            // Same reasons the anonymous link is refused for a template: a reply from the open link
+            // has no personal invitation to come from. A save the date takes no replies at all.
+            if (campaign.Kind == CampaignKind.SaveTheDate)
+                throw new BusinessRuleException(SaveTheDates.NoRepliesMessage, "save_the_date_no_replies");
+            if (!await IsImportedAsync(campaign, ct))
+                throw new BusinessRuleException(
+                    "An open guest list is for a design you upload yourself.", "open_list_needs_imported_design");
+        }
+
+        // Left alone when the link is turned off or made gated: the list is then simply closed, and
+        // comes back with the link, so turning the link off for an evening doesn't change the event's type.
+        if (campaign.OpenGuestList == req.Enabled) return;
+        campaign.OpenGuestList = req.Enabled;
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+        campaigns.Update(campaign);
+        await uow.SaveChangesAsync(ct);
     }
 
     public async Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default)

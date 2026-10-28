@@ -25,6 +25,7 @@ public sealed class RenderTickets(IConfiguration config)
     private const string OpenRenderIdContext = "open-render-id:";
     private const string TicketContext = "render-ticket:";
     private const string HandoffContext = "render-handoff:";
+    private const string JoinedContext = "open-joined:";
 
     /// <summary>How long a guest stays admitted before their link has to admit them again.</summary>
     public static readonly TimeSpan TicketLifetime = TimeSpan.FromDays(7);
@@ -136,6 +137,39 @@ public sealed class RenderTickets(IConfiguration config)
     {
         var body = Verify(HandoffContext, handoff, now);
         return body is not null && Guid.TryParseExact(body, "N", out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// The cookie remembering which open guest lists this browser has joined, and as whom. Far
+    /// longer-lived than the ticket: somebody who replied from a group chat in March and opens the
+    /// same link the week of the wedding must land on their own invitation, not on a form that adds
+    /// them a second time.
+    /// </summary>
+    public const string JoinedCookieName = "ib_joined";
+
+    public static readonly TimeSpan JoinedLifetime = TimeSpan.FromDays(180);
+
+    /// <summary>
+    /// Adds the invite a browser just joined as to those it had already joined, newest first. Its
+    /// own context, so it can never be presented as a ticket: holding it admits nothing until the
+    /// open link itself has been followed again and the invite still exists.
+    /// </summary>
+    public string Joined(string? existing, Guid inviteId, DateTimeOffset now)
+    {
+        var ids = new[] { inviteId }.Concat(ReadJoined(existing, now)).Distinct().Take(MaxAdmitted).ToList();
+        var body = $"{string.Join(',', ids.Select(i => i.ToString("N")))}.{now.Add(JoinedLifetime).ToUnixTimeSeconds()}";
+        return $"{body}.{Base64Url(Sign(JoinedContext, body))}";
+    }
+
+    /// <summary>The invites a joined cookie names, or empty. Never throws, like <see cref="ReadTicket"/>.</summary>
+    public IReadOnlyList<Guid> ReadJoined(string? value, DateTimeOffset now)
+    {
+        var body = Verify(JoinedContext, value, now);
+        if (body is null) return [];
+        var ids = new List<Guid>();
+        foreach (var part in body.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            if (Guid.TryParseExact(part, "N", out var id)) ids.Add(id);
+        return ids;
     }
 
     /// <summary>

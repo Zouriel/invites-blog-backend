@@ -91,6 +91,19 @@ public sealed class CampaignsController(
         return SuccessMessage("That link no longer works.");
     }
 
+    /// <summary>
+    /// Opens or closes the guest list to whoever has the open link: see
+    /// <see cref="ICampaignService.SetOpenGuestListAsync"/>.
+    /// </summary>
+    [HttpPut("{id:guid}/open-guest-list")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> SetOpenGuestList(
+        Guid id, [FromBody] SetOpenGuestListRequest req, CancellationToken ct)
+    {
+        await campaigns.SetOpenGuestListAsync(id, req, ct);
+        return Success(new { openGuestList = req.Enabled });
+    }
+
     /// <summary>Finishes a photos-only event (no invitation to send): it stops being a draft.</summary>
     [HttpPost("{id:guid}/activate")]
     [HasPermission(Permissions.Campaigns.Write)]
