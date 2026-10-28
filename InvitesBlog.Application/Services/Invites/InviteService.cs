@@ -430,7 +430,17 @@ public sealed class InviteService(
         if (campaign is null) return null;
 
         var guest = await guests.GetByIdAsync(invite.GuestId, ct);
+        return ThemeOf(campaign, guest?.Role);
+    }
 
+    public async Task<GuestThemeResponse?> CampaignThemeAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        return campaign is null ? null : ThemeOf(campaign, null);
+    }
+
+    private static GuestThemeResponse ThemeOf(Campaign campaign, string? role)
+    {
         // The template's authored defaults, from the manifest the campaign froze at booking.
         var declared = ParseJsonObject(campaign.TemplateManifestJson)?["theme"] as JsonObject;
         var accent = declared?["accentColor"]?.ToString();
@@ -438,7 +448,7 @@ public sealed class InviteService(
         var text = declared?["textColor"]?.ToString();
 
         // The inviter's choices, shared first and then anything scoped to this guest's role.
-        foreach (var layer in ThemeLayers(campaign.ThemeOverridesJson, guest?.Role))
+        foreach (var layer in ThemeLayers(campaign.ThemeOverridesJson, role))
         {
             if (layer["accentColor"]?.ToString() is { Length: > 0 } a) accent = a;
             if (layer["backgroundColor"]?.ToString() is { Length: > 0 } b) background = b;

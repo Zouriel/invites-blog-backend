@@ -102,7 +102,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
               <a href="{WebUtility.HtmlEncode(link)}" style="display:inline-flex;align-items:center;
                  padding:15px 30px;border-radius:999px;text-decoration:none;
                  font:600 15px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-                 letter-spacing:.02em;color:var(--ib-bg,#17131a);
+                 letter-spacing:.02em;color:{Label(data)};
                  background:var(--ib-accent,#c9a227)">{WebUtility.HtmlEncode(label)}</a>
             </section>
             """;
@@ -141,7 +141,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
 
         // A static invitation is one picture. A bar under it reads as part of the design, so the
         // camera floats over it instead, bottom right, where a thumb reaches.
-        if (data["invitation"]?["kind"]?.ToString() == "static") return WithFloatingCamera(html, link);
+        if (data["invitation"]?["kind"]?.ToString() == "static") return WithFloatingCamera(html, link, Label(data));
 
         // Safe as a plain string check because the markup has just been through AngleSharp, which
         // normalises every attribute to double quotes — this is not run against author markup.
@@ -174,7 +174,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
               <a href="{WebUtility.HtmlEncode(link)}" style="display:inline-flex;align-items:center;
                  padding:15px 30px;border-radius:999px;text-decoration:none;
                  font:600 15px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-                 letter-spacing:.02em;color:var(--ib-bg,#17131a);
+                 letter-spacing:.02em;color:{Label(data)};
                  background:var(--ib-accent,#c9a227)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1.05em;height:1.05em;vertical-align:-.16em;margin-right:.55em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Capture moments</a>
               <p style="margin:16px 0 0;font:400 12px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
                  letter-spacing:.14em;text-transform:uppercase;
@@ -191,7 +191,17 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
     /// plus room at the end of the page so the last of the design and the reply button can scroll
     /// clear of it. Shown only while the camera is open, like the bar.
     /// </summary>
-    private static string WithFloatingCamera(string html, string link)
+    /// <summary>
+    /// The colour of the words on a filled bar button. It used to be the background colour, which reads
+    /// on the default gold but not on whatever a host picks (pink on near-white came out pale on pale).
+    /// With an accent chosen, the label is worked out from it; otherwise it stays as it always was.
+    /// </summary>
+    private static string Label(JsonObject data) =>
+        data["theme"]?["accentColor"]?.ToString() is { } accent && InvitesBlog.Application.Campaigns.GuestColours.IsHex(accent)
+            ? GuestPalette.From(accent, null, null).OnAccent
+            : "var(--ib-bg,#17131a)";
+
+    private static string WithFloatingCamera(string html, string link, string label)
     {
         var button = $"""
             <div aria-hidden="true" style="height:96px"></div>
@@ -200,7 +210,7 @@ public sealed class RenderedInvitations(IStorageService storage, IConfiguration 
                z-index:2147483001;display:inline-flex;align-items:center;gap:.5em;
                padding:14px 20px;border-radius:999px;text-decoration:none;
                font:600 15px/1 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-               color:var(--ib-bg,#17131a);background:var(--ib-accent,#c9a227);
+               color:{label};background:var(--ib-accent,#c9a227);
                box-shadow:0 10px 30px rgba(0,0,0,.35)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="width:1.2em;height:1.2em"><path d="M3 8.6A2.4 2.4 0 0 1 5.4 6.2h1.7a1 1 0 0 0 .83-.45l.9-1.36a1 1 0 0 1 .84-.45h4.66a1 1 0 0 1 .84.45l.9 1.36a1 1 0 0 0 .83.45h1.7A2.4 2.4 0 0 1 21 8.6v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16.8z"/><circle cx="12" cy="12.6" r="3.5"/></svg>Camera</a>
             """;
 

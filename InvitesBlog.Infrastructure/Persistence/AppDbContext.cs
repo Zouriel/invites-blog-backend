@@ -139,6 +139,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Kind).HasDefaultValue(CampaignKind.Invitation);
             e.Property(x => x.AllDay).HasDefaultValue(false);
             e.Property(x => x.OpenGuestList).HasDefaultValue(false);
+            e.Property(x => x.CardThemeJson).HasColumnType("jsonb").HasDefaultValue("{}");
             e.HasIndex(x => x.AccessTokenHash).IsUnique().HasDatabaseName("idx_campaigns_access_token_hash");
             e.HasIndex(x => x.DashboardTokenHash).HasDatabaseName("idx_campaigns_dashboard_token_hash");
             // Every open link resolves through this index, and the lookup runs before anything is

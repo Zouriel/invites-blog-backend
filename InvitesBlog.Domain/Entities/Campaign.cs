@@ -75,6 +75,13 @@ public sealed class Campaign
     /// uploaded design, and only works while <see cref="OpenLinkCode"/> is set.
     /// </summary>
     public bool OpenGuestList { get; set; }
+
+    /// <summary>
+    /// The colours of the printed QR table card, as <c>{"accent","background","text"}</c> hex values.
+    /// Empty is the original cream-and-gold card. Kept apart from <see cref="ThemeOverridesJson"/>:
+    /// paper is not a screen, and a dark invitation usually still wants a light card.
+    /// </summary>
+    public string CardThemeJson { get; set; } = "{}";
     public string Title { get; set; } = default!;
     public string Slug { get; set; } = default!;
     public CampaignStatus Status { get; set; }

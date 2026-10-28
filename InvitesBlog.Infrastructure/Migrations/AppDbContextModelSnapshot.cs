@@ -188,6 +188,13 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("all_day");
 
+                    b.Property<string>("CardThemeJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("{}")
+                        .HasColumnName("card_theme_json");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

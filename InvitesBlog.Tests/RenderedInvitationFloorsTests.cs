@@ -168,4 +168,39 @@ public class RenderedInvitationFloorsTests
         var html = (await RenderAsync(BareDesign, Data()))!;
         Assert.DoesNotContain("flex-direction:column", html);
     }
+
+    // ---------- the bar button's label ----------
+
+    /// <summary>
+    /// The label used to be the background colour, which is unreadable once a host picks their own
+    /// accent (pale pink on a pale ground). With an accent chosen it is worked out from the accent.
+    /// </summary>
+    [Fact]
+    public async Task A_chosen_accent_gets_a_readable_label()
+    {
+        var dark = Data();
+        dark["theme"] = new JsonObject { ["accentColor"] = "#7a1f3d" };
+        var light = Data();
+        light["theme"] = new JsonObject { ["accentColor"] = "#f6c6d4" };
+
+        Assert.Contains("color:#ffffff", (await RenderAsync(BareDesign, dark))!);
+        Assert.Contains("color:#1a1408", (await RenderAsync(BareDesign, light))!);
+    }
+
+    [Fact]
+    public async Task Without_a_chosen_accent_the_label_is_as_it_always_was()
+    {
+        var html = (await RenderAsync(BareDesign, Data()))!;
+        Assert.Contains("color:var(--ib-bg,#17131a)", html);
+    }
+
+    /// <summary>A value that isn't a colour never reaches the style attribute.</summary>
+    [Fact]
+    public async Task A_theme_value_that_is_not_a_colour_is_not_used_for_the_label()
+    {
+        var data = Data();
+        data["theme"] = new JsonObject { ["accentColor"] = "red;background:url(x)" };
+        var html = (await RenderAsync(BareDesign, data))!;
+        Assert.DoesNotContain("url(x)", html.Split("z-index:2147483000")[1]);
+    }
 }

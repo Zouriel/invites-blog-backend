@@ -51,6 +51,12 @@ public interface IInviteService
     Task<GuestThemeResponse?> GuestThemeAsync(Guid inviteId, CancellationToken ct = default);
 
     /// <summary>
+    /// The same, for a page that knows the event but no guest (the open link's reply form and camera):
+    /// the design's colours and the host's shared choices, without any one role's.
+    /// </summary>
+    Task<GuestThemeResponse?> CampaignThemeAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
     /// Builds the payload for an invite the caller has ALREADY been authorized to see. Does no access
     /// check of its own — it is the tail of a flow whose head did the checking, which is why it takes
     /// an id rather than a token. The server-rendered guest path uses it: admission happens once at

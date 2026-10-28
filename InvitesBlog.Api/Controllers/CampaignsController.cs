@@ -16,7 +16,8 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/campaigns")]
 public sealed class CampaignsController(
-    ICampaignService campaigns, IImportedDesignService designs, IMediaBucketService buckets) : BaseApiController
+    ICampaignService campaigns, IImportedDesignService designs, IMediaBucketService buckets,
+    IGuestColoursService colours) : BaseApiController
 {
     // Creation is open to anonymous callers: a brand-new visitor spins up a draft and receives a
     // possession token that grants Inviter rights thereafter. The Public role does NOT hold
@@ -103,6 +104,20 @@ public sealed class CampaignsController(
         await campaigns.SetOpenGuestListAsync(id, req, ct);
         return Success(new { openGuestList = req.Enabled });
     }
+
+    /// <summary>
+    /// The event's Colours page: the reply button and guest pages (uploaded designs only), the QR
+    /// table card, and colours read off the uploaded picture.
+    /// </summary>
+    [HttpGet("{id:guid}/colours")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> GetColours(Guid id, CancellationToken ct) =>
+        Success(await colours.GetAsync(id, ct));
+
+    [HttpPut("{id:guid}/colours")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> SetColours(Guid id, [FromBody] SetGuestColoursRequest req, CancellationToken ct) =>
+        Success(await colours.SetAsync(id, req, ct));
 
     /// <summary>Finishes a photos-only event (no invitation to send): it stops being a draft.</summary>
     [HttpPost("{id:guid}/activate")]

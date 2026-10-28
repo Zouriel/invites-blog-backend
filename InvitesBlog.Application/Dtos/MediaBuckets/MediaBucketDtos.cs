@@ -55,7 +55,9 @@ public sealed record MediaBucketDto(
     bool Branded = true,
     /// <summary>The venue the event is held at, whose name and logo its albums and QR cards carry.</summary>
     string? VenueName = null,
-    string? VenueLogoUrl = null);
+    string? VenueLogoUrl = null,
+    /// <summary>The colours the QR table card is printed in, or null for the original cream and gold.</summary>
+    InvitesBlog.Application.Dtos.Campaigns.ColourSetDto? CardTheme = null);
 
 /// <summary>
 /// The space a venue's events share: how much there is and how much is used. For anyone who isn't a
