@@ -55,6 +55,21 @@ public class ImageOrientationTests
     }
 
     [Fact]
+    public void An_image_kept_as_it_was_still_reports_its_size()
+    {
+        // A small, already well-compressed JPEG: re-encoding can't beat it, so the original bytes are
+        // kept. Its size must still come back — the designer lays the picture out by it.
+        using var image = new Image<Rgba32>(300, 120);
+        using var ms = new MemoryStream();
+        image.Save(ms, new JpegEncoder { Quality = 30 });
+
+        var result = Sut().Optimize(ms.ToArray(), "image/jpeg", 1600);
+
+        Assert.Equal(ms.ToArray(), result.Content);
+        Assert.Equal((300, 120), (result.Width, result.Height));
+    }
+
+    [Fact]
     public void A_resized_copy_is_kept_the_right_way_up()
     {
         var result = Sut().Optimize(SidewaysPortrait(2000, 1000), "image/jpeg", 800);

@@ -40,6 +40,8 @@ public static partial class SvgSanitizer
     private const string XlinkNs = "http://www.w3.org/1999/xlink";
     private const int MaxNodes = 8000;
     private const int MaxDepth = 40;
+    private const int MaxValueChars = 20000;
+    private const int MaxGeometryChars = 200 * 1024;
 
     private static readonly HashSet<string> Elements = new(StringComparer.Ordinal)
     {
@@ -88,6 +90,9 @@ public static partial class SvgSanitizer
 
     [GeneratedRegex(@"^[A-Za-z0-9_.:-]{1,80}$")]
     private static partial Regex IdRegex();
+
+    [GeneratedRegex(@"^[MmLlHhVvCcSsQqTtAaZzEe0-9.,+\- \t\r\n]*$")]
+    private static partial Regex GeometryRegex();
 
     public static SanitizedSvg Sanitize(string markup, string idPrefix = "")
     {
@@ -217,7 +222,11 @@ public static partial class SvgSanitizer
     /// <summary>A safe value for the property, or null to drop it.</summary>
     private static string? CleanValue(string property, string value, State state)
     {
-        if (value.Length == 0 || value.Length > 20000) return null;
+        if (value.Length == 0) return null;
+        // Geometry may be long (a detailed silhouette is one path of 100k+ characters), so it gets the
+        // asset's own size as its limit — but only when it is nothing but path/point syntax.
+        if (value.Length > MaxValueChars)
+            return property is "d" or "points" && value.Length <= MaxGeometryChars && GeometryRegex().IsMatch(value) ? value : null;
         foreach (var ch in value)
             if (ch is '<' or '>' or '\\' or '"' or '`' || char.IsControl(ch) && ch is not ('\n' or '\r' or '\t'))
                 return null;

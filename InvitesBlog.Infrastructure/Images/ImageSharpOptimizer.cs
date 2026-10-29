@@ -78,7 +78,7 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
 
             using var output = new MemoryStream();
             var encoded = Encode(image, output, type);
-            if (!encoded) return Passthrough(content, contentType);
+            if (!encoded) return Passthrough(content, contentType, image.Width, image.Height);
 
             var bytes = output.ToArray();
 
@@ -86,7 +86,7 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
             // photographic PNG. Only keep the new bytes when they actually win; a resize always
             // wins on the browser's decode cost even if the file is a wash, so that still counts.
             if (!needsResize && bytes.Length >= content.Length)
-                return Passthrough(content, contentType);
+                return Passthrough(content, contentType, image.Width, image.Height);
 
             logger.LogInformation(
                 "Image optimised: {OldKb} KB -> {NewKb} KB ({W}x{H}{Resized}).",
@@ -222,6 +222,8 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
         }
     }
 
-    private static OptimizedImage Passthrough(byte[] content, string contentType) =>
-        new(content, contentType, 0, 0, false);
+    /// <summary>The bytes as given. The size is passed when it is known: callers lay images out by it,
+    /// and an already-compact upload that comes back 0×0 is placed as a square and cropped.</summary>
+    private static OptimizedImage Passthrough(byte[] content, string contentType, int width = 0, int height = 0) =>
+        new(content, contentType, width, height, false);
 }

@@ -487,6 +487,23 @@ public class DesignCompilerTests
     }
 
     [Fact]
+    public void Long_path_data_survives_but_only_as_geometry()
+    {
+        // A detailed silhouette is often one path of 100k+ characters; the 20k cap on values used to
+        // drop its d silently, so the art imported blank.
+        var d = "M0 0" + string.Concat(Enumerable.Repeat("l1.5-2.25 3 4.125", 3000)) + "z";
+        Assert.True(d.Length > 20000);
+        var clean = SvgSanitizer.Sanitize($"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="{d}"/><polygon points="{string.Join(' ', Enumerable.Repeat("1,2", 8000))}"/></svg>""");
+        Assert.Contains($"d=\"{d}\"", clean.InnerMarkup);
+        Assert.Contains("points=\"1,2 1,2", clean.InnerMarkup);
+
+        // Anything else that long is still dropped — other attributes, and path data with non-path text in it.
+        var junk = SvgSanitizer.Sanitize($"""<svg xmlns="http://www.w3.org/2000/svg"><path d="{d}url(#x)"/><rect transform="{string.Concat(Enumerable.Repeat("scale(1) ", 3000))}"/></svg>""");
+        Assert.DoesNotContain(" d=", junk.InnerMarkup);
+        Assert.DoesNotContain("transform", junk.InnerMarkup);
+    }
+
+    [Fact]
     public void Doctypes_are_refused()
     {
         const string xxe = """<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>""";
