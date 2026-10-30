@@ -181,10 +181,23 @@ public class GuestServiceTests
         var added = TestData.Guest(c.Id);
         _guests.Query().Returns(new[] { added }.AsAsyncQueryable());
 
-        var outcome = await Sut().AddGuestAsync(c.Id, new AddGuestRequest("now@test.com", null, "Now", null, null, null));
+        var outcome = await Sut().AddGuestAsync(c.Id, new AddGuestRequest("now@test.com", null, "Now", null, null, null, SendNow: true));
 
         Assert.Equal(1, outcome.Response.Added);
         Assert.Equal(added.Id, outcome.DispatchGuestId);
+    }
+
+    [Fact]
+    public async Task AddGuest_sends_nothing_unless_asked()
+    {
+        var c = Own(status: CampaignStatus.Dispatched, paidCapacity: 100);
+        _guests.CountByCampaignAsync(c.Id, Arg.Any<CancellationToken>()).Returns(1);
+
+        var outcome = await Sut().AddGuestAsync(
+            c.Id, new AddGuestRequest("quiet@test.com", null, "Quiet", null, null, null));
+
+        Assert.Equal(1, outcome.Response.Added);
+        Assert.Null(outcome.DispatchGuestId);
     }
 
     [Fact]

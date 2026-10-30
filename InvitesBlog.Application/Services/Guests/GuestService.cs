@@ -136,11 +136,12 @@ public sealed class GuestService(
 
         var guestCount = await guests.CountByCampaignAsync(campaignId, ct);
 
-        // If the invitations have already gone out, send this new guest immediately — unless the
-        // caller explicitly asked to add it for a later send instead (SendNow: false). Whether the
+        // Adding somebody never sends them anything by itself: being on the list already puts the
+        // event in their inbox and feed. They get a message only if the caller asked (SendNow: true)
+        // and the invitations have already gone out. Whether the
         // event may still email somebody new is decided where every send goes through
         // (DispatchService, against SendingAllowanceService), so it isn't asked twice here.
-        var shouldSend = req.SendNow ?? true;
+        var shouldSend = req.SendNow ?? false;
         Guid? dispatchGuestId = null;
         if (added == 1 && shouldSend &&
             campaign.Status is CampaignStatus.Dispatched or CampaignStatus.PartiallyDispatched)
