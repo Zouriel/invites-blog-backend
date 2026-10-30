@@ -7,8 +7,8 @@ namespace InvitesBlog.Application.Dtos.Guests;
 /// <summary>
 /// Manual guest add after payment (§4.7.4). <paramref name="SendNow"/> chooses whether a guest added
 /// to an already-dispatched campaign is emailed immediately or just added for a later, explicit send
-/// (the same free resend used for anyone else not-yet-sent) — null defaults to true, the original
-/// always-send-if-possible behavior, so any other caller that doesn't know about the flag is unaffected.
+/// (the same free resend used for anyone else not-yet-sent). Null means don't send: adding a guest is
+/// not a request to message them.
 /// </summary>
 public sealed record AddGuestRequest(
     string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
