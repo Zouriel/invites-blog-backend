@@ -17,7 +17,7 @@
   if (!input || !button) return;
 
   const WORKERS = 3;
-  const TRIES = 4;
+  const TRIES = 6;
   const action = form.getAttribute('action');
 
   const status = document.createElement('p');
@@ -50,33 +50,44 @@
     throw new Error(String(res.status));
   }
 
-  async function sendOne(file) {
-    const link = await postJson(`${action}/uploads`, {
-      fileName: file.name, contentType: file.type, size: file.size,
-    });
-    if (!link.direct) {
-      const body = new FormData();
-      body.append('files', file, file.name);
-      const res = await fetch(action, { method: 'POST', credentials: 'same-origin', body });
-      if (!res.ok) throw new Error(String(res.status));
-      return null;
-    }
-
-    const put = await fetch(link.url, { method: 'PUT', headers: { 'Content-Type': link.contentType }, body: file });
-    if (!put.ok) throw new Error(String(put.status));
-
-    const done = await postJson(`/api/uploads/${link.id}/complete`);
-    if (done.status === 'failed') throw new Refused(done.error || 'That photo could not be added.');
-    return link.id;
+  async function sendLegacy(file) {
+    const body = new FormData();
+    body.append('files', file, file.name);
+    const res = await fetch(action, { method: 'POST', credentials: 'same-origin', body });
+    if (!res.ok) throw new Error(String(res.status));
+    return null;
   }
 
+  /** The id to watch, or null if the old route finished it there and then. */
   async function sendWithRetries(file) {
+    // Kept across attempts: a new link each time would hold the file's space again.
+    let link = null;
+    let uploaded = false;
     for (let attempt = 1; ; attempt++) {
       try {
-        return await sendOne(file);
+        // The last go takes the old route, so a browser that can't reach storage still gets through.
+        if (attempt === TRIES && !uploaded) return await sendLegacy(file);
+
+        link = link || await postJson(`${action}/uploads`, {
+          fileName: file.name, contentType: file.type, size: file.size,
+        });
+        if (!link.direct) return await sendLegacy(file);
+
+        if (!uploaded) {
+          const put = await fetch(link.url, { method: 'PUT', headers: { 'Content-Type': link.contentType }, body: file });
+          if (!put.ok) {
+            link = null; // storage said no, so this link is spent
+            throw new Error(String(put.status));
+          }
+          uploaded = true;
+        }
+
+        const done = await postJson(`/api/uploads/${link.id}/complete`);
+        if (done.status === 'failed') throw new Refused(done.error || 'That photo could not be added.');
+        return link.id;
       } catch (e) {
         if (e instanceof Refused || attempt >= TRIES) throw e;
-        await wait(1000 * 2 ** attempt);
+        await wait(1000 * Math.min(2 ** attempt, 30));
       }
     }
   }
