@@ -619,6 +619,52 @@ public class InviteServiceTests
         Assert.Equal("Going", card.RsvpStatus);
     }
 
+    private void SignedInByPhone(params Guest[] guestRows)
+    {
+        _currentUser.Contact.Returns("+9607771234");
+        _currentUser.ContactType.Returns("phone");
+        _guests.Query().Returns(guestRows.AsAsyncQueryable());
+        _invites.Query().Returns(Array.Empty<Invite>().AsAsyncQueryable());
+        _inviters.Query().Returns(Array.Empty<Inviter>().AsAsyncQueryable());
+    }
+
+    [Fact]
+    public async Task Inbox_shows_a_finished_event_to_a_guest_added_by_number_with_no_invite()
+    {
+        var campaign = TestData.Campaign(status: CampaignStatus.Dispatched);
+        var guest = TestData.Guest(campaign.Id, email: null, phone: "+9607771234");
+        SignedInByPhone(guest);
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+
+        var card = Assert.Single(await Sut().GetInboxAsync());
+
+        Assert.Equal(campaign.Id, card.CampaignId);
+        Assert.Equal("NoResponse", card.RsvpStatus);
+        Assert.True(card.IsNew);
+    }
+
+    [Fact]
+    public async Task Inbox_hides_an_unfinished_event_from_a_guest_with_no_invite()
+    {
+        var campaign = TestData.Campaign(status: CampaignStatus.Draft);
+        SignedInByPhone(TestData.Guest(campaign.Id, email: null, phone: "+9607771234"));
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+
+        Assert.Empty(await Sut().GetInboxAsync());
+    }
+
+    [Fact]
+    public async Task Inbox_hides_an_event_from_a_guest_who_opted_out_with_no_invite()
+    {
+        var campaign = TestData.Campaign(status: CampaignStatus.Dispatched);
+        var guest = TestData.Guest(campaign.Id, email: null, phone: "+9607771234");
+        guest.OptedOut = true;
+        SignedInByPhone(guest);
+        _campaigns.Query().Returns(new[] { campaign }.AsAsyncQueryable());
+
+        Assert.Empty(await Sut().GetInboxAsync());
+    }
+
     /// <summary>
     /// A merged account answers to BOTH its identifiers, so an invitation sent to the phone and one
     /// sent to the email belong in the same inbox — even though the token names only one of them.

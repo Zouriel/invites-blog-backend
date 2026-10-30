@@ -82,11 +82,25 @@ public class FeedServiceTests
     }
 
     [Fact]
-    public async Task A_guest_whose_invitation_has_not_gone_out_sees_nothing()
+    public async Task A_guest_of_an_unfinished_event_sees_nothing()
     {
+        _event.Status = CampaignStatus.Draft;
         InvitedAsGuest(InviteStatus.Queued);
 
         Assert.Empty((await Sut().FeedAsync(0, 10)).Items);
+    }
+
+    [Fact]
+    public async Task A_guest_on_the_list_sees_the_post_with_no_invitation_at_all()
+    {
+        _event.Status = CampaignStatus.Dispatched;
+        var guest = TestData.Guest(_event.Id, email: "guest@test.com", phone: null);
+        _guests.Query(Arg.Any<bool>()).Returns(new[] { guest }.AsAsyncQueryable());
+
+        var post = Assert.Single((await Sut().FeedAsync(0, 10)).Items);
+
+        Assert.Equal("guest", post.Role);
+        Assert.Equal($"/invitation/{_event.Id}", post.Link);
     }
 
     [Fact]
