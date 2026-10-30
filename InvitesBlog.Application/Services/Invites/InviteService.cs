@@ -593,16 +593,18 @@ public sealed class InviteService(
 
         // Every identifier, not just the one on the token: someone who signed in with their phone
         // and later linked their email should find BOTH sets of invitations in one inbox.
-        var guestIds = await guests.Query()
+        var guestList = await guests.Query()
             .Where(g => (email != null && g.Email == email) || (phone != null && g.PhoneE164 == phone))
-            .Select(g => g.Id).ToListAsync(ct);
-        if (guestIds.Count == 0) return [];
+            .Select(g => new { g.Id, g.CampaignId, g.OptedOut }).ToListAsync(ct);
+        if (guestList.Count == 0) return [];
 
-        var inviteList = await invites.Query()
-            .Where(i => guestIds.Contains(i.GuestId)).ToListAsync(ct);
-        if (inviteList.Count == 0) return [];
+        var guestIds = guestList.Select(g => g.Id).ToList();
+        var inviteByGuest = (await invites.Query()
+                .Where(i => guestIds.Contains(i.GuestId)).ToListAsync(ct))
+            .GroupBy(i => i.GuestId)
+            .ToDictionary(g => g.Key, g => g.First());
 
-        var campaignIds = inviteList.Select(i => i.CampaignId).Distinct().ToList();
+        var campaignIds = guestList.Select(g => g.CampaignId).Distinct().ToList();
         var campaignList = await campaigns.Query()
             .Where(c => campaignIds.Contains(c.Id)).ToListAsync(ct);
 
@@ -628,14 +630,18 @@ public sealed class InviteService(
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
         var now = DateTimeOffset.UtcNow;
-        return inviteList
-            .Select(i =>
+        return guestList
+            .Select(g =>
             {
-                var c = campaignList.FirstOrDefault(x => x.Id == i.CampaignId);
+                var c = campaignList.FirstOrDefault(x => x.Id == g.CampaignId);
                 if (c is null) return null;
+                var i = inviteByGuest.GetValueOrDefault(g.Id);
+                // No invitation yet: on the list is enough, unless they left it or the host isn't done.
+                if (i is null && (g.OptedOut || GuestVisibility.Hidden.Contains(c.Status))) return null;
                 return new InboxCardResponse(
-                    i.Id, c.Id, c.Title, c.EventStartAt, c.EventType,
-                    i.RsvpStatus.ToString(), i.ViewedAt is null,
+                    // The card's identity only; opening it goes by campaign and makes the invite then.
+                    i?.Id ?? g.Id, c.Id, c.Title, c.EventStartAt, c.EventType,
+                    (i?.RsvpStatus ?? RsvpStatus.NoResponse).ToString(), i?.ViewedAt is null,
                     c.EventStartAt < now, c.Status == CampaignStatus.Cancelled,
                     c.InviterId is { } iid ? inviterNames.GetValueOrDefault(iid) : null,
                     // The host's own cover first: a template preview is a marketing poster rendered

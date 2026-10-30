@@ -355,13 +355,23 @@ public sealed class FeedService(
                      .ToListAsync(ct))
             Offer(c.CampaignId, c.CanManage ? FeedRole.Manager : FeedRole.Celebrant);
 
-        var guestIds = await guests.Query()
+        var guestRows = await guests.Query()
             .Where(g => !g.OptedOut && ((email != null && g.Email == email) || (phone != null && g.PhoneE164 == phone)))
-            .Select(g => g.Id)
+            .Select(g => new { g.Id, g.CampaignId })
             .ToListAsync(ct);
-        if (guestIds.Count > 0)
+        if (guestRows.Count > 0)
         {
-            // Only once their invitation has actually gone out to them.
+            var guestIds = guestRows.Select(g => g.Id).ToList();
+            var guestCampaignIds = guestRows.Select(g => g.CampaignId).Distinct().ToList();
+
+            // On the list of an event the host has finished; see GuestVisibility.
+            foreach (var id in await campaigns.Query()
+                         .Where(c => guestCampaignIds.Contains(c.Id) && !GuestVisibility.Hidden.Contains(c.Status))
+                         .Select(c => c.Id)
+                         .ToListAsync(ct))
+                Offer(id, FeedRole.Guest);
+
+            // An invitation that really went out counts whatever state the event is in.
             foreach (var id in await invites.Query()
                          .Where(i => guestIds.Contains(i.GuestId)
                                      && (i.Status == InviteStatus.Sent || i.Status == InviteStatus.Viewed))
