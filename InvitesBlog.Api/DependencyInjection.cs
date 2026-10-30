@@ -99,6 +99,14 @@ public static class DependencyInjection
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10) }));
             options.AddPolicy(RateLimiting.RateLimitPolicies.CreateEvent, RateLimiting.RateLimitPolicies.CreateEventPartition);
             // The designer previews on every edit (debounced in the editor); this only stops a runaway client.
+            // Direct uploads ask for one link per photo and a party can share one connection, so this is
+            // about four photos a second from one address: well past a crowd, well short of a flood.
+            options.AddPolicy("upload-link", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) }));
+            options.AddPolicy("upload-progress", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1) }));
             options.AddPolicy("design-preview", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 240, Window = TimeSpan.FromMinutes(1) }));

@@ -29,6 +29,28 @@ public interface IStorageService
     Task DeleteAsync(string key, CancellationToken ct = default);
 }
 
+/// <summary>
+/// The private holding area phones upload to. A separate bucket from <see cref="IStorageService"/>
+/// because that one is public in full (it has a custom domain): nothing here can be read by anyone
+/// until the server has checked it and made the copies that go live.
+/// </summary>
+public interface IIncomingUploadStore
+{
+    /// <summary>False when this deployment has no holding area; every upload then takes the old path.</summary>
+    bool Available { get; }
+
+    /// <summary>The origin upload links point at, for the Content-Security-Policy of pages that use them.</summary>
+    string? Origin { get; }
+
+    /// <summary>A link good for one PUT to this key, of exactly this type and size.</summary>
+    string PresignPut(string key, string contentType, long bytes, TimeSpan lifetime);
+
+    /// <summary>The size of what arrived, or null if nothing has.</summary>
+    Task<long?> SizeAsync(string key, CancellationToken ct = default);
+    Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
+    Task DeleteAsync(string key, CancellationToken ct = default);
+}
+
 // ----- Delivery (§4.8.4) -----
 
 public sealed record InviteDeliveryMessage(

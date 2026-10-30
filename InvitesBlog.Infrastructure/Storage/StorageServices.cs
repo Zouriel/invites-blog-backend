@@ -72,6 +72,9 @@ public sealed class S3StorageService : IStorageService
     private readonly string _publicBase;
     private readonly bool _unsignedPayload;
 
+    /// <summary>The configured client, for the holding area on the same account.</summary>
+    internal IAmazonS3 Client => _s3;
+
     public S3StorageService(IConfiguration config)
     {
         _bucket = config["Storage:Bucket"] ?? "invites-assets";
@@ -162,6 +165,79 @@ public sealed class S3StorageService : IStorageService
     // S3 answers 204 for a key that isn't there, so a second delete is already harmless.
     public async Task DeleteAsync(string key, CancellationToken ct = default) =>
         await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key }, ct);
+}
+
+/// <summary>No holding area configured: <see cref="Available"/> sends every upload down the old path.</summary>
+public sealed class NoIncomingUploadStore : IIncomingUploadStore
+{
+    public bool Available => false;
+    public string? Origin => null;
+    public string PresignPut(string key, string contentType, long bytes, TimeSpan lifetime) =>
+        throw new InvalidOperationException("There is no holding area configured.");
+    public Task<long?> SizeAsync(string key, CancellationToken ct = default) => Task.FromResult<long?>(null);
+    public Task<byte[]?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<byte[]?>(null);
+    public Task DeleteAsync(string key, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// The holding area on R2. The bucket has no public domain, allows PUT only from the app's own
+/// origins (CORS), and expires anything left in it after a day, which is the backstop for every
+/// path here that fails to tidy up.
+/// </summary>
+public sealed class S3IncomingUploadStore(IAmazonS3 s3, string bucket, string endpoint) : IIncomingUploadStore
+{
+    public bool Available => true;
+
+    public string? Origin => new Uri(endpoint).GetLeftPart(UriPartial.Authority);
+
+    public string PresignPut(string key, string contentType, long bytes, TimeSpan lifetime)
+    {
+        var request = new GetPreSignedUrlRequest
+        {
+            BucketName = bucket,
+            Key = key,
+            Verb = HttpVerb.PUT,
+            ContentType = contentType,
+            Expires = DateTime.UtcNow.Add(lifetime),
+            Protocol = endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? Protocol.HTTPS : Protocol.HTTP,
+        };
+        // Signed, so the link refuses a body of any other size. There is no POST policy on R2 to
+        // express a limit with; this is how it is said.
+        request.Headers["Content-Length"] = bytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return s3.GetPreSignedURL(request);
+    }
+
+    public async Task<long?> SizeAsync(string key, CancellationToken ct = default)
+    {
+        try
+        {
+            var head = await s3.GetObjectMetadataAsync(bucket, key, ct);
+            return head.ContentLength;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<byte[]?> GetAsync(string key, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await s3.GetObjectAsync(new GetObjectRequest { BucketName = bucket, Key = key }, ct);
+            using var ms = new MemoryStream();
+            await res.ResponseStream.CopyToAsync(ms, ct);
+            return ms.ToArray();
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task DeleteAsync(string key, CancellationToken ct = default) =>
+        await s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = bucket, Key = key }, ct);
 }
 
 /// <summary>Turns a URL the storage handed out back into its key.</summary>

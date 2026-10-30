@@ -1,3 +1,4 @@
+using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Domain.Entities;
 
 /// <summary>Record of an uploaded guest Excel file (§9.1 uploaded_guest_files).</summary>
@@ -82,4 +83,29 @@ public sealed class VerifiedContactLink
     /// <summary>Which side the person had already verified when they proved the other: "email" | "phone".</summary>
     public string VerifiedFrom { get; set; } = default!;
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>A photograph on its way through the holding area (see DirectUploadService).</summary>
+public sealed class PendingUpload
+{
+    /// <summary>Also the id of the photograph it becomes, so doing the work twice cannot make two.</summary>
+    public Guid Id { get; set; }
+    public Guid BucketId { get; set; }
+    public Guid? CampaignId { get; set; }
+    public Guid? GuestId { get; set; }
+    public string? UploaderName { get; set; }
+    /// <summary>The QR code it came through, so the code's tally moves once it has really landed.</summary>
+    public Guid? QrId { get; set; }
+    public string IncomingKey { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    /// <summary>What was reserved against the album, and the only size the upload link accepts.</summary>
+    public long DeclaredBytes { get; set; }
+    public PendingUploadStatus Status { get; set; }
+    public int Attempts { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset NextAttemptAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
