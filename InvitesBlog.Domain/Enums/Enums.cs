@@ -27,6 +27,17 @@ public enum CampaignKind
     SaveTheDate,
 }
 
+/// <summary>Where a photo sent straight to storage has got to. Stored as ints: only ever append.</summary>
+public enum PendingUploadStatus
+{
+    Issued,
+    Uploaded,
+    Processing,
+    Done,
+    Failed,
+    Expired,
+}
+
 public enum InviteStatus
 {
     Created,

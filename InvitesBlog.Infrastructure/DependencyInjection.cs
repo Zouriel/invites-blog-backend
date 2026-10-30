@@ -70,6 +70,13 @@ public static class DependencyInjection
         else
             services.AddSingleton<IStorageService, LocalFileStorageService>();
 
+        // The holding area for direct uploads. Only on S3-style storage with a bucket named for it.
+        services.AddSingleton<IIncomingUploadStore>(sp =>
+            sp.GetRequiredService<IStorageService>() is S3StorageService s3
+            && config["Storage:IncomingBucket"] is { Length: > 0 } incoming
+                ? new S3IncomingUploadStore(s3.Client, incoming, config["Storage:Endpoint"] ?? string.Empty)
+                : new NoIncomingUploadStore());
+
         services.AddScoped<TemplatePackagePublisher>();
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();

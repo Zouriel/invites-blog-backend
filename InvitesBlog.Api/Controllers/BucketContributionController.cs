@@ -43,6 +43,7 @@ public sealed class BucketContributionController(
     IMediaBucketService buckets,
     IEventPhotoService photos,
     IOtpService otp,
+    IDirectUploadService directUploads,
     ContributorTickets tickets,
     ILogger<BucketContributionController> logger) : BaseApiController
 {
@@ -199,44 +200,8 @@ public sealed class BucketContributionController(
         [FromForm(Name = ContributorTickets.FieldName)] string? ticket,
         CancellationToken ct)
     {
-        var admission = await buckets.AdmitAsync(token, ct);
-        if (admission is null) { Upload("qr", "refused: unknown code", file); return NotFound(ApiResponse<object?>.Fail("That code isn't valid.")); }
-
-        // The form field is how the app's own picker sends it; the cookie is how the camera page does,
-        // because a server-rendered page was handed nothing to put in a field. Same ticket, same
-        // checks below either way.
-        var holder = tickets.Read(ticket, DateTimeOffset.UtcNow)
-                     ?? tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
-        if (holder is null)
-        {
-            Upload("qr", ticket is null ? "refused: no ticket" : "refused: ticket unreadable", file);
-            return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
-        }
-
-        // The ticket has to have been minted for THIS code. Otherwise a ticket earned on a bucket
-        // somebody does own would let them write into any other bucket whose token they could read.
-        if (holder.QrId != admission.QrId)
-        {
-            Upload("qr", "refused: ticket for another code", file);
-            return Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding."));
-        }
-
-        // A ticket earned by verifying is only good for as long as that contact is still on the
-        // guest list. Without this, being taken off took effect only once the ticket expired — and
-        // removing somebody means nothing if it does not take effect until tomorrow.
-        if (holder.VerifiedContact is { } proved
-            && await buckets.GuestForContactAsync(admission.BucketId, proved, ct) is null)
-        {
-            Upload("qr", "refused: contact off the list", file);
-            return Unauthorized(ApiResponse<object?>.Fail("That contact isn't on the guest list."));
-        }
-
-        if (!admission.CanUpload)
-        {
-            Upload("qr", admission.IsOpen ? "refused: full" : "refused: not open", file);
-            return BadRequest(ApiResponse<object?>.Fail(
-                admission.IsOpen ? "This album is full." : "This one isn't open."));
-        }
+        var (admission, holder, refused) = await AuthorizeAsync(token, ticket, file, ct);
+        if (refused is not null) return refused;
 
         if (file is null || file.Length == 0)
         {
@@ -244,7 +209,7 @@ public sealed class BucketContributionController(
             return BadRequest(ApiResponse<object?>.Fail("Pick a photo or a video."));
         }
 
-        var bucket = await buckets.GetBucketForContributionAsync(admission.BucketId, ct);
+        var bucket = await buckets.GetBucketForContributionAsync(admission!.BucketId, ct);
         if (bucket is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
 
         InvitesBlog.Application.Dtos.Photos.EventPhotoDto added;
@@ -253,7 +218,7 @@ public sealed class BucketContributionController(
             added = await photos.AddToBucketAsync(
             admission.BucketId,
             bucket.CampaignId,
-            holder.DisplayName,
+            holder!.DisplayName,
             await ReadAsync(file, ct),
             file.ContentType,
             file.FileName,
@@ -272,6 +237,68 @@ public sealed class BucketContributionController(
         // Deliberately thin. A contributor is told their photo landed and nothing else about the
         // bucket — not what is in it, not who else has added to it.
         return Created(new { id = added.Id, thumbUrl = added.ThumbUrl });
+    }
+
+    /// <summary>A link to send one photo straight to storage. The same checks as adding it directly.</summary>
+    [HttpPost("{token}/media/uploads")]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> Link(
+        string token, [FromBody] DirectUploadRequest req, CancellationToken ct)
+    {
+        var (admission, holder, refused) = await AuthorizeAsync(token, req.Ticket, null, ct);
+        if (refused is not null) return refused;
+
+        var bucket = await buckets.GetBucketForContributionAsync(admission!.BucketId, ct);
+        if (bucket is null) return NotFound(ApiResponse<object?>.Fail("That code isn't valid."));
+
+        return Success(await directUploads.IssueAsync(
+            new UploadDoor(admission.BucketId, bucket.CampaignId, null, holder!.DisplayName, admission.QrId), req, ct));
+    }
+
+    /// <summary>Whether this ticket may add through this code right now. See <see cref="Add"/>.</summary>
+    private async Task<(MediaBucketQrAdmission? Admission, ContributorAdmission? Holder, IActionResult? Refused)> AuthorizeAsync(
+        string token, string? ticket, IFormFile? file, CancellationToken ct)
+    {
+        var admission = await buckets.AdmitAsync(token, ct);
+        if (admission is null) { Upload("qr", "refused: unknown code", file); return (null, null, NotFound(ApiResponse<object?>.Fail("That code isn't valid."))); }
+
+        // The form field is how the app's own picker sends it; the cookie is how the camera page does,
+        // because a server-rendered page was handed nothing to put in a field. Same ticket, same
+        // checks below either way.
+        var holder = tickets.Read(ticket, DateTimeOffset.UtcNow)
+                     ?? tickets.Read(Request.Cookies[ContributorTickets.CookieName], DateTimeOffset.UtcNow);
+        if (holder is null)
+        {
+            Upload("qr", ticket is null ? "refused: no ticket" : "refused: ticket unreadable", file);
+            return (null, null, Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding.")));
+        }
+
+        // The ticket has to have been minted for THIS code. Otherwise a ticket earned on a bucket
+        // somebody does own would let them write into any other bucket whose token they could read.
+        if (holder.QrId != admission.QrId)
+        {
+            Upload("qr", "refused: ticket for another code", file);
+            return (null, null, Unauthorized(ApiResponse<object?>.Fail("Tell us who you are before adding.")));
+        }
+
+        // A ticket earned by verifying is only good for as long as that contact is still on the
+        // guest list. Without this, being taken off took effect only once the ticket expired — and
+        // removing somebody means nothing if it does not take effect until tomorrow.
+        if (holder.VerifiedContact is { } proved
+            && await buckets.GuestForContactAsync(admission.BucketId, proved, ct) is null)
+        {
+            Upload("qr", "refused: contact off the list", file);
+            return (null, null, Unauthorized(ApiResponse<object?>.Fail("That contact isn't on the guest list.")));
+        }
+
+        if (!admission.CanUpload)
+        {
+            Upload("qr", admission.IsOpen ? "refused: full" : "refused: not open", file);
+            return (null, null, BadRequest(ApiResponse<object?>.Fail(
+                admission.IsOpen ? "This album is full." : "This one isn't open.")));
+        }
+
+        return (admission, holder, null);
     }
 
     /// <summary>

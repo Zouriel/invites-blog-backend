@@ -4,6 +4,7 @@ using InvitesBlog.Application.Services.Photos;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace InvitesBlog.Api.Controllers;
 
@@ -31,7 +32,7 @@ namespace InvitesBlog.Api.Controllers;
 /// controller attribute can lift.</para>
 /// </summary>
 [ApiController]
-public sealed class PhotosController(IEventPhotoService photos, IInviteService invites) : BaseApiController
+public sealed class PhotosController(IEventPhotoService photos, IInviteService invites, IDirectUploadService directUploads) : BaseApiController
 {
     // ---------- the host, from their dashboard ----------
 
@@ -48,6 +49,13 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, IFormFile? poster,
         CancellationToken ct) =>
         await AddAsync(campaignId, guestId: null, files, file, poster, ct);
+
+    [HttpPost("/api/campaigns/{campaignId:guid}/photos/uploads")]
+    [HasPermission(Permissions.Photos.Upload)]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> LinkAsHost(
+        Guid campaignId, [FromBody] DirectUploadRequest req, CancellationToken ct) =>
+        Success(await directUploads.IssueAsync(await photos.DoorForCampaignAsync(campaignId, null, ct), req, ct));
 
     [HttpDelete("/api/campaigns/{campaignId:guid}/photos/{photoId:guid}")]
     [HasPermission(Permissions.Photos.Read)]
@@ -80,6 +88,14 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         Guid campaignId, [FromForm] IFormFileCollection? files, IFormFile? file, IFormFile? poster,
         CancellationToken ct) =>
         await AddAsync(campaignId, await GuestAsync(campaignId, ct), files, file, poster, ct);
+
+    [HttpPost("/api/me/invitations/{campaignId:guid}/photos/uploads")]
+    [HasPermission(Permissions.Photos.Upload)]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> LinkAsGuest(
+        Guid campaignId, [FromBody] DirectUploadRequest req, CancellationToken ct) =>
+        Success(await directUploads.IssueAsync(
+            await photos.DoorForCampaignAsync(campaignId, await GuestAsync(campaignId, ct), ct), req, ct));
 
     [HttpDelete("/api/me/invitations/{campaignId:guid}/photos/{photoId:guid}")]
     [HasPermission(Permissions.Photos.Read)]

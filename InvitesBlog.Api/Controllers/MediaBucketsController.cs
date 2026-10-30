@@ -4,6 +4,7 @@ using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Application.Services.Photos;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace InvitesBlog.Api.Controllers;
 
@@ -22,7 +23,7 @@ namespace InvitesBlog.Api.Controllers;
 [ApiController]
 [Route("api/media-buckets")]
 public sealed class MediaBucketsController(
-    IMediaBucketService buckets, IEventPhotoService photos) : BaseApiController
+    IMediaBucketService buckets, IEventPhotoService photos, IDirectUploadService directUploads) : BaseApiController
 {
     /// <summary>
     /// The bucket belonging to an event, created on the spot if that event predates buckets.
@@ -116,6 +117,16 @@ public sealed class MediaBucketsController(
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Media(Guid bucketId, CancellationToken ct) =>
         Success(await photos.GetBucketAsync(bucketId, ct));
+
+    [HttpPost("{bucketId:guid}/media/uploads")]
+    [HasPermission(Permissions.Buckets.Manage)]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> LinkAsOwner(
+        Guid bucketId, [FromBody] DirectUploadRequest req, CancellationToken ct)
+    {
+        var bucket = await buckets.GetAsync(bucketId, ct);   // ownership, or it throws
+        return Success(await directUploads.IssueAsync(new UploadDoor(bucketId, bucket.CampaignId, null, null), req, ct));
+    }
 
     /// <summary>
     /// Adds to the bucket as its owner. The same door as the dashboard's, addressed by bucket.

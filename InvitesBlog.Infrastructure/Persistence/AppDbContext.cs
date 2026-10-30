@@ -39,6 +39,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<VerifiedContactLink> VerifiedContactLinks => Set<VerifiedContactLink>();
+    public DbSet<PendingUpload> PendingUploads => Set<PendingUpload>();
     public DbSet<Venue> Venues => Set<Venue>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<VenueStaff> VenueStaff => Set<VenueStaff>();
@@ -383,6 +384,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("suppression_list");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ContactHash).IsUnique().HasDatabaseName("idx_suppression_contact");
+        });
+
+        b.Entity<PendingUpload>(e =>
+        {
+            e.ToTable("pending_uploads");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.IncomingKey).HasMaxLength(200);
+            e.Property(x => x.ContentType).HasMaxLength(120);
+            e.Property(x => x.FileName).HasMaxLength(260);
+            e.Property(x => x.UploaderName).HasMaxLength(200);
+            e.Property(x => x.Error).HasMaxLength(500);
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt }).HasDatabaseName("idx_pending_uploads_status");
         });
 
         b.Entity<VerifiedContactLink>(e =>

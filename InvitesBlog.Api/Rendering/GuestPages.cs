@@ -20,6 +20,7 @@ public static class GuestPages
     /// link to a confirmation page that works without it, and this only makes the question instant.
     /// </summary>
     private static readonly string Enhancement = LoadAsset("gallery.js");
+    private static readonly string UploadEnhancement = LoadAsset("gallery-upload.js");
 
     private static string LoadAsset(string name)
     {
@@ -373,6 +374,7 @@ public static class GuestPages
               <script nonce="{nonce}">
               window.__ibGallery = true;
               {Enhancement}
+              {UploadEnhancement}
               </script>
               """)}
             """;

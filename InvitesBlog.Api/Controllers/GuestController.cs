@@ -36,6 +36,7 @@ namespace InvitesBlog.Api.Controllers;
 public sealed class GuestController(
     IInviteService invites,
     IEventPhotoService photos,
+    IDirectUploadService directUploads,
     InviteRenderService renderer,
     RenderedInvitations rendered,
     RenderTickets tickets,
@@ -435,6 +436,29 @@ public sealed class GuestController(
         return await RenderBoxAsync(renderId, inviteId.Value, error, ct);
     }
 
+    /// <summary>A link to send one photo straight to storage, from the gallery's own script.</summary>
+    [HttpPost("/r/{renderId}/photos/uploads")]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> UploadLink(
+        string renderId, [FromBody] DirectUploadRequest req, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return NotFound(new { error = "not_found" });
+
+        try
+        {
+            var door = await photos.DoorForCampaignAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
+            return Ok(await directUploads.IssueAsync(door, req, ct));
+        }
+        catch (AppException e)
+        {
+            return BadRequest(new { error = e.Message });
+        }
+    }
+
     /// <summary>
     /// Asks first. The remove control sits on the corner of the photograph it deletes, which is where
     /// a thumb lands to open one — so this is the step between a mis-tap and a lost picture. A page
@@ -762,7 +786,7 @@ public sealed class GuestController(
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         Response.Headers["Content-Security-Policy"] =
             $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-            + "img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; "
+            + $"img-src 'self'; connect-src 'self' {directUploads.UploadOrigin}; form-action 'self'; base-uri 'none'; "
             + "frame-ancestors 'none'";
         return Content(html, "text/html; charset=utf-8");
     }

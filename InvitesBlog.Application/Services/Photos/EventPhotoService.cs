@@ -45,6 +45,22 @@ public interface IEventPhotoService
         byte[]? poster = null, CancellationToken ct = default);
 
     /// <summary>
+    /// The checks <see cref="AddAsync"/> makes before storing anything, on their own: who may add to
+    /// this event, and where it would go. A direct upload needs the answer before any bytes exist.
+    /// </summary>
+    Task<UploadDoor> DoorForCampaignAsync(Guid campaignId, Guid? guestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores a photograph that came through the holding area: the same media rules and derivatives
+    /// as every other door. Its space was reserved and its window checked when the upload link was
+    /// issued, and a photo taken at the party must not be refused because processing ran past
+    /// midnight. The photograph takes the given id, so repeating this cannot make a second one.
+    /// </summary>
+    Task<EventPhotoDto> StoreUploadedAsync(
+        Guid id, UploadDoor door, byte[] content, string contentType, string fileName,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// A BUCKET's contents, for its owner.
     ///
     /// <para>Separate from <see cref="GetAsync"/> because a standalone bucket has no campaign to be
@@ -202,6 +218,13 @@ public sealed class EventPhotoService(
         Guid campaignId, Guid? guestId, byte[] content, string contentType, string fileName,
         byte[]? poster = null, CancellationToken ct = default)
     {
+        var door = await DoorForCampaignAsync(campaignId, guestId, ct);
+        return await StoreAsync(
+            door.BucketId, door.CampaignId, door.GuestId, door.UploaderName, content, contentType, fileName, poster, ct);
+    }
+
+    public async Task<UploadDoor> DoorForCampaignAsync(Guid campaignId, Guid? guestId, CancellationToken ct = default)
+    {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
 
@@ -220,9 +243,14 @@ public sealed class EventPhotoService(
         var bucket = await bucketService.ForCampaignAsync(campaign.Id, ct);
         var credit = guestId is null ? null : await GuestNameAsync(guestId.Value, ct);
 
-        return await StoreAsync(
-            bucket.Id, campaign.Id, guestId, credit, content, contentType, fileName, poster, ct);
+        return new UploadDoor(bucket.Id, campaign.Id, guestId, credit);
     }
+
+    public Task<EventPhotoDto> StoreUploadedAsync(
+        Guid id, UploadDoor door, byte[] content, string contentType, string fileName,
+        CancellationToken ct = default) =>
+        StoreAsync(door.BucketId, door.CampaignId, door.GuestId, door.UploaderName, content, contentType,
+            fileName, poster: null, ct, reservedId: id);
 
     public async Task<EventPhotoBoxDto> GetBucketAsync(Guid bucketId, CancellationToken ct = default)
     {
@@ -305,7 +333,7 @@ public sealed class EventPhotoService(
     /// </summary>
     private async Task<EventPhotoDto> StoreAsync(
         Guid bucketId, Guid? campaignId, Guid? guestId, string? uploaderName, byte[] content,
-        string contentType, string fileName, byte[]? poster, CancellationToken ct)
+        string contentType, string fileName, byte[]? poster, CancellationToken ct, Guid? reservedId = null)
     {
         if (content.Length == 0)
             throw new BusinessRuleException("That photo file is empty.", "empty_image");
@@ -340,7 +368,7 @@ public sealed class EventPhotoService(
         // their dashboard at any time. A bucket is an occasion: it is open on its night and then it is
         // a record of one, and an owner who could keep adding to it indefinitely would make the date
         // a suggestion. If this ever looks like a bug, it was asked for — check before "fixing" it.
-        await bucketService.EnsureOpenAsync(bucketId, ct);
+        if (reservedId is null) await bucketService.EnsureOpenAsync(bucketId, ct);
 
         // Whether it will fit, checked BEFORE a single object is written: the alternative is
         // discovering a bucket is full after uploading 200 MB into it, which costs the storage anyway
@@ -354,7 +382,7 @@ public sealed class EventPhotoService(
         // RESERVED, not merely checked: the estimate is counted against the bucket in the same step
         // as the check, under a lock. Checking first and counting at the end let twenty parallel
         // uploads all pass the check on the same figure and all be stored.
-        await bucketService.ReserveRoomAsync(bucketId, content.Length, ct);
+        if (reservedId is null) await bucketService.ReserveRoomAsync(bucketId, content.Length, ct);
 
         // NO SIZE CAP on a photograph, deliberately. Size limits belong on the images a TEMPLATE
         // renders, where a huge upload buys nothing a browser can show and costs every guest the
@@ -372,7 +400,7 @@ public sealed class EventPhotoService(
             var ext = Path.GetExtension(fileName);
             if (string.IsNullOrWhiteSpace(ext)) ext = MediaFileTypes.ExtensionFor(contentType);
 
-            var id = Guid.NewGuid();
+            var id = reservedId ?? Guid.NewGuid();
             // Keyed by BUCKET, not by campaign: a standalone bucket has no campaign to key by, and the
             // bucket is what owns the bytes and is charged for them either way.
             var stem = $"buckets/{bucketId:N}/media/{id:N}";
@@ -465,7 +493,10 @@ public sealed class EventPhotoService(
         {
             // Nothing was recorded, so the space reserved for it is given back. Not the request's
             // token: a guest who gave up and closed the page must not keep the space they never used.
-            await bucketService.CountUsageAsync(bucketId, -content.Length, CancellationToken.None);
+            // A direct upload keeps its reservation here: it may be retried, and whoever gives up on
+            // it gives the space back (DirectUploadService).
+            if (reservedId is null)
+                await bucketService.CountUsageAsync(bucketId, -content.Length, CancellationToken.None);
             throw;
         }
 

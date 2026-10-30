@@ -69,6 +69,48 @@ public class EventPhotoServiceTests
         new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
         _currentUser, _storage, _optimizer, _buckets, _uow, TestData.Empty<Venue>(), TestData.FreePlans());
 
+    [Fact]
+    public async Task A_direct_upload_keeps_its_id_its_reservation_and_is_not_refused_for_closing_time()
+    {
+        var id = Guid.NewGuid();
+        var door = new UploadDoor(Guid.NewGuid(), Guid.NewGuid(), null, "Mariyam");
+        var content = Jpeg(800, 600);
+        _storage.PutAsync(default!, default!, default!, default).ReturnsForAnyArgs(ci => "/assets/" + ci.ArgAt<string>(0));
+        _buckets.EnsureOpenAsync(door.BucketId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new BusinessRuleException("Closed.", "closed"));
+
+        var photo = await Sut().StoreUploadedAsync(id, door, content, "image/jpeg", "a.jpg");
+
+        Assert.Equal(id, photo.Id);
+        await _buckets.DidNotReceiveWithAnyArgs().ReserveRoomAsync(default, default, default);
+        // Settled by the difference only: the reservation already counted the rest.
+        await _buckets.Received(1).CountUsageAsync(door.BucketId, Arg.Is<long>(d => d != -content.Length), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_direct_upload_is_judged_by_its_bytes_like_any_other()
+    {
+        var door = new UploadDoor(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var html = System.Text.Encoding.UTF8.GetBytes("<html><script>alert(1)</script></html>");
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().StoreUploadedAsync(Guid.NewGuid(), door, html, "image/jpeg", "a.jpg"));
+
+        await _storage.DidNotReceiveWithAnyArgs().PutAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task A_direct_upload_that_fails_to_store_keeps_its_reservation_for_the_retry()
+    {
+        var door = new UploadDoor(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        _storage.PutAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new IOException("R2 is down"));
+
+        await Assert.ThrowsAsync<IOException>(
+            () => Sut().StoreUploadedAsync(Guid.NewGuid(), door, Jpeg(800, 600), "image/jpeg", "a.jpg"));
+
+        await _buckets.DidNotReceiveWithAnyArgs().CountUsageAsync(default, default, default);
+    }
+
     /// <summary>
     /// A photo-like image — noise, so the two derivatives can't both compress away to nothing and make
     /// the size comparison below meaningless.
