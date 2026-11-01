@@ -621,6 +621,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnName("original_url");
 
                     b.Property<long>("SizeBytes")
+                        .IsConcurrencyToken()
                         .HasColumnType("bigint")
                         .HasColumnName("size_bytes");
 
@@ -634,6 +635,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnName("uploader_name");
 
                     b.Property<string>("Url")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("url");
@@ -2426,6 +2428,57 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("verified_contact_links", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.VideoTrimJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("MetadataClean")
+                        .HasColumnType("boolean")
+                        .HasColumnName("metadata_clean");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("note");
+
+                    b.Property<long>("OriginalBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_bytes");
+
+                    b.Property<long?>("ResultBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("result_bytes");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("idx_video_trim_jobs_due");
+
+                    b.ToTable("video_trim_jobs", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Campaign", b =>
                 {
                     b.HasOne("InvitesBlog.Domain.Entities.Venue", null)
@@ -2600,6 +2653,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.Venue", null)
                         .WithMany()
                         .HasForeignKey("VenueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.VideoTrimJob", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
+                        .WithMany()
+                        .HasForeignKey("Id")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

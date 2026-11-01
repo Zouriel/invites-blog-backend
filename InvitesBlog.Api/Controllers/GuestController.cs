@@ -626,6 +626,34 @@ public sealed class GuestController(
                 MaxAge = TimeSpan.FromHours(1),
             });
 
+    /// <summary>A link to send one clip from the static camera straight to storage, too big for the route below.</summary>
+    [HttpPost("/r/{renderId}/camera/uploads")]
+    [EnableRateLimiting("upload-link")]
+    public async Task<IActionResult> CameraUploadLink(
+        string renderId, [FromBody] DirectUploadRequest req, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        var openCampaignId = inviteId is null ? AdmittedOpen(renderId) : null;
+        if (inviteId is null && openCampaignId is null)
+            return StatusCode(StatusCodes.Status401Unauthorized, new { error = "expired" });
+
+        var staticCamera = await StaticCameraForAsync(inviteId, openCampaignId, ct);
+        if (staticCamera is not { IsStatic: true }) return NotFound(new { error = "not_found" });
+
+        var name = CameraName();
+        if (name is null) return StatusCode(StatusCodes.Status401Unauthorized, new { error = "name" });
+
+        try
+        {
+            return Ok(await directUploads.IssueAsync(
+                new UploadDoor(staticCamera.BucketId, staticCamera.CampaignId, null, name), req, ct));
+        }
+        catch (AppException e)
+        {
+            return BadRequest(new { error = e.Message });
+        }
+    }
+
     /// <summary>One frame or clip from the static camera, into the event's default bucket under the typed name.</summary>
     [HttpPost("/r/{renderId}/camera/upload")]
     [DisableRequestSizeLimit]
@@ -747,7 +775,7 @@ public sealed class GuestController(
         Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()";
         Response.Headers["Content-Security-Policy"] =
             $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-            + "img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; "
+            + $"img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' {directUploads.UploadOrigin}; "
             + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
         return Content(html, "text/html; charset=utf-8");
     }

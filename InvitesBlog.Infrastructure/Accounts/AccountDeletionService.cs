@@ -369,7 +369,11 @@ public sealed class AccountDeletionService(
         foreach (var key in await db.PendingUploads
                      .Where(u => bucketIds.Contains(u.BucketId) || (u.CampaignId != null && ids.Contains(u.CampaignId.Value)))
                      .Select(u => u.IncomingKey).ToListAsync(ct))
+        {
             queue.Incoming(key);
+            // A video's still, if it has one. Asking to remove one that isn't there does no harm.
+            queue.Incoming(InvitesBlog.Application.Services.Photos.DirectUploadService.PosterKey(key));
+        }
         await db.PendingUploads
             .Where(u => bucketIds.Contains(u.BucketId) || (u.CampaignId != null && ids.Contains(u.CampaignId.Value)))
             .ExecuteDeleteAsync(ct);

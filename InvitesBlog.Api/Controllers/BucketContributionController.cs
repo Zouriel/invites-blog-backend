@@ -388,7 +388,7 @@ public sealed class BucketContributionController(
         Response.Headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()";
         Response.Headers["Content-Security-Policy"] =
             $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-            + "img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; "
+            + $"img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' {directUploads.UploadOrigin}; "
             + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
         return Content(html, "text/html; charset=utf-8");
     }

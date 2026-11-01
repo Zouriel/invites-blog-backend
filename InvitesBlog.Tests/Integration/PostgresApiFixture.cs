@@ -40,6 +40,9 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 {
     public const string ServerVariable = "IB_TEST_POSTGRES";
 
+    /// <summary>The API reads its settings from the process's environment, so fixtures take turns starting it.</summary>
+    public static readonly SemaphoreSlim EnvLock = new(1, 1);
+
     private string _database = default!;
     private string _server = default!;
     private string _storageRoot = default!;
@@ -73,7 +76,10 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 
         var conn = new NpgsqlConnectionStringBuilder(_server) { Database = _database }.ToString();
         // Environment rather than the factory's configuration hook: Program reads configuration while it
-        // registers services, before such a hook would take effect.
+        // registers services, before such a hook would take effect. One fixture at a time: see EnvLock.
+        await EnvLock.WaitAsync();
+        try
+        {
         foreach (var (key, value) in new Dictionary<string, string>
         {
             ["ConnectionStrings__Postgres"] = conn,
@@ -98,6 +104,11 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 
         _factory = new ApiFactory(this);
         _ = _factory.Server; // starts the app: migrates and seeds
+        }
+        finally
+        {
+            EnvLock.Release();
+        }
 
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -277,6 +288,8 @@ public sealed class FlakyStorage(IStorageService inner) : IStorageService
     public volatile bool FailRemovals;
     public Task<string> PutAsync(string key, byte[] content, string contentType, CancellationToken ct = default) => inner.PutAsync(key, content, contentType, ct);
     public Task<byte[]?> GetAsync(string key, CancellationToken ct = default) => inner.GetAsync(key, ct);
+    public Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default) => inner.PutFileAsync(key, path, contentType, ct);
+    public Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default) => inner.DownloadToFileAsync(key, path, ct);
     public string PublicUrl(string key) => inner.PublicUrl(key);
     public string? KeyFor(string url) => inner.KeyFor(url);
     public Task DeleteAsync(string key, CancellationToken ct = default) =>

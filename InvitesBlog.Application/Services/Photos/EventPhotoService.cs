@@ -61,6 +61,15 @@ public interface IEventPhotoService
         CancellationToken ct = default);
 
     /// <summary>
+    /// The same for a video, from a file on disk: its bytes judged, its camera metadata removed BEFORE
+    /// anything is public, a still taken from <paramref name="poster"/> or else drawn from the video, and
+    /// its trim queued. A file that isn't a playable video is refused. Space as for
+    /// <see cref="StoreUploadedAsync"/>.
+    /// </summary>
+    Task<EventPhotoDto> StoreUploadedVideoAsync(
+        Guid id, UploadDoor door, string path, byte[]? poster, CancellationToken ct = default);
+
+    /// <summary>
     /// A BUCKET's contents, for its owner.
     ///
     /// <para>Separate from <see cref="GetAsync"/> because a standalone bucket has no campaign to be
@@ -123,7 +132,9 @@ public sealed class EventPhotoService(
     IUnitOfWork uow,
     IRepository<Venue> venues,
     Plans.IPlanService plans,
-    ILogger<EventPhotoService>? logger = null) : IEventPhotoService
+    ILogger<EventPhotoService>? logger = null,
+    IVideoTools? videoTools = null,
+    IRepository<VideoTrimJob>? trimJobs = null) : IEventPhotoService
 {
     /// <summary>
     /// What a tap opens. NOT what a download hands over — the original is kept for that, so this is
@@ -143,10 +154,9 @@ public sealed class EventPhotoService(
     /// <para>Photographs are deliberately uncapped below — nobody's memory of the night should be
     /// refused for being large. A video is a different quantity: the upload is buffered into a byte
     /// array before it reaches here, so an unbounded one is a phone being able to decide how much of
-    /// the API's memory it takes. The camera stops recording well inside this, so the cap is a
-    /// backstop against a caller that is not the camera rather than a limit anyone should meet.</para>
+    /// the API's memory it takes.</para>
     /// </summary>
-    private const long MaxVideoBytes = 256L * 1024 * 1024;
+    private const long MaxVideoBytes = MediaLimits.MaxVideoBytes;
 
     /// <summary>One stored derivative: where it went, what it weighed, and how big it was.</summary>
     private sealed record Derivative(string Url, long Bytes, int Width, int Height);
@@ -252,6 +262,100 @@ public sealed class EventPhotoService(
         StoreAsync(door.BucketId, door.CampaignId, door.GuestId, door.UploaderName, content, contentType,
             fileName, poster: null, ct, reservedId: id);
 
+    public async Task<EventPhotoDto> StoreUploadedVideoAsync(
+        Guid id, UploadDoor door, string path, byte[]? poster, CancellationToken ct = default)
+    {
+        if (videoTools is not { Available: true })
+            throw new InvalidOperationException("A direct video needs ffmpeg, and links aren't issued without it.");
+
+        var kind = await VideoSniffer.DetectFileAsync(path, ct)
+                   ?? throw new BusinessRuleException(VideoSniffer.Refusal, VideoSniffer.RefusalCode);
+        var probe = await videoTools.ProbeAsync(path, kind, ct)
+                    ?? throw new BusinessRuleException(VideoSniffer.Refusal, VideoSniffer.RefusalCode);
+
+        var reserved = new FileInfo(path).Length;
+        if (reserved > MaxVideoBytes) throw new BusinessRuleException(MediaLimits.TooLarge(reserved), MediaLimits.TooLargeCode);
+
+        // Everything in the main bucket can be read by anyone, so the location goes before it gets there.
+        // If this fails the original goes up, because it's someone's video; the queued job tries again.
+        var stripped = path + ".clean";
+        var clean = await videoTools.StripMetadataAsync(path, stripped, kind, ct);
+        var file = clean ? stripped : path;
+        if (!clean) logger?.LogWarning("Video {PhotoId}: couldn't remove its metadata before storing it.", id);
+
+        var still = poster is { Length: > 0 } && ImageSniffer.IsPhoto(poster, PosterType) ? poster : null;
+        still ??= await videoTools.PosterAsync(path, kind, ct);
+        if (still is null)
+            throw new BusinessRuleException("We couldn't read a picture from that video.", "video_without_poster");
+
+        var stem = $"buckets/{door.BucketId:N}/media/{id:N}";
+        var tile = await Task.Run(() => imageOptimizer.Optimize(still, PosterType, ThumbEdge), ct);
+        var tileUrl = await storage.PutAsync($"{stem}_t.jpg", tile.Content, PosterType, ct);
+        var url = await storage.PutFileAsync($"{stem}{kind.Extension}", file, kind.ContentType, ct);
+        var bytes = new FileInfo(file).Length;
+
+        var photo = new EventPhoto
+        {
+            Id = id,
+            CampaignId = door.CampaignId,
+            BucketId = door.BucketId,
+            GuestId = door.GuestId,
+            UploaderName = door.UploaderName,
+            OriginalUrl = url,
+            Url = url,
+            ThumbUrl = tileUrl,
+            ContentType = kind.ContentType,
+            SizeBytes = bytes + tile.Content.Length,
+            Width = probe.Width,
+            Height = probe.Height,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await photos.AddAsync(photo, ct);
+        await QueueTrimAsync(id, bytes, clean, ct);
+        await uow.SaveChangesAsync(ct);
+
+        await bucketService.CountUsageAsync(door.BucketId, photo.SizeBytes - reserved, ct);
+
+        return new EventPhotoDto(
+            photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,
+            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt);
+    }
+
+    /// <summary>Added to the caller's save, so a video can't be stored with its trim forgotten.</summary>
+    private async Task QueueTrimAsync(Guid photoId, long bytes, bool metadataClean, CancellationToken ct)
+    {
+        if (trimJobs is null || videoTools is not { Available: true }) return;
+        var now = DateTimeOffset.UtcNow;
+        await trimJobs.AddAsync(new VideoTrimJob
+        {
+            Id = photoId,
+            Status = VideoTrimStatus.Waiting,
+            MetadataClean = metadataClean,
+            OriginalBytes = bytes,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        }, ct);
+    }
+
+    /// <summary>A still for a video that came without one, drawn on the server. Null if that can't be done here.</summary>
+    private async Task<byte[]?> DrawPosterAsync(byte[] content, VideoKind kind, CancellationToken ct)
+    {
+        if (videoTools is not { Available: true }) return null;
+        var dir = videoTools.NewWorkDir();
+        try
+        {
+            var file = Path.Combine(dir, "in");
+            await File.WriteAllBytesAsync(file, content, ct);
+            return await videoTools.PosterAsync(file, kind, ct);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (IOException e) { logger?.LogWarning(e, "Couldn't remove a video working folder."); }
+        }
+    }
+
     public async Task<EventPhotoBoxDto> GetBucketAsync(Guid bucketId, CancellationToken ct = default)
     {
         // The VIEW door, not the ownership one: a bucket's contents are what its members are for, and
@@ -345,11 +449,15 @@ public sealed class EventPhotoService(
 
         if (isVideo)
         {
+            if (content.Length > MaxVideoBytes)
+                throw new BusinessRuleException(MediaLimits.TooLarge(content.Length), MediaLimits.TooLargeCode);
+            // The label is whatever the client said, and it's what the file will be served as.
+            var kind = VideoSniffer.Detect(content.AsSpan(0, Math.Min(content.Length, VideoSniffer.HeadBytes)))
+                       ?? throw new BusinessRuleException(VideoSniffer.Refusal, VideoSniffer.RefusalCode);
+            if (poster is null || poster.Length == 0) poster = await DrawPosterAsync(content, kind, ct);
             if (poster is null || poster.Length == 0)
                 throw new BusinessRuleException(
                     "That video arrived without a still to show for it.", "video_without_poster");
-            if (content.Length > MaxVideoBytes)
-                throw new BusinessRuleException("That video is too long to upload.", "video_too_large");
             if (!ImageSniffer.IsPhoto(poster, PosterType))
                 throw new BusinessRuleException(ImageSniffer.Refusal, ImageSniffer.RefusalCode);
         }
@@ -487,6 +595,8 @@ public sealed class EventPhotoService(
             };
 
             await photos.AddAsync(photo, ct);
+            // The old route's file has its camera metadata until this job has run.
+            if (isVideo) await QueueTrimAsync(photo.Id, content.Length, metadataClean: false, ct);
             await uow.SaveChangesAsync(ct);
         }
         catch
@@ -535,9 +645,23 @@ public sealed class EventPhotoService(
     /// </summary>
     private async Task RemoveAsync(EventPhoto photo, CancellationToken ct)
     {
-        photo.DeletedAt = DateTimeOffset.UtcNow;
-        photos.Update(photo);
-        await uow.SaveChangesAsync(ct);
+        for (var attempt = 1; ; attempt++)
+        {
+            photo.DeletedAt = DateTimeOffset.UtcNow;
+            photos.Update(photo);
+            try
+            {
+                await uow.SaveChangesAsync(ct);
+                break;
+            }
+            catch (DbUpdateConcurrencyException e) when (attempt < 3)
+            {
+                // A video's trim finished between reading this and saving it. Reloaded, so the bytes
+                // credited and the file removed below are the ones it has now.
+                await e.Entries.Single().ReloadAsync(ct);
+                if (photo.DeletedAt is not null) return;
+            }
+        }
 
         if (photo.BucketId is { } bucketId)
             await bucketService.CountUsageAsync(bucketId, -photo.SizeBytes, CancellationToken.None);
