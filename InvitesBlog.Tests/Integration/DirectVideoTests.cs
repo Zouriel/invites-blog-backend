@@ -258,6 +258,24 @@ public sealed class DirectVideoTests(VideoStackFixture stack) : IAsyncLifetime
     }
 
     [VideoStackFact]
+    public async Task A_file_with_a_videos_opening_bytes_and_nothing_readable_after_them_is_refused()
+    {
+        var album = await AlbumAsync();
+        var file = Path.Combine(stack.Files, $"{Guid.NewGuid():N}.mp4");
+        await File.WriteAllBytesAsync(file, [0, 0, 0, 0x20, .. "ftypisom"u8, .. Enumerable.Repeat((byte)7, 8192)]);
+        // With a still of its own, so only the reading of the video itself can refuse it.
+        var still = Path.Combine(stack.Files, $"{Guid.NewGuid():N}.jpg");
+        await TestVideos.RunAsync("ffmpeg", $"-nostdin -y -loglevel error -f lavfi -i color=c=red:s=640x360 -frames:v 1 {still}");
+
+        var id = await UploadAsync(album, file, poster: still);
+
+        var row = await stack.ReadAsync(db => db.PendingUploads.AsNoTracking().FirstAsync(u => u.Id == id));
+        Assert.Equal(PendingUploadStatus.Failed, row.Status);
+        Assert.False(await stack.ReadAsync(db => db.EventPhotos.AnyAsync(p => p.Id == id)));
+        Assert.Equal(0, await UsedAsync(album.Bucket));
+    }
+
+    [VideoStackFact]
     public async Task A_truncated_body_is_refused_as_not_arriving_whole()
     {
         var album = await AlbumAsync();
