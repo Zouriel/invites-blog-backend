@@ -40,12 +40,12 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void A_party_pass_gets_25_gb_two_albums_three_days_100_invitations_and_no_mark()
+    public void A_gold_pass_gets_25_gb_two_albums_three_days_100_invitations_and_no_mark()
     {
         var until = PlanRules.PassUntil(Night, Now);
-        var plan = Evaluate(EventPassKind.Party, until);
+        var plan = Evaluate(EventPassKind.Gold, until);
 
-        Assert.Equal(PlanKind.PartyPass, plan.Kind);
+        Assert.Equal(PlanKind.GoldPass, plan.Kind);
         Assert.Equal(5 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(2, plan.MaxBuckets);
         Assert.Equal(3, plan.MaxWindowDays);
@@ -56,11 +56,11 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void A_wedding_pass_gets_50_gb_five_albums_five_days_500_invitations_and_private_albums()
+    public void A_platinum_pass_gets_50_gb_five_albums_five_days_500_invitations_and_private_albums()
     {
-        var plan = Evaluate(EventPassKind.Wedding, Now.AddMonths(6));
+        var plan = Evaluate(EventPassKind.Platinum, Now.AddMonths(6));
 
-        Assert.Equal(PlanKind.WeddingPass, plan.Kind);
+        Assert.Equal(PlanKind.PlatinumPass, plan.Kind);
         Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(MediaBucket.MaxPerCampaign, plan.MaxBuckets);
         Assert.Equal(5, plan.MaxWindowDays);
@@ -105,8 +105,8 @@ public class PlanRulesTests
     [Fact]
     public void A_pass_outranks_premium()
     {
-        var plan = Evaluate(EventPassKind.Party, PlanRules.PassUntil(Night, Now), premium: (true, null));
-        Assert.Equal(PlanKind.PartyPass, plan.Kind);
+        var plan = Evaluate(EventPassKind.Gold, PlanRules.PassUntil(Night, Now), premium: (true, null));
+        Assert.Equal(PlanKind.GoldPass, plan.Kind);
         Assert.Equal(5 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Null(plan.CoveredUntil);
     }
@@ -125,11 +125,11 @@ public class PlanRulesTests
     [Fact]
     public void A_venue_s_event_is_on_its_pass_not_on_the_venue()
     {
-        var withPass = Evaluate(EventPassKind.Party, Now.AddMonths(2), venueActive: true);
+        var withPass = Evaluate(EventPassKind.Gold, Now.AddMonths(2), venueActive: true);
         var without = Evaluate(venueActive: true);
 
-        Assert.Equal(PlanKind.PartyPass, withPass.Kind);
-        Assert.Equal(PlanCatalog.PartyEventBytes, withPass.EventBytes);
+        Assert.Equal(PlanKind.GoldPass, withPass.Kind);
+        Assert.Equal(PlanCatalog.GoldEventBytes, withPass.EventBytes);
         Assert.Null(withPass.AccountBytes);
         Assert.Null(withPass.VenueId);
         Assert.Equal(PlanKind.Free, without.Kind);
@@ -152,7 +152,7 @@ public class PlanRulesTests
     public void An_expired_pass_counts_for_nothing_but_its_cover_date()
     {
         var ended = Night.AddDays(120);
-        var plan = Evaluate(EventPassKind.Wedding, ended, now: ended.AddDays(1));
+        var plan = Evaluate(EventPassKind.Platinum, ended, now: ended.AddDays(1));
 
         Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Equal(ended, plan.CoveredUntil);
@@ -204,30 +204,30 @@ public class PlanRulesTests
     [Fact]
     public void Venue_passes_cost_half()
     {
-        Assert.Equal(100m, Prices.Defaults.VenuePassPrice(EventPassKind.Party));
-        Assert.Equal(350m, Prices.Defaults.VenuePassPrice(EventPassKind.Wedding));
+        Assert.Equal(100m, Prices.Defaults.VenuePassPrice(EventPassKind.Gold));
+        Assert.Equal(350m, Prices.Defaults.VenuePassPrice(EventPassKind.Platinum));
     }
 
     [Fact]
     public void The_catalogue_shows_the_price_book_not_the_defaults()
     {
-        var changed = Prices.Defaults with { PartyPass = 249m, SendingPerBlock = 60m, VenueDiscountPercent = 20, PremiumMonthly = 500m };
+        var changed = Prices.Defaults with { GoldPass = 249m, SendingPerBlock = 60m, VenueDiscountPercent = 20, PremiumMonthly = 500m };
         var c = PlanCatalog.Describe(changed);
-        var party = c.Plans.Single(p => p.Kind == "PartyPass");
-        Assert.Equal(249m, party.Price);
+        var gold = c.Plans.Single(p => p.Kind == "GoldPass");
+        Assert.Equal(249m, gold.Price);
         Assert.Equal(500m, c.Plans.Single(p => p.Kind == "Premium").Price);
         Assert.Equal(60m, c.Sending.PerBlock);
         Assert.Equal(20, c.VenueDiscountPercent);
         // Limits are not prices: they stay where the code enforces them.
-        Assert.Equal(PlanCatalog.PartyEventBytes, party.EventBytes);
+        Assert.Equal(PlanCatalog.GoldEventBytes, gold.EventBytes);
     }
 
     [Fact]
     public void Prices_that_make_no_sense_are_refused()
     {
         Assert.Empty(Prices.Defaults.Problems());
-        Assert.NotEmpty((Prices.Defaults with { PartyPass = 0 }).Problems());
-        Assert.NotEmpty((Prices.Defaults with { WeddingPass = 100 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { GoldPass = 0 }).Problems());
+        Assert.NotEmpty((Prices.Defaults with { PlatinumPass = 100 }).Problems());
         Assert.NotEmpty((Prices.Defaults with { PremiumMonthly = 0 }).Problems());
         Assert.NotEmpty((Prices.Defaults with { VenueDiscountPercent = 95 }).Problems());
     }
@@ -238,7 +238,7 @@ public class PlanRulesTests
         var catalog = PlanCatalog.Describe();
 
         Assert.Equal("MVR", catalog.Currency);
-        Assert.Equal(["Free", "PartyPass", "WeddingPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
+        Assert.Equal(["Free", "GoldPass", "PlatinumPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
         // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
         Assert.Equal([0m, 199m, 699m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
         Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
@@ -262,9 +262,9 @@ public class EventPassesTests
     public void A_new_pass_runs_a_year_from_the_event()
     {
         var c = Event(Now.AddMonths(2));
-        EventPasses.Apply(c, EventPassKind.Party, Now);
+        EventPasses.Apply(c, EventPassKind.Gold, Now);
 
-        Assert.Equal(EventPassKind.Party, c.EventPass);
+        Assert.Equal(EventPassKind.Gold, c.EventPass);
         Assert.Equal(Now.AddMonths(2).AddMonths(12), c.EventPassUntil);
     }
 
@@ -272,30 +272,30 @@ public class EventPassesTests
     public void The_same_pass_again_adds_a_year()
     {
         var c = Event(Now.AddMonths(2));
-        EventPasses.Apply(c, EventPassKind.Wedding, Now);
+        EventPasses.Apply(c, EventPassKind.Platinum, Now);
         var first = c.EventPassUntil!.Value;
-        EventPasses.Apply(c, EventPassKind.Wedding, Now);
+        EventPasses.Apply(c, EventPassKind.Platinum, Now);
 
         Assert.Equal(first.AddMonths(12), c.EventPassUntil);
     }
 
     [Fact]
-    public void Moving_up_to_wedding_keeps_the_later_end_and_a_party_pass_never_replaces_a_wedding_one()
+    public void Moving_up_to_platinum_keeps_the_later_end_and_a_gold_pass_never_replaces_a_platinum_one()
     {
         var c = Event(Now.AddMonths(2));
-        EventPasses.Apply(c, EventPassKind.Party, Now);
-        EventPasses.Apply(c, EventPassKind.Wedding, Now);
-        Assert.Equal(EventPassKind.Wedding, c.EventPass);
+        EventPasses.Apply(c, EventPassKind.Gold, Now);
+        EventPasses.Apply(c, EventPassKind.Platinum, Now);
+        Assert.Equal(EventPassKind.Platinum, c.EventPass);
 
-        EventPasses.Apply(c, EventPassKind.Party, Now);
-        Assert.Equal(EventPassKind.Wedding, c.EventPass);
+        EventPasses.Apply(c, EventPassKind.Gold, Now);
+        Assert.Equal(EventPassKind.Platinum, c.EventPass);
     }
 
     [Fact]
     public void Taking_a_pass_away_ends_it_today_so_the_lapse_counts_from_now()
     {
         var c = Event(Now.AddMonths(2));
-        EventPasses.Apply(c, EventPassKind.Wedding, Now);
+        EventPasses.Apply(c, EventPassKind.Platinum, Now);
         EventPasses.Apply(c, EventPassKind.None, Now);
 
         Assert.Equal(EventPassKind.None, c.EventPass);

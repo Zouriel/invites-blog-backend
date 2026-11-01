@@ -9,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 namespace InvitesBlog.Application.Plans;
 
 /// <summary>
-/// "Your pass ends soon": a month before an event's Party or Wedding pass ends, then a week before,
+/// "Your pass ends soon": a month before an event's Gold or Platinum pass ends, then a week before,
 /// the host is emailed an offer to extend it (a year more, without invitations). Each is sent once
 /// (<see cref="Campaign.PassNoticeStage"/>); extending resets them.
 /// </summary>
@@ -54,7 +54,7 @@ public sealed class PassReminderService(
             if (string.IsNullOrWhiteSpace(to)) continue;
 
             var offer = await offers.ForCampaignAsync(c.Id, ct);
-            var passName = c.EventPass == EventPassKind.Wedding ? "Wedding pass" : "Party pass";
+            var passName = c.EventPass == EventPassKind.Platinum ? "Platinum pass" : "Gold pass";
             await email.SendAsync(PassEmails.EndingSoon(to, c.Title, passName, c.EventPassUntil!.Value,
                 offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}"), ct);
             sent++;

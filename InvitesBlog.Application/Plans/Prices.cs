@@ -13,36 +13,36 @@ namespace InvitesBlog.Application.Plans;
 /// without a release, so they live here and are read through <see cref="IPriceBook"/>.
 /// </summary>
 public sealed record Prices(
-    decimal PartyPass,
-    decimal WeddingPass,
+    decimal GoldPass,
+    decimal PlatinumPass,
     decimal KeepPhotosYearly,
     decimal PremiumMonthly,
     int VenueDiscountPercent,
     decimal SendingPerBlock,
     decimal MvrPerUsd,
-    decimal PartyExtension = PlanCatalog.PartyExtension,
-    decimal WeddingExtension = PlanCatalog.WeddingExtension,
+    decimal GoldExtension = PlanCatalog.GoldExtension,
+    decimal PlatinumExtension = PlanCatalog.PlatinumExtension,
     decimal VenueMonthly = PlanCatalog.VenueMonthly)
 {
     /// <summary>The prices in code, used until an admin saves others.</summary>
     public static Prices Defaults { get; } = new(
-        PlanCatalog.PartyPassPrice, PlanCatalog.WeddingPassPrice, PlanCatalog.KeepPhotosYearly,
+        PlanCatalog.GoldPassPrice, PlanCatalog.PlatinumPassPrice, PlanCatalog.KeepPhotosYearly,
         PlanCatalog.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
         Pricing.PricingCalculator.PricePerBlock, PlanCatalog.MvrPerUsd,
-        PlanCatalog.PartyExtension, PlanCatalog.WeddingExtension, PlanCatalog.VenueMonthly);
+        PlanCatalog.GoldExtension, PlanCatalog.PlatinumExtension, PlanCatalog.VenueMonthly);
 
     public decimal PassPrice(EventPassKind kind) => kind switch
     {
-        EventPassKind.Party => PartyPass,
-        EventPassKind.Wedding => WeddingPass,
+        EventPassKind.Gold => GoldPass,
+        EventPassKind.Platinum => PlatinumPass,
         _ => 0m,
     };
 
     /// <summary>Another year of a pass, without invitations.</summary>
     public decimal ExtensionPrice(EventPassKind kind) => kind switch
     {
-        EventPassKind.Party => PartyExtension,
-        EventPassKind.Wedding => WeddingExtension,
+        EventPassKind.Gold => GoldExtension,
+        EventPassKind.Platinum => PlatinumExtension,
         _ => 0m,
     };
 
@@ -64,19 +64,19 @@ public sealed record Prices(
             if (value <= 0) problems.Add($"{name} must be more than 0.");
             if (value > 1_000_000) problems.Add($"{name} is too large.");
         }
-        Positive(PartyPass, "The Party pass");
-        Positive(WeddingPass, "The Wedding pass");
+        Positive(GoldPass, "The Gold pass");
+        Positive(PlatinumPass, "The Platinum pass");
         Positive(KeepPhotosYearly, "Keep your photos");
         Positive(PremiumMonthly, "Premium a month");
         Positive(VenueMonthly, "Venue a month");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
-        Positive(PartyExtension, "Extending a Party pass");
-        Positive(WeddingExtension, "Extending a Wedding pass");
-        if (PartyExtension > PartyPass) problems.Add("Extending a Party pass can't cost more than the pass.");
-        if (WeddingExtension > WeddingPass) problems.Add("Extending a Wedding pass can't cost more than the pass.");
+        Positive(GoldExtension, "Extending a Gold pass");
+        Positive(PlatinumExtension, "Extending a Platinum pass");
+        if (GoldExtension > GoldPass) problems.Add("Extending a Gold pass can't cost more than the pass.");
+        if (PlatinumExtension > PlatinumPass) problems.Add("Extending a Platinum pass can't cost more than the pass.");
         if (VenueDiscountPercent is < 0 or > 90) problems.Add("The venue discount must be between 0 and 90%.");
-        if (WeddingPass < PartyPass) problems.Add("The Wedding pass can't cost less than the Party pass.");
+        if (PlatinumPass < GoldPass) problems.Add("The Platinum pass can't cost less than the Gold pass.");
         return problems;
     }
 }
@@ -158,18 +158,22 @@ public sealed class PriceBook(
             var r = doc.RootElement;
             decimal D(string name, decimal fallback) =>
                 r.TryGetProperty(name, out var v) && v.TryGetDecimal(out var d) ? d : fallback;
+            // Saved before the Party and Wedding passes became Gold and Platinum: their prices carry
+            // over, so a price an admin set doesn't reset. The new name wins once a save has written it.
+            decimal Renamed(string name, string oldName, decimal fallback) =>
+                D(name, D(oldName, D(char.ToLowerInvariant(oldName[0]) + oldName[1..], fallback)));
             var p = Prices.Defaults;
             var read = new Prices(
-                D(nameof(Prices.PartyPass), p.PartyPass),
-                D(nameof(Prices.WeddingPass), p.WeddingPass),
+                Renamed(nameof(Prices.GoldPass), "PartyPass", p.GoldPass),
+                Renamed(nameof(Prices.PlatinumPass), "WeddingPass", p.PlatinumPass),
                 D(nameof(Prices.KeepPhotosYearly), p.KeepPhotosYearly),
                 // Saved before Studio became Premium: its monthly price carries over.
                 D(nameof(Prices.PremiumMonthly), D("StudioMonthly", p.PremiumMonthly)),
                 (int)D(nameof(Prices.VenueDiscountPercent), p.VenueDiscountPercent),
                 D(nameof(Prices.SendingPerBlock), p.SendingPerBlock),
                 D(nameof(Prices.MvrPerUsd), p.MvrPerUsd),
-                D(nameof(Prices.PartyExtension), p.PartyExtension),
-                D(nameof(Prices.WeddingExtension), p.WeddingExtension),
+                Renamed(nameof(Prices.GoldExtension), "PartyExtension", p.GoldExtension),
+                Renamed(nameof(Prices.PlatinumExtension), "WeddingExtension", p.PlatinumExtension),
                 D(nameof(Prices.VenueMonthly), p.VenueMonthly));
             return read.Problems().Count == 0 ? read : p;
         }

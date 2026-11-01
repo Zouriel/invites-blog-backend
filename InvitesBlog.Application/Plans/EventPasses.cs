@@ -15,7 +15,7 @@ public static class EventPasses
     /// <summary>
     /// Gives the event a pass, or with <see cref="EventPassKind.None"/> takes it away. A pass runs a
     /// year from the event day, or from today if it has passed. The same pass again adds a year;
-    /// moving up from Party to Wedding keeps whichever end is later; a smaller pass never replaces a
+    /// moving up from Gold to Platinum keeps whichever end is later; a smaller pass never replaces a
     /// bigger one still in force.
     /// </summary>
     public static void Apply(Campaign campaign, EventPassKind kind, DateTimeOffset now)

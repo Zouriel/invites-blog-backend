@@ -88,9 +88,9 @@ public class BmlPaymentProviderTests
         _bml.On(HttpMethod.Post, "/public/v2/transactions", HttpStatusCode.Created, Tx("tx1", "INITIATED"));
 
         var session = await Provider().CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest(
-            Guid.Empty, "PartyPass", 699.00m, "MVR", 0, "https://invites.blog/billing?paid=x", "https://invites.blog/billing")
+            Guid.Empty, "GoldPass", 699.00m, "MVR", 0, "https://invites.blog/billing?paid=x", "https://invites.blog/billing")
         {
-            PaymentId = paymentId, Description = "Party pass · Ali's birthday",
+            PaymentId = paymentId, Description = "Gold pass · Ali's birthday",
         }, default);
 
         Assert.Equal("tx1", session.SessionId);
@@ -101,7 +101,7 @@ public class BmlPaymentProviderTests
         Assert.Equal(69900, body["amount"]!.GetValue<long>());
         Assert.Equal("MVR", body["currency"]!.GetValue<string>());
         Assert.Equal(paymentId.ToString(), body["localId"]!.GetValue<string>());
-        Assert.Equal("Party pass · Ali's birthday", body["customerReference"]!.GetValue<string>());
+        Assert.Equal("Gold pass · Ali's birthday", body["customerReference"]!.GetValue<string>());
         Assert.Equal("https://invites.blog/billing?paid=x", body["redirectUrl"]!.GetValue<string>());
         Assert.Equal("https://invites.blog/api/payments/webhook", body["webhook"]!.GetValue<string>());
         Assert.Null(body["tokenizationDetails"]);

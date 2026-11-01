@@ -38,7 +38,7 @@ Use the UAT test cards BML provides (ask BML; they are not kept in this repo).
 2. Run the API with `Payments__Enabled=true Payments__Provider=Bml Payments__Bml__ApiKey=<key>` (UAT is the default base URL).
    Locally BML can't reach the webhook; the return page and the 2-minute sweep finish the payment instead. On a
    public host the webhook arrives too.
-3. Buy a Party pass with each card: review → tick → Pay → BML page → card → back. Expect "Payment received", the pass on,
+3. Buy a Gold pass with each card: review → tick → Pay → BML page → card → back. Expect "Payment received", the pass on,
    and the payment `Paid` with `terms_version` set.
 4. Cancel on BML's page: expect "didn't go through" and the payment `Failed`.
 5. Buy the Premium pass (monthly): expect "Renews automatically" under Billing. Set the account's `subscription_ends_at` to an hour
