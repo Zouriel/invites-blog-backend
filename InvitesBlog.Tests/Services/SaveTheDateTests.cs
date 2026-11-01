@@ -139,7 +139,7 @@ public class SaveTheDateTests
     public async Task Making_the_invitation_copies_guests_and_marks_and_moves_the_pass()
     {
         var std = Std();
-        std.EventPass = EventPassKind.Wedding;
+        std.EventPass = EventPassKind.Platinum;
         std.EventPassUntil = DateTimeOffset.UtcNow.AddYears(1);
         std.PaidInviteCapacity = 100;
         var invitation = new Campaign { Id = Guid.NewGuid(), Title = std.Title, Kind = CampaignKind.Invitation, Status = CampaignStatus.Draft };
@@ -184,7 +184,7 @@ public class SaveTheDateTests
         Assert.Equal(added[0].Id, mark.GuestId);
         Assert.Equal(at, mark.FirstEmailedAt);
         // One pool per wedding: the pass and the extra emails move over.
-        Assert.Equal(EventPassKind.Wedding, invitation.EventPass);
+        Assert.Equal(EventPassKind.Platinum, invitation.EventPass);
         Assert.Equal(100, invitation.PaidInviteCapacity);
         Assert.Equal(EventPassKind.None, std.EventPass);
         Assert.Equal(0, std.PaidInviteCapacity);

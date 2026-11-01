@@ -402,8 +402,8 @@ public sealed class AccountService(
                 Plan: c.VenueId is not null ? "Venue"
                     : InvitesBlog.Application.Plans.EventPasses.Active(c, DateTimeOffset.UtcNow) switch
                     {
-                        Domain.Enums.EventPassKind.Wedding => "WeddingPass",
-                        Domain.Enums.EventPassKind.Party => "PartyPass",
+                        Domain.Enums.EventPassKind.Platinum => "PlatinumPass",
+                        Domain.Enums.EventPassKind.Gold => "GoldPass",
                         _ => "Free",
                     },
                 Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind)));

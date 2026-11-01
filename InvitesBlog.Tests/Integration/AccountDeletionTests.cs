@@ -43,7 +43,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         var qr = await QrAsync(album);
         var asset = await AssetAsync(ev);
         var removedEarlier = await PhotoAsync(ev, album, deleted: true);
-        await WritePassAsync(ev, EventPassKind.Wedding);
+        await WritePassAsync(ev, EventPassKind.Platinum);
         await api.WriteAsync(async db =>
         {
             db.DeliveryAttempts.Add(new DeliveryAttempt { Id = Guid.NewGuid(), InviteId = invite, Channel = "email", RecipientAddress = "guest@example.com", AttemptedAt = DateTimeOffset.UtcNow });
@@ -72,7 +72,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         Assert.Equal(1, summary.Data.Videos);
         Assert.True(summary.Data.AutoRenews);
         Assert.Contains("Premium pass", summary.Data.Paid);
-        Assert.Contains(summary.Data.Paid, p => p.StartsWith("Wedding pass on"));
+        Assert.Contains(summary.Data.Paid, p => p.StartsWith("Platinum pass on"));
         Assert.Null(summary.Data.Blocked);
         Assert.Equal("email", summary.Data.CodeChannel);
 
@@ -188,7 +188,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             await Task.CompletedTask;
         });
         var ev = await EventAsync(host, inviterId: inviter);
-        await WritePassAsync(ev, EventPassKind.Wedding);
+        await WritePassAsync(ev, EventPassKind.Platinum);
         var key = Guid.NewGuid().ToString("N");
         await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.AccessTokenHash, InvitesBlog.Application.Security.TokenService.Hash(key))));
         var album = await AlbumAsync(ev, host.Id);
@@ -215,7 +215,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             var c = await db.Campaigns.SingleAsync(x => x.Id == ev);
             Assert.Equal(heir.Id, c.CreatedByUserId);
             Assert.Null(c.InviterId);
-            Assert.Equal(EventPassKind.Wedding, c.EventPass);
+            Assert.Equal(EventPassKind.Platinum, c.EventPass);
             Assert.Equal(heir.Id, (await db.MediaBuckets.SingleAsync(b => b.Id == album)).OwnerUserId);
             Assert.True(await db.Guests.AnyAsync(g => g.Id == guest));
             Assert.Null((await db.EventPhotos.SingleAsync(p => p.Id == photo.Id)).DeletedAt);
@@ -523,7 +523,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
     {
         var person = await UserAsync(subscription: SubscriptionTier.Premium, autoRenew: true, customer: $"cus_{Guid.NewGuid():N}", endsAt: DateTimeOffset.UtcNow.AddHours(2));
         var ev = await EventAsync(person, title: "A very personal title");
-        var paid = await PaymentAsync(person.Id, ev, PaymentStatus.Paid, "Wedding pass · A very personal title", PaymentKind.WeddingPass);
+        var paid = await PaymentAsync(person.Id, ev, PaymentStatus.Paid, "Platinum pass · A very personal title", PaymentKind.PlatinumPass);
         var plan = await PaymentAsync(person.Id, null, PaymentStatus.Paid, "Premium pass, a month", PaymentKind.PremiumMonthly);
         var pending = await PaymentAsync(person.Id, null, PaymentStatus.Pending, "Venue, a month", PaymentKind.VenueMonthly);
         var refund = Guid.NewGuid();
@@ -543,7 +543,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             Assert.Equal(699m, row.Amount);
             Assert.Equal("MVR", row.Currency);
             Assert.Equal("tx-1", row.ProviderPaymentId);
-            Assert.Equal("Wedding pass", row.Description);
+            Assert.Equal("Platinum pass", row.Description);
             Assert.Null((await db.Payments.SingleAsync(p => p.Id == plan)).UserId);
             Assert.True(await db.Refunds.AnyAsync(r => r.Id == refund));
             return true;

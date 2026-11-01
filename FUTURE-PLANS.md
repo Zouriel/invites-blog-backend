@@ -687,8 +687,8 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
 Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plans of 2026-09-15.
 
 - **Hosts pay per event, not per month.** Free (1 GB, one album, one night, 90 days, a small "Made
-  with invites.blog" on the invitation and album), a **Party pass** (MVR 199: 10 GB, two albums, three
-  days, a year, 100 invitations sent) and a **Wedding pass** (MVR 699: 100 GB, five albums, five days,
+  with invites.blog" on the invitation and album), a **Gold pass** (MVR 199: 10 GB, two albums, three
+  days, a year, 100 invitations sent) and a **Platinum pass** (MVR 699: 100 GB, five albums, five days,
   private albums, a year, 500 invitations). **Keep your photos** adds a year for MVR 150. Sending
   beyond a pass is MVR 50 per 100. Limits are `PlanCatalog`; prices are the admin price book
   (`IPriceBook`, Admin → Prices) with `PlanCatalog` as its defaults. The frontend's fallback copy must
@@ -700,7 +700,7 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
   while Studio runs, and **pass credits**
   bought at 30% off and given to a client's event (`PassCredit`, `EventPasses.Apply`). **Venue** (from
   MVR 2,300/month): a `Venue` with a name and logo, `VenueStaff` matched by email like celebrants, and
-  events created at the venue (`Campaign.VenueId`) that get Wedding-level albums while the plan runs,
+  events created at the venue (`Campaign.VenueId`) that get Platinum-level albums while the plan runs,
   1 TB across the venue, and the venue's name on their albums and QR pages. Staff reach those events
   as Managers through `CampaignOwnershipService`.
 - **Bucket sizing is gone.** Space is per event, shared by its albums; the allocation endpoint, the
@@ -714,7 +714,7 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
 - **A host can hold their own event at a venue** by the venue's code (`Venue.Code`, on the Venue
   page); the organiser only, since it gives the venue's staff access. The event then gets the venue's
   plan and its albums are lengthened to it.
-- **Every old event pass became a Wedding pass** in the migration: it was the one that covered the old
+- **Every old event pass became a Platinum pass** in the migration: it was the one that covered the old
   pass's 50 GB and three albums.
 
 ### Still to settle
@@ -807,7 +807,7 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   bought, off when it ends — hourly `DesignerAccessSweeper`); admins always keep it. The Designer role
   can't be switched on by hand any more. Existing designers were given open-ended Studio
   (migration `DesignersGetStudio`).
-- **Billing** (`BillingService`, `/api/billing`, page `/billing`): per event — Party/Wedding pass,
+- **Billing** (`BillingService`, `/api/billing`, page `/billing`): per event — Gold/Platinum pass,
   Keep your photos, 100 more emails; per account — Studio monthly/yearly; for a Studio — pass credits.
   Checkout creates a pending `Payment` (now with `Kind`, `UserId`, `Quantity`, `Description`,
   `FulfilledAt`; `CampaignId` nullable) and asks `IPaymentProvider` for a checkout page; the webhook
@@ -830,22 +830,22 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   its dashboard asks. Venue events and standalone albums are created live. `CampaignResume` sends a
   draft to the plan step (`photos`). Photos-only drafts from before were made live (migration
   `PassRemindersAndLiveEvents`).
-- **The plan step** (route `create/:id/photos`, before Share in every flow): Free, Party or Wedding;
+- **The plan step** (route `create/:id/photos`, before Share in every flow): Free, Gold or Platinum;
   a pass is paid before anything is sent (`/api/billing/checkout` with a `returnPath`, then back to
   the step). While `Payments:Enabled` is off, choosing a pass leads to "Ask us" and the event waits;
   an admin adding the pass to a draft emails the host `PassEmails.Ready`.
 - **Studio discount, automatic** (`PassOfferService`): a design a Studio published FOR a client takes
-  the Studio percentage off a Party/Wedding pass — only when the event's host is that client (by
+  the Studio percentage off a Gold/Platinum pass — only when the event's host is that client (by
   email), only on their first event from it, only while the designer's Studio is active. Nothing
   else is discounted. The Studio pass stock (credits, admin grants, "give a pass") is gone.
-- **Extending a pass** (`party-extension`/`wedding-extension`, defaults MVR 99/349 in the price book):
+- **Extending a pass** (`gold-extension`/`platinum-extension`, defaults MVR 99/349 in the price book):
   a year more from its end, without invitations. `PassReminderService` (6-hourly) emails the host a
   month and a week before a pass ends (`Campaign.PassNoticeStage`, reset on extension); the dashboard
   and billing page offer "Extend a year" from a month before.
 
 ## Premium pass replaces Studio; the designer is for everyone — *2026-10-02*
 
-- **Passes:** Party pass 25 GB (was 10), Wedding pass 50 GB (was 100). Free stays 1 GB.
+- **Passes:** Gold pass 25 GB (was 10), Platinum pass 50 GB (was 100). Free stays 1 GB.
 - **Premium pass** replaces Studio (`SubscriptionTier.Premium` = 2, the number Studio had, so the
   accounts that were on Studio are on Premium with the same end date). MVR 200 a month, monthly only
   (`premium-monthly`; `StudioYearly` is retired). Every event the subscriber organises
@@ -861,4 +861,6 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
 - **Designer Check:** no RSVP button is a warning (`rsvp_missing`), not an error — some cards don't
   take replies.
 
-**Sizes changed 2026-11-01 (owner):** Free 300 MB, Premium 2 GB, Party pass 5 GB, Wedding pass 10 GB. They apply to every event, passes already sold included; no event was over the new sizes on the day.
+**Renamed 2026-11-02 (owner):** the Party pass is now the Gold pass and the Wedding pass the Platinum pass, in words, code, API names, billing keys (`gold-pass`, `platinum-pass`, `gold-extension`, `platinum-extension`), topics and Play ids (`gold_pass`, `platinum_pass`, `gold_pass_extend`, `platinum_pass_extend`). Limits and prices didn't change. The database didn't either: enums are stored as numbers (`campaigns.event_pass` 1 = Gold, 2 = Platinum; `payments.kind`, `pass_credits.kind`, `app_users.auto_renew_kind`), and a saved `prices` row with the old keys is read as the new ones. Old billing keys, `?topic=party|wedding` and an admin's `Party`/`Wedding` are still accepted. Older `payments.description` and audit rows keep the old names: they are history. This document's older sections use the new names for what are the same two passes.
+
+**Sizes changed 2026-11-01 (owner):** Free 300 MB, Premium 2 GB, Gold pass 5 GB, Platinum pass 10 GB. They apply to every event, passes already sold included; no event was over the new sizes on the day.

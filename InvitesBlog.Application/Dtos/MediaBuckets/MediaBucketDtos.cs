@@ -17,7 +17,7 @@ public sealed record MediaBucketDto(
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
-    /// <summary>The event's plan: Free, PartyPass, WeddingPass or Venue.</summary>
+    /// <summary>The event's plan: Free, GoldPass, PlatinumPass or Venue.</summary>
     string Tier,
     /// <summary>The event's space in GB, to one decimal. Shared by all of the event's buckets.</summary>
     double Gb,
@@ -49,7 +49,7 @@ public sealed record MediaBucketDto(
     string Phase = "Active",
     /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
     long EventUsedBytes = 0,
-    /// <summary>Whether the album can be closed to some guests (Wedding pass and venues).</summary>
+    /// <summary>Whether the album can be closed to some guests (Platinum pass and venues).</summary>
     bool PrivateAlbums = false,
     /// <summary>Whether the event is on Free, so its pages carry a small "Made with invites.blog".</summary>
     bool Branded = true,
@@ -71,7 +71,7 @@ public sealed record StorageSummaryDto(string Tier, long? AccountBytes, long Use
 /// </summary>
 /// <param name="WindowDays">
 /// How many days it collects for, counted from when the event begins. Null or 1 is the ordinary
-/// night; more comes with a pass (3 days on Party, 5 on Wedding). Frozen onto the bucket, so a pass
+/// night; more comes with a pass (3 days on Gold, 5 on Platinum). Frozen onto the bucket, so a pass
 /// running out cannot close one already made.
 /// </param>
 public sealed record CreateMediaBucketRequest(
