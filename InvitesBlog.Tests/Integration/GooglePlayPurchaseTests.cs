@@ -836,6 +836,26 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
+    public async Task Racing_renewal_notifications_add_one_period_and_all_succeed()
+    {
+        var user = await UserAsync();
+        var token = Subscribed(user.Id, DateTimeOffset.UtcNow.AddDays(2));
+        await RedeemAsync(user, "premium_monthly", token);
+
+        // The row already exists here, so only its lock keeps these apart.
+        var next = DateTimeOffset.UtcNow.AddDays(32);
+        UpdateSub(token, user.Id, next, "SUBSCRIPTION_STATE_ACTIVE", $"GPA.{Guid.NewGuid():N}"[..28]);
+        api.Google.ReadDelayMs = 100;
+        try
+        {
+            var all = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => NotifyAsync(SubscriptionNote(token, 2))));
+            Assert.All(all, r => Assert.True(r.IsSuccessStatusCode, r.StatusCode.ToString()));
+        }
+        finally { api.Google.ReadDelayMs = 0; }
+        Assert.Equal(2, (await PaymentsAsync(user.Id)).Count);
+    }
+
+    [PostgresFact]
     public async Task With_no_notification_at_all_the_sweep_notices_a_renewal_and_a_lapse()
     {
         var user = await UserAsync();

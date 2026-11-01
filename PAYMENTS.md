@@ -74,3 +74,36 @@ Verified on UAT with the real site:
   `POST /public-customers/charge` answers `PP-TKN-007 No default token found` (or `PP-G-400` when the transaction's
   token is passed). Until BML enables/explains card-on-file for this merchant, automatic renewal can't charge:
   the renewal sweep then turns auto-renew off and emails the account to renew by hand.
+
+## Google Play (the app)
+
+The website pays by BML as above, untouched. The Android app pays through Google Play billing, and a purchase has the same
+effect by the same path: `BillingService.FulfilAsync`. The code is `Infrastructure/Payments/GooglePlay`, the product table `GooglePlayCatalog`.
+
+| Step | Where |
+|---|---|
+| The app asks what can be bought (`GET /api/billing/google-play/offers?eventId=`); it shows what the server offers and Play also returns | `GooglePlayPurchaseService.OffersAsync` |
+| The purchase carries the account and event ids (obfuscated account and profile ids, the account and event's GUIDs: random, nothing personal) | the app |
+| `POST /api/billing/google-play/purchases` `{productId, purchaseToken, eventId?}` asks the Android Publisher API (`purchases.products.get`, `purchases.subscriptionsv2.get`), and only what it answers counts | `RedeemAsync` |
+| In one transaction, under the token's unique row: a `payments` row (`provider = google_play`, Google's order id, amount and currency from `orders.get`) and `FulfilAsync`. Repeats and races find it done | |
+| After the commit: consumed or acknowledged at Google. If that fails, the 5-minute sweep retries, and the app does it too | `GooglePlaySweeper` |
+| `POST /api/billing/google-play/notifications`: Real-time Developer Notifications by Pub/Sub push, verified by its Google-signed token (audience and sender). Only says what to ask Google about | |
+| Every 6 hours: subscriptions near their end re-checked, the voided list read, amounts Google hadn't shown filled in. All of it works with no notifications at all, only later | |
+
+A subscription's end date is Google's. Refunds and revocations take back what was bought (the pass, the year, the emails, the plan).
+Store money isn't MVR: amounts are in the buyer's currency, and `XXX` with amount 0 means Google hasn't shown it yet (`orders.get` needs the
+"View financial data" permission). Nothing here adds store money to anything. Event cancel doesn't refund a store payment: only Google can.
+
+Test purchases (`purchaseType` 0, `testPurchase`) are refused unless `GooglePlay:AllowTestPurchases` is true, and are recorded with `is_test`.
+
+| Setting | Meaning |
+|---|---|
+| `GooglePlay:PackageName` | `blog.invites.app`. Unset: off. Offers say nothing is available, purchases answer 503 and stay open at Google |
+| `GooglePlay:ServiceAccountJson` or `GooglePlay:ServiceAccountFile` | The service account's key, one line of JSON or a path. Secret: never in git |
+| `GooglePlay:AllowTestPurchases` | Default false |
+| `GooglePlay:Notifications:Audience` | The audience set on the Pub/Sub push subscription. Unset: notifications answer 503 |
+| `GooglePlay:Notifications:ServiceAccountEmail` | The service account set on that subscription |
+
+In `invites-blog-deploy`: `GOOGLE_PLAY_PACKAGE_NAME`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, `GOOGLE_PLAY_ALLOW_TEST_PURCHASES`, `GOOGLE_PLAY_NOTIFICATIONS_AUDIENCE`, `GOOGLE_PLAY_NOTIFICATIONS_EMAIL`.
+
+Tests: `GooglePlayPurchaseTests`, the real client over a socket to a stub of Google, on real Postgres (`IB_TEST_POSTGRES`). Never tried against Google itself until the Play Console is set up.

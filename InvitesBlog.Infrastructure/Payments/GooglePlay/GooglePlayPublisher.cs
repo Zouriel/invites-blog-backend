@@ -40,7 +40,8 @@ public sealed class GooglePlayPublisher(IHttpClientFactory http, IConfiguration 
     private string? KeyJson()
     {
         if (config["GooglePlay:ServiceAccountJson"] is { Length: > 0 } json) return json;
-        if (config["GooglePlay:ServiceAccountFile"] is { Length: > 0 } file && File.Exists(file)) return File.ReadAllText(file);
+        if (config["GooglePlay:ServiceAccountFile"] is { Length: > 0 } file && File.Exists(file)
+            && File.ReadAllText(file) is { } text && !string.IsNullOrWhiteSpace(text)) return text;
         return null;
     }
 
