@@ -108,4 +108,96 @@ public class ImageOrientationTests
         using var output = Image.Load(result.Content);
         Assert.True(output.Width > output.Height, "an untagged landscape was rotated anyway");
     }
+
+    private static byte[] Shot(int w = 400, int h = 300, Action<ExifProfile>? exif = null, int quality = 98)
+    {
+        using var image = new Image<Rgb24>(w, h);
+        // Enough detail that a second encode would show.
+        image.ProcessPixelRows(a =>
+        {
+            for (var y = 0; y < a.Height; y++)
+            {
+                var row = a.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++) row[x] = new Rgb24((byte)(x * 37 ^ y * 11), (byte)(x * y), (byte)(y * 53 ^ x));
+            }
+        });
+        if (exif != null)
+        {
+            image.Metadata.ExifProfile = new ExifProfile();
+            exif(image.Metadata.ExifProfile);
+        }
+        using var ms = new MemoryStream();
+        image.Save(ms, new JpegEncoder { Quality = quality });
+        return ms.ToArray();
+    }
+
+    private static byte[] PictureData(byte[] jpeg)
+    {
+        for (var i = 2; i < jpeg.Length - 1; i++)
+            if (jpeg[i] == 0xFF && jpeg[i + 1] == 0xDB) return jpeg[i..];
+        throw new InvalidOperationException("no tables");
+    }
+
+    /// <summary>What was wrong in production: every "original" came back at web quality.</summary>
+    [Fact]
+    public void A_shot_the_right_way_up_keeps_every_byte_of_its_picture()
+    {
+        var shot = Shot(exif: e => e.SetValue(ExifTag.Orientation, (ushort)1));
+
+        var result = Sut().Preserve(shot, "image/jpeg");
+
+        Assert.Equal(PictureData(shot), PictureData(result.Content));
+        Assert.Equal((400, 300), (result.Width, result.Height));
+    }
+
+    [Fact]
+    public void A_kept_shot_loses_its_location_and_notes()
+    {
+        var shot = Shot(exif: e =>
+        {
+            e.SetValue(ExifTag.Software, "SecretCamera");
+            e.SetValue(ExifTag.GPSLatitudeRef, "N");
+        });
+
+        var result = Sut().Preserve(shot, "image/jpeg");
+
+        using var output = Image.Load(result.Content);
+        Assert.Null(output.Metadata.ExifProfile);
+        Assert.DoesNotContain("SecretCamera", System.Text.Encoding.Latin1.GetString(result.Content));
+    }
+
+    [Fact]
+    public void Anything_hung_on_after_the_picture_goes_too()
+    {
+        var shot = Shot();
+        var withTail = shot.Concat(new byte[] { 0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9 }).ToArray();
+
+        var result = Sut().Preserve(withTail, "image/jpeg");
+
+        Assert.Equal(shot.Length, result.Content.Length);
+    }
+
+    [Fact]
+    public void A_shot_that_has_to_turn_is_encoded_far_better_than_web_quality()
+    {
+        var turned = Shot(400, 300, e => e.SetValue(ExifTag.Orientation, (ushort)6));
+
+        var kept = Sut().Preserve(turned, "image/jpeg");
+
+        using var output = Image.Load(kept.Content);
+        Assert.Equal((300, 400), (output.Width, output.Height));
+        var web = Sut().Optimize(turned, "image/jpeg", 4000);
+        Assert.True(kept.Content.Length > web.Content.Length * 1.5, $"{kept.Content.Length} against {web.Content.Length}");
+    }
+
+    [Fact]
+    public void A_broken_file_is_still_stored_rather_than_refused()
+    {
+        var shot = Shot();
+        var broken = shot[..(shot.Length / 2)];
+
+        var result = Sut().Preserve(broken, "image/jpeg");
+
+        Assert.NotEmpty(result.Content);
+    }
 }
