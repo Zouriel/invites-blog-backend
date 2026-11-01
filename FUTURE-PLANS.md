@@ -860,3 +860,5 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   is the accounts that have used the designer (a design or a published template, or the old role).
 - **Designer Check:** no RSVP button is a warning (`rsvp_missing`), not an error — some cards don't
   take replies.
+
+**Sizes changed 2026-11-01 (owner):** Free 300 MB, Premium 2 GB, Party pass 5 GB, Wedding pass 10 GB. They apply to every event, passes already sold included; no event was over the new sizes on the day.

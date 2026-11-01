@@ -28,7 +28,7 @@ public class PlanRulesTests
         var plan = Evaluate();
 
         Assert.Equal(PlanKind.Free, plan.Kind);
-        Assert.Equal(1 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(300 * PlanCatalog.Mb, plan.EventBytes);
         Assert.Null(plan.AccountBytes);
         Assert.Equal(1, plan.MaxBuckets);
         Assert.Equal(1, plan.MaxWindowDays);
@@ -46,7 +46,7 @@ public class PlanRulesTests
         var plan = Evaluate(EventPassKind.Party, until);
 
         Assert.Equal(PlanKind.PartyPass, plan.Kind);
-        Assert.Equal(25 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(5 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(2, plan.MaxBuckets);
         Assert.Equal(3, plan.MaxWindowDays);
         Assert.Equal(100, plan.IncludedInvites);
@@ -61,7 +61,7 @@ public class PlanRulesTests
         var plan = Evaluate(EventPassKind.Wedding, Now.AddMonths(6));
 
         Assert.Equal(PlanKind.WeddingPass, plan.Kind);
-        Assert.Equal(50 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(MediaBucket.MaxPerCampaign, plan.MaxBuckets);
         Assert.Equal(5, plan.MaxWindowDays);
         Assert.Equal(500, plan.IncludedInvites);
@@ -76,7 +76,7 @@ public class PlanRulesTests
         var plan = Evaluate(now: Night.AddDays(400), premium: (true, null));
 
         Assert.Equal(PlanKind.Premium, plan.Kind);
-        Assert.Equal(3 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(2 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Equal(1, plan.MaxBuckets);
         Assert.Equal(1, plan.MaxWindowDays);
         Assert.Equal(0, plan.IncludedInvites);
@@ -96,7 +96,7 @@ public class PlanRulesTests
         // Ended: back to Free's space and the mark, and the photos lapse from when it ended.
         var ended = Evaluate(now: ends.AddDays(10), premium: (false, ends));
         Assert.Equal(PlanKind.Free, ended.Kind);
-        Assert.Equal(1 * PlanCatalog.Gb, ended.EventBytes);
+        Assert.Equal(300 * PlanCatalog.Mb, ended.EventBytes);
         Assert.True(ended.Branded);
         Assert.Equal(ends, ended.CoveredUntil);
         Assert.Equal(MediaPhase.UploadsClosed, ended.Phase);
@@ -107,7 +107,7 @@ public class PlanRulesTests
     {
         var plan = Evaluate(EventPassKind.Party, PlanRules.PassUntil(Night, Now), premium: (true, null));
         Assert.Equal(PlanKind.PartyPass, plan.Kind);
-        Assert.Equal(25 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(5 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Null(plan.CoveredUntil);
     }
 
@@ -169,7 +169,7 @@ public class PlanRulesTests
         Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Equal(keep, plan.CoveredUntil);
         Assert.Equal(MediaPhase.Active, plan.Phase);
-        Assert.Equal(1 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(300 * PlanCatalog.Mb, plan.EventBytes);
     }
 
     [Theory]
@@ -187,7 +187,7 @@ public class PlanRulesTests
     [Fact]
     public void An_event_from_before_the_plans_gets_its_plan_s_space_and_no_more()
     {
-        // Covered by the pre-plans promise, and still sized by the plan: Free is 1 GB.
+        // Covered by the pre-plans promise, and still sized by the plan: Free is 300 MB.
         var plan = Evaluate(legacyCover: Night.AddMonths(6), now: Night.AddDays(1));
 
         Assert.Equal(PlanCatalog.FreeEventBytes, plan.EventBytes);
@@ -242,7 +242,7 @@ public class PlanRulesTests
         // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
         Assert.Equal([0m, 199m, 699m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
         Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
-        Assert.Equal([1 * PlanCatalog.Gb, 25 * PlanCatalog.Gb, 50 * PlanCatalog.Gb, 3 * PlanCatalog.Gb, (long?)null],
+        Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, (long?)null],
             catalog.Plans.Select(p => p.EventBytes));
         Assert.Equal(50, catalog.VenueDiscountPercent);
         Assert.Equal(150m, catalog.KeepPhotos.Price);

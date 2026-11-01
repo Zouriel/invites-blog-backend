@@ -39,7 +39,7 @@ A bucket owns its **window** and its **audience** and little else: its cover, it
 guest list are the event's, shared with the invitation, and its space is the event's plan's. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
 (`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or the organiser's
-Premium pass. The Premium pass (3 GB on every event, kept while it lasts) and Venue (resorts and
+Premium pass. The Premium pass (2 GB on every event, kept while it lasts) and Venue (resorts and
 halls, passes at half price) are the only subscriptions; hosts pay per event. The template designer
 is open to every account. Prices are in rufiyaa.
 

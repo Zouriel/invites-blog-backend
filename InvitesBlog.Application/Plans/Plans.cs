@@ -39,7 +39,7 @@ public enum MediaPhase
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
 /// everything small, a Party pass, a Wedding pass. Premium is a monthly subscription that lifts every
-/// event its subscriber organises to 3 GB, without the mark, kept while it lasts. Venue (resorts and
+/// event its subscriber organises to 2 GB, without the mark, kept while it lasts. Venue (resorts and
 /// halls) is a monthly subscription: a venue buys and renews passes for the events it runs at the
 /// venue discount, and charges its clients itself. The template designer is open to every account. Prices are in rufiyaa,
 /// shown with dollars alongside.</para>
@@ -49,10 +49,10 @@ public static class PlanCatalog
     public const long Mb = 1024L * 1024;
     public const long Gb = 1024L * Mb;
 
-    public const long FreeEventBytes = 1 * Gb;
-    public const long PremiumEventBytes = 3 * Gb;
-    public const long PartyEventBytes = 25 * Gb;
-    public const long WeddingEventBytes = 50 * Gb;
+    public const long FreeEventBytes = 300 * Mb;
+    public const long PremiumEventBytes = 2 * Gb;
+    public const long PartyEventBytes = 5 * Gb;
+    public const long WeddingEventBytes = 10 * Gb;
 
     public const int FreeBuckets = 1;
     public const int PartyBuckets = 2;
@@ -236,7 +236,7 @@ public static class PlanRules
         };
         // The plan is the only source of an event's space. Albums from before the plans once kept
         // their old size, which made an event on Free show and allow more than Free, while its
-        // settings said 1 GB. Only their cover date is still honoured (legacyCoverUntil).
+        // settings said a fixed size. Only their cover date is still honoured (legacyCoverUntil).
 
         // The cover is the latest of the free 90 days, a pass, "Keep your photos", a venue plan that
         // covered it before venues bought passes, the organiser's Premium, and what anything from
