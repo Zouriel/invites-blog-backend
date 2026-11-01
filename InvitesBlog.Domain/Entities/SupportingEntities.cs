@@ -85,6 +85,35 @@ public sealed class VerifiedContactLink
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>
+/// Something outside the database still to be removed after an account was deleted: stored files and
+/// the bank's customer record. Written in the same transaction as the deletion, so a crash can't lose
+/// it, and worked through by a background service in the API host, so a failure is retried and a large
+/// event doesn't hold up the request. Holds keys and references only.
+/// </summary>
+public sealed class PendingRemoval
+{
+    public Guid Id { get; set; }
+    /// <summary>See <see cref="PendingRemovalKinds"/>.</summary>
+    public string Kind { get; set; } = default!;
+    public string Target { get; set; } = default!;
+    public int Attempts { get; set; }
+    public DateTimeOffset NextAttemptAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public static class PendingRemovalKinds
+{
+    /// <summary>One object in public storage.</summary>
+    public const string File = "file";
+    /// <summary>Every object in public storage under a prefix.</summary>
+    public const string Prefix = "prefix";
+    /// <summary>One object in the private upload holding area.</summary>
+    public const string IncomingFile = "incoming";
+    /// <summary>A customer record at the payment gateway, with its saved cards.</summary>
+    public const string PaymentCustomer = "payment-customer";
+}
+
 /// <summary>A photograph on its way through the holding area (see DirectUploadService).</summary>
 public sealed class PendingUpload
 {

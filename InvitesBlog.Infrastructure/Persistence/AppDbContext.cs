@@ -40,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<VerifiedContactLink> VerifiedContactLinks => Set<VerifiedContactLink>();
     public DbSet<PendingUpload> PendingUploads => Set<PendingUpload>();
+    public DbSet<PendingRemoval> PendingRemovals => Set<PendingRemoval>();
     public DbSet<Venue> Venues => Set<Venue>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<VenueStaff> VenueStaff => Set<VenueStaff>();
@@ -190,6 +191,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.Email).HasDatabaseName("idx_campaign_celebrants_email");
             e.HasIndex(x => x.PhoneE164).HasDatabaseName("idx_campaign_celebrants_phone_e164");
             e.Property(x => x.Name).HasMaxLength(120);
+            e.Property(x => x.InheritsOwnership).HasDefaultValue(false);
             e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -396,6 +398,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.UploaderName).HasMaxLength(200);
             e.Property(x => x.Error).HasMaxLength(500);
             e.HasIndex(x => new { x.Status, x.NextAttemptAt }).HasDatabaseName("idx_pending_uploads_status");
+        });
+
+        b.Entity<PendingRemoval>(e =>
+        {
+            e.ToTable("pending_removals");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasMaxLength(32);
+            e.Property(x => x.Target).HasMaxLength(512);
+            e.HasIndex(x => x.NextAttemptAt).HasDatabaseName("idx_pending_removals_next_attempt");
         });
 
         b.Entity<VerifiedContactLink>(e =>

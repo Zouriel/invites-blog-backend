@@ -47,6 +47,20 @@ public sealed class LocalFileStorageService : IStorageService
         if (File.Exists(path)) File.Delete(path);
         return Task.CompletedTask;
     }
+
+    public Task DeletePrefixAsync(string prefix, CancellationToken ct = default)
+    {
+        if (!StorageKeyPrefix.IsSafe(prefix)) throw new ArgumentException("Too wide a prefix to delete.", nameof(prefix));
+        var parent = Path.Combine(_root, prefix[..prefix.LastIndexOf('/')].Replace('/', Path.DirectorySeparatorChar));
+        if (!Directory.Exists(parent)) return Task.CompletedTask;
+
+        foreach (var file in Directory.EnumerateFiles(parent, "*", SearchOption.AllDirectories).ToList())
+        {
+            var key = Path.GetRelativePath(_root, file).Replace(Path.DirectorySeparatorChar, '/');
+            if (key.StartsWith(prefix, StringComparison.Ordinal)) File.Delete(file);
+        }
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>
@@ -165,6 +179,22 @@ public sealed class S3StorageService : IStorageService
     // S3 answers 204 for a key that isn't there, so a second delete is already harmless.
     public async Task DeleteAsync(string key, CancellationToken ct = default) =>
         await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key }, ct);
+
+    public async Task DeletePrefixAsync(string prefix, CancellationToken ct = default)
+    {
+        if (!StorageKeyPrefix.IsSafe(prefix)) throw new ArgumentException("Too wide a prefix to delete.", nameof(prefix));
+
+        // Listed afresh each round rather than by continuation: what was just deleted is gone from the
+        // next page, and an interrupted run simply lists what is left.
+        while (true)
+        {
+            var page = await _s3.ListObjectsV2Async(
+                new ListObjectsV2Request { BucketName = _bucket, Prefix = prefix, MaxKeys = 1000 }, ct);
+            if (page.S3Objects is not { Count: > 0 } found) return;
+            await Parallel.ForEachAsync(found, new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
+                async (item, token) => await DeleteAsync(item.Key, token));
+        }
+    }
 }
 
 /// <summary>No holding area configured: <see cref="Available"/> sends every upload down the old path.</summary>

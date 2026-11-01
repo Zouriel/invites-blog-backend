@@ -186,6 +186,21 @@ public sealed class BmlPaymentProvider(
         return chosen is null ? null : Str(chosen, "id") ?? Str(chosen, "_id");
     }
 
+    /// <summary>
+    /// Deletes each saved card, then archives the customer: BML has no call that removes a customer
+    /// outright. Safe to repeat.
+    /// </summary>
+    public async Task ForgetCustomerAsync(string customerId, CancellationToken ct)
+    {
+        var customer = Uri.EscapeDataString(customerId);
+        var list = await SendAsync(HttpMethod.Get, $"/public-customers/{customer}/tokens", null, ct);
+        if (list?["items"] is JsonArray items)
+            foreach (var token in items.OfType<JsonNode>())
+                if ((Str(token, "id") ?? Str(token, "_id")) is { } id)
+                    await SendAsync(HttpMethod.Delete, $"/public-customers/{customer}/tokens/{Uri.EscapeDataString(id)}", null, ct);
+        await SendAsync(HttpMethod.Delete, $"/public-customers/{customer}", null, ct);
+    }
+
     public async Task<PaymentWebhookResult> ChargeSavedCardAsync(SavedCardCharge charge, CancellationToken ct)
     {
         var tokenId = await SavedCardTokenAsync(charge.CustomerId, ct);

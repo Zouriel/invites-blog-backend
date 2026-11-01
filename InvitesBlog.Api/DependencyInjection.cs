@@ -94,6 +94,11 @@ public static class DependencyInjection
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
             // Each reply through an open guest list adds a guest. Enough for a family replying one by
             // one from one phone; not enough for a script to fill a host's list.
+            // Asking for and entering the code that deletes an account. Each code already allows five
+            // tries and three sends an hour; this bounds one address going through many accounts' codes.
+            options.AddPolicy("account-delete", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10) }));
             options.AddPolicy("open-list-join", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10) }));

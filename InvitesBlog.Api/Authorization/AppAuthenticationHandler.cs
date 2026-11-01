@@ -5,6 +5,7 @@ using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Security;
 using InvitesBlog.Domain.Authorization;
+using InvitesBlog.Domain.Entities;
 using InvitesBlog.Infrastructure.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -31,7 +32,8 @@ public sealed class AppAuthenticationHandler(
     ILoggerFactory logger,
     UrlEncoder encoder,
     ICampaignRepository campaigns,
-    InviteeJwt inviteeJwt)
+    InviteeJwt inviteeJwt,
+    IRepository<AppUser> users)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "InvitesBlog";
@@ -48,6 +50,17 @@ public sealed class AppAuthenticationHandler(
         }
         else if (token.Count(c => c == '.') == 2 && TryReadJwt(token, out var jwtClaims))
         {
+            // A token says who it was issued to, not that they still exist. A deleted account's token
+            // authenticates nobody from that moment: the refusals below turn it into a 401, the same
+            // as an expired one. One primary-key read per signed-in request is the price of "at once".
+            // Tokens from an emailed code name a contact and no account, so they don't come here.
+            if (Guid.TryParse(jwtClaims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value, out var userId)
+                && !await users.AnyAsync(u => u.Id == userId))
+            {
+                var nobody = new ClaimsPrincipal(BuildIdentity(Roles.Public, authenticated: false));
+                return AuthenticateResult.Success(new AuthenticationTicket(nobody, SchemeName));
+            }
+
             // A token may carry SEVERAL roles — one person can be an admin, a designer and a
             // customer at once — so the identity holds the union of what they all grant.
             var roles = jwtClaims.Where(c => c.Type == ClaimTypes.Role)

@@ -123,7 +123,10 @@ public enum OtpPurpose
     SignIn = 0,
 
     /// <summary>Re-proving a personal invite link from a network it doesn't recognise.</summary>
-    InviteReauth = 1
+    InviteReauth = 1,
+
+    /// <summary>Confirming that a signed-in account really is to be deleted. Never signs anyone in.</summary>
+    AccountDeletion = 2
 }
 
 /// <summary>

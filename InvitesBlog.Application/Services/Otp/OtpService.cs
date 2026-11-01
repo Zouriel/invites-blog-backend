@@ -87,7 +87,8 @@ public sealed class OtpService(
 
         var sender = senders.First(s => s.Channel.Equals(
             channel == OtpChannel.Sms ? "sms" : "email", StringComparison.OrdinalIgnoreCase));
-        await sender.SendCodeAsync(recipient, code, ct);
+        if (purpose == OtpPurpose.AccountDeletion) await sender.SendAccountDeletionCodeAsync(recipient, code, ct);
+        else await sender.SendCodeAsync(recipient, code, ct);
 
         return new OtpChallengeResponse(challenge.Id, expiryMinutes * 60);
     }
@@ -136,12 +137,22 @@ public sealed class OtpService(
         return new OtpTokensResponse(accessToken, TokenService.GenerateToken());
     }
 
-    public async Task<VerifiedContact> VerifyContactAsync(VerifyOtpRequest req, CancellationToken ct = default)
+    public Task<VerifiedContact> VerifyContactAsync(VerifyOtpRequest req, CancellationToken ct = default) =>
+        VerifyAsync(req, purpose: null, ct);
+
+    public Task<VerifiedContact> VerifyContactForAsync(VerifyOtpRequest req, OtpPurpose purpose, CancellationToken ct = default) =>
+        VerifyAsync(req, purpose, ct);
+
+    private async Task<VerifiedContact> VerifyAsync(VerifyOtpRequest req, OtpPurpose? purpose, CancellationToken ct)
     {
         await verifyValidator.ValidateAndThrowAsync(req, ct);
 
         var challenge = await challenges.GetByIdAsync(req.ChallengeId, ct)
             ?? throw new OtpChallengeNotFoundException();
+        // Answered like a code that doesn't exist: a deletion code signs nobody in, and a sign-in code
+        // deletes nothing.
+        if (purpose is { } wanted ? challenge.Purpose != wanted : challenge.Purpose == OtpPurpose.AccountDeletion)
+            throw new OtpChallengeNotFoundException();
         if (challenge.VerifiedAt is not null) throw new OtpAlreadyUsedException();
         if (challenge.ExpiresAt < DateTimeOffset.UtcNow) throw new OtpExpiredException();
         if (challenge.Attempts >= MaxAttempts) throw new OtpTooManyAttemptsException();

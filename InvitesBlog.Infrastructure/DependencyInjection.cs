@@ -27,6 +27,9 @@ public static class DependencyInjection
         var conn = config.GetConnectionString("Postgres")
                    ?? "Host=localhost;Port=5432;Database=invites_blog;Username=invites;Password=invites_password";
         services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn));
+        services.AddScoped<InvitesBlog.Application.Services.Accounts.IAccountDeletionService, Accounts.AccountDeletionService>();
+        services.AddSingleton<Accounts.PendingRemovalSignal>();
+        services.AddScoped<InvitesBlog.Application.Services.Accounts.IEventInheritance, Accounts.EventInheritance>();
         services.AddScoped<Application.Abstractions.Persistence.IUnitOfWork, Repositories.UnitOfWork>();
 
         // Repositories — base + entity repositories auto-registered by convention (spec §Repositories).

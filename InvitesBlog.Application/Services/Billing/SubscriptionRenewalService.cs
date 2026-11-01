@@ -112,6 +112,11 @@ public sealed class SubscriptionRenewalService(
             return true;
         }
 
+        // Read again right before charging. This sweep loaded the account a while ago, and automatic
+        // renewal may have been turned off since, or the account deleted: neither may be charged.
+        if (!await users.Query().AnyAsync(u => u.Id == user.Id && u.AutoRenewKind != null, ct))
+            return false;
+
         var p = await priceBook.CurrentAsync(ct);
         var price = kind switch
         {
