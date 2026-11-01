@@ -21,6 +21,31 @@ public class StorageKeyPrefixTests
     public void Only_a_named_folder_or_a_templates_versions_can_be_removed_whole(string prefix, bool safe) =>
         Assert.Equal(safe, StorageKeyPrefix.IsSafe(prefix));
 
+    /// <summary>The path production takes. Needs an S3 server: set IB_TEST_S3 to its endpoint (key and secret in IB_TEST_S3_KEY, IB_TEST_S3_SECRET).</summary>
+    [Fact]
+    public async Task On_s3_removing_a_prefix_lists_and_removes_only_what_starts_with_it()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("IB_TEST_S3");
+        if (string.IsNullOrWhiteSpace(endpoint)) return;
+        var key = Environment.GetEnvironmentVariable("IB_TEST_S3_KEY");
+        var secret = Environment.GetEnvironmentVariable("IB_TEST_S3_SECRET");
+        var bucket = "t" + Guid.NewGuid().ToString("N");
+        using var admin = new Amazon.S3.AmazonS3Client(key, secret, new Amazon.S3.AmazonS3Config { ServiceURL = endpoint, ForcePathStyle = true });
+        await admin.PutBucketAsync(bucket);
+        var store = new S3StorageService(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Storage:Endpoint"] = endpoint, ["Storage:AccessKey"] = key, ["Storage:SecretKey"] = secret,
+            ["Storage:Bucket"] = bucket, ["Storage:Region"] = "us-east-1",
+        }).Build());
+        for (var i = 0; i < 1005; i++) await store.PutAsync($"buckets/one/media/{i}.jpg", [1], "image/jpeg");
+        await store.PutAsync("buckets/onetwo/keep.jpg", [1], "image/jpeg");
+
+        await store.DeletePrefixAsync("buckets/one/");
+
+        var left = await admin.ListObjectsV2Async(new Amazon.S3.Model.ListObjectsV2Request { BucketName = bucket });
+        Assert.Equal("buckets/onetwo/keep.jpg", Assert.Single(left.S3Objects).Key);
+    }
+
     [Fact]
     public async Task Removing_a_prefix_takes_only_what_starts_with_it()
     {

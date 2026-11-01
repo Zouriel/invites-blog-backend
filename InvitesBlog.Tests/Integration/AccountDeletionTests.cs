@@ -230,6 +230,9 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         // Runs it for real: dashboard, guest list, a change, and rights only an organiser has.
         var heirClient = api.Client(heir.Token);
         Assert.Equal(HttpStatusCode.OK, (await heirClient.GetAsync($"/api/campaigns/{ev}/summary")).StatusCode);
+        var dashboard = await heirClient.GetAsync($"/api/me/campaigns/{ev}/dashboard");
+        Assert.Equal(HttpStatusCode.OK, dashboard.StatusCode);
+        Assert.Contains("A guest", await dashboard.Content.ReadAsStringAsync());
         var events = await heirClient.GetFromJsonAsync<Envelope<List<CampaignRow>>>("/api/me/campaigns", Web);
         Assert.Contains(events!.Data, c => c.Id == ev);
         Assert.Equal(HttpStatusCode.OK, (await heirClient.GetAsync($"/api/media-buckets/{album}")).StatusCode);
@@ -784,6 +787,26 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             Assert.Equal(creator.Id, (await db.MediaBuckets.SingleAsync(b => b.Id == album)).OwnerUserId);
             return true;
         });
+    }
+
+    /// <summary>A new foreign key to users must be thought about here, not discovered when a deletion fails.</summary>
+    [PostgresFact]
+    public async Task Every_foreign_key_to_users_is_one_the_deletion_accounts_for()
+    {
+        var found = await api.ReadAsync(async db =>
+        {
+            var c = db.Database.GetDbConnection();
+            await c.OpenAsync();
+            await using var q = c.CreateCommand();
+            q.CommandText = "select conrelid::regclass::text || '.' || a.attname from pg_constraint k join pg_attribute a on a.attrelid = k.conrelid and a.attnum = any(k.conkey) where k.contype = 'f' and k.confrelid = 'users'::regclass";
+            var rows = new List<string>();
+            await using var r = await q.ExecuteReaderAsync();
+            while (await r.ReadAsync()) rows.Add(r.GetString(0));
+            return rows;
+        });
+        Assert.Equal(
+            new[] { "comment_likes.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
+            found.Order(StringComparer.Ordinal));
     }
 
     [PostgresFact]
