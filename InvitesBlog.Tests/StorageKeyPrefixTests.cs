@@ -5,6 +5,15 @@ using Xunit;
 
 namespace InvitesBlog.Tests;
 
+/// <summary>Skipped, not passed, without an S3 server to run against.</summary>
+public sealed class S3FactAttribute : FactAttribute
+{
+    public S3FactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("IB_TEST_S3"))) Skip = "Set IB_TEST_S3 to run against an S3 server.";
+    }
+}
+
 public class StorageKeyPrefixTests
 {
     [Theory]
@@ -22,11 +31,10 @@ public class StorageKeyPrefixTests
         Assert.Equal(safe, StorageKeyPrefix.IsSafe(prefix));
 
     /// <summary>The path production takes. Needs an S3 server: set IB_TEST_S3 to its endpoint (key and secret in IB_TEST_S3_KEY, IB_TEST_S3_SECRET).</summary>
-    [Fact]
+    [S3Fact]
     public async Task On_s3_removing_a_prefix_lists_and_removes_only_what_starts_with_it()
     {
         var endpoint = Environment.GetEnvironmentVariable("IB_TEST_S3");
-        if (string.IsNullOrWhiteSpace(endpoint)) return;
         var key = Environment.GetEnvironmentVariable("IB_TEST_S3_KEY");
         var secret = Environment.GetEnvironmentVariable("IB_TEST_S3_SECRET");
         var bucket = "t" + Guid.NewGuid().ToString("N");
