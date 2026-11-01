@@ -219,7 +219,7 @@ public sealed class AdminService(
         PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
 
     /// <summary>
-    /// Sets an account's plan by hand: Premium (3 GB events, kept while it lasts), or Venue for a
+    /// Sets an account's plan by hand: Premium (2 GB events, kept while it lasts), or Venue for a
     /// resort or hall.
     ///
     /// <para>Choosing None ends an active plan now rather than erasing it, because the end date is

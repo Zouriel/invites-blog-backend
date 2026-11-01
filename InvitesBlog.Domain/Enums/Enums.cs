@@ -165,7 +165,7 @@ public enum MediaBucketTier
 public enum SubscriptionTier
 {
     None = 0,
-    /// <summary>A monthly subscription: every event the account organises gets 3 GB, no "Made with
+    /// <summary>A monthly subscription: every event the account organises gets 2 GB, no "Made with
     /// invites.blog" mark, and keeps its photos for as long as the subscription lasts.</summary>
     Premium = 2,
     /// <summary>A resort or hall: albums for every event at the property, under its own name, run by its staff.</summary>
