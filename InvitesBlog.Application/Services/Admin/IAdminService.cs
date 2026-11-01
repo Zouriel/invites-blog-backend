@@ -29,7 +29,7 @@ public interface IAdminService
     /// <summary>The events an account organised, with their passes.</summary>
     Task<IReadOnlyList<AdminUserEventDto>> UserEventsAsync(Guid userId, CancellationToken ct = default);
 
-    /// <summary>Gives an event a Party or Wedding pass, or takes it away.</summary>
+    /// <summary>Gives an event a Gold or Platinum pass, or takes it away.</summary>
     Task<AdminUserEventDto> SetEventPassAsync(Guid campaignId, SetEventPassRequest req, CancellationToken ct = default);
 
     /// <summary>"Keep your photos": adds years to how long an event's albums stay online, or takes them away.</summary>

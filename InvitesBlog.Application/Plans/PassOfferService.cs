@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -11,12 +12,21 @@ namespace InvitesBlog.Application.Plans;
 /// <param name="VenuePercent">The venue discount on an event a venue runs (passes and extensions); 0 otherwise.</param>
 /// <param name="VenueName">That venue.</param>
 public sealed record PassOfferDto(
-    decimal PartyPass, decimal WeddingPass, decimal FullPartyPass, decimal FullWeddingPass,
-    decimal PartyExtension, decimal WeddingExtension,
+    decimal GoldPass, decimal PlatinumPass, decimal FullGoldPass, decimal FullPlatinumPass,
+    decimal GoldExtension, decimal PlatinumExtension,
     int VenuePercent = 0, string? VenueName = null)
 {
-    public decimal PassPrice(EventPassKind kind) => kind == EventPassKind.Wedding ? WeddingPass : PartyPass;
-    public decimal ExtensionPrice(EventPassKind kind) => kind == EventPassKind.Wedding ? WeddingExtension : PartyExtension;
+    // The same prices under their names before the rename, read by web tabs still open from before
+    // that deploy. Nothing current reads them; remove them a release later.
+    [JsonPropertyName("partyPass")] public decimal OldGoldPass => GoldPass;
+    [JsonPropertyName("weddingPass")] public decimal OldPlatinumPass => PlatinumPass;
+    [JsonPropertyName("fullPartyPass")] public decimal OldFullGoldPass => FullGoldPass;
+    [JsonPropertyName("fullWeddingPass")] public decimal OldFullPlatinumPass => FullPlatinumPass;
+    [JsonPropertyName("partyExtension")] public decimal OldGoldExtension => GoldExtension;
+    [JsonPropertyName("weddingExtension")] public decimal OldPlatinumExtension => PlatinumExtension;
+
+    public decimal PassPrice(EventPassKind kind) => kind == EventPassKind.Platinum ? PlatinumPass : GoldPass;
+    public decimal ExtensionPrice(EventPassKind kind) => kind == EventPassKind.Platinum ? PlatinumExtension : GoldExtension;
 }
 
 public interface IPassOfferService
@@ -34,7 +44,7 @@ public sealed class PassOfferService(
     {
         var p = await priceBook.CurrentAsync(ct);
         var campaign = await campaigns.GetByIdAsync(campaignId, ct);
-        var offer = new PassOfferDto(p.PartyPass, p.WeddingPass, p.PartyPass, p.WeddingPass, p.PartyExtension, p.WeddingExtension);
+        var offer = new PassOfferDto(p.GoldPass, p.PlatinumPass, p.GoldPass, p.PlatinumPass, p.GoldExtension, p.PlatinumExtension);
 
         // An event a venue runs: the venue buys its pass, and another year of it, at the venue price,
         // while the venue's plan is in force.
@@ -45,10 +55,10 @@ public sealed class PassOfferService(
             && p.VenueDiscountPercent > 0)
             offer = offer with
             {
-                PartyPass = p.VenuePassPrice(EventPassKind.Party),
-                WeddingPass = p.VenuePassPrice(EventPassKind.Wedding),
-                PartyExtension = p.VenueExtensionPrice(EventPassKind.Party),
-                WeddingExtension = p.VenueExtensionPrice(EventPassKind.Wedding),
+                GoldPass = p.VenuePassPrice(EventPassKind.Gold),
+                PlatinumPass = p.VenuePassPrice(EventPassKind.Platinum),
+                GoldExtension = p.VenueExtensionPrice(EventPassKind.Gold),
+                PlatinumExtension = p.VenueExtensionPrice(EventPassKind.Platinum),
                 VenuePercent = p.VenueDiscountPercent,
                 VenueName = venue.Name,
             };

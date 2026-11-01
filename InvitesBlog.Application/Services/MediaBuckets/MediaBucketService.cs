@@ -95,7 +95,7 @@ public interface IMediaBucketService
 
     /// <summary>
     /// Brings every album on an event up to the days its plan now allows — called when a pass is
-    /// given, so a Wedding pass means five days without the host changing anything. Never shortens
+    /// given, so a Platinum pass means five days without the host changing anything. Never shortens
     /// one: a window already given is kept.
     /// </summary>
     Task RaiseWindowsToPlanAsync(Guid campaignId, CancellationToken ct = default);
@@ -438,12 +438,12 @@ public sealed class MediaBucketService(
             var existingPlan = await plans.ForCampaignAsync(existing, ct);
 
             // More albums on one event come with a pass: the ceremony and the after-party, each with
-            // its own night and its own audience. Two with a Party pass, five with a Wedding pass.
+            // its own night and its own audience. Two with a Gold pass, five with a Platinum pass.
             if (already > 0 && already >= existingPlan.MaxBuckets && existingPlan.MaxBuckets < MediaBucket.MaxPerCampaign)
                 throw new BusinessRuleException(
                     existingPlan.MaxBuckets <= 1
-                        ? "That event already has an album. More than one comes with a Party or Wedding pass."
-                        : $"That event already has {already} albums, the most its Party pass allows. A Wedding pass allows {MediaBucket.MaxPerCampaign}.",
+                        ? "That event already has an album. More than one comes with a Gold or Platinum pass."
+                        : $"That event already has {already} albums, the most its Gold pass allows. A Platinum pass allows {MediaBucket.MaxPerCampaign}.",
                     "bucket_exists_for_campaign");
 
             // And a ceiling above that, which no plan lifts. See MediaBucket.MaxPerCampaign.
@@ -538,11 +538,11 @@ public sealed class MediaBucketService(
     {
         var bucket = await OwnedAsync(bucketId, ct, tracking: true);
 
-        // Closing an album to some guests comes with a Wedding pass or a venue. Opening one again is
+        // Closing an album to some guests comes with a Platinum pass or a venue. Opening one again is
         // always allowed, so an album closed before a pass ran out can still be given back to everyone.
         if (!req.Allowed && !(await plans.ForCampaignAsync(bucket.CampaignId, ct)).PrivateAlbums)
             throw new BusinessRuleException(
-                "Private albums, that only some guests can see, come with a Wedding pass.", "private_needs_plan");
+                "Private albums, that only some guests can see, come with a Platinum pass.", "private_needs_plan");
 
         var guests = await guestRepository.ListByCampaignAsync(bucket.CampaignId, includeOptedOut: true, ct);
         var everyone = guests.Select(g => g.Id).ToHashSet();
@@ -663,7 +663,7 @@ public sealed class MediaBucketService(
 
         if ((await plans.ForCampaignAsync(bucket.CampaignId, ct)).MaxBuckets <= 1)
             throw new BusinessRuleException(
-                "Naming albums comes with a Party or Wedding pass.", "rename_needs_subscription");
+                "Naming albums comes with a Gold or Platinum pass.", "rename_needs_subscription");
 
         // Blank is the default rather than an error: somebody clearing the box means "put it back",
         // and an empty name would render as a gap where the bucket's title should be.
@@ -690,7 +690,7 @@ public sealed class MediaBucketService(
         if (req.Days > most)
             throw new BusinessRuleException(
                 most <= 1
-                    ? "Collecting for more than one night comes with a Party or Wedding pass."
+                    ? "Collecting for more than one night comes with a Gold or Platinum pass."
                     : $"This event can collect for up to {most} days.",
                 "window_needs_plan");
 
@@ -873,11 +873,11 @@ public sealed class MediaBucketService(
             .SumAsync(b => b.UsedBytes, ct);
         if (eventUsed + incomingBytes > plan.EventBytes)
             throw new BusinessRuleException(
-                plan.Kind is PlanKind.WeddingPass or PlanKind.Venue
+                plan.Kind is PlanKind.PlatinumPass or PlanKind.Venue
                     ? $"This event's {Size(plan.EventBytes)} is full."
-                    : plan.Kind == PlanKind.PartyPass
-                        ? $"This event's {Size(plan.EventBytes)} is full. A Wedding pass gives it more room."
-                        : $"This event's {Size(plan.EventBytes)} is full. A Party or Wedding pass gives it more room.",
+                    : plan.Kind == PlanKind.GoldPass
+                        ? $"This event's {Size(plan.EventBytes)} is full. A Platinum pass gives it more room."
+                        : $"This event's {Size(plan.EventBytes)} is full. A Gold or Platinum pass gives it more room.",
                 "bucket_full");
 
         // And a venue's limit across all of its events.

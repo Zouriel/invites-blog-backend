@@ -20,12 +20,12 @@ public class PricingCalculatorTests
     }
 
     [Theory]
-    // Party pass: the first 100 are included.
+    // Gold pass: the first 100 are included.
     [InlineData(80, 100, 0)]
     [InlineData(100, 100, 0)]
     [InlineData(101, 100, 50)]
     [InlineData(250, 100, 100)]
-    // Wedding pass: the first 500.
+    // Platinum pass: the first 500.
     [InlineData(500, 500, 0)]
     [InlineData(620, 500, 100)]
     public void A_pass_includes_its_invitations_first(int invites, int included, decimal expected)

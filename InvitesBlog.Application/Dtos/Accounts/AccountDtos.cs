@@ -106,7 +106,7 @@ public sealed record MyCampaignDto(
     string Relation = "host",
     /// <summary>For a celebrant: whether the organiser gave them full access.</summary>
     bool CanManage = true,
-    /// <summary>What the event is on, for its badge: Free, PartyPass, WeddingPass or Venue.</summary>
+    /// <summary>What the event is on, for its badge: Free, GoldPass, PlatinumPass or Venue.</summary>
     string Plan = "Free",
     /// <summary>"invitation" or "saveTheDate".</summary>
     string Kind = "invitation");

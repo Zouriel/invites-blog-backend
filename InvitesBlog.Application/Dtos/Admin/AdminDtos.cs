@@ -12,8 +12,8 @@ public sealed record AdminUserDto(
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
 
 /// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>
-/// <param name="Pass">None, Party or Wedding.</param>
-/// <param name="Plan">What covers it now: Free, PartyPass, WeddingPass or Venue.</param>
+/// <param name="Pass">None, Gold or Platinum.</param>
+/// <param name="Plan">What covers it now: Free, GoldPass, PlatinumPass or Venue.</param>
 /// <param name="CoveredUntil">When its photos start to lapse; null while a venue covers it.</param>
 /// <param name="Phase">Active, UploadsClosed, OrganiserOnly or Deleted.</param>
 /// <param name="Sending">Emailed invitations: included, added, used.</param>
@@ -25,7 +25,7 @@ public sealed record AdminUserEventDto(
 /// <summary>Emailed invitations to add to an event (negative takes unused ones back).</summary>
 public sealed record AddSendingRequest(int Invitations);
 
-/// <summary>Gives an event a pass (<c>Party</c> or <c>Wedding</c>) or takes it away (<c>None</c>).</summary>
+/// <summary>Gives an event a pass (<c>Gold</c> or <c>Platinum</c>) or takes it away (<c>None</c>).</summary>
 public sealed record SetEventPassRequest(string Kind);
 
 /// <summary>"Keep your photos" for this many years; 0 takes it away.</summary>

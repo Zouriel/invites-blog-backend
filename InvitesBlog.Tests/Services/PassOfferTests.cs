@@ -28,10 +28,10 @@ public class PassOfferTests
 
         var o = await new PassOfferService(_campaigns, users, TestData.PriceBook()).ForCampaignAsync(campaign.Id);
 
-        Assert.Equal(199m, o.PartyPass);
-        Assert.Equal(699m, o.WeddingPass);
-        Assert.Equal(99m, o.PartyExtension);
-        Assert.Equal(349m, o.WeddingExtension);
+        Assert.Equal(199m, o.GoldPass);
+        Assert.Equal(699m, o.PlatinumPass);
+        Assert.Equal(99m, o.GoldExtension);
+        Assert.Equal(349m, o.PlatinumExtension);
         Assert.Equal(0, o.VenuePercent);
     }
 
@@ -40,7 +40,7 @@ public class PassOfferTests
     {
         var now = DateTimeOffset.UtcNow;
         var c = TestData.Campaign();
-        c.EventPass = EventPassKind.Wedding;
+        c.EventPass = EventPassKind.Platinum;
         c.EventPassUntil = now.AddDays(10);
         c.PassNoticeStage = 2;
 
@@ -79,11 +79,11 @@ public class PassOfferTests
     {
         var o = await AtVenue(venueActive: true);
 
-        Assert.Equal(100m, o.PartyPass);        // half of 199, rounded
-        Assert.Equal(350m, o.WeddingPass);      // half of 699
-        Assert.Equal(50m, o.PartyExtension);    // half of 99
-        Assert.Equal(175m, o.WeddingExtension); // half of 349
-        Assert.Equal(199m, o.FullPartyPass);
+        Assert.Equal(100m, o.GoldPass);        // half of 199, rounded
+        Assert.Equal(350m, o.PlatinumPass);      // half of 699
+        Assert.Equal(50m, o.GoldExtension);    // half of 99
+        Assert.Equal(175m, o.PlatinumExtension); // half of 349
+        Assert.Equal(199m, o.FullGoldPass);
         Assert.Equal(50, o.VenuePercent);
         Assert.Equal("Sunset Resort", o.VenueName);
     }
@@ -93,8 +93,8 @@ public class PassOfferTests
     {
         var o = await AtVenue(venueActive: false);
 
-        Assert.Equal(199m, o.PartyPass);
-        Assert.Equal(99m, o.PartyExtension);
+        Assert.Equal(199m, o.GoldPass);
+        Assert.Equal(99m, o.GoldExtension);
         Assert.Equal(0, o.VenuePercent);
     }
 }
