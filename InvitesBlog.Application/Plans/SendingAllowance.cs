@@ -7,7 +7,7 @@ namespace InvitesBlog.Application.Plans;
 /// <summary>
 /// How many guests invites.blog may still email for an event. Sharing links is always free; emailing
 /// each guest their own link is what's counted: the event's pass includes some (none on Free, 100
-/// with a Party pass, 500 with a Wedding pass), and more are added a block at a time.
+/// with a Gold pass, 500 with a Platinum pass), and more are added a block at a time.
 /// </summary>
 /// <param name="Included">What the event's plan includes.</param>
 /// <param name="Extra">Added on top: bought, or given by an admin (<c>Campaign.PaidInviteCapacity</c>).</param>

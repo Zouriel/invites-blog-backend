@@ -219,7 +219,7 @@ public sealed class AdminService(
         PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
 
     /// <summary>
-    /// Sets an account's plan by hand: Premium (3 GB events, kept while it lasts), or Venue for a
+    /// Sets an account's plan by hand: Premium (2 GB events, kept while it lasts), or Venue for a
     /// resort or hall.
     ///
     /// <para>Choosing None ends an active plan now rather than erasing it, because the end date is
@@ -335,15 +335,22 @@ public sealed class AdminService(
     }
 
     /// <summary>
-    /// Gives one event a Party or Wedding pass, or takes it away. A pass runs a year from the event
+    /// Gives one event a Gold or Platinum pass, or takes it away. A pass runs a year from the event
     /// day, or from today if the event has passed; giving the same pass again adds a year to it, and
-    /// moving up from Party to Wedding keeps whichever end is later.
+    /// moving up from Gold to Platinum keeps whichever end is later.
     /// </summary>
     public async Task<AdminUserEventDto> SetEventPassAsync(
         Guid campaignId, SetEventPassRequest req, CancellationToken ct = default)
     {
-        if (!Enum.TryParse<EventPassKind>(req.Kind?.Trim(), ignoreCase: true, out var kind) || !Enum.IsDefined(kind))
-            throw new BusinessRuleException("Choose None, Party or Wedding.", "pass_kind_unknown");
+        // "Party" and "Wedding" are the names from before the rename: an admin tab open during the deploy.
+        var named = req.Kind?.Trim() switch
+        {
+            { } k when k.Equals("Party", StringComparison.OrdinalIgnoreCase) => nameof(EventPassKind.Gold),
+            { } k when k.Equals("Wedding", StringComparison.OrdinalIgnoreCase) => nameof(EventPassKind.Platinum),
+            var k => k,
+        };
+        if (!Enum.TryParse<EventPassKind>(named, ignoreCase: true, out var kind) || !Enum.IsDefined(kind))
+            throw new BusinessRuleException("Choose None, Gold or Platinum.", "pass_kind_unknown");
 
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
@@ -370,7 +377,7 @@ public sealed class AdminService(
             && await users.Query().Where(u => u.Id == hostId).Select(u => u.Email).FirstOrDefaultAsync(ct) is { Length: > 0 } hostEmail)
         {
             var link = $"{InvitesBlog.Application.Common.AppUrls.InviterBase(config)}/create/{campaign.Id}/photos";
-            await email.SendAsync(PassEmails.Ready(hostEmail, campaign.Title, kind == EventPassKind.Wedding ? "Wedding pass" : "Party pass", link), ct);
+            await email.SendAsync(PassEmails.Ready(hostEmail, campaign.Title, kind == EventPassKind.Platinum ? "Platinum pass" : "Gold pass", link), ct);
         }
         return await DescribeEventAsync(campaign, ct);
     }

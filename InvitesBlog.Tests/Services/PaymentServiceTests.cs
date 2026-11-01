@@ -216,7 +216,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task A_confirmation_for_a_different_amount_does_not_mark_the_payment_paid()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_a");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_a");
         _payments.GetBySessionIdAsync("tx_a", Arg.Any<CancellationToken>()).Returns(payment);
         Webhook(new PaymentWebhookResult(WebhookEventKind.PaymentSucceeded, "tx_a", "tx_a", null, "k") { Amount = 1m, Currency = "MVR" });
 
@@ -230,7 +230,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task A_confirmation_in_another_currency_does_not_mark_the_payment_paid()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_c");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_c");
         _payments.GetBySessionIdAsync("tx_c", Arg.Any<CancellationToken>()).Returns(payment);
         Webhook(new PaymentWebhookResult(WebhookEventKind.PaymentSucceeded, "tx_c", "tx_c", null, "k") { Amount = 699m, Currency = "USD" });
 
@@ -242,7 +242,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task A_transaction_made_for_another_payment_is_ignored()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_l");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_l");
         _payments.GetBySessionIdAsync("tx_l", Arg.Any<CancellationToken>()).Returns(payment);
         Webhook(new PaymentWebhookResult(WebhookEventKind.PaymentSucceeded, "tx_l", "tx_l", null, "k")
             { Amount = 699m, Currency = "MVR", LocalId = Guid.NewGuid().ToString() });
@@ -255,7 +255,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task The_exact_amount_for_this_payment_marks_it_paid_and_hands_it_to_billing()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_ok");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Pending, amount: 699m, sessionId: "tx_ok");
         _payments.GetBySessionIdAsync("tx_ok", Arg.Any<CancellationToken>()).Returns(payment);
         Webhook(new PaymentWebhookResult(WebhookEventKind.PaymentSucceeded, "tx_ok", "tx_ok", null, "k")
             { Amount = 699m, Currency = "MVR", LocalId = payment.Id.ToString() });
@@ -269,7 +269,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task A_late_failure_never_undoes_a_payment_that_went_through()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Paid, sessionId: "tx_p");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Paid, sessionId: "tx_p");
         _payments.GetBySessionIdAsync("tx_p", Arg.Any<CancellationToken>()).Returns(payment);
         Webhook(new PaymentWebhookResult(WebhookEventKind.PaymentFailed, "tx_p", null, null, "k"));
 
@@ -292,7 +292,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task Sync_asks_the_gateway_about_a_pending_payment_and_records_its_answer()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Pending, amount: 199m, sessionId: "tx_s");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Pending, amount: 199m, sessionId: "tx_s");
         _payments.Query(Arg.Any<bool>()).Returns(_ => new[] { payment }.AsAsyncQueryable());
         _payments.GetBySessionIdAsync("tx_s", Arg.Any<CancellationToken>()).Returns(payment);
         _provider.GetStatusAsync("tx_s", Arg.Any<CancellationToken>())
@@ -307,7 +307,7 @@ public class PaymentServiceTests
     [Fact]
     public async Task Sync_leaves_a_settled_payment_alone()
     {
-        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.PartyPass, status: PaymentStatus.Paid, sessionId: "tx_done");
+        var payment = TestData.Payment(Guid.NewGuid(), kind: PaymentKind.GoldPass, status: PaymentStatus.Paid, sessionId: "tx_done");
         _payments.Query(Arg.Any<bool>()).Returns(_ => new[] { payment }.AsAsyncQueryable());
 
         await Sut().SyncAsync(payment.Id);

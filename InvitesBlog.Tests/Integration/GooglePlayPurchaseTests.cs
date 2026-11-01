@@ -184,34 +184,34 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     // ----- The main path ------------------------------------------------------------------------
 
     [PostgresFact]
-    public async Task A_verified_party_pass_is_applied_recorded_and_only_then_consumed()
+    public async Task A_verified_gold_pass_is_applied_recorded_and_only_then_consumed()
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal("applied", body.Data!.State);
         var c = await CampaignAsync(ev);
-        Assert.Equal(EventPassKind.Party, c.EventPass);
+        Assert.Equal(EventPassKind.Gold, c.EventPass);
         Assert.True(c.EventPassUntil > DateTimeOffset.UtcNow.AddMonths(11));
 
         var p = Assert.Single(await PaymentsAsync(host.Id));
         Assert.Equal("google_play", p.Provider);
         Assert.Equal(PaymentStatus.Paid, p.Status);
         Assert.NotNull(p.FulfilledAt);
-        Assert.Equal(PaymentKind.PartyPass, p.Kind);
+        Assert.Equal(PaymentKind.GoldPass, p.Kind);
         Assert.Equal(ev, p.CampaignId);
         // Google's figures, never ours: this is not MVR.
         Assert.Equal("USD", p.Currency);
         Assert.Equal(12.99m, p.Amount);
-        Assert.Equal(Product("party_pass", token)["orderId"], p.ProviderPaymentId);
+        Assert.Equal(Product("gold_pass", token)["orderId"], p.ProviderPaymentId);
         Assert.False(p.IsTest);
         Assert.Null(p.TermsAcceptedAt);
 
-        Assert.True(Consumed("party_pass", token));
+        Assert.True(Consumed("gold_pass", token));
         Assert.NotNull((await RowAsync(token))!.SettledAt);
     }
 
@@ -220,27 +220,27 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("wedding_pass", host.Id, ev);
+        var token = Bought("platinum_pass", host.Id, ev);
         var escaped = Uri.EscapeDataString(token);
         var refusedBefore = api.Google.AssertionsRefused;
 
-        await RedeemAsync(host, "wedding_pass", token, ev);
+        await RedeemAsync(host, "platinum_pass", token, ev);
 
         var seen = api.Google.Requests.Where(r => r.Path.Contains(escaped)).ToList();
-        Assert.Contains(("GET", $"/androidpublisher/v3/applications/{GooglePlayStub.Package}/purchases/products/wedding_pass/tokens/{escaped}"), seen);
-        Assert.Contains(("POST", $"/androidpublisher/v3/applications/{GooglePlayStub.Package}/purchases/products/wedding_pass/tokens/{escaped}:consume"), seen);
+        Assert.Contains(("GET", $"/androidpublisher/v3/applications/{GooglePlayStub.Package}/purchases/products/platinum_pass/tokens/{escaped}"), seen);
+        Assert.Contains(("POST", $"/androidpublisher/v3/applications/{GooglePlayStub.Package}/purchases/products/platinum_pass/tokens/{escaped}:consume"), seen);
         Assert.True(api.Google.TokensIssued >= 1);
         Assert.Equal(refusedBefore, api.Google.AssertionsRefused);
     }
 
     [PostgresTheory]
-    [InlineData("party_pass_extend")]
-    [InlineData("wedding_pass_extend")]
+    [InlineData("gold_pass_extend")]
+    [InlineData("platinum_pass_extend")]
     public async Task An_extension_adds_a_year_to_the_pass_the_event_has(string product)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var kind = product.StartsWith("wedding") ? EventPassKind.Wedding : EventPassKind.Party;
+        var kind = product.StartsWith("platinum") ? EventPassKind.Platinum : EventPassKind.Gold;
         var until = DateTimeOffset.UtcNow.AddMonths(2);
         await api.WriteAsync(async db =>
         {
@@ -261,13 +261,13 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass_extend", host.Id, ev);
+        var token = Bought("gold_pass_extend", host.Id, ev);
 
-        var (status, body) = await RedeemAsync(host, "party_pass_extend", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass_extend", token, ev);
 
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Contains("Extending", body.Message);
-        Assert.False(Consumed("party_pass_extend", token));
+        Assert.False(Consumed("gold_pass_extend", token));
         Assert.Null(await RowAsync(token));
     }
 
@@ -295,23 +295,23 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         await Unconfigured(async () =>
         {
-            var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+            var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
             Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
             Assert.Equal("google_play_unavailable", Code(body));
             var offers = await api.Client(host.Token).GetFromJsonAsync<Envelope<Offers>>($"/api/billing/google-play/offers?eventId={ev}", Web);
             Assert.False(offers!.Data!.Available);
             Assert.Empty(offers.Data.Products);
         });
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
 
         // Once it's set up, the same purchase goes through: nothing was lost.
-        var (later, _) = await RedeemAsync(host, "party_pass", token, ev);
+        var (later, _) = await RedeemAsync(host, "gold_pass", token, ev);
         Assert.Equal(HttpStatusCode.OK, later);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
     }
 
     [PostgresFact]
@@ -319,12 +319,12 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         var saved = Config["GooglePlay:PackageName"];
         Config["GooglePlay:PackageName"] = "blog.someone.else";
         try
         {
-            var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+            var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
             Assert.Equal(HttpStatusCode.NotFound, status);
             Assert.Equal("google_play_not_found", Code(body));
         }
@@ -338,14 +338,14 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         var buyer = await UserAsync();
         var thief = await UserAsync();
         var ev = await EventAsync(thief);
-        var token = Bought("party_pass", buyer.Id, ev);
+        var token = Bought("gold_pass", buyer.Id, ev);
 
-        var (status, body) = await RedeemAsync(thief, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(thief, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.Equal("google_play_wrong_account", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
     }
 
     [PostgresFact]
@@ -353,7 +353,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var (status, body) = await RedeemAsync(host, "party_pass", Bought("party_pass", null, ev), ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", Bought("gold_pass", null, ev), ev);
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.Equal("google_play_wrong_account", Code(body));
     }
@@ -364,9 +364,9 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         var host = await UserAsync();
         var bought = await EventAsync(host);
         var other = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, bought);
+        var token = Bought("gold_pass", host.Id, bought);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, other);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, other);
 
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.Equal("google_play_wrong_event", Code(body));
@@ -374,10 +374,10 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.Equal(EventPassKind.None, (await CampaignAsync(bought)).EventPass);
 
         // Named for no event (a recovery after a restart), Google's word for the event decides.
-        var (recovered, r) = await RedeemAsync(host, "party_pass", token);
+        var (recovered, r) = await RedeemAsync(host, "gold_pass", token);
         Assert.Equal(HttpStatusCode.OK, recovered);
         Assert.Equal(bought, r.Data!.EventId);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(bought)).EventPass);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(bought)).EventPass);
         Assert.Equal(EventPassKind.None, (await CampaignAsync(other)).EventPass);
     }
 
@@ -386,7 +386,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var (status, body) = await RedeemAsync(host, "party_pass", Bought("party_pass", host.Id, null), ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, null), ev);
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.Equal("google_play_wrong_event", Code(body));
     }
@@ -397,14 +397,14 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         var host = await UserAsync();
         var stranger = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", stranger.Id, ev);
+        var token = Bought("gold_pass", stranger.Id, ev);
 
-        var (status, body) = await RedeemAsync(stranger, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(stranger, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.Equal("google_play_not_host", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
     }
 
     [PostgresFact]
@@ -412,9 +412,9 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        // The token was really for a Party pass; the request says Wedding, and Google says otherwise.
-        var token = Bought("wedding_pass", host.Id, ev, reportedProduct: "party_pass");
-        var (status, body) = await RedeemAsync(host, "wedding_pass", token, ev);
+        // The token was really for a Gold pass; the request says Platinum, and Google says otherwise.
+        var token = Bought("platinum_pass", host.Id, ev, reportedProduct: "gold_pass");
+        var (status, body) = await RedeemAsync(host, "platinum_pass", token, ev);
         Assert.Equal(HttpStatusCode.Conflict, status);
         Assert.Equal("google_play_wrong_product", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
@@ -434,7 +434,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     [PostgresFact]
     public async Task Signed_out_is_refused()
     {
-        var res = await api.Client().PostAsJsonAsync(Url, new { productId = "party_pass", purchaseToken = "x" });
+        var res = await api.Client().PostAsJsonAsync(Url, new { productId = "gold_pass", purchaseToken = "x" });
         Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
     }
 
@@ -443,14 +443,14 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         await api.WriteAsync(async db => (await db.Campaigns.FirstAsync(c => c.Id == ev)).Status = CampaignStatus.Cancelled);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Contains("cancelled", body.Message);
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
         Assert.Empty(await PaymentsAsync(host.Id));
     }
 
@@ -461,11 +461,11 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
 
-        var (first, a) = await RedeemAsync(host, "party_pass", token, ev);
+        var (first, a) = await RedeemAsync(host, "gold_pass", token, ev);
         var until = (await CampaignAsync(ev)).EventPassUntil;
-        var (second, b) = await RedeemAsync(host, "party_pass", token, ev);
+        var (second, b) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.OK, first);
         Assert.Equal(HttpStatusCode.OK, second);
@@ -479,12 +479,12 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
-        await RedeemAsync(host, "party_pass", token, ev);
-        // Moved up since: a new Party pass would be refused, this old one is simply already done.
-        await RedeemAsync(host, "wedding_pass", Bought("wedding_pass", host.Id, ev), ev);
+        var token = Bought("gold_pass", host.Id, ev);
+        await RedeemAsync(host, "gold_pass", token, ev);
+        // Moved up since: a new Gold pass would be refused, this old one is simply already done.
+        await RedeemAsync(host, "platinum_pass", Bought("platinum_pass", host.Id, ev), ev);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal("applied", body.Data!.State);
@@ -495,11 +495,11 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         api.Google.ReadDelayMs = 150;
         try
         {
-            var all = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => RedeemAsync(host, "party_pass", token, ev)));
+            var all = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => RedeemAsync(host, "gold_pass", token, ev)));
             Assert.All(all, r => Assert.Equal(HttpStatusCode.OK, r.Status));
             Assert.All(all, r => Assert.Equal("applied", r.Body.Data!.State));
         }
@@ -509,7 +509,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.True(api.Google.Count(Uri.EscapeDataString(token)) >= 12);
         Assert.Single(await PaymentsAsync(host.Id));
         var c = await CampaignAsync(ev);
-        Assert.Equal(EventPassKind.Party, c.EventPass);
+        Assert.Equal(EventPassKind.Gold, c.EventPass);
         Assert.True(c.EventPassUntil < DateTimeOffset.UtcNow.AddMonths(15), $"more than one year added: {c.EventPassUntil}");
         Assert.Equal(1, await api.ReadAsync(db => db.GooglePlayPurchases.CountAsync(p => p.PurchaseToken == token)));
     }
@@ -518,7 +518,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     public async Task The_token_is_unique_in_the_database_itself()
     {
         var token = $"dup-{Guid.NewGuid():N}";
-        var row = () => new GooglePlayPurchase { Id = Guid.NewGuid(), PurchaseToken = token, ProductId = "party_pass", CreatedAt = DateTimeOffset.UtcNow };
+        var row = () => new GooglePlayPurchase { Id = Guid.NewGuid(), PurchaseToken = token, ProductId = "gold_pass", CreatedAt = DateTimeOffset.UtcNow };
         await api.WriteAsync(async db => { db.GooglePlayPurchases.Add(row()); await Task.CompletedTask; });
         await Assert.ThrowsAsync<DbUpdateException>(() => api.WriteAsync(async db => { db.GooglePlayPurchases.Add(row()); await Task.CompletedTask; }));
     }
@@ -530,15 +530,15 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev, type: 0);
+        var token = Bought("gold_pass", host.Id, ev, type: 0);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.Conflict, status);
         Assert.Equal("google_play_test_refused", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
         Assert.Empty(await PaymentsAsync(host.Id));
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
     }
 
     [PostgresFact]
@@ -546,10 +546,10 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev, type: 0);
+        var token = Bought("gold_pass", host.Id, ev, type: 0);
         await AllowingTests(async () =>
         {
-            var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+            var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
             Assert.Equal(HttpStatusCode.OK, status);
             Assert.True(body.Data!.Test);
         });
@@ -566,19 +566,19 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev, state: 2);
+        var token = Bought("gold_pass", host.Id, ev, state: 2);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal("pending", body.Data!.State);
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
         Assert.Empty(await PaymentsAsync(host.Id));
 
-        Product("party_pass", token)["purchaseState"] = 0;
-        var (_, later) = await RedeemAsync(host, "party_pass", token, ev);
+        Product("gold_pass", token)["purchaseState"] = 0;
+        var (_, later) = await RedeemAsync(host, "gold_pass", token, ev);
         Assert.Equal("applied", later.Data!.State);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
     }
 
     [PostgresFact]
@@ -586,7 +586,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var (status, body) = await RedeemAsync(host, "party_pass", Bought("party_pass", host.Id, ev, state: 1), ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, ev, state: 1), ev);
         Assert.Equal(HttpStatusCode.Conflict, status);
         Assert.Equal("google_play_not_purchased", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
@@ -599,15 +599,15 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         api.Google.FailNext[Uri.EscapeDataString(token)] = 500;
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("google_play_unreachable", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
-        Assert.False(Consumed("party_pass", token));
+        Assert.False(Consumed("gold_pass", token));
     }
 
     [PostgresFact]
@@ -615,19 +615,19 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         api.Google.FailNext[$"{Uri.EscapeDataString(token)}:consume"] = 503;
 
-        var (status, _) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, _) = await RedeemAsync(host, "gold_pass", token, ev);
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
-        Assert.False(Consumed("party_pass", token));
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
+        Assert.False(Consumed("gold_pass", token));
         Assert.Null((await RowAsync(token))!.SettledAt);
 
         await SweepAsync(full: false);
 
-        Assert.True(Consumed("party_pass", token));
+        Assert.True(Consumed("gold_pass", token));
         Assert.NotNull((await RowAsync(token))!.SettledAt);
         Assert.Single(await PaymentsAsync(host.Id));
     }
@@ -637,9 +637,9 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
-        Product("party_pass", token)["consumptionState"] = 1;
-        await RedeemAsync(host, "party_pass", token, ev);
+        var token = Bought("gold_pass", host.Id, ev);
+        Product("gold_pass", token)["consumptionState"] = 1;
+        await RedeemAsync(host, "gold_pass", token, ev);
         Assert.NotNull((await RowAsync(token))!.SettledAt);
     }
 
@@ -648,16 +648,16 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
-        var order = (string)Product("party_pass", token)["orderId"]!;
+        var token = Bought("gold_pass", host.Id, ev);
+        var order = (string)Product("gold_pass", token)["orderId"]!;
         api.Google.FailNext[$"orders/{order}"] = 403;
 
-        await RedeemAsync(host, "party_pass", token, ev);
+        await RedeemAsync(host, "gold_pass", token, ev);
 
         var p = Assert.Single(await PaymentsAsync(host.Id));
         Assert.Equal("XXX", p.Currency);
         Assert.Equal(0m, p.Amount);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
 
         await SweepAsync();
         p = Assert.Single(await PaymentsAsync(host.Id));
@@ -676,13 +676,13 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        Assert.Equal(["party_pass", "wedding_pass", "keep_photos_year", "extra_invites_100"], await OffersAsync(host, ev));
+        Assert.Equal(["gold_pass", "platinum_pass", "keep_photos_year", "extra_invites_100"], await OffersAsync(host, ev));
 
-        await RedeemAsync(host, "party_pass", Bought("party_pass", host.Id, ev), ev);
-        Assert.Equal(["wedding_pass", "party_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
+        await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, ev), ev);
+        Assert.Equal(["platinum_pass", "gold_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
 
-        await RedeemAsync(host, "wedding_pass", Bought("wedding_pass", host.Id, ev), ev);
-        Assert.Equal(["wedding_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
+        await RedeemAsync(host, "platinum_pass", Bought("platinum_pass", host.Id, ev), ev);
+        Assert.Equal(["platinum_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
     }
 
     [PostgresFact]
@@ -717,10 +717,10 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         });
         var ev = await EventAsync(owner, venueId: venueId);
         var offered = await OffersAsync(owner, ev);
-        Assert.DoesNotContain("party_pass", offered);
-        Assert.DoesNotContain("wedding_pass", offered);
-        Assert.DoesNotContain("party_pass_extend", offered);
-        Assert.DoesNotContain("wedding_pass_extend", offered);
+        Assert.DoesNotContain("gold_pass", offered);
+        Assert.DoesNotContain("platinum_pass", offered);
+        Assert.DoesNotContain("gold_pass_extend", offered);
+        Assert.DoesNotContain("platinum_pass_extend", offered);
         Assert.Contains("extra_invites_100", offered);
         Assert.Empty(await OffersAsync(owner));   // nor Premium, on the Venue plan
     }
@@ -969,8 +969,8 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
-        var note = OneTimeNote(token, "party_pass");
+        var token = Bought("gold_pass", host.Id, ev);
+        var note = OneTimeNote(token, "gold_pass");
         using var stranger = RSA.Create(2048);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await NotifyAsync(note, bearer: null)).StatusCode);
@@ -987,16 +987,16 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
 
-        var res = await NotifyAsync(OneTimeNote(token, "party_pass"));
+        var res = await NotifyAsync(OneTimeNote(token, "gold_pass"));
 
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
-        Assert.True(Consumed("party_pass", token));
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
+        Assert.True(Consumed("gold_pass", token));
 
         // The app turning up afterwards finds it done.
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal("applied", body.Data!.State);
         Assert.Single(await PaymentsAsync(host.Id));
@@ -1007,7 +1007,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var res = await NotifyAsync(OneTimeNote(Bought("party_pass", host.Id, ev, state: 2), "party_pass"));
+        var res = await NotifyAsync(OneTimeNote(Bought("gold_pass", host.Id, ev, state: 2), "gold_pass"));
         Assert.True(res.IsSuccessStatusCode);
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
     }
@@ -1017,11 +1017,11 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         api.Google.FailNext[Uri.EscapeDataString(token)] = 500;
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await NotifyAsync(OneTimeNote(token, "party_pass"))).StatusCode);
-        Assert.True((await NotifyAsync(OneTimeNote(token, "party_pass"))).IsSuccessStatusCode);
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await NotifyAsync(OneTimeNote(token, "gold_pass"))).StatusCode);
+        Assert.True((await NotifyAsync(OneTimeNote(token, "gold_pass"))).IsSuccessStatusCode);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
     }
 
     [PostgresFact]
@@ -1030,7 +1030,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.True((await NotifyAsync(new { version = "1.0", packageName = GooglePlayStub.Package, testNotification = new { version = "1.0" } })).IsSuccessStatusCode);
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var other = await NotifyAsync(new { packageName = "blog.other", oneTimeProductNotification = new { purchaseToken = Bought("party_pass", host.Id, ev), sku = "party_pass" } });
+        var other = await NotifyAsync(new { packageName = "blog.other", oneTimeProductNotification = new { purchaseToken = Bought("gold_pass", host.Id, ev), sku = "gold_pass" } });
         Assert.True(other.IsSuccessStatusCode);
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
     }
@@ -1061,9 +1061,9 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
-        await RedeemAsync(host, "party_pass", token, ev);
-        var order = (string)Product("party_pass", token)["orderId"]!;
+        var token = Bought("gold_pass", host.Id, ev);
+        await RedeemAsync(host, "gold_pass", token, ev);
+        var order = (string)Product("gold_pass", token)["orderId"]!;
 
         Assert.True((await NotifyAsync(VoidedNote(token, order))).IsSuccessStatusCode);
 
@@ -1073,7 +1073,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.Equal(PaymentStatus.Refunded, Assert.Single(await PaymentsAsync(host.Id)).Status);
         Assert.NotNull((await RowAsync(token))!.VoidedAt);
 
-        var (status, body) = await RedeemAsync(host, "party_pass", token, ev);
+        var (status, body) = await RedeemAsync(host, "gold_pass", token, ev);
         Assert.Equal(HttpStatusCode.Conflict, status);
         Assert.Equal("google_play_voided", Code(body));
         Assert.Equal(EventPassKind.None, (await CampaignAsync(ev)).EventPass);
@@ -1101,33 +1101,33 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
-    public async Task Refunding_a_party_pass_under_a_wedding_pass_leaves_the_wedding_pass()
+    public async Task Refunding_a_gold_pass_under_a_platinum_pass_leaves_the_platinum_pass()
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var party = Bought("party_pass", host.Id, ev);
-        await RedeemAsync(host, "party_pass", party, ev);
-        await RedeemAsync(host, "wedding_pass", Bought("wedding_pass", host.Id, ev), ev);
+        var gold = Bought("gold_pass", host.Id, ev);
+        await RedeemAsync(host, "gold_pass", gold, ev);
+        await RedeemAsync(host, "platinum_pass", Bought("platinum_pass", host.Id, ev), ev);
 
-        await NotifyAsync(VoidedNote(party, (string)Product("party_pass", party)["orderId"]!));
+        await NotifyAsync(VoidedNote(gold, (string)Product("gold_pass", gold)["orderId"]!));
 
         var c = await CampaignAsync(ev);
-        Assert.Equal(EventPassKind.Wedding, c.EventPass);
+        Assert.Equal(EventPassKind.Platinum, c.EventPass);
         Assert.True(c.EventPassUntil > DateTimeOffset.UtcNow);
     }
 
     [PostgresFact]
-    public async Task Refunding_the_wedding_pass_falls_back_to_the_party_pass_still_paid_for()
+    public async Task Refunding_the_platinum_pass_falls_back_to_the_gold_pass_still_paid_for()
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        await RedeemAsync(host, "party_pass", Bought("party_pass", host.Id, ev), ev);
-        var wedding = Bought("wedding_pass", host.Id, ev);
-        await RedeemAsync(host, "wedding_pass", wedding, ev);
+        await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, ev), ev);
+        var platinum = Bought("platinum_pass", host.Id, ev);
+        await RedeemAsync(host, "platinum_pass", platinum, ev);
 
-        await NotifyAsync(VoidedNote(wedding, (string)Product("wedding_pass", wedding)["orderId"]!));
+        await NotifyAsync(VoidedNote(platinum, (string)Product("platinum_pass", platinum)["orderId"]!));
 
-        Assert.Equal(EventPassKind.Party, (await CampaignAsync(ev)).EventPass);
+        Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
     }
 
     [PostgresFact]
@@ -1162,7 +1162,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        await RedeemAsync(host, "party_pass", Bought("party_pass", host.Id, ev), ev);
+        await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, ev), ev);
 
         var res = await api.Client(host.Token).PostAsync($"/api/campaigns/{ev}/cancel", null);
 
@@ -1177,15 +1177,15 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        var token = Bought("party_pass", host.Id, ev);
+        var token = Bought("gold_pass", host.Id, ev);
         api.Google.FailNext[$"{Uri.EscapeDataString(token)}:consume"] = 500;
-        await RedeemAsync(host, "party_pass", token, ev);
-        var refused = Bought("party_pass", host.Id, ev, type: 0);
-        await RedeemAsync(host, "party_pass", refused, ev);
+        await RedeemAsync(host, "gold_pass", token, ev);
+        var refused = Bought("gold_pass", host.Id, ev, type: 0);
+        await RedeemAsync(host, "gold_pass", refused, ev);
         var sub = Subscribed(host.Id, DateTimeOffset.UtcNow.AddDays(3));
         api.Google.FailNext[sub] = 500;
         await RedeemAsync(host, "premium_monthly", sub);
-        await NotifyAsync(OneTimeNote(Bought("party_pass", host.Id, ev), "party_pass"));
+        await NotifyAsync(OneTimeNote(Bought("gold_pass", host.Id, ev), "gold_pass"));
         await SweepAsync();
 
         // The scan must have had something to read.
@@ -1206,7 +1206,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.Equal(7, GooglePlayCatalog.All.Count);
         foreach (var p in GooglePlayCatalog.All)
             Assert.NotEqual("other", BillingService.ItemName(p.Kind));
-        Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.VenueMonthly or PaymentKind.StudioYearly or PaymentKind.StudioPartyCredits or PaymentKind.StudioWeddingCredits);
+        Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.VenueMonthly or PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
         Assert.Single(GooglePlayCatalog.All, p => p.IsSubscription);
     }
 
@@ -1299,8 +1299,8 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var user = await UserAsync();
         var ev = await EventAsync(user);
-        var pass = Bought("party_pass", user.Id, ev);
-        await RedeemAsync(user, "party_pass", pass, ev);
+        var pass = Bought("gold_pass", user.Id, ev);
+        await RedeemAsync(user, "gold_pass", pass, ev);
         var sub = Subscribed(user.Id, DateTimeOffset.UtcNow.AddDays(20));
         await RedeemAsync(user, "premium_monthly", sub);
 
@@ -1310,7 +1310,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.Null((await RowAsync(pass))!.UserId);
         Assert.Null((await RowAsync(pass))!.CampaignId);
         Assert.True((await NotifyAsync(SubscriptionNote(sub, 2))).IsSuccessStatusCode);
-        Assert.True((await NotifyAsync(OneTimeNote(pass, "party_pass"))).IsSuccessStatusCode);
+        Assert.True((await NotifyAsync(OneTimeNote(pass, "gold_pass"))).IsSuccessStatusCode);
         Assert.False(await api.ReadAsync(db => db.Users.AnyAsync(u => u.Id == user.Id)));
         Assert.Equal(0, await api.ReadAsync(db => db.Payments.CountAsync(p => p.UserId == user.Id)));
     }

@@ -16,10 +16,10 @@ public static class GooglePlayCatalog
 {
     public static readonly IReadOnlyList<PlayProduct> All =
     [
-        new("party_pass", PaymentKind.PartyPass, false),
-        new("wedding_pass", PaymentKind.WeddingPass, false),
-        new("party_pass_extend", PaymentKind.PartyExtension, false),
-        new("wedding_pass_extend", PaymentKind.WeddingExtension, false),
+        new("gold_pass", PaymentKind.GoldPass, false),
+        new("platinum_pass", PaymentKind.PlatinumPass, false),
+        new("gold_pass_extend", PaymentKind.GoldExtension, false),
+        new("platinum_pass_extend", PaymentKind.PlatinumExtension, false),
         new("keep_photos_year", PaymentKind.KeepPhotos, false),
         new("extra_invites_100", PaymentKind.Sending, false),
         new("premium_monthly", PaymentKind.PremiumMonthly, true),

@@ -6,14 +6,14 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Application.Plans;
 
 /// <summary>
-/// What an event is on right now. A Wedding pass outranks a Party pass, which outranks Premium (its
+/// What an event is on right now. A Platinum pass outranks a Gold pass, which outranks Premium (its
 /// organiser's subscription), which outranks Free.
 /// </summary>
 public enum PlanKind
 {
     Free,
-    PartyPass,
-    WeddingPass,
+    GoldPass,
+    PlatinumPass,
     Venue,
     Premium,
 }
@@ -38,8 +38,8 @@ public enum MediaPhase
 /// the pricing page, so the two can't disagree.
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
-/// everything small, a Party pass, a Wedding pass. Premium is a monthly subscription that lifts every
-/// event its subscriber organises to 3 GB, without the mark, kept while it lasts. Venue (resorts and
+/// everything small, a Gold pass, a Platinum pass. Premium is a monthly subscription that lifts every
+/// event its subscriber organises to 2 GB, without the mark, kept while it lasts. Venue (resorts and
 /// halls) is a monthly subscription: a venue buys and renews passes for the events it runs at the
 /// venue discount, and charges its clients itself. The template designer is open to every account. Prices are in rufiyaa,
 /// shown with dollars alongside.</para>
@@ -49,22 +49,22 @@ public static class PlanCatalog
     public const long Mb = 1024L * 1024;
     public const long Gb = 1024L * Mb;
 
-    public const long FreeEventBytes = 1 * Gb;
-    public const long PremiumEventBytes = 3 * Gb;
-    public const long PartyEventBytes = 25 * Gb;
-    public const long WeddingEventBytes = 50 * Gb;
+    public const long FreeEventBytes = 300 * Mb;
+    public const long PremiumEventBytes = 2 * Gb;
+    public const long GoldEventBytes = 5 * Gb;
+    public const long PlatinumEventBytes = 10 * Gb;
 
     public const int FreeBuckets = 1;
-    public const int PartyBuckets = 2;
-    public const int WeddingBuckets = MediaBucket.MaxPerCampaign;
+    public const int GoldBuckets = 2;
+    public const int PlatinumBuckets = MediaBucket.MaxPerCampaign;
 
     public const int FreeWindowDays = 1;
-    public const int PartyWindowDays = 3;
-    public const int WeddingWindowDays = EventDayWindow.MaxWindowDays;
+    public const int GoldWindowDays = 3;
+    public const int PlatinumWindowDays = EventDayWindow.MaxWindowDays;
 
     /// <summary>Invitations invites.blog sends for the event without charging for them.</summary>
-    public const int PartyIncludedInvites = 100;
-    public const int WeddingIncludedInvites = 500;
+    public const int GoldIncludedInvites = 100;
+    public const int PlatinumIncludedInvites = 500;
 
     /// <summary>How long a free event is covered, counted from the event day.</summary>
     public const int FreeCoverDays = 90;
@@ -88,12 +88,12 @@ public static class PlanCatalog
 
     // Default prices. What is charged comes from IPriceBook, which an admin can change; these are
     // what it starts from and falls back to.
-    public const decimal PartyPassPrice = 199m;
-    public const decimal WeddingPassPrice = 699m;
+    public const decimal GoldPassPrice = 199m;
+    public const decimal PlatinumPassPrice = 699m;
     public const decimal KeepPhotosYearly = 150m;
     /// <summary>Another year of a pass, without invitations: half the pass.</summary>
-    public const decimal PartyExtension = 99m;
-    public const decimal WeddingExtension = 349m;
+    public const decimal GoldExtension = 99m;
+    public const decimal PlatinumExtension = 349m;
     public const decimal PremiumMonthly = 200m;
 
     /// <summary>A venue account, a month.</summary>
@@ -121,12 +121,12 @@ public static class PlanCatalog
             [
                 new PlanDto("Free", "Free", 0m, "every event",
                     FreeEventBytes, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
-                new PlanDto("PartyPass", "Party pass", p.PartyPass, "per event",
-                    PartyEventBytes, PartyBuckets, PartyWindowDays, 365, PartyIncludedInvites, false, false,
-                    ExtensionPrice: p.PartyExtension),
-                new PlanDto("WeddingPass", "Wedding pass", p.WeddingPass, "per event",
-                    WeddingEventBytes, WeddingBuckets, WeddingWindowDays, 365, WeddingIncludedInvites, true, false,
-                    ExtensionPrice: p.WeddingExtension),
+                new PlanDto("GoldPass", "Gold pass", p.GoldPass, "per event",
+                    GoldEventBytes, GoldBuckets, GoldWindowDays, 365, GoldIncludedInvites, false, false,
+                    ExtensionPrice: p.GoldExtension),
+                new PlanDto("PlatinumPass", "Platinum pass", p.PlatinumPass, "per event",
+                    PlatinumEventBytes, PlatinumBuckets, PlatinumWindowDays, 365, PlatinumIncludedInvites, true, false,
+                    ExtensionPrice: p.PlatinumExtension),
                 // Every event its subscriber organises, kept while it lasts (no retention days).
                 new PlanDto("Premium", "Premium pass", p.PremiumMonthly, "per month",
                     PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
@@ -222,21 +222,21 @@ public static class PlanRules
         var passActive = pass != EventPassKind.None && passUntil is { } until && until > now;
         var premiumActive = premium is { Active: true };
 
-        var kind = passActive && pass == EventPassKind.Wedding ? PlanKind.WeddingPass
-            : passActive && pass == EventPassKind.Party ? PlanKind.PartyPass
+        var kind = passActive && pass == EventPassKind.Platinum ? PlanKind.PlatinumPass
+            : passActive && pass == EventPassKind.Gold ? PlanKind.GoldPass
             : premiumActive ? PlanKind.Premium
             : PlanKind.Free;
 
         var eventBytes = kind switch
         {
-            PlanKind.PartyPass => PlanCatalog.PartyEventBytes,
-            PlanKind.WeddingPass => PlanCatalog.WeddingEventBytes,
+            PlanKind.GoldPass => PlanCatalog.GoldEventBytes,
+            PlanKind.PlatinumPass => PlanCatalog.PlatinumEventBytes,
             PlanKind.Premium => PlanCatalog.PremiumEventBytes,
             _ => PlanCatalog.FreeEventBytes,
         };
         // The plan is the only source of an event's space. Albums from before the plans once kept
         // their old size, which made an event on Free show and allow more than Free, while its
-        // settings said 1 GB. Only their cover date is still honoured (legacyCoverUntil).
+        // settings said a fixed size. Only their cover date is still honoured (legacyCoverUntil).
 
         // The cover is the latest of the free 90 days, a pass, "Keep your photos", a venue plan that
         // covered it before venues bought passes, the organiser's Premium, and what anything from
@@ -247,17 +247,17 @@ public static class PlanRules
         // Premium with no end keeps the photos for as long as it lasts: no end date at all.
         DateTimeOffset? coveredUntil = premium is { Active: true, EndsAt: null } ? null : end;
 
-        var large = kind is PlanKind.WeddingPass;
+        var large = kind is PlanKind.PlatinumPass;
         return new EventPlan(
             kind,
             eventBytes,
             null,
-            large ? PlanCatalog.WeddingBuckets : kind == PlanKind.PartyPass ? PlanCatalog.PartyBuckets : PlanCatalog.FreeBuckets,
-            large ? PlanCatalog.WeddingWindowDays : kind == PlanKind.PartyPass ? PlanCatalog.PartyWindowDays : PlanCatalog.FreeWindowDays,
+            large ? PlanCatalog.PlatinumBuckets : kind == PlanKind.GoldPass ? PlanCatalog.GoldBuckets : PlanCatalog.FreeBuckets,
+            large ? PlanCatalog.PlatinumWindowDays : kind == PlanKind.GoldPass ? PlanCatalog.GoldWindowDays : PlanCatalog.FreeWindowDays,
             kind switch
             {
-                PlanKind.WeddingPass => PlanCatalog.WeddingIncludedInvites,
-                PlanKind.PartyPass => PlanCatalog.PartyIncludedInvites,
+                PlanKind.PlatinumPass => PlanCatalog.PlatinumIncludedInvites,
+                PlanKind.GoldPass => PlanCatalog.GoldIncludedInvites,
                 _ => 0,
             },
             large,

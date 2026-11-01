@@ -34,11 +34,55 @@ public class PriceBookTests
     [Fact]
     public async Task A_saved_price_wins_and_missing_ones_fall_back()
     {
-        var row = new AppSetting { Key = PriceBook.Key, ValueJson = """{"PartyPass":249,"SendingPerBlock":60}""" };
+        var row = new AppSetting { Key = PriceBook.Key, ValueJson = """{"GoldPass":249,"SendingPerBlock":60}""" };
         var p = await Sut(row).CurrentAsync();
-        Assert.Equal(249m, p.PartyPass);
+        Assert.Equal(249m, p.GoldPass);
         Assert.Equal(60m, p.SendingPerBlock);
-        Assert.Equal(Prices.Defaults.WeddingPass, p.WeddingPass);
+        Assert.Equal(Prices.Defaults.PlatinumPass, p.PlatinumPass);
+    }
+
+    // ----- A row saved before Party and Wedding became Gold and Platinum --------------------------
+
+    private const string OldRow = """
+        {"PartyPass":249,"WeddingPass":799,"KeepPhotosYearly":160,"PremiumMonthly":210,"VenueDiscountPercent":40,
+         "SendingPerBlock":60,"MvrPerUsd":15.5,"PartyExtension":120,"WeddingExtension":400,"VenueMonthly":2500}
+        """;
+
+    [Fact]
+    public async Task A_row_with_the_old_names_keeps_every_custom_price()
+    {
+        var p = await Sut(new AppSetting { Key = PriceBook.Key, ValueJson = OldRow }).CurrentAsync();
+        Assert.Equal(new Prices(249m, 799m, 160m, 210m, 40, 60m, 15.5m, 120m, 400m, 2500m), p);
+    }
+
+    [Fact]
+    public async Task A_row_with_the_old_names_in_camel_case_keeps_them_too()
+    {
+        var row = new AppSetting { Key = PriceBook.Key, ValueJson = """{"partyPass":249,"weddingPass":799,"partyExtension":120,"weddingExtension":400}""" };
+        var p = await Sut(row).CurrentAsync();
+        Assert.Equal((249m, 799m, 120m, 400m), (p.GoldPass, p.PlatinumPass, p.GoldExtension, p.PlatinumExtension));
+    }
+
+    [Fact]
+    public async Task When_a_row_has_both_the_new_name_wins()
+    {
+        var row = new AppSetting { Key = PriceBook.Key, ValueJson = """{"PartyPass":249,"GoldPass":300}""" };
+        Assert.Equal(300m, (await Sut(row).CurrentAsync()).GoldPass);
+    }
+
+    [Fact]
+    public async Task Saving_over_an_old_row_writes_the_new_names_and_keeps_the_prices_not_changed()
+    {
+        var row = new AppSetting { Key = PriceBook.Key, ValueJson = OldRow };
+        var book = Sut(row);
+        var before = await book.CurrentAsync();
+        await book.SetAsync(before with { KeepPhotosYearly = 170m }, Guid.NewGuid());
+
+        Assert.DoesNotContain("Party", row.ValueJson);
+        Assert.DoesNotContain("Wedding", row.ValueJson);
+        PriceBook.ClearCache();
+        var after = await Sut(row).CurrentAsync();
+        Assert.Equal(before with { KeepPhotosYearly = 170m }, after);
     }
 
     [Fact]
@@ -46,7 +90,7 @@ public class PriceBookTests
     {
         var book = Sut();
         await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            book.SetAsync(Prices.Defaults with { WeddingPass = 50 }, Guid.NewGuid()));
+            book.SetAsync(Prices.Defaults with { PlatinumPass = 50 }, Guid.NewGuid()));
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 

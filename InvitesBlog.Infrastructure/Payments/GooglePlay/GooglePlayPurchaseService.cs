@@ -84,10 +84,10 @@ public sealed class GooglePlayPurchaseService(
         var active = EventPasses.Active(campaign, now);
         if (!discounted)
         {
-            if (active == EventPassKind.None) list.Add("party_pass");
-            if (active != EventPassKind.Wedding) list.Add("wedding_pass");
-            if (campaign.EventPass == EventPassKind.Party) list.Add("party_pass_extend");
-            if (campaign.EventPass == EventPassKind.Wedding) list.Add("wedding_pass_extend");
+            if (active == EventPassKind.None) list.Add("gold_pass");
+            if (active != EventPassKind.Platinum) list.Add("platinum_pass");
+            if (campaign.EventPass == EventPassKind.Gold) list.Add("gold_pass_extend");
+            if (campaign.EventPass == EventPassKind.Platinum) list.Add("platinum_pass_extend");
         }
         if (campaign.Kind != CampaignKind.SaveTheDate && campaign.EventPass == EventPassKind.None) list.Add("keep_photos_year");
         list.Add("extra_invites_100");
@@ -407,24 +407,24 @@ public sealed class GooglePlayPurchaseService(
     {
         switch (payment.Kind)
         {
-            case PaymentKind.PartyPass:
-            case PaymentKind.WeddingPass:
+            case PaymentKind.GoldPass:
+            case PaymentKind.PlatinumPass:
             {
-                var voided = payment.Kind == PaymentKind.WeddingPass ? EventPassKind.Wedding : EventPassKind.Party;
+                var voided = payment.Kind == PaymentKind.PlatinumPass ? EventPassKind.Platinum : EventPassKind.Gold;
                 var others = await db.Payments
                     .Where(p => p.CampaignId == campaign.Id && p.Id != payment.Id && p.Status == PaymentStatus.Paid
-                                && (p.Kind == PaymentKind.PartyPass || p.Kind == PaymentKind.WeddingPass))
+                                && (p.Kind == PaymentKind.GoldPass || p.Kind == PaymentKind.PlatinumPass))
                     .Select(p => p.Kind).ToListAsync(ct);
-                // Only what this one gave: a Party pass refunded under a Wedding pass changes nothing,
+                // Only what this one gave: a Gold pass refunded under a Platinum pass changes nothing,
                 // and one of two the same loses its year.
                 if (campaign.EventPass != voided) break;
                 if (others.Contains(payment.Kind))
                 {
                     if (campaign.EventPassUntil is { } until) campaign.EventPassUntil = until.AddMonths(-PlanCatalog.PassMonths);
                 }
-                else if (voided == EventPassKind.Wedding && others.Contains(PaymentKind.PartyPass))
+                else if (voided == EventPassKind.Platinum && others.Contains(PaymentKind.GoldPass))
                 {
-                    campaign.EventPass = EventPassKind.Party;
+                    campaign.EventPass = EventPassKind.Gold;
                 }
                 else
                 {
@@ -432,8 +432,8 @@ public sealed class GooglePlayPurchaseService(
                 }
                 break;
             }
-            case PaymentKind.PartyExtension:
-            case PaymentKind.WeddingExtension:
+            case PaymentKind.GoldExtension:
+            case PaymentKind.PlatinumExtension:
                 if (campaign.EventPassUntil is { } end) campaign.EventPassUntil = end.AddMonths(-PlanCatalog.PassMonths);
                 break;
             case PaymentKind.KeepPhotos:

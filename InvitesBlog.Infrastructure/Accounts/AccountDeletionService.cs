@@ -249,7 +249,7 @@ public sealed class AccountDeletionService(
         foreach (var c in running)
         {
             if (c.EventPass != EventPassKind.None && c.EventPassUntil > now)
-                paid.Add($"{(c.EventPass == EventPassKind.Wedding ? "Wedding" : "Party")} pass on {c.Title}");
+                paid.Add($"{(c.EventPass == EventPassKind.Platinum ? "Platinum" : "Gold")} pass on {c.Title}");
             if (c.KeepPhotosUntil > now) paid.Add($"Keep your photos on {c.Title}");
         }
 

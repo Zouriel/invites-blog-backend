@@ -27,7 +27,7 @@ public class PassReminderTests
             var c = TestData.Campaign();
             c.Status = status;
             c.CreatedByUserId = host.Id;
-            c.EventPass = EventPassKind.Wedding;
+            c.EventPass = EventPassKind.Platinum;
             c.EventPassUntil = until;
             db.Campaigns.Add(c);
             return c;

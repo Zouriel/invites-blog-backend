@@ -12,13 +12,22 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using System.Text.Json.Serialization;
 
 namespace InvitesBlog.Application.Services.Billing;
 
 public sealed record BillingPricesDto(
-    decimal PartyPass, decimal WeddingPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
+    decimal GoldPass, decimal PlatinumPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
     decimal PremiumMonthly, int VenueDiscountPercent,
-    decimal PartyExtension, decimal WeddingExtension, decimal VenueMonthly);
+    decimal GoldExtension, decimal PlatinumExtension, decimal VenueMonthly)
+{
+    // The same prices under their names before the rename, read by web tabs still open from before
+    // that deploy. Nothing current reads them; remove them a release later.
+    [JsonPropertyName("partyPass")] public decimal OldGoldPass => GoldPass;
+    [JsonPropertyName("weddingPass")] public decimal OldPlatinumPass => PlatinumPass;
+    [JsonPropertyName("partyExtension")] public decimal OldGoldExtension => GoldExtension;
+    [JsonPropertyName("weddingExtension")] public decimal OldPlatinumExtension => PlatinumExtension;
+}
 
 /// <summary>The account's own plan: None, Premium or Venue.</summary>
 /// <param name="AutoRenew">What renews by itself at <paramref name="EndsAt"/> (premium-monthly,
@@ -34,7 +43,7 @@ public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool
 public sealed record PaymentStatusDto(Guid Id, string Item, string Description, decimal Amount, string Currency, string Status);
 
 /// <summary>One of the account's events, with everything that can be bought for it.</summary>
-/// <param name="Pass">The pass it has or last had (None, Party, Wedding) — what an extension extends.</param>
+/// <param name="Pass">The pass it has or last had (None, Gold, Platinum) — what an extension extends.</param>
 /// <param name="Offer">What its passes cost this host: with the venue discount on an event a venue runs.</param>
 /// <param name="IsDraft">Not finished yet: a pass bought now is what it goes out with.</param>
 public sealed record BillingEventDto(
@@ -50,7 +59,7 @@ public sealed record BillingOverviewDto(
     bool PaymentsEnabled, string Currency, decimal MvrPerUsd, BillingPricesDto Prices, BillingAccountDto Account,
     IReadOnlyList<BillingEventDto> Events, IReadOnlyList<BillingPaymentDto> Payments);
 
-/// <param name="Item">party-pass, wedding-pass, party-extension, wedding-extension, keep-photos, sending,
+/// <param name="Item">gold-pass, platinum-pass, gold-extension, platinum-extension, keep-photos, sending,
 /// premium-monthly or venue-monthly.</param>
 /// <param name="Quantity">Blocks of emails. 1 for the rest.</param>
 /// <param name="ReturnPath">A path on this site to come back to after paying (the plan step); the billing page by default.</param>
@@ -160,9 +169,9 @@ public sealed class BillingService(
 
         return new BillingOverviewDto(
             Enabled, PlanCatalog.Currency, p.MvrPerUsd,
-            new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
+            new BillingPricesDto(p.GoldPass, p.PlatinumPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 p.PremiumMonthly, p.VenueDiscountPercent,
-                p.PartyExtension, p.WeddingExtension, p.VenueMonthly),
+                p.GoldExtension, p.PlatinumExtension, p.VenueMonthly),
             await AccountWithStoreAsync(user, now, ct),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
@@ -316,10 +325,10 @@ public sealed class BillingService(
         var offer = campaign is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
         var amount = kind switch
         {
-            PaymentKind.PartyPass => offer!.PartyPass,
-            PaymentKind.WeddingPass => offer!.WeddingPass,
-            PaymentKind.PartyExtension => offer!.PartyExtension,
-            PaymentKind.WeddingExtension => offer!.WeddingExtension,
+            PaymentKind.GoldPass => offer!.GoldPass,
+            PaymentKind.PlatinumPass => offer!.PlatinumPass,
+            PaymentKind.GoldExtension => offer!.GoldExtension,
+            PaymentKind.PlatinumExtension => offer!.PlatinumExtension,
             PaymentKind.KeepPhotos => p.KeepPhotosYearly,
             PaymentKind.Sending => p.SendingPerBlock * quantity,
             PaymentKind.PremiumMonthly => p.PremiumMonthly,
@@ -328,8 +337,8 @@ public sealed class BillingService(
         };
         var description = Describe(kind, quantity, campaign);
         // The discount says where it comes from, on the receipt as on the page.
-        if (offer is { VenuePercent: > 0 } v && kind is PaymentKind.PartyPass or PaymentKind.WeddingPass
-                or PaymentKind.PartyExtension or PaymentKind.WeddingExtension)
+        if (offer is { VenuePercent: > 0 } v && kind is PaymentKind.GoldPass or PaymentKind.PlatinumPass
+                or PaymentKind.GoldExtension or PaymentKind.PlatinumExtension)
             description += $" · {v.VenuePercent}% venue price, {v.VenueName}";
 
         return new Priced(kind, quantity, campaign, amount, description);
@@ -340,10 +349,10 @@ public sealed class BillingService(
     {
         if (campaign.Status == CampaignStatus.Cancelled)
             throw new BusinessRuleException("That event was cancelled.", "event_cancelled");
-        if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
-            throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
-        if (kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension
-            && campaign.EventPass != (kind == PaymentKind.WeddingExtension ? EventPassKind.Wedding : EventPassKind.Party))
+        if (kind == PaymentKind.GoldPass && EventPasses.Active(campaign, now) == EventPassKind.Platinum)
+            throw new BusinessRuleException("That event already has a Platinum pass.", "pass_already_bigger");
+        if (kind is PaymentKind.GoldExtension or PaymentKind.PlatinumExtension
+            && campaign.EventPass != (kind == PaymentKind.PlatinumExtension ? EventPassKind.Platinum : EventPassKind.Gold))
             throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
     }
 
@@ -370,14 +379,14 @@ public sealed class BillingService(
 
         switch (payment.Kind)
         {
-            case PaymentKind.PartyPass:
-            case PaymentKind.WeddingPass:
+            case PaymentKind.GoldPass:
+            case PaymentKind.PlatinumPass:
                 if (campaign is null) break;
-                EventPasses.Apply(campaign, payment.Kind == PaymentKind.WeddingPass ? EventPassKind.Wedding : EventPassKind.Party, now);
+                EventPasses.Apply(campaign, payment.Kind == PaymentKind.PlatinumPass ? EventPassKind.Platinum : EventPassKind.Gold, now);
                 raiseWindows = true;
                 break;
-            case PaymentKind.PartyExtension:
-            case PaymentKind.WeddingExtension:
+            case PaymentKind.GoldExtension:
+            case PaymentKind.PlatinumExtension:
                 if (campaign is null) break;
                 raiseWindows = EventPasses.Extend(campaign, now);
                 break;
@@ -505,35 +514,39 @@ public sealed class BillingService(
     private Guid RequireUser() => currentUser.UserId ?? throw new ForbiddenException("Sign in to see your billing.");
 
     private static bool IsEventItem(PaymentKind kind) =>
-        kind is PaymentKind.PartyPass or PaymentKind.WeddingPass or PaymentKind.PartyExtension or PaymentKind.WeddingExtension
+        kind is PaymentKind.GoldPass or PaymentKind.PlatinumPass or PaymentKind.GoldExtension or PaymentKind.PlatinumExtension
             or PaymentKind.KeepPhotos or PaymentKind.Sending;
 
+    /// <summary>
+    /// A billing key to what it buys. The keys from before Party and Wedding became Gold and Platinum
+    /// are still accepted: a tab open during the deploy, or an old client, may post them.
+    /// </summary>
     public static PaymentKind ParseItem(string? item) => (item ?? "").Trim().ToLowerInvariant() switch
     {
-        "party-pass" => PaymentKind.PartyPass,
-        "wedding-pass" => PaymentKind.WeddingPass,
+        "gold-pass" or "party-pass" => PaymentKind.GoldPass,
+        "platinum-pass" or "wedding-pass" => PaymentKind.PlatinumPass,
         "keep-photos" => PaymentKind.KeepPhotos,
         "sending" => PaymentKind.Sending,
         "premium-monthly" => PaymentKind.PremiumMonthly,
         "venue-monthly" => PaymentKind.VenueMonthly,
-        "party-extension" => PaymentKind.PartyExtension,
-        "wedding-extension" => PaymentKind.WeddingExtension,
+        "gold-extension" or "party-extension" => PaymentKind.GoldExtension,
+        "platinum-extension" or "wedding-extension" => PaymentKind.PlatinumExtension,
         _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
     };
 
     public static string ItemName(PaymentKind kind) => kind switch
     {
-        PaymentKind.PartyPass => "party-pass",
-        PaymentKind.WeddingPass => "wedding-pass",
+        PaymentKind.GoldPass => "gold-pass",
+        PaymentKind.PlatinumPass => "platinum-pass",
         PaymentKind.KeepPhotos => "keep-photos",
         PaymentKind.Sending or PaymentKind.Initial or PaymentKind.TopUp => "sending",
         PaymentKind.PremiumMonthly => "premium-monthly",
         PaymentKind.StudioYearly => "studio-yearly",
         PaymentKind.VenueMonthly => "venue-monthly",
-        PaymentKind.PartyExtension => "party-extension",
-        PaymentKind.WeddingExtension => "wedding-extension",
-        PaymentKind.StudioPartyCredits => "studio-party-credits",
-        PaymentKind.StudioWeddingCredits => "studio-wedding-credits",
+        PaymentKind.GoldExtension => "gold-extension",
+        PaymentKind.PlatinumExtension => "platinum-extension",
+        PaymentKind.StudioGoldCredits => "studio-gold-credits",
+        PaymentKind.StudioPlatinumCredits => "studio-platinum-credits",
         _ => "other",
     };
 
@@ -542,25 +555,25 @@ public sealed class BillingService(
         var on = c is null ? "" : $" · {c.Title}";
         return kind switch
         {
-            PaymentKind.PartyPass => $"Party pass{on}",
-            PaymentKind.WeddingPass => $"Wedding pass{on}",
-            PaymentKind.PartyExtension => $"Party pass, another year{on}",
-            PaymentKind.WeddingExtension => $"Wedding pass, another year{on}",
+            PaymentKind.GoldPass => $"Gold pass{on}",
+            PaymentKind.PlatinumPass => $"Platinum pass{on}",
+            PaymentKind.GoldExtension => $"Gold pass, another year{on}",
+            PaymentKind.PlatinumExtension => $"Platinum pass, another year{on}",
             PaymentKind.KeepPhotos => $"Keep your photos, a year{on}",
             PaymentKind.Sending => $"{quantity * PricingCalculator.BlockSize} emailed invitations{on}",
             PaymentKind.PremiumMonthly => "Premium pass, a month",
             PaymentKind.StudioYearly => "Studio, a year",
             PaymentKind.VenueMonthly => "Venue, a month",
-            PaymentKind.StudioPartyCredits => $"{quantity} Party pass{(quantity == 1 ? "" : "es")} for clients",
-            PaymentKind.StudioWeddingCredits => $"{quantity} Wedding pass{(quantity == 1 ? "" : "es")} for clients",
+            PaymentKind.StudioGoldCredits => $"{quantity} Gold pass{(quantity == 1 ? "" : "es")} for clients",
+            PaymentKind.StudioPlatinumCredits => $"{quantity} Platinum pass{(quantity == 1 ? "" : "es")} for clients",
             _ => kind.ToString(),
         };
     }
 
     private static string InquireTopic(PaymentKind kind) => kind switch
     {
-        PaymentKind.PartyPass or PaymentKind.PartyExtension => "party",
-        PaymentKind.WeddingPass or PaymentKind.WeddingExtension => "wedding",
+        PaymentKind.GoldPass or PaymentKind.GoldExtension => "gold",
+        PaymentKind.PlatinumPass or PaymentKind.PlatinumExtension => "platinum",
         PaymentKind.KeepPhotos => "keep",
         PaymentKind.Sending => "sending",
         PaymentKind.PremiumMonthly => "premium",

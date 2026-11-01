@@ -72,17 +72,18 @@ public enum PaymentKind
 {
     Initial,
     TopUp,
-    // What the billing page sells (appended; EF stores ints). See BillingService.
-    PartyPass,
-    WeddingPass,
+    // What the billing page sells (appended; EF stores ints, so only the names may ever change, never
+    // the order). GoldPass and PlatinumPass were PartyPass and WeddingPass. See BillingService.
+    GoldPass,
+    PlatinumPass,
     KeepPhotos,
     Sending,
     PremiumMonthly,         // was StudioMonthly: Studio became Premium (2026-10)
     StudioYearly,           // retired: Premium is monthly only
-    StudioPartyCredits,     // retired: Studio clients get the discount automatically now
-    StudioWeddingCredits,   // retired
-    PartyExtension,
-    WeddingExtension,
+    StudioGoldCredits,     // retired: Studio clients get the discount automatically now
+    StudioPlatinumCredits,   // retired
+    GoldExtension,
+    PlatinumExtension,
     VenueMonthly,
 }
 
@@ -165,17 +166,20 @@ public enum MediaBucketTier
 public enum SubscriptionTier
 {
     None = 0,
-    /// <summary>A monthly subscription: every event the account organises gets 3 GB, no "Made with
+    /// <summary>A monthly subscription: every event the account organises gets 2 GB, no "Made with
     /// invites.blog" mark, and keeps its photos for as long as the subscription lasts.</summary>
     Premium = 2,
     /// <summary>A resort or hall: albums for every event at the property, under its own name, run by its staff.</summary>
     Venue = 3,
 }
 
-/// <summary>What one event was bought. Stored as a number; see <c>Campaign.EventPass</c>.</summary>
+/// <summary>
+/// What one event was bought. Stored as a number (<c>campaigns.event_pass</c>); Gold was called Party and
+/// Platinum was called Wedding, with the same numbers. See <c>Campaign.EventPass</c>.
+/// </summary>
 public enum EventPassKind
 {
     None = 0,
-    Party = 1,
-    Wedding = 2,
+    Gold = 1,
+    Platinum = 2,
 }

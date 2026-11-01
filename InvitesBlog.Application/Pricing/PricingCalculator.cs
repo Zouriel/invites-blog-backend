@@ -16,8 +16,8 @@ public sealed record PriceBreakdown(
     string Currency = Plans.PlanCatalog.Currency);
 
 /// <summary>
-/// What invites.blog charges to SEND invitations. Sharing links yourself is always free. A Party pass
-/// includes the first 100 and a Wedding pass the first 500; beyond that, and for an event without a
+/// What invites.blog charges to SEND invitations. Sharing links yourself is always free. A Gold pass
+/// includes the first 100 and a Platinum pass the first 500; beyond that, and for an event without a
 /// pass, it is <see cref="PricePerBlock"/> for every <see cref="BlockSize"/>. No minimum, and a top-up
 /// only pays for what is not already covered. Pure and deterministic — the unit tests pin every branch.
 /// </summary>

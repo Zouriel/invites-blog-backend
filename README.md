@@ -38,8 +38,8 @@ moderates.
 A bucket owns its **window** and its **audience** and little else: its cover, its date and its
 guest list are the event's, shared with the invitation, and its space is the event's plan's. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
-(`PlanCatalog`): Free for every event, a Party or Wedding pass bought per event, or the organiser's
-Premium pass. The Premium pass (3 GB on every event, kept while it lasts) and Venue (resorts and
+(`PlanCatalog`): Free for every event, a Gold or Platinum pass bought per event, or the organiser's
+Premium pass. The Premium pass (2 GB on every event, kept while it lasts) and Venue (resorts and
 halls, passes at half price) are the only subscriptions; hosts pay per event. The template designer
 is open to every account. Prices are in rufiyaa.
 
@@ -213,7 +213,7 @@ Worth knowing before reading the pricing code:
   `app_settings`, edited in Admin → Prices, audited as `prices.set`), falling back to the defaults in
   `PlanCatalog`/`Prices.Defaults`. Space, albums, days and included emails stay in `PlanCatalog`.
 - **Payments are not live.** `PricingCalculator` is complete and tested — MVR 50 per 100 invitations,
-  after the 100 a Party pass or 500 a Wedding pass includes — but the only registered
+  after the 100 a Gold pass or 500 a Platinum pass includes — but the only registered
   `IPaymentProvider` is `FakePaymentProvider`, and sending invitations is not charged at all today.
   No real money has moved through this.
 - **Delivery is email only.** The landing page's Telegram and WhatsApp are marked "coming soon"

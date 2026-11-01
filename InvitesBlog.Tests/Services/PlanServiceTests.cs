@@ -32,7 +32,7 @@ public class PlanServiceTests
     {
         var plan = await PlanFor(SubscriptionTier.Premium, null);
         Assert.Equal(PlanKind.Premium, plan.Kind);
-        Assert.Equal(3 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(2 * PlanCatalog.Gb, plan.EventBytes);
         Assert.Null(plan.CoveredUntil);
     }
 

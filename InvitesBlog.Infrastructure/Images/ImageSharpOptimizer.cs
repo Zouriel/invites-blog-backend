@@ -27,6 +27,9 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
     /// <summary>High enough that the difference is invisible at these dimensions, well below the
     /// near-lossless quality phones encode at (which is where most of the file size goes).</summary>
     private const int JpegQuality = 82;
+
+    /// <summary>For a photograph someone will want back, when it has to be turned the right way up.</summary>
+    private const int KeptJpegQuality = 95;
     private const int WebpQuality = 82;
 
     public OptimizedImage Optimize(byte[] content, string contentType, int? maxEdge = null)
@@ -155,6 +158,19 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
 
         try
         {
+            // A JPEG that is already the right way up doesn't need decoding at all: the camera's own
+            // encode is the photograph, and writing it again at web quality loses what they shot.
+            if (type == "image/jpeg")
+            {
+                var info = Image.Identify(content);
+                if (!info.Metadata.ExifProfile.HasTurn() && JpegMetadata.TryStrip(content, out var clean))
+                {
+                    logger.LogInformation("Event photo kept as shot: {OldKb} KB -> {NewKb} KB ({W}x{H}, metadata stripped).",
+                        content.Length / 1024, clean.Length / 1024, info.Width, info.Height);
+                    return new OptimizedImage(clean, contentType, info.Width, info.Height, true);
+                }
+            }
+
             using var image = Image.Load(content);
 
             // No resize. This is the whole difference from Optimize: an event photo is the picture
@@ -169,7 +185,9 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
             image.Metadata.XmpProfile = null;
 
             using var output = new MemoryStream();
-            if (!Encode(image, output, type, PngCompressionLevel.DefaultCompression))
+            // Turning a JPEG means encoding it again, so as near to what was shot as is sensible.
+            if (type == "image/jpeg") image.Save(output, new JpegEncoder { Quality = KeptJpegQuality, ColorType = JpegColorType.YCbCrRatio444 });
+            else if (!Encode(image, output, type, PngCompressionLevel.DefaultCompression))
                 return Passthrough(content, contentType);
 
             var bytes = output.ToArray();
