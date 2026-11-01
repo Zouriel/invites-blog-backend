@@ -31,6 +31,13 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         ClientId = config[$"OAuth:{ConfigSection}:ClientId"];
     }
 
+    /// <summary>For a token addressed to something other than a sign-in client.</summary>
+    protected OpenIdConnectAuthProvider(string? audience, IHttpClientFactory httpClientFactory)
+    {
+        this.httpClientFactory = httpClientFactory;
+        ClientId = audience;
+    }
+
     public abstract string Provider { get; }
     /// <summary>The <c>OAuth:&lt;section&gt;:ClientId</c> configuration key this provider reads.</summary>
     protected abstract string ConfigSection { get; }

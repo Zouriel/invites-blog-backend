@@ -25,6 +25,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<InviteTrustedIp> InviteTrustedIps => Set<InviteTrustedIp>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<GooglePlayPurchase> GooglePlayPurchases => Set<GooglePlayPurchase>();
     public DbSet<Refund> Refunds => Set<Refund>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<RsvpResponse> RsvpResponses => Set<RsvpResponse>();
@@ -262,6 +263,27 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Description).HasMaxLength(200);
             e.Property(x => x.Amount).HasColumnType("numeric(10,2)");
             e.Property(x => x.TermsVersion).HasMaxLength(32);
+            e.Property(x => x.IsTest).HasDefaultValue(false);
+            // A store's order is paid for once, whichever way word of it arrives. Only for the store:
+            // the gateway's references have never been unique and aren't promised to be.
+            e.HasIndex(x => x.ProviderPaymentId).IsUnique()
+                .HasFilter("provider = 'google_play' AND provider_payment_id IS NOT NULL")
+                .HasDatabaseName("ux_payments_google_play_order");
+        });
+
+        b.Entity<GooglePlayPurchase>(e =>
+        {
+            e.ToTable("google_play_purchases");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.PurchaseToken).HasMaxLength(2048);
+            e.HasIndex(x => x.PurchaseToken).IsUnique().HasDatabaseName("ux_google_play_purchases_token");
+            e.Property(x => x.ProductId).HasMaxLength(64);
+            e.Property(x => x.OrderId).HasMaxLength(64);
+            e.Property(x => x.SubscriptionState).HasMaxLength(64);
+            e.Property(x => x.IsTest).HasDefaultValue(false);
+            e.Property(x => x.AutoRenewing).HasDefaultValue(false);
+            e.HasIndex(x => x.UserId);
+            // No foreign keys, like payments: these rows outlive what they name, as the accounts do.
         });
 
         b.Entity<Refund>(e =>
@@ -405,7 +427,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("pending_removals");
             e.HasKey(x => x.Id);
             e.Property(x => x.Kind).HasMaxLength(32);
-            e.Property(x => x.Target).HasMaxLength(512);
+            e.Property(x => x.Target).HasMaxLength(2048);
             e.HasIndex(x => x.NextAttemptAt).HasDatabaseName("idx_pending_removals_next_attempt");
         });
 

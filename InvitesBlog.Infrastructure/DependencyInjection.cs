@@ -158,6 +158,15 @@ public static class DependencyInjection
         services.AddScoped<DispatchService>();
         services.AddScoped<Payments.PaymentOutcomes>();
 
+        // Google Play: only ever asks, and consumes after applying. No automatic retries on the client:
+        // the callers already retry safely, and a hung call mustn't hold a buyer's screen for long.
+        services.AddHttpClient(Payments.GooglePlay.GooglePlayPublisher.ClientName, c => c.Timeout = TimeSpan.FromSeconds(30))
+            // The factory's default logging writes each request's URL, and a purchase token is in the path.
+            .RemoveAllLoggers();
+        services.AddSingleton<Application.Services.Billing.IGooglePlayPublisher, Payments.GooglePlay.GooglePlayPublisher>();
+        services.AddSingleton<Payments.GooglePlay.GooglePubSubTokenVerifier>();
+        services.AddScoped<Application.Services.Billing.IGooglePlayPurchases, Payments.GooglePlay.GooglePlayPurchaseService>();
+
         // Payments: Bank of Maldives (BML Connect) when configured, the no-network fake otherwise.
         if (string.Equals(config["Payments:Provider"], "Bml", StringComparison.OrdinalIgnoreCase))
         {

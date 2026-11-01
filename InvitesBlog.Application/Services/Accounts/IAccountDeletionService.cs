@@ -13,6 +13,7 @@ namespace InvitesBlog.Application.Services.Accounts;
 /// <param name="Blocked">Why the account can't be deleted right now, or null.</param>
 /// <param name="CodeChannel">"email" or "sms": where the code will go.</param>
 /// <param name="CodeSentTo">That destination, masked.</param>
+/// <param name="StoreNote">What happens to a subscription in the store, in words, or null when there is none.</param>
 public sealed record AccountDeletionSummaryDto(
     int EventsDeleted,
     int EventsPassedOn,
@@ -23,7 +24,8 @@ public sealed record AccountDeletionSummaryDto(
     bool AutoRenews,
     string? Blocked,
     string CodeChannel,
-    string CodeSentTo);
+    string CodeSentTo,
+    string? StoreNote = null);
 
 public sealed record AccountDeletedDto(bool Deleted);
 

@@ -23,7 +23,11 @@ public sealed record BillingPricesDto(
 /// <summary>The account's own plan: None, Premium or Venue.</summary>
 /// <param name="AutoRenew">What renews by itself at <paramref name="EndsAt"/> (premium-monthly,
 /// venue-monthly), charging the saved card; null when nothing does.</param>
-public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active, string? AutoRenew = null);
+/// <param name="Store">"google_play" when the plan runs on a store subscription: it is managed in the
+/// store, and our own "turn off automatic renewal" doesn't reach it.</param>
+/// <param name="StoreAutoRenew">That subscription will renew by itself.</param>
+public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active, string? AutoRenew = null,
+    string? Store = null, bool StoreAutoRenew = false);
 
 /// <summary>Where one payment stands, for the page the buyer lands on after the gateway.</summary>
 /// <param name="Status">Pending, Paid or Failed.</param>
@@ -124,7 +128,8 @@ public sealed class BillingService(
     IRepository<AuditLog> auditLogs,
     IUnitOfWork uow,
     IRecurringPaymentProvider? recurring = null,
-    Payments.IPaymentService? paymentService = null) : IBillingService
+    Payments.IPaymentService? paymentService = null,
+    IRepository<GooglePlayPurchase>? playPurchases = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -158,7 +163,7 @@ public sealed class BillingService(
             new BillingPricesDto(p.PartyPass, p.WeddingPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 p.PremiumMonthly, p.VenueDiscountPercent,
                 p.PartyExtension, p.WeddingExtension, p.VenueMonthly),
-            Account(user, now),
+            await AccountWithStoreAsync(user, now, ct),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
                 x.Amount, x.Currency, x.Status.ToString(), x.CreatedAt, x.PaidAt, x.CampaignId)).ToList());
@@ -299,23 +304,13 @@ public sealed class BillingService(
             if (await ownership.AccessAsync(id, ct) != CampaignAccess.Organiser)
                 throw new ForbiddenException("Only the event's host can pay for it.");
             campaign = await campaigns.GetByIdAsync(id, ct) ?? throw new NotFoundException("That event no longer exists.");
-            if (campaign.Status == CampaignStatus.Cancelled)
-                throw new BusinessRuleException("That event was cancelled.", "event_cancelled");
-            if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
-                throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
-            if (kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension
-                && campaign.EventPass != (kind == PaymentKind.WeddingExtension ? EventPassKind.Wedding : EventPassKind.Party))
-                throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
+            EnsureEventCanHave(kind, campaign, now);
         }
         else
         {
             var user = await users.Query().FirstOrDefaultAsync(u => u.Id == me, ct)
                        ?? throw new NotFoundException("That account no longer exists.");
-            var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-            if (kind == PaymentKind.PremiumMonthly && active && user.SubscriptionTier == SubscriptionTier.Venue)
-                throw new BusinessRuleException("This account is on the Venue plan. Talk to us about changing it.", "billing_venue_account");
-            if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Premium)
-                throw new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account");
+            EnsureAccountCanHave(kind, user, now);
         }
 
         var offer = campaign is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
@@ -338,6 +333,28 @@ public sealed class BillingService(
             description += $" · {v.VenuePercent}% venue price, {v.VenueName}";
 
         return new Priced(kind, quantity, campaign, amount, description);
+    }
+
+    /// <summary>Whether this event can have this item now. Checkout and a store purchase ask the same question.</summary>
+    public static void EnsureEventCanHave(PaymentKind kind, Campaign campaign, DateTimeOffset now)
+    {
+        if (campaign.Status == CampaignStatus.Cancelled)
+            throw new BusinessRuleException("That event was cancelled.", "event_cancelled");
+        if (kind == PaymentKind.PartyPass && EventPasses.Active(campaign, now) == EventPassKind.Wedding)
+            throw new BusinessRuleException("That event already has a Wedding pass.", "pass_already_bigger");
+        if (kind is PaymentKind.PartyExtension or PaymentKind.WeddingExtension
+            && campaign.EventPass != (kind == PaymentKind.WeddingExtension ? EventPassKind.Wedding : EventPassKind.Party))
+            throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
+    }
+
+    /// <summary>Whether this account can have this plan now. Checkout and a store purchase ask the same question.</summary>
+    public static void EnsureAccountCanHave(PaymentKind kind, AppUser user, DateTimeOffset now)
+    {
+        var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+        if (kind == PaymentKind.PremiumMonthly && active && user.SubscriptionTier == SubscriptionTier.Venue)
+            throw new BusinessRuleException("This account is on the Venue plan. Talk to us about changing it.", "billing_venue_account");
+        if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Premium)
+            throw new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account");
     }
 
     public async Task FulfilAsync(Guid paymentId, CancellationToken ct = default)
@@ -388,8 +405,13 @@ public sealed class BillingService(
                 if (!(running && user.SubscriptionEndsAt is null))
                 {
                     var start = running && user.SubscriptionEndsAt > now ? user.SubscriptionEndsAt!.Value : now;
-                    user.SubscriptionEndsAt = payment.Kind == PaymentKind.StudioYearly ? start.AddYears(1) : start.AddMonths(1);
+                    user.SubscriptionEndsAt = payment.PeriodEndsAt is { } storeEnd
+                        // The store decides when its period ends. Time already paid for elsewhere is kept.
+                        ? (running && user.SubscriptionEndsAt > storeEnd ? user.SubscriptionEndsAt : storeEnd)
+                        : payment.Kind == PaymentKind.StudioYearly ? start.AddYears(1) : start.AddMonths(1);
                 }
+                // The store renews it from here on, so a card saved earlier must not be charged as well.
+                if (payment.PeriodEndsAt is not null) user.AutoRenewKind = null;
                 user.SubscriptionTier = tier;
                 // Bought with the card saved (or renewed with it): it goes on renewing the same way.
                 if (payment.AutoRenew)
@@ -455,7 +477,19 @@ public sealed class BillingService(
             }, ct);
             await uow.SaveChangesAsync(ct);
         }
-        return Account(user, now);
+        return await AccountWithStoreAsync(user, now, ct);
+    }
+
+    private async Task<BillingAccountDto> AccountWithStoreAsync(AppUser user, DateTimeOffset now, CancellationToken ct)
+    {
+        var account = Account(user, now);
+        if (playPurchases is null || !account.Active) return account;
+        var store = await playPurchases.Query()
+            .Where(p => p.UserId == user.Id && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
+            .OrderByDescending(p => p.ExpiresAt)
+            .Select(p => new { p.AutoRenewing })
+            .FirstOrDefaultAsync(ct);
+        return store is null ? account : account with { Store = PaymentProviders.GooglePlay, StoreAutoRenew = store.AutoRenewing };
     }
 
     private static BillingAccountDto Account(AppUser user, DateTimeOffset now)
