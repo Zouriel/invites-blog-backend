@@ -25,6 +25,30 @@ public sealed class EmailOtpSender(IEmailSender email, IConfiguration config) : 
 {
     public string Channel => "email";
 
+    public async Task<DeliveryResult> SendAccountDeletionCodeAsync(string recipient, string code, CancellationToken ct)
+    {
+        var minutes = int.TryParse(config["Otp:ExpiryMinutes"], out var m) ? m : 5;
+        var time = $"{minutes} minute{(minutes == 1 ? "" : "s")}";
+
+        var body =
+            EmailLayout.Heading("Delete your account?") +
+            EmailLayout.Paragraph("Use this code to confirm you want to delete your invites.blog account. Deleting it can't be undone.") +
+            EmailLayout.CodeBlock(code) +
+            EmailLayout.Paragraph($"The code expires in {time}.", muted: true) +
+            EmailLayout.Paragraph("If you didn't ask for this, don't share the code, and change your password if you have one.", muted: true) +
+            EmailLayout.EndSpacer();
+
+        return await email.SendAsync(new EmailMessage(
+            To: recipient,
+            Subject: $"{code} is your code to delete your invites.blog account",
+            Html: EmailLayout.Wrap(body, preheader: $"Your code to delete your account is {code}."),
+            Stream: EmailStream.System,
+            Text: $"Your code to delete your invites.blog account is {code}.\n\n"
+                + $"It expires in {time}. Deleting your account can't be undone.\n\n"
+                + "If you didn't ask for this, don't share the code, and change your password if you have one.",
+            Tags: new[] { new KeyValuePair<string, string>("kind", "otp_account_deletion") }), ct);
+    }
+
     public async Task<DeliveryResult> SendCodeAsync(string recipient, string code, CancellationToken ct)
     {
         // Same key OtpService uses to set ExpiresAt — the copy has to match the real expiry.

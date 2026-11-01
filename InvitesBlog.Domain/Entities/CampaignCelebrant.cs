@@ -24,6 +24,12 @@ public sealed class CampaignCelebrant
     /// <summary>Whether they may edit and send like the organiser. Only the organiser can turn it on.</summary>
     public bool CanManage { get; set; }
 
+    /// <summary>
+    /// Chosen to take over the event when its owner deleted their account and this person had none yet.
+    /// They become its owner the first time they sign in with this contact.
+    /// </summary>
+    public bool InheritsOwnership { get; set; }
+
     /// <summary>When the "you've been added" email went out, or null if it never did.</summary>
     public DateTimeOffset? NotifiedAt { get; set; }
 

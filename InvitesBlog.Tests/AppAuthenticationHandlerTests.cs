@@ -28,6 +28,7 @@ public class AppAuthenticationHandlerTests
     private const string Key = "a-test-signing-key-that-is-long-enough-for-hmac-sha256-0123456789";
 
     private readonly ICampaignRepository _campaigns = Substitute.For<ICampaignRepository>();
+    private readonly IRepository<AppUser> _users = Substitute.For<IRepository<AppUser>>();
 
     private static InviteeJwt Jwt(string key) => new(new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:SigningKey"] = key }).Build());
@@ -40,7 +41,7 @@ public class AppAuthenticationHandlerTests
         options.Get(Arg.Any<string>()).Returns(new AuthenticationSchemeOptions());
 
         var handler = new AppAuthenticationHandler(
-            options, NullLoggerFactory.Instance, UrlEncoder.Default, _campaigns, Jwt(Key));
+            options, NullLoggerFactory.Instance, UrlEncoder.Default, _campaigns, Jwt(Key), _users);
 
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();

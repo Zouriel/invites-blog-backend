@@ -27,6 +27,29 @@ public interface IStorageService
 
     /// <summary>Removes an object. Removing one that isn't there is not an error.</summary>
     Task DeleteAsync(string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes every object whose key starts with <paramref name="prefix"/>, which must name a folder or
+    /// a template's versions (see <see cref="StorageKeyPrefix.IsSafe"/>); anything wider is refused.
+    /// </summary>
+    Task DeletePrefixAsync(string prefix, CancellationToken ct = default);
+}
+
+/// <summary>What may be handed to <see cref="IStorageService.DeletePrefixAsync"/>.</summary>
+public static class StorageKeyPrefix
+{
+    /// <summary>
+    /// At least a folder and something inside it, ending at a boundary, so a blank id can't turn into
+    /// "delete the whole bucket".
+    /// </summary>
+    public static bool IsSafe(string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || prefix.StartsWith('/') || prefix.Contains("..")) return false;
+        if (!prefix.EndsWith('/') && !prefix.EndsWith('@')) return false;
+        var slash = prefix.IndexOf('/');
+        // "templates/" alone has nothing after the folder; "templates/@" has no name.
+        return slash > 0 && prefix.Length - slash - 1 >= 2;
+    }
 }
 
 /// <summary>
@@ -88,6 +111,13 @@ public interface IOtpSender
     /// <summary>"sms" | "email" — matches OtpChannel.</summary>
     string Channel { get; }
     Task<DeliveryResult> SendCodeAsync(string recipient, string code, CancellationToken ct);
+
+    /// <summary>
+    /// A code to confirm deleting an account, which must not read like a sign-in code: someone handing
+    /// it over should be able to see what it does.
+    /// </summary>
+    Task<DeliveryResult> SendAccountDeletionCodeAsync(string recipient, string code, CancellationToken ct) =>
+        SendCodeAsync(recipient, code, ct);
 }
 
 /// <summary>Which reputation stream / from-identity an email is sent on (provider guide §2.5).</summary>
@@ -215,6 +245,9 @@ public interface IRecurringPaymentProvider
     /// transaction, so a result that is still pending can be finished by the webhook or a status check.
     /// </summary>
     Task<PaymentWebhookResult> ChargeSavedCardAsync(SavedCardCharge charge, CancellationToken ct);
+
+    /// <summary>Removes the customer's saved cards at the gateway and closes the customer record.</summary>
+    Task ForgetCustomerAsync(string customerId, CancellationToken ct);
 }
 
 // ----- QR codes (media bucket contribution) -----

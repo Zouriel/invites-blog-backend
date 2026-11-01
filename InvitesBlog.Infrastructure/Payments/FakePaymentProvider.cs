@@ -45,6 +45,8 @@ public sealed class FakePaymentProvider(IConfiguration config) : IPaymentProvide
 
     public Task<bool> HasSavedCardAsync(string customerId, CancellationToken ct) => Task.FromResult(true);
 
+    public Task ForgetCustomerAsync(string customerId, CancellationToken ct) => Task.CompletedTask;
+
     public Task<PaymentWebhookResult> ChargeSavedCardAsync(SavedCardCharge charge, CancellationToken ct) =>
         Task.FromResult(new PaymentWebhookResult(
             WebhookEventKind.PaymentSucceeded, $"cs_fake_{Guid.NewGuid():N}", $"pi_fake_{Guid.NewGuid():N}", null, null)

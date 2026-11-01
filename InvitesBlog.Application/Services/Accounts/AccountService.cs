@@ -49,7 +49,8 @@ public sealed class AccountService(
     IConfiguration config,
     IRepository<Venue> venues,
     IRepository<VenueStaff> venueStaff,
-    IProfilePictureService pictures) : IAccountService
+    IProfilePictureService pictures,
+    IEventInheritance? inheritance = null) : IAccountService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(14);
 
@@ -560,6 +561,8 @@ public sealed class AccountService(
     {
         if (!user.IsActive) throw new AccountSuspendedException();
 
+        if (inheritance is not null) await inheritance.ClaimAsync(user, ct);
+
         var roleNames = RoleNames(user);
         if (roleNames.Count == 0) roleNames.Add(Roles.Customer);
 
@@ -659,7 +662,7 @@ public sealed class AccountService(
     private static string Normalize(string? email) => (email ?? string.Empty).Trim().ToLowerInvariant();
 
     /// <summary>a•••a@example.com — enough to recognise, not enough to harvest.</summary>
-    private static string MaskEmail(string email)
+    public static string MaskEmail(string email)
     {
         var at = email.IndexOf('@');
         if (at <= 0) return email;
@@ -670,7 +673,7 @@ public sealed class AccountService(
     }
 
     /// <summary>Keeps the country prefix and the last two digits.</summary>
-    private static string MaskPhone(string phone)
+    public static string MaskPhone(string phone)
     {
         if (phone.Length <= 4) return phone;
         return $"{phone[..Math.Min(4, phone.Length)]}•••{phone[^2..]}";

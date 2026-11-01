@@ -13,7 +13,7 @@ namespace InvitesBlog.Api.Controllers;
 /// issued token decide what the app shows them afterwards.
 /// </summary>
 [Route("api/auth")]
-public sealed class AuthController(IAccountService accounts) : BaseApiController
+public sealed class AuthController(IAccountService accounts, IAccountDeletionService deletion) : BaseApiController
 {
     /// <summary>What the sign-in page can offer — used to hide options this server can't deliver.</summary>
     [HttpGet("options")]
@@ -126,6 +126,28 @@ public sealed class AuthController(IAccountService accounts) : BaseApiController
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> VerifyLink([FromBody] VerifyCodeRequest request, CancellationToken ct) =>
         Success(await accounts.VerifyLinkAsync(request, ct));
+
+    // ----- Deleting the account -----------------------------------------------------------------
+
+    /// <summary>What deleting this account would remove, shown before anyone asks for the code.</summary>
+    [HttpGet("me/deletion/summary")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> DeletionSummary(CancellationToken ct) =>
+        Success(await deletion.SummaryAsync(ct));
+
+    /// <summary>Sends a code to the account's own email, or its phone if it has no email.</summary>
+    [HttpPost("me/deletion/request")]
+    [HasPermission(Permissions.Templates.Read)]
+    [EnableRateLimiting("account-delete")]
+    public async Task<IActionResult> RequestDeletion(CancellationToken ct) =>
+        Success(await deletion.RequestCodeAsync(ct));
+
+    /// <summary>Deletes the account, there and then. Its token stops working with this response.</summary>
+    [HttpPost("me/deletion/confirm")]
+    [HasPermission(Permissions.Templates.Read)]
+    [EnableRateLimiting("account-delete")]
+    public async Task<IActionResult> ConfirmDeletion([FromBody] VerifyCodeRequest request, CancellationToken ct) =>
+        Success(await deletion.DeleteAsync(request, ct));
 
     // ----- The signed-in person's own history ---------------------------------------------------
 

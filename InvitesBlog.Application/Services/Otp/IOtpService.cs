@@ -26,6 +26,12 @@ public interface IOtpService
     /// this with <see cref="VerifyAsync"/> keeps the expiry/attempt rules in exactly one place.
     /// </summary>
     Task<VerifiedContact> VerifyContactAsync(VerifyOtpRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// As above, for a code that must have been sent for exactly <paramref name="purpose"/>. A code asked
+    /// for to delete an account is good for nothing else, and nothing else is good for deleting one.
+    /// </summary>
+    Task<VerifiedContact> VerifyContactForAsync(VerifyOtpRequest req, OtpPurpose purpose, CancellationToken ct = default);
 }
 
 /// <summary>An identifier a challenge has just proved the caller controls.</summary>

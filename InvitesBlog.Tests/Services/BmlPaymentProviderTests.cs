@@ -54,6 +54,31 @@ public class BmlPaymentProviderTests
             ["localId"] = localId, ["url"] = $"https://pay.bml.test/{id}",
         }.ToJsonString();
 
+    // ----- a deleted account ------------------------------------------------------------------
+
+    [Fact]
+    public async Task Forgetting_a_customer_deletes_each_saved_card_then_archives_the_customer()
+    {
+        _bml.On(HttpMethod.Get, "/public-customers/c1/tokens", HttpStatusCode.OK, """{"items":[{"id":"t1"},{"_id":"t2"}]}""");
+        _bml.On(HttpMethod.Delete, "/public-customers/c1/tokens/t1", HttpStatusCode.NoContent, "");
+        _bml.On(HttpMethod.Delete, "/public-customers/c1/tokens/t2", HttpStatusCode.NoContent, "");
+        _bml.On(HttpMethod.Delete, "/public-customers/c1", HttpStatusCode.NoContent, "");
+
+        await Provider().ForgetCustomerAsync("c1", default);
+
+        var deletes = _bml.Requests.Where(r => r.Method == "DELETE").ToList();
+        Assert.Equal(3, deletes.Count);
+        Assert.EndsWith("/public-customers/c1", deletes[^1].Path);
+    }
+
+    [Fact]
+    public async Task A_refusal_while_forgetting_a_customer_is_an_error_so_it_is_retried() =>
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            _bml.On(HttpMethod.Get, "/public-customers/c2/tokens", HttpStatusCode.InternalServerError, """{"message":"no"}""");
+            await Provider().ForgetCustomerAsync("c2", default);
+        });
+
     // ----- taking a payment -------------------------------------------------------------------
 
     [Fact]
