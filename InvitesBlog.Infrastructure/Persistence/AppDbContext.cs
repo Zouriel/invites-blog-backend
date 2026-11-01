@@ -32,6 +32,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateAsset> TemplateAssets => Set<TemplateAsset>();
     public DbSet<CampaignAsset> CampaignAssets => Set<CampaignAsset>();
     public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
+    public DbSet<VideoTrimJob> VideoTrimJobs => Set<VideoTrimJob>();
     public DbSet<MediaBucket> MediaBuckets => Set<MediaBucket>();
     public DbSet<MediaBucketQr> MediaBucketQrs => Set<MediaBucketQr>();
     public DbSet<MediaBucketMember> MediaBucketMembers => Set<MediaBucketMember>();
@@ -313,6 +314,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // A standalone bucket has no campaign to read by, and the bucket list counts live items
             // per bucket — both are this index rather than the campaign one.
             e.HasIndex(x => new { x.BucketId, x.DeletedAt, x.CreatedAt });
+            // Trimming a video moves it to a new file. A delete that read the photo just before that
+            // would credit the old size and remove the old file, so it has to notice (see RemoveAsync).
+            e.Property(x => x.Url).IsConcurrencyToken();
+            e.Property(x => x.SizeBytes).IsConcurrencyToken();
+        });
+
+        b.Entity<VideoTrimJob>(e =>
+        {
+            e.ToTable("video_trim_jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(200);
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt }).HasDatabaseName("idx_video_trim_jobs_due");
+            // A photo's row can be removed outright (a deleted account); nothing about the job outlives it.
+            e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.Id).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<MediaBucket>(e =>
