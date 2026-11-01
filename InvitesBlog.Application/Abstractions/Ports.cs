@@ -114,6 +114,16 @@ public sealed record EmailMessage(
 /// <summary>A file sent with an email, such as a save the date's .ics.</summary>
 public sealed record EmailAttachment(string Filename, byte[] Content, string ContentType);
 
+/// <summary>
+/// Push notifications to all of one account's devices. Delivery problems are logged, never thrown,
+/// so a failed push can't fail what triggered it; only cancellation throws. An implementation may
+/// save the current unit of work when it forgets a dead device, so save your own changes first.
+/// </summary>
+public interface IPushSender
+{
+    Task SendAsync(Guid userId, string title, string body, IReadOnlyDictionary<string, string>? data, CancellationToken ct);
+}
+
 public interface IEmailSender
 {
     Task<DeliveryResult> SendAsync(EmailMessage message, CancellationToken ct);
