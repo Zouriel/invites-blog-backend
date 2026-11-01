@@ -13,6 +13,10 @@ public interface ICampaignOwnershipService
 
     /// <summary>How far this caller reaches into the campaign. See <see cref="CampaignAccess"/>.</summary>
     Task<CampaignAccess> AccessAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>What a named account may do with this event, for work done on its behalf with nobody
+    /// signed in (a store's notification). Link keys don't count: only the account.</summary>
+    Task<CampaignAccess> AccessOfAsync(Guid userId, Guid campaignId, CancellationToken ct = default);
 }
 
 /// <summary>What a caller may do with a campaign, from least to most.</summary>
@@ -58,7 +62,11 @@ public sealed class CampaignOwnershipService(
     {
         if (currentUser.CampaignId == campaignId) return CampaignAccess.Organiser;
         if (currentUser.UserId is not { } userId) return CampaignAccess.None;
+        return await AccessOfAsync(userId, campaignId, ct);
+    }
 
+    public async Task<CampaignAccess> AccessOfAsync(Guid userId, Guid campaignId, CancellationToken ct = default)
+    {
         var me = await users.GetByIdAsync(userId, ct);
         if (me is null) return CampaignAccess.None;
         if (string.IsNullOrWhiteSpace(me.Email) && string.IsNullOrWhiteSpace(me.PhoneE164)) return CampaignAccess.None;

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Xunit;
 
@@ -51,6 +52,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     public RecordingBank Bank { get; } = new();
     public RecordingMail Mail { get; } = new();
     public FlakyStorage Storage { get; private set; } = default!;
+    public GooglePlayStub Google { get; } = new();
+    public RecordingLogs Logs { get; } = new();
     public IServiceProvider Services => _factory!.Services;
     public string StorageRoot => _storageRoot;
 
@@ -68,6 +71,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             await using var create = new NpgsqlCommand($"CREATE DATABASE {_database}", admin);
             await create.ExecuteNonQueryAsync();
         }
+
+        await Google.StartAsync();
 
         var conn = new NpgsqlConnectionStringBuilder(_server) { Database = _database }.ToString();
         // Environment rather than the factory's configuration hook: Program reads configuration while it
@@ -88,6 +93,12 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["Urls__InviteeBase"] = "http://localhost",
             ["Urls__AssetsBase"] = "http://localhost/assets",
             ["Jwt__SigningKey"] = "integration-test-signing-key-long-enough-for-hmac-sha256-0123456789",
+            ["GooglePlay__PackageName"] = GooglePlayStub.Package,
+            ["GooglePlay__ServiceAccountJson"] = Google.ServiceAccountJson(),
+            ["GooglePlay__ApiBaseUrl"] = Google.BaseUrl,
+            ["GooglePlay__Notifications__Audience"] = GooglePlayStub.Audience,
+            ["GooglePlay__Notifications__ServiceAccountEmail"] = GooglePlayStub.PubSubEmail,
+            ["GooglePlay__Notifications__JwksUrl"] = $"{Google.BaseUrl}/jwks",
         })
             Environment.SetEnvironmentVariable(key, value);
 
@@ -109,6 +120,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     {
         if (_factory is null) return;
         await _factory.DisposeAsync();
+        await Google.DisposeAsync();
         NpgsqlConnection.ClearAllPools();
         await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(_server) { Database = "postgres" }.ToString());
         await admin.OpenAsync();
@@ -170,6 +182,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            builder.ConfigureLogging(l => l.AddProvider(fixture.Logs));
             builder.ConfigureTestServices(services =>
             {
                 // No sweeps racing the assertions. Removals are run by hand; the service itself is real.
@@ -209,6 +222,18 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             next(app);
         };
     }
+}
+
+/// <summary>Everything the app logged, so a test can say what must never appear there.</summary>
+public sealed class RecordingLogs : ILoggerProvider, ILogger
+{
+    public System.Collections.Concurrent.ConcurrentQueue<string> Lines { get; } = new();
+    public ILogger CreateLogger(string categoryName) => this;
+    public void Dispose() { }
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public bool IsEnabled(LogLevel logLevel) => true;
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Lines.Enqueue($"{formatter(state, exception)} {exception}");
 }
 
 public sealed class CapturedCodes
@@ -271,4 +296,14 @@ public sealed class FlakyStorage(IStorageService inner) : IStorageService
         FailRemovals ? throw new IOException("Storage is down.") : inner.DeleteAsync(key, ct);
     public Task DeletePrefixAsync(string prefix, CancellationToken ct = default) =>
         FailRemovals ? throw new IOException("Storage is down.") : inner.DeletePrefixAsync(prefix, ct);
+}
+
+/// <summary>A data-driven test that needs a real Postgres; skipped, never passed, without one.</summary>
+public sealed class PostgresTheoryAttribute : TheoryAttribute
+{
+    public PostgresTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PostgresApiFixture.ServerVariable)))
+            Skip = $"Set {PostgresApiFixture.ServerVariable} to run against real Postgres.";
+    }
 }

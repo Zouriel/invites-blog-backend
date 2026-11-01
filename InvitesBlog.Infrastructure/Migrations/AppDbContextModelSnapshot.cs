@@ -655,6 +655,94 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("event_photos", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.GooglePlayPurchase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AutoRenewing")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("auto_renewing");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTimeOffset?>("FulfilledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fulfilled_at");
+
+                    b.Property<bool>("IsTest")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_test");
+
+                    b.Property<DateTimeOffset?>("LastCheckedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_checked_at");
+
+                    b.Property<string>("OrderId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid?>("PaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payment_id");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("PurchaseToken")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("purchase_token");
+
+                    b.Property<DateTimeOffset?>("SettledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("settled_at");
+
+                    b.Property<string>("SubscriptionState")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("subscription_state");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset?>("VoidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("voided_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseToken")
+                        .IsUnique()
+                        .HasDatabaseName("ux_google_play_purchases_token");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("google_play_purchases", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Guest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1260,6 +1348,12 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("invite_count");
 
+                    b.Property<bool>("IsTest")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_test");
+
                     b.Property<int>("Kind")
                         .HasColumnType("integer")
                         .HasColumnName("kind");
@@ -1267,6 +1361,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("paid_at");
+
+                    b.Property<DateTimeOffset?>("PeriodEndsAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("period_ends_at");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -1308,6 +1406,11 @@ namespace InvitesBlog.Infrastructure.Migrations
 
                     b.HasIndex("CampaignId");
 
+                    b.HasIndex("ProviderPaymentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_payments_google_play_order")
+                        .HasFilter("provider = 'google_play' AND provider_payment_id IS NOT NULL");
+
                     b.HasIndex("ProviderSessionId");
 
                     b.HasIndex("UserId");
@@ -1342,8 +1445,8 @@ namespace InvitesBlog.Infrastructure.Migrations
 
                     b.Property<string>("Target")
                         .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
                         .HasColumnName("target");
 
                     b.HasKey("Id");

@@ -59,6 +59,7 @@ public sealed class AccountDeletionService(
     PendingRemovalSignal removals,
     IEmailSender email,
     IConfiguration config,
+    Application.Services.Billing.IGooglePlayPublisher play,
     ILogger<AccountDeletionService> logger) : IAccountDeletionService
 {
     private const string LastAdmin =
@@ -84,12 +85,17 @@ public sealed class AccountDeletionService(
         var videos = media.Count(t => t.StartsWith("video/", StringComparison.OrdinalIgnoreCase));
 
         var (channel, sentTo) = Destination(me);
+        var storeRenews = await RenewingPlaySubscriptions(me.Id, now).AnyAsync(ct);
         return new AccountDeletionSummaryDto(
             eventIds.Count, scope.Passed.Count, bucketIds.Count, media.Count - videos, videos,
             await PaidAsync(me, eventIds, now, ct),
-            me.AutoRenewKind is not null,
+            me.AutoRenewKind is not null || storeRenews,
             await IsLastAdminAsync(me.Id, ct) ? LastAdmin : null,
-            channel, sentTo);
+            channel, sentTo,
+            // Only say we'll stop it if we can. If we can't, they have to, or Google keeps charging.
+            !storeRenews ? null : play.IsConfigured
+                ? "Your Premium pass stops renewing on Google Play."
+                : "Your Premium pass renews through Google Play. Cancel it there too, or Google keeps charging you.");
     }
 
     public async Task<CodeSentResponse> RequestCodeAsync(CancellationToken ct = default)
@@ -221,6 +227,10 @@ public sealed class AccountDeletionService(
 
         return new Scope(deleted, passed, myInviters, emailList, phoneList);
     }
+
+    /// <summary>Store subscriptions that will charge again unless someone stops them.</summary>
+    private IQueryable<GooglePlayPurchase> RenewingPlaySubscriptions(Guid userId, DateTimeOffset now) =>
+        db.GooglePlayPurchases.Where(p => p.UserId == userId && p.CampaignId == null && p.AutoRenewing && p.VoidedAt == null && p.ExpiresAt > now);
 
     private async Task<List<string>> PaidAsync(AppUser me, List<Guid> eventIds, DateTimeOffset now, CancellationToken ct)
     {
@@ -585,6 +595,15 @@ public sealed class AccountDeletionService(
         }
 
         if (!string.IsNullOrWhiteSpace(me.PaymentCustomerId)) queue.PaymentCustomer(me.PaymentCustomerId);
+
+        // Store purchases: same treatment. The token stays so it can never be redeemed again, with no
+        // link to the person. A subscription still renewing is stopped at Google after the commit.
+        foreach (var token in await RenewingPlaySubscriptions(me.Id, DateTimeOffset.UtcNow).Select(p => p.PurchaseToken).ToListAsync(ct))
+            queue.PlaySubscription(token);
+        await db.GooglePlayPurchases.Where(p => p.UserId == me.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.AutoRenewing, false), ct);
+        await db.GooglePlayPurchases.Where(p => p.CampaignId != null && deletedEvents.Contains(p.CampaignId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.CampaignId, (Guid?)null), ct);
     }
 
     /// <summary>Collects what to remove after the commit, each thing once.</summary>
@@ -614,6 +633,8 @@ public sealed class AccountDeletionService(
         }
 
         public void PaymentCustomer(string id) => _items.Add((PendingRemovalKinds.PaymentCustomer, id));
+
+        public void PlaySubscription(string token) => _items.Add((PendingRemovalKinds.PlaySubscription, token));
 
         public IEnumerable<PendingRemoval> Rows(DateTimeOffset now) => _items.Select(i => new PendingRemoval
         {

@@ -63,6 +63,7 @@ public sealed class PendingRemovalService(
         var storage = scope.ServiceProvider.GetRequiredService<IStorageService>();
         var incoming = scope.ServiceProvider.GetRequiredService<IIncomingUploadStore>();
         var bank = scope.ServiceProvider.GetRequiredService<IRecurringPaymentProvider>();
+        var play = scope.ServiceProvider.GetRequiredService<Application.Services.Billing.IGooglePlayPublisher>();
 
         var now = DateTimeOffset.UtcNow;
         var due = await db.PendingRemovals.Where(r => r.NextAttemptAt <= now)
@@ -81,6 +82,8 @@ public sealed class PendingRemovalService(
                         if (incoming.Available) await incoming.DeleteAsync(row.Target, ct);
                         break;
                     case PendingRemovalKinds.PaymentCustomer: await bank.ForgetCustomerAsync(row.Target, ct); break;
+                    // False means Google refused it, which it does for one already ended: nothing to stop.
+                    case PendingRemovalKinds.PlaySubscription: await play.CancelSubscriptionAsync(row.Target, ct); break;
                     default: throw new InvalidOperationException($"Unknown removal kind {row.Kind}.");
                 }
                 db.PendingRemovals.Remove(row);

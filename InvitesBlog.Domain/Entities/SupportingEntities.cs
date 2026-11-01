@@ -110,6 +110,8 @@ public static class PendingRemovalKinds
     public const string Prefix = "prefix";
     /// <summary>One object in the private upload holding area.</summary>
     public const string IncomingFile = "incoming";
+    /// <summary>A Google Play subscription to stop renewing, by its purchase token.</summary>
+    public const string PlaySubscription = "play-subscription";
     /// <summary>A customer record at the payment gateway, with its saved cards.</summary>
     public const string PaymentCustomer = "payment-customer";
 }
