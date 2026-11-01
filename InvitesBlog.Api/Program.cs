@@ -17,6 +17,7 @@ builder.Services.AddHostedService<PhotoDigestService>();
 builder.Services.AddHostedService<MediaRetentionService>();
 builder.Services.AddHostedService<PassReminderSweeper>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Photos.DirectUploadProcessor>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Video.VideoTrimService>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.PaymentSweeper>();
 // Removes what a deleted account left outside the database (files, the bank's customer record).
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Accounts.PendingRemovalService>();

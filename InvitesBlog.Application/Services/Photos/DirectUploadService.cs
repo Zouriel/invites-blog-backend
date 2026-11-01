@@ -15,15 +15,17 @@ namespace InvitesBlog.Application.Services.Photos;
 /// <summary>Who an upload is for, once a door has decided they may add.</summary>
 public sealed record UploadDoor(Guid BucketId, Guid? CampaignId, Guid? GuestId, string? UploaderName, Guid? QrId = null);
 
-public sealed record DirectUploadRequest(string? FileName, string? ContentType, long Size, string? Ticket = null);
+/// <param name="PosterSize">For a video: the size of the JPEG still the client has for it, if it has one.</param>
+public sealed record DirectUploadRequest(string? FileName, string? ContentType, long Size, string? Ticket = null, long? PosterSize = null);
 
 /// <summary><paramref name="Direct"/> false means: send this file the old way.</summary>
-public sealed record DirectUploadTicket(bool Direct, Guid? Id = null, string? Url = null, string? ContentType = null);
+/// <param name="PosterUrl">Where to PUT the still, as image/jpeg, when one was declared. Failing is harmless: the server then draws its own.</param>
+public sealed record DirectUploadTicket(bool Direct, Guid? Id = null, string? Url = null, string? ContentType = null, string? PosterUrl = null);
 
 public sealed record DirectUploadStatusDto(Guid Id, string Status, string? Error = null, EventPhotoDto? Photo = null);
 
 /// <summary>
-/// Photographs sent straight from the phone to the holding area, then checked and stored here.
+/// Photographs and videos sent straight from the phone to the holding area, then checked and stored here.
 /// The phone asks for a link (door checks, space reserved), uploads, says it has, and the server takes
 /// over: <see cref="FinishAsync"/> runs in the background, so a guest can put the phone away.
 /// </summary>
@@ -51,10 +53,20 @@ public sealed class DirectUploadService(
     IMediaBucketService buckets,
     IUnitOfWork uow,
     IConfiguration config,
-    ILogger<DirectUploadService>? logger = null) : IDirectUploadService
+    ILogger<DirectUploadService>? logger = null,
+    IVideoTools? videoTools = null) : IDirectUploadService
 {
     /// <summary>Long enough for a slow connection to send one large photo; a queue asks per file.</summary>
     public static readonly TimeSpan LinkLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// 256 MB at 1 Mbit/s takes over half an hour. The space stays reserved this long if a phone gives up,
+    /// which the sweep then returns.
+    /// </summary>
+    public static readonly TimeSpan VideoLinkLifetime = TimeSpan.FromHours(2);
+
+    /// <summary>A still is a small JPEG. Anything larger is ignored and the server draws its own.</summary>
+    public const long MaxPosterBytes = 10L * 1024 * 1024;
 
     /// <summary>
     /// Above this a file takes the old path rather than being refused. Photographs stay uncapped (see
@@ -84,13 +96,25 @@ public sealed class DirectUploadService(
         UploadDoor door, DirectUploadRequest request, CancellationToken ct = default)
     {
         var type = (request.ContentType ?? string.Empty).Trim().ToLowerInvariant();
-        // Videos and files with no type keep the old path. The bytes are judged later either way; this
-        // only decides the route, and a value signed into a header must be a plain media type.
-        if (!EnabledFor(door.BucketId)
-            || !type.StartsWith("image/", StringComparison.Ordinal) || type.Contains("svg", StringComparison.Ordinal)
-            || type.Length > 100 || !type.All(c => char.IsAsciiLetterOrDigit(c) || c is '/' or '-' or '+' or '.')
-            || request.Size <= 0 || request.Size > MaxDirectBytes)
+        var isVideo = type.StartsWith("video/", StringComparison.Ordinal);
+
+        if (isVideo && request.Size > MediaLimits.MaxVideoBytes)
+            throw new BusinessRuleException(MediaLimits.TooLarge(request.Size), MediaLimits.TooLargeCode);
+
+        // Files with no type keep the old path. The bytes are judged later either way; this only decides
+        // the route, and a value signed into a header must be a plain media type.
+        var plain = type.Length <= 100 && type.All(c => char.IsAsciiLetterOrDigit(c) || c is '/' or '-' or '+' or '.');
+        var routable = isVideo
+            ? videoTools is { Available: true } && request.Size > 0
+            : type.StartsWith("image/", StringComparison.Ordinal) && !type.Contains("svg", StringComparison.Ordinal)
+              && request.Size > 0 && request.Size <= MaxDirectBytes;
+        if (!EnabledFor(door.BucketId) || !plain || !routable)
+        {
+            // The old route goes through Cloudflare, which would refuse this with nothing we can explain.
+            if (isVideo && request.Size > MediaLimits.MaxThroughCloudflareBytes)
+                throw new BusinessRuleException(MediaLimits.NeedsDirect(request.Size), MediaLimits.NeedsDirectCode);
             return new DirectUploadTicket(false);
+        }
 
         await buckets.EnsureOpenAsync(door.BucketId, ct);
         await buckets.ReserveRoomAsync(door.BucketId, request.Size, ct);
@@ -98,6 +122,7 @@ public sealed class DirectUploadService(
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var key = $"incoming/{door.BucketId:N}/{id:N}";
+        var lifetime = isVideo ? VideoLinkLifetime : LinkLifetime;
         try
         {
             await uploads.AddAsync(new PendingUpload
@@ -110,16 +135,19 @@ public sealed class DirectUploadService(
                 QrId = door.QrId,
                 IncomingKey = key,
                 ContentType = type,
-                FileName = Path.GetFileName(request.FileName ?? string.Empty) is { Length: > 0 and <= 200 } name ? name : "photo",
+                FileName = Path.GetFileName(request.FileName ?? string.Empty) is { Length: > 0 and <= 200 } name ? name : isVideo ? "video" : "photo",
                 DeclaredBytes = request.Size,
                 Status = PendingUploadStatus.Issued,
-                ExpiresAt = now + LinkLifetime,
+                ExpiresAt = now + lifetime,
                 NextAttemptAt = now,
                 CreatedAt = now,
                 UpdatedAt = now,
             }, ct);
             await uow.SaveChangesAsync(ct);
-            return new DirectUploadTicket(true, id, incoming.PresignPut(key, type, request.Size, LinkLifetime), type);
+            var posterUrl = isVideo && request.PosterSize is > 0 and <= MaxPosterBytes
+                ? incoming.PresignPut(PosterKey(key), "image/jpeg", request.PosterSize.Value, lifetime)
+                : null;
+            return new DirectUploadTicket(true, id, incoming.PresignPut(key, type, request.Size, lifetime), type, posterUrl);
         }
         catch
         {
@@ -127,6 +155,12 @@ public sealed class DirectUploadService(
             throw;
         }
     }
+
+    /// <summary>Where a video's still waits, beside it in the holding area.</summary>
+    public static string PosterKey(string key) => key + ".poster";
+
+    private static bool IsVideo(PendingUpload upload) =>
+        upload.ContentType.StartsWith("video/", StringComparison.Ordinal);
 
     public async Task<DirectUploadStatusDto> CompleteAsync(Guid id, CancellationToken ct = default)
     {
@@ -192,16 +226,22 @@ public sealed class DirectUploadService(
             // Done already and stopped before saying so: the fixed id is how a restart can tell.
             if (!await photos.Query().AnyAsync(p => p.Id == id, ct))
             {
-                var bytes = await incoming.GetAsync(upload.IncomingKey, ct);
-                if (bytes is null || bytes.Length != upload.DeclaredBytes)
+                var door = new UploadDoor(upload.BucketId, upload.CampaignId, upload.GuestId, upload.UploaderName);
+                if (IsVideo(upload))
                 {
-                    await GiveUpAsync(upload, PendingUploadStatus.Failed, "That file didn't arrive whole. Please try again.", ct);
-                    return;
+                    if (!await StoreVideoAsync(upload, door, ct)) return;
                 }
+                else
+                {
+                    var bytes = await incoming.GetAsync(upload.IncomingKey, ct);
+                    if (bytes is null || bytes.Length != upload.DeclaredBytes)
+                    {
+                        await GiveUpAsync(upload, PendingUploadStatus.Failed, "That file didn't arrive whole. Please try again.", ct);
+                        return;
+                    }
 
-                await photoService.StoreUploadedAsync(
-                    id, new UploadDoor(upload.BucketId, upload.CampaignId, upload.GuestId, upload.UploaderName),
-                    bytes, upload.ContentType, upload.FileName, ct);
+                    await photoService.StoreUploadedAsync(id, door, bytes, upload.ContentType, upload.FileName, ct);
+                }
                 if (upload.QrId is { } qr) await buckets.CountContributionAsync(qr, ct);
             }
 
@@ -226,7 +266,9 @@ public sealed class DirectUploadService(
             upload.Attempts++;
             if (upload.Attempts >= MaxAttempts)
             {
-                await GiveUpAsync(upload, PendingUploadStatus.Failed, "We couldn't save that photo. Please try again.", CancellationToken.None);
+                await GiveUpAsync(upload, PendingUploadStatus.Failed,
+                    IsVideo(upload) ? "We couldn't save that video. Please try again." : "We couldn't save that photo. Please try again.",
+                    CancellationToken.None);
                 return;
             }
             upload.Status = PendingUploadStatus.Uploaded;
@@ -234,6 +276,49 @@ public sealed class DirectUploadService(
             upload.UpdatedAt = DateTimeOffset.UtcNow;
             await uow.SaveChangesAsync(CancellationToken.None);
         }
+    }
+
+    /// <summary>On disk rather than in memory: three of these at 256 MB would be most of a gigabyte. False if it gave up on the upload.</summary>
+    private async Task<bool> StoreVideoAsync(PendingUpload upload, UploadDoor door, CancellationToken ct)
+    {
+        if (videoTools is not { Available: true })
+            throw new InvalidOperationException("ffmpeg has gone from this server; trying again in case it comes back.");
+        // Retried like any other hiccup: a full disk usually clears.
+        if (!videoTools.HasRoomFor(upload.DeclaredBytes * 2))
+            throw new IOException("No room on the working disk for a video.");
+
+        var dir = videoTools.NewWorkDir();
+        try
+        {
+            var path = Path.Combine(dir, "video");
+            var arrived = await incoming.DownloadToFileAsync(upload.IncomingKey, path, ct);
+            if (!arrived || new FileInfo(path).Length != upload.DeclaredBytes)
+            {
+                await GiveUpAsync(upload, PendingUploadStatus.Failed, "That file didn't arrive whole. Please try again.", ct);
+                return false;
+            }
+
+            await photoService.StoreUploadedVideoAsync(upload.Id, door, path, await PosterAsync(upload, ct), ct);
+            return true;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                logger?.LogWarning(e, "Direct upload {UploadId}: couldn't remove its working folder.", upload.Id);
+            }
+        }
+    }
+
+    /// <summary>The still the client sent, if it managed to. Its absence is never a problem.</summary>
+    private async Task<byte[]?> PosterAsync(PendingUpload upload, CancellationToken ct)
+    {
+        var key = PosterKey(upload.IncomingKey);
+        return await incoming.SizeAsync(key, ct) is > 0 and <= MaxPosterBytes ? await incoming.GetAsync(key, ct) : null;
     }
 
     public async Task SweepAsync(CancellationToken ct = default)
@@ -279,6 +364,7 @@ public sealed class DirectUploadService(
         try
         {
             await incoming.DeleteAsync(upload.IncomingKey, CancellationToken.None);
+            if (IsVideo(upload)) await incoming.DeleteAsync(PosterKey(upload.IncomingKey), CancellationToken.None);
         }
         catch (Exception e)
         {

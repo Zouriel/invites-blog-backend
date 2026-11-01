@@ -114,6 +114,40 @@ public static class PendingRemovalKinds
     public const string PaymentCustomer = "payment-customer";
 }
 
+/// <summary>
+/// A video waiting to be made smaller, or to lose its camera metadata. Holds nothing a person typed: its
+/// id is the photo's, and the row goes with the photo. See VideoTrimService.
+/// </summary>
+public sealed class VideoTrimJob
+{
+    /// <summary>The photo's id.</summary>
+    public Guid Id { get; set; }
+    public VideoTrimStatus Status { get; set; }
+    /// <summary>True when what's in storage already has no camera metadata, so keeping it needs no work.</summary>
+    public bool MetadataClean { get; set; }
+    public int Attempts { get; set; }
+    /// <summary>The file's size when it was queued, then what it became.</summary>
+    public long OriginalBytes { get; set; }
+    public long? ResultBytes { get; set; }
+    /// <summary>In a few words why it ended as it did, for whoever is looking at the table.</summary>
+    public string? Note { get; set; }
+    public DateTimeOffset NextAttemptAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public enum VideoTrimStatus
+{
+    Waiting = 0,
+    Running = 1,
+    /// <summary>A smaller copy replaced it.</summary>
+    Trimmed = 2,
+    /// <summary>The file stays as it is (or with only its metadata removed).</summary>
+    Kept = 3,
+    /// <summary>The photo went away first.</summary>
+    Gone = 4,
+}
+
 /// <summary>A photograph on its way through the holding area (see DirectUploadService).</summary>
 public sealed class PendingUpload
 {

@@ -80,6 +80,8 @@ public static class DependencyInjection
                 ? new S3IncomingUploadStore(s3.Client, incoming, config["Storage:Endpoint"] ?? string.Empty)
                 : new NoIncomingUploadStore());
 
+        services.AddSingleton<IVideoTools, Video.FfmpegVideoTools>();
+
         services.AddScoped<TemplatePackagePublisher>();
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();

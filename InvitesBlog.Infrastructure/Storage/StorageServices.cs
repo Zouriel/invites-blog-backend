@@ -37,6 +37,26 @@ public sealed class LocalFileStorageService : IStorageService
         return File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
     }
 
+    public async Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default)
+    {
+        var target = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        await using (var from = File.OpenRead(path))
+        await using (var to = File.Create(target))
+            await from.CopyToAsync(to, ct);
+        return PublicUrl(key);
+    }
+
+    public async Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default)
+    {
+        var source = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(source)) return false;
+        await using var from = File.OpenRead(source);
+        await using var to = File.Create(path);
+        await from.CopyToAsync(to, ct);
+        return true;
+    }
+
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";
 
     public string? KeyFor(string url) => StorageKeys.KeyFor(_publicBase, url);
@@ -121,6 +141,9 @@ public sealed class S3StorageService : IStorageService
         s3Config.RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED;
         s3Config.ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED;
 
+        // A 256 MB video going up from a shared server can take longer than the SDK's default allows.
+        s3Config.Timeout = TimeSpan.FromMinutes(20);
+
         // R2 implements neither form of streaming payload signature — not
         // STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER (killed by the two lines above) and not plain
         // STREAMING-AWS4-HMAC-SHA256-PAYLOAD either. The only body encoding it accepts is
@@ -172,6 +195,23 @@ public sealed class S3StorageService : IStorageService
         }
     }
 
+    public async Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default)
+    {
+        await _s3.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = _bucket,
+            Key = key,
+            FilePath = path,
+            ContentType = contentType,
+            DisablePayloadSigning = _unsignedPayload,
+            Headers = { CacheControl = StorageCache.For(key) }
+        }, ct);
+        return PublicUrl(key);
+    }
+
+    public Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default) =>
+        S3Files.DownloadAsync(_s3, _bucket, key, path, ct);
+
     public string PublicUrl(string key) => $"{_publicBase}/{key.TrimStart('/')}";
 
     public string? KeyFor(string url) => StorageKeys.KeyFor(_publicBase, url);
@@ -206,6 +246,7 @@ public sealed class NoIncomingUploadStore : IIncomingUploadStore
         throw new InvalidOperationException("There is no holding area configured.");
     public Task<long?> SizeAsync(string key, CancellationToken ct = default) => Task.FromResult<long?>(null);
     public Task<byte[]?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<byte[]?>(null);
+    public Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default) => Task.FromResult(false);
     public Task DeleteAsync(string key, CancellationToken ct = default) => Task.CompletedTask;
 }
 
@@ -266,8 +307,29 @@ public sealed class S3IncomingUploadStore(IAmazonS3 s3, string bucket, string en
         }
     }
 
+    public Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default) =>
+        S3Files.DownloadAsync(s3, bucket, key, path, ct);
+
     public async Task DeleteAsync(string key, CancellationToken ct = default) =>
         await s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = bucket, Key = key }, ct);
+}
+
+internal static class S3Files
+{
+    public static async Task<bool> DownloadAsync(IAmazonS3 s3, string bucket, string key, string path, CancellationToken ct)
+    {
+        try
+        {
+            using var res = await s3.GetObjectAsync(new GetObjectRequest { BucketName = bucket, Key = key }, ct);
+            await using var to = File.Create(path);
+            await res.ResponseStream.CopyToAsync(to, ct);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>Turns a URL the storage handed out back into its key.</summary>

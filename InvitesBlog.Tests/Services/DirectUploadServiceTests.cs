@@ -2,6 +2,7 @@ using Amazon.Runtime;
 using Amazon.S3;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Photos;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.MediaBuckets;
@@ -318,5 +319,109 @@ public class DirectUploadServiceTests
         Assert.Contains("content-length", url);
         Assert.Contains("content-type", url);
         Assert.Equal("https://acct.r2.cloudflarestorage.com", store.Origin);
+    }
+}
+
+/// <summary>What a video changes about asking for a link.</summary>
+public class DirectVideoLinkTests
+{
+    private readonly IRepository<PendingUpload> _uploads = Substitute.For<IRepository<PendingUpload>>();
+    private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
+    private readonly IIncomingUploadStore _incoming = Substitute.For<IIncomingUploadStore>();
+    private readonly IEventPhotoService _photoService = Substitute.For<IEventPhotoService>();
+    private readonly IMediaBucketService _buckets = Substitute.For<IMediaBucketService>();
+    private readonly IVideoTools _tools = Substitute.For<IVideoTools>();
+    private readonly Guid _bucket = Guid.NewGuid();
+
+    public DirectVideoLinkTests()
+    {
+        _incoming.Available.Returns(true);
+        _tools.Available.Returns(true);
+        _incoming.PresignPut(default!, default!, default, default).ReturnsForAnyArgs("https://r2.test/put");
+    }
+
+    private DirectUploadService Sut(string direct = "on", bool tools = true) => new(
+        _uploads, _photos, _incoming, _photoService, _buckets, Substitute.For<IUnitOfWork>(),
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Uploads:Direct"] = direct }).Build(),
+        null, tools ? _tools : null);
+
+    private UploadDoor Door => new(_bucket, Guid.NewGuid(), null, "Mariyam");
+    private const long Mb = 1024 * 1024;
+
+    [Fact]
+    public async Task A_123_MB_video_gets_a_link_that_outlasts_a_slow_connection()
+    {
+        const long size = 123 * Mb;
+
+        var ticket = await Sut().IssueAsync(Door, new DirectUploadRequest("clip.mp4", "video/mp4", size));
+
+        Assert.True(ticket.Direct);
+        Assert.Null(ticket.PosterUrl);
+        await _buckets.Received(1).ReserveRoomAsync(_bucket, size, Arg.Any<CancellationToken>());
+        _incoming.Received(1).PresignPut(Arg.Any<string>(), "video/mp4", size, DirectUploadService.VideoLinkLifetime);
+    }
+
+    [Fact]
+    public async Task A_declared_still_gets_its_own_link_beside_the_video()
+    {
+        var ticket = await Sut().IssueAsync(Door, new DirectUploadRequest("clip.mp4", "video/mp4", 5, PosterSize: 900));
+
+        Assert.NotNull(ticket.PosterUrl);
+        _incoming.Received(1).PresignPut(Arg.Is<string>(k => k.EndsWith(".poster")), "image/jpeg", 900, DirectUploadService.VideoLinkLifetime);
+    }
+
+    [Fact]
+    public async Task An_oversized_still_is_not_signed()
+    {
+        var ticket = await Sut().IssueAsync(Door, new DirectUploadRequest("c.mp4", "video/mp4", 5, PosterSize: DirectUploadService.MaxPosterBytes + 1));
+
+        Assert.True(ticket.Direct);
+        Assert.Null(ticket.PosterUrl);
+    }
+
+    [Fact]
+    public async Task Above_the_limit_says_so_in_plain_words_and_reserves_nothing()
+    {
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            Sut().IssueAsync(Door, new DirectUploadRequest("c.mp4", "video/mp4", MediaLimits.MaxVideoBytes + 1)));
+
+        Assert.Equal(MediaLimits.TooLargeCode, ex.ErrorCode);
+        Assert.Contains("256 MB", ex.Message);
+        await _buckets.DidNotReceiveWithAnyArgs().ReserveRoomAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task Exactly_at_the_limit_is_taken()
+    {
+        Assert.True((await Sut().IssueAsync(Door, new DirectUploadRequest("c.mp4", "video/mp4", MediaLimits.MaxVideoBytes))).Direct);
+    }
+
+    [Theory]
+    [InlineData("off", true)]
+    [InlineData("on", false)]
+    public async Task With_no_direct_route_a_video_cloudflare_would_refuse_is_told_why(string sw, bool tools)
+    {
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            Sut(sw, tools).IssueAsync(Door, new DirectUploadRequest("c.mp4", "video/mp4", 123 * Mb)));
+
+        Assert.Equal(MediaLimits.NeedsDirectCode, ex.ErrorCode);
+        Assert.Contains("123 MB", ex.Message);
+        Assert.Contains("90 MB", ex.Message);
+    }
+
+    [Fact]
+    public async Task With_no_direct_route_a_video_that_fits_takes_the_old_one()
+    {
+        var ticket = await Sut("off").IssueAsync(Door, new DirectUploadRequest("c.mp4", "video/mp4", MediaLimits.MaxThroughCloudflareBytes));
+
+        Assert.False(ticket.Direct);
+    }
+
+    [Theory]
+    [InlineData("video/mp4\r\nx-evil: 1")]
+    [InlineData("video/mp4;codecs=avc1")]
+    public async Task A_label_that_cannot_be_signed_takes_the_old_route(string type)
+    {
+        Assert.False((await Sut().IssueAsync(Door, new DirectUploadRequest("c", type, 5))).Direct);
     }
 }

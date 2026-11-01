@@ -17,6 +17,12 @@ public interface IStorageService
     Task<string> PutAsync(string key, byte[] content, string contentType, CancellationToken ct = default);
     /// <summary>Reads a stored object's bytes, or null if it doesn't exist.</summary>
     Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
+
+    /// <summary>Stores a file from disk, without holding it in memory (a video can be 256 MB).</summary>
+    Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default);
+
+    /// <summary>Copies a stored object to disk. False if it doesn't exist.</summary>
+    Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default);
     string PublicUrl(string key);
 
     /// <summary>
@@ -71,6 +77,9 @@ public interface IIncomingUploadStore
     /// <summary>The size of what arrived, or null if nothing has.</summary>
     Task<long?> SizeAsync(string key, CancellationToken ct = default);
     Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
+
+    /// <summary>Copies what arrived to disk, without holding it in memory. False if nothing has.</summary>
+    Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default);
     Task DeleteAsync(string key, CancellationToken ct = default);
 }
 

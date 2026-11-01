@@ -1,5 +1,6 @@
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Application.Services.MediaBuckets;
@@ -758,7 +759,7 @@ public class EventPhotoServiceTests
         var (campaign, guest) = OnTheGuestList();
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().AddAsync(
-            campaign.Id, guest.Id, [.. Enumerable.Repeat((byte)7, 4096)], "video/mp4", "clip.mp4",
+            campaign.Id, guest.Id, FakeMp4, "video/mp4", "clip.mp4",
             System.Text.Encoding.UTF8.GetBytes(Svg)));
 
         Assert.Equal("unsupported_image", ex.ErrorCode);
@@ -811,6 +812,23 @@ public class EventPhotoServiceTests
         await _buckets.Received(1).CountUsageAsync(bucket.Id, -content.Length, Arg.Any<CancellationToken>());
     }
 
+    /// <summary>An MP4's opening bytes and filler: the sniff is all these tests reach.</summary>
+    private static readonly byte[] FakeMp4 =
+        [0, 0, 0, 0x20, .. "ftypisom"u8, .. Enumerable.Repeat((byte)7, 4096)];
+
+    [Fact]
+    public async Task A_file_labelled_video_whose_bytes_are_not_one_is_refused()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        OneBucket(campaign.Id);
+        var html = "<html><script>alert(1)</script></html>"u8.ToArray();
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sut().AddAsync(campaign.Id, guest.Id, html, "video/mp4", "clip.mp4", Jpeg(64, 64)));
+
+        Assert.Equal(VideoSniffer.RefusalCode, ex.ErrorCode);
+    }
+
     [Fact]
     public async Task Something_that_is_neither_a_photo_nor_a_video_is_refused()
     {
@@ -835,7 +853,7 @@ public class EventPhotoServiceTests
         var (campaign, guest) = OnTheGuestList();
 
         var clip = await Sut().AddAsync(
-            campaign.Id, guest.Id, [.. Enumerable.Repeat((byte)7, 4096)], "video/mp4", "clip.mp4",
+            campaign.Id, guest.Id, FakeMp4, "video/mp4", "clip.mp4",
             Jpeg(1280, 720));
 
         // Two objects, not three: the clip itself, and the still that stands in for it.
@@ -859,7 +877,7 @@ public class EventPhotoServiceTests
         var (campaign, guest) = OnTheGuestList();
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Sut().AddAsync(campaign.Id, guest.Id, [1, 2, 3], "video/mp4", "clip.mp4"));
+            () => Sut().AddAsync(campaign.Id, guest.Id, FakeMp4, "video/mp4", "clip.mp4"));
 
         Assert.Equal("video_without_poster", ex.ErrorCode);
     }
