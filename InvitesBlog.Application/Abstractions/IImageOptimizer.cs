@@ -66,6 +66,9 @@ public interface IImageOptimizer
     /// of it. Orientation is baked in by the decoder first, so dropping the rest costs nothing
     /// visible.</para>
     ///
+    /// <para>A JPEG already the right way up keeps its picture data exactly; only the notes are cut out.
+    /// One that has to turn is encoded again at high quality.</para>
+    ///
     /// <para>Like <see cref="Optimize"/> it is conservative: same format, and the original bytes come
     /// back untouched whenever the file cannot be safely rewritten. A failure to decode is never a
     /// failed upload.</para>
