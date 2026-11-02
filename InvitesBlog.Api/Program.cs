@@ -22,6 +22,8 @@ builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.PaymentSwe
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.GooglePlay.GooglePlaySweeper>();
 // Removes what a deleted account left outside the database (files, the bank's customer record).
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Accounts.PendingRemovalService>();
+// Sends push notifications queued by requests (invitations, replies, comments), after they've answered.
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>();
 
 var app = builder.Build();
 

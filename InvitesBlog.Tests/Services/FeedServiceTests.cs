@@ -1,3 +1,4 @@
+using InvitesBlog.Tests.Support;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Feed;
@@ -56,7 +57,9 @@ public class FeedServiceTests
 
     private FeedService Sut() => new(
         _currentUser, _users, _campaigns, _inviters, _celebrants, _guests, _invites, _photos, _buckets,
-        _templates, _comments, _postLikes, _commentLikes, _bucketService, _uow);
+        _templates, _comments, _postLikes, _commentLikes, _bucketService, _uow, _push);
+
+    private readonly RecordingPushQueue _push = new();
 
     private void InvitedAsGuest(InviteStatus status)
     {

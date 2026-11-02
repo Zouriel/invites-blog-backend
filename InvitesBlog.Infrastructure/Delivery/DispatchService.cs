@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Push;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Delivery;
@@ -23,7 +24,8 @@ public sealed class DispatchService(
     IEnumerable<IInviteDeliveryProvider> providers,
     IConfiguration config,
     ILogger<DispatchService> logger,
-    ISendingAllowanceService allowances)
+    ISendingAllowanceService allowances,
+    IPushQueue push)
 {
     /// <summary>What the dashboard shows beside a guest held back by the event's emailed-invitation limit.</summary>
     public const string OverLimitMessage =
@@ -102,7 +104,10 @@ public sealed class DispatchService(
         var inviter = campaign.InviterId is null ? null
             : await db.Inviters.FirstOrDefaultAsync(i => i.Id == campaign.InviterId, ct);
         var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
-        return await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
+        var sent = await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
+        // The host pressed send for this guest, so it's in their inbox either way; once per guest.
+        push.Enqueue(new InvitationsSent(campaign.Id, [guest.Id], null));
+        return sent;
     }
 
     /// <summary>

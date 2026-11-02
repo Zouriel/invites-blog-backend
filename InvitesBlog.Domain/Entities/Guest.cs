@@ -44,6 +44,12 @@ public sealed class Guest
     public string? TypedContact { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>
+    /// When the app was told this guest's invitation reached their inbox (a push to their phone), so a
+    /// resend or a second send never notifies them twice. Null until then.
+    /// </summary>
+    public DateTimeOffset? InvitePushedAt { get; set; }
+
     /// <summary>Every role, or the single legacy <see cref="Role"/> for a row that predates the list.</summary>
     public IReadOnlyList<string> AllRoles() =>
         Roles.Count > 0 ? Roles

@@ -1,3 +1,4 @@
+using InvitesBlog.Tests.Support;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
@@ -73,7 +74,7 @@ public class DispatchServiceTests
 
     private static DispatchService Sut(AppDbContext db, IInviteDeliveryProvider provider,
         InvitesBlog.Application.Plans.ISendingAllowanceService? allowance = null) =>
-        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance, allowance ?? TestData.Allowance());
+        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance, allowance ?? TestData.Allowance(), new RecordingPushQueue());
 
     [Fact]
     public async Task A_delivered_invitation_spends_the_dedicated_template()

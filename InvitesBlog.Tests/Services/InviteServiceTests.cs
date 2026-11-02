@@ -1,3 +1,4 @@
+using InvitesBlog.Tests.Support;
 using System.Text.Json.Nodes;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
@@ -71,8 +72,10 @@ public class InviteServiceTests
         return new(
             _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks,
             _trustedIps, _photos, _otp, _bucketService, _uow, _currentUser, _config, _rsvpValidator,
-            TestData.FreePlans(), TestData.Empty<Venue>());
+            TestData.FreePlans(), TestData.Empty<Venue>(), _push);
     }
+
+    private readonly RecordingPushQueue _push = new();
 
     private static readonly InviteRenderer Renderer = (c, t, g, i, link, n, p, e, windowDays) =>
         new InviteRenderData(t.PackageUrl, new JsonObject { ["guest"] = g.Name }, false, c.Status.ToString());

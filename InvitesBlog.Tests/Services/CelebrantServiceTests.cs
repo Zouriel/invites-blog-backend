@@ -1,3 +1,4 @@
+using InvitesBlog.Tests.Support;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Campaigns;
@@ -35,7 +36,9 @@ public class CelebrantServiceTests
 
     private CelebrantService Sut() => new(
         _ownership, _campaigns, _celebrants, _users, Substitute.For<IInviterRepository>(), _currentUser, _email, new PhoneNormalizer(), _uow,
-        Substitute.For<IConfiguration>());
+        Substitute.For<IConfiguration>(), _push);
+
+    private readonly RecordingPushQueue _push = new();
 
     [Fact]
     public async Task Adding_someone_stores_them_without_emailing_by_default()

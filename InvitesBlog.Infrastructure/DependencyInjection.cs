@@ -14,6 +14,7 @@ using InvitesBlog.Infrastructure.Templates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace InvitesBlog.Infrastructure;
@@ -188,6 +189,51 @@ public static class DependencyInjection
             services.AddSingleton<FakePaymentProvider>();
             services.AddSingleton<IPaymentProvider>(sp => sp.GetRequiredService<FakePaymentProvider>());
             services.AddSingleton<IRecurringPaymentProvider>(sp => sp.GetRequiredService<FakePaymentProvider>());
+        }
+
+        // Push. Android through FCM, off unless Push:Enabled is true; iPhones straight through APNs, off
+        // unless Push:Apns has a key id, team id and key. With neither, nothing is queued or sent.
+        // No resilience handlers: a retry could show a notification twice. No request logging either:
+        // the APNs URL carries the device token.
+        var fcmOn = bool.TryParse(config["Push:Enabled"], out var pushEnabled) && pushEnabled;
+        var apnsSettings = Notifications.Push.ApnsSettings.From(config);
+        services.AddSingleton<Notifications.Push.PushQueue>();
+        services.AddScoped<Application.Push.PushNotificationService>();
+        if (fcmOn)
+        {
+            services.AddHttpClient(Notifications.Push.FcmPushSender.ClientName, c =>
+            {
+                c.BaseAddress = new Uri("https://fcm.googleapis.com/");
+                c.Timeout = TimeSpan.FromSeconds(15);
+            }).RemoveAllLoggers();
+            services.AddSingleton<Notifications.Push.IFcmCredentials, Notifications.Push.ServiceAccountFcmCredentials>();
+            services.AddScoped<Notifications.Push.FcmPushSender>();
+        }
+        if (apnsSettings.IsConfigured)
+        {
+            services.AddHttpClient(Notifications.Push.ApnsClient.ClientName, c => c.Timeout = Notifications.Push.ApnsClient.Timeout)
+                .RemoveAllLoggers();
+            services.AddSingleton(apnsSettings);
+            services.TryAddSingleton(TimeProvider.System);
+            services.AddSingleton<Notifications.Push.ApnsClient>();
+            services.AddScoped<Notifications.Push.ApnsPushSender>();
+        }
+        if (fcmOn || apnsSettings.IsConfigured)
+        {
+            services.AddScoped<IPushSender>(sp =>
+            {
+                var senders = new List<IPushSender>();
+                if (fcmOn) senders.Add(sp.GetRequiredService<Notifications.Push.FcmPushSender>());
+                if (apnsSettings.IsConfigured) senders.Add(sp.GetRequiredService<Notifications.Push.ApnsPushSender>());
+                return new Notifications.Push.CompositePushSender(senders,
+                    sp.GetRequiredService<ILogger<Notifications.Push.CompositePushSender>>());
+            });
+            services.AddSingleton<Application.Push.IPushQueue>(sp => sp.GetRequiredService<Notifications.Push.PushQueue>());
+        }
+        else
+        {
+            services.AddSingleton<IPushSender, Notifications.Push.NoOpPushSender>();
+            services.AddSingleton<Application.Push.IPushQueue, Application.Push.NoPushQueue>();
         }
 
         return services;

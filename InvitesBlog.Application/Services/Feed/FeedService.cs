@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Push;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using InvitesBlog.Application.Abstractions;
@@ -58,7 +59,8 @@ public sealed class FeedService(
     IRepository<PostLike> postLikes,
     IRepository<CommentLike> commentLikes,
     IMediaBucketService bucketService,
-    IUnitOfWork uow) : IFeedService
+    IUnitOfWork uow,
+    IPushQueue push) : IFeedService
 {
     /// <summary>How many photos a post's header shows.</summary>
     public const int HeaderImages = 6;
@@ -164,6 +166,7 @@ public sealed class FeedService(
         };
         await comments.AddAsync(comment, ct);
         await uow.SaveChangesAsync(ct);
+        push.Enqueue(new CommentAdded(comment.Id, me.Id));
 
         return (await DescribeCommentsAsync(me, campaign, role, [comment], ct))[0];
     }

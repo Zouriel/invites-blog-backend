@@ -63,6 +63,8 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             u.ThemePreference = "dark";
         });
         var client = api.Client(host.Token);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/me/devices", new { token = $"dev-{Guid.NewGuid():N}", platform = "ios" })).StatusCode);
+        Assert.True(await api.ReadAsync(db => db.DeviceTokens.AnyAsync(d => d.UserId == host.Id)));
 
         var summary = await client.GetFromJsonAsync<Envelope<SummaryDto>>("/api/auth/me/deletion/summary", Web);
         Assert.Equal(1, summary!.Data.EventsDeleted);
@@ -83,6 +85,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             Assert.False(await db.Users.AnyAsync(u => u.Id == host.Id));
             Assert.False(await db.UserRoles.AnyAsync(r => r.UserId == host.Id));
             Assert.False(await db.UserExternalLogins.AnyAsync(l => l.UserId == host.Id));
+            Assert.False(await db.DeviceTokens.AnyAsync(d => d.UserId == host.Id));
             Assert.False(await db.Campaigns.AnyAsync(c => c.Id == ev));
             Assert.False(await db.Guests.AnyAsync(g => g.CampaignId == ev));
             Assert.False(await db.Invites.AnyAsync(i => i.CampaignId == ev));
@@ -805,7 +808,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             return rows;
         });
         Assert.Equal(
-            new[] { "comment_likes.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
+            new[] { "comment_likes.user_id", "device_tokens.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
             found.Order(StringComparer.Ordinal));
     }
 

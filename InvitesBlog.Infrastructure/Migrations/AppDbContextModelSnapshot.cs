@@ -579,6 +579,54 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("delivery_attempts", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.DeviceToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Environment")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("environment");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("platform");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("token");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .IsUnique()
+                        .HasDatabaseName("idx_device_tokens_token");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_device_tokens_user_id");
+
+                    b.ToTable("device_tokens", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.EventPhoto", b =>
                 {
                     b.Property<Guid>("Id")
@@ -766,6 +814,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("gender");
+
+                    b.Property<DateTimeOffset?>("InvitePushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("invite_pushed_at");
 
                     b.Property<string>("MetadataJson")
                         .IsRequired()
@@ -2508,6 +2560,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.DeviceToken", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 
