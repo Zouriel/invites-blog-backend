@@ -808,7 +808,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             return rows;
         });
         Assert.Equal(
-            new[] { "comment_likes.user_id", "device_tokens.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
+            new[] { "comment_likes.user_id", "content_reports.reporter_user_id", "device_tokens.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_blocks.blocked_user_id", "user_blocks.blocker_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
             found.Order(StringComparer.Ordinal));
     }
 

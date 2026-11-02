@@ -25,7 +25,8 @@ public sealed class PushNotificationService(
     IRepository<CampaignCelebrant> celebrants,
     IRepository<PostComment> comments,
     IUnitOfWork uow,
-    IPushSender sender)
+    IPushSender sender,
+    Moderation.IModerationViewService? moderation = null)
 {
     /// <summary>Longest stretch of a comment quoted in a notification.</summary>
     public const int QuoteLength = 80;
@@ -36,6 +37,9 @@ public sealed class PushNotificationService(
         foreach (var note in notes)
         {
             if (note.UserId == job.ActorUserId) continue;
+            // Someone who blocked the actor hears nothing about what they do.
+            if (job.ActorUserId is { } actor && moderation is not null
+                && await moderation.HasBlockedAsync(note.UserId, actor, ct)) continue;
             await sender.SendAsync(note.UserId, note.Title, note.Body,
                 new Dictionary<string, string> { ["path"] = note.Path }, ct);
         }

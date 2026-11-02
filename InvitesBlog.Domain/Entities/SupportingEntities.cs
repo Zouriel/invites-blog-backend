@@ -161,6 +161,8 @@ public sealed class PendingUpload
     public Guid? CampaignId { get; set; }
     public Guid? GuestId { get; set; }
     public string? UploaderName { get; set; }
+    /// <summary>The signed-in account the upload is from, carried to the photo it becomes.</summary>
+    public Guid? UploaderUserId { get; set; }
     /// <summary>The QR code it came through, so the code's tally moves once it has really landed.</summary>
     public Guid? QrId { get; set; }
     public string IncomingKey { get; set; } = string.Empty;

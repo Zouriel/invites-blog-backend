@@ -40,6 +40,9 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 {
     public const string ServerVariable = "IB_TEST_POSTGRES";
 
+    /// <summary>Where reports are emailed during tests.</summary>
+    public const string ReportInbox = "reports@example.com";
+
     /// <summary>The API reads its settings from the process's environment, so fixtures take turns starting it.</summary>
     public static readonly SemaphoreSlim EnvLock = new(1, 1);
 
@@ -90,6 +93,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["ConnectionStrings__Postgres"] = conn,
             ["Otp__Channels"] = "Email,Sms",
             ["Email__Provider"] = "Console",
+            ["Moderation__ReportEmail"] = ReportInbox,
             ["Storage__Provider"] = "Local",
             ["Storage__LocalRoot"] = _storageRoot,
             ["Payments__Provider"] = "Fake",

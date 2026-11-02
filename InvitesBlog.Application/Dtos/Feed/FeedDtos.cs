@@ -27,7 +27,9 @@ public sealed record FeedPostDto(
     bool CanModerate,
     string Link,
     DateTimeOffset LastActivityAt,
-    string? HostAvatarUrl = null);
+    string? HostAvatarUrl = null,
+    /// <summary>The account that made the event, for Report and Block. Null for very old events.</summary>
+    Guid? HostUserId = null);
 
 public sealed record FeedPageDto(IReadOnlyList<FeedPostDto> Items, bool HasMore);
 
@@ -42,7 +44,9 @@ public sealed record FeedCommentDto(
     bool LikedByMe,
     bool CanDelete,
     IReadOnlyList<FeedCommentDto> Replies,
-    string? AuthorAvatarUrl = null);
+    string? AuthorAvatarUrl = null,
+    /// <summary>The account that wrote it, for Report and Block.</summary>
+    Guid? AuthorId = null);
 
 public sealed record AddFeedCommentRequest(string Body, Guid? ParentId = null);
 

@@ -14,6 +14,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateDesign> TemplateDesigns => Set<TemplateDesign>();
     public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
     public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
+    public DbSet<ContentReport> ContentReports => Set<ContentReport>();
+    public DbSet<UserBlock> UserBlocks => Set<UserBlock>();
     public DbSet<Inviter> Inviters => Set<Inviter>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Guest> Guests => Set<Guest>();
@@ -351,6 +353,35 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         b.Entity<TemplateAsset>(e => { e.ToTable("template_assets"); e.HasKey(x => x.Id); e.HasIndex(x => x.TemplateId); });
         b.Entity<CampaignAsset>(e => { e.ToTable("campaign_assets"); e.HasKey(x => x.Id); e.HasIndex(x => x.CampaignId); });
+
+        // Reports about people's posts, comments, photos and profiles (guideline 1.2), and blocks.
+        b.Entity<ContentReport>(e =>
+        {
+            e.ToTable("content_reports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Reason).HasMaxLength(32);
+            e.Property(x => x.Note).HasMaxLength(1000);
+            e.Property(x => x.Snapshot).HasMaxLength(2000);
+            e.Property(x => x.Resolution).HasMaxLength(16);
+            e.Property(x => x.ResolutionNote).HasMaxLength(1000);
+            // The admin queue: open reports, oldest first.
+            e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_content_reports_queue");
+            // A reporter's own hide list, read on every feed and album page they open.
+            e.HasIndex(x => new { x.ReporterUserId, x.Kind }).HasDatabaseName("idx_content_reports_reporter_kind");
+            e.HasIndex(x => new { x.Kind, x.TargetId }).HasDatabaseName("idx_content_reports_target");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ReporterUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserBlock>(e =>
+        {
+            e.ToTable("user_blocks");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.BlockerUserId, x.BlockedUserId }).IsUnique().HasDatabaseName("ux_user_blocks_pair");
+            e.HasIndex(x => x.BlockedUserId).HasDatabaseName("idx_user_blocks_blocked");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.BlockerUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.BlockedUserId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         b.Entity<EventPhoto>(e =>
         {

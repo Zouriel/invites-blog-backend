@@ -112,6 +112,12 @@ public sealed class Campaign
     /// </summary>
     public List<Guid> PostCoverPhotoIds { get; set; } = [];
 
+    /// <summary>
+    /// Set when an admin takes the event's post out of the feed after a report. Its organisers still
+    /// see it (with its comments) so they can tidy it; nobody else does.
+    /// </summary>
+    public DateTimeOffset? PostHiddenAt { get; set; }
+
     /// <summary>The pass bought for this one event, if any. See <see cref="EventPassUntil"/> for how long it lasts.</summary>
     public EventPassKind EventPass { get; set; }
 

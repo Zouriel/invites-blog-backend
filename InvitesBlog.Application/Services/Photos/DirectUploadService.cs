@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace InvitesBlog.Application.Services.Photos;
 
 /// <summary>Who an upload is for, once a door has decided they may add.</summary>
-public sealed record UploadDoor(Guid BucketId, Guid? CampaignId, Guid? GuestId, string? UploaderName, Guid? QrId = null);
+public sealed record UploadDoor(Guid BucketId, Guid? CampaignId, Guid? GuestId, string? UploaderName, Guid? QrId = null, Guid? UploaderUserId = null);
 
 /// <param name="PosterSize">For a video: the size of the JPEG still the client has for it, if it has one.</param>
 public sealed record DirectUploadRequest(string? FileName, string? ContentType, long Size, string? Ticket = null, long? PosterSize = null);
@@ -54,7 +54,8 @@ public sealed class DirectUploadService(
     IUnitOfWork uow,
     IConfiguration config,
     ILogger<DirectUploadService>? logger = null,
-    IVideoTools? videoTools = null) : IDirectUploadService
+    IVideoTools? videoTools = null,
+    ICurrentUser? currentUser = null) : IDirectUploadService
 {
     /// <summary>Long enough for a slow connection to send one large photo; a queue asks per file.</summary>
     public static readonly TimeSpan LinkLifetime = TimeSpan.FromMinutes(15);
@@ -132,6 +133,7 @@ public sealed class DirectUploadService(
                 CampaignId = door.CampaignId,
                 GuestId = door.GuestId,
                 UploaderName = door.UploaderName,
+                UploaderUserId = door.UploaderUserId ?? currentUser?.UserId,
                 QrId = door.QrId,
                 IncomingKey = key,
                 ContentType = type,
@@ -226,7 +228,7 @@ public sealed class DirectUploadService(
             // Done already and stopped before saying so: the fixed id is how a restart can tell.
             if (!await photos.Query().AnyAsync(p => p.Id == id, ct))
             {
-                var door = new UploadDoor(upload.BucketId, upload.CampaignId, upload.GuestId, upload.UploaderName);
+                var door = new UploadDoor(upload.BucketId, upload.CampaignId, upload.GuestId, upload.UploaderName, null, upload.UploaderUserId);
                 if (IsVideo(upload))
                 {
                     if (!await StoreVideoAsync(upload, door, ct)) return;

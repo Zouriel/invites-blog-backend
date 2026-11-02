@@ -23,7 +23,9 @@ public sealed record EventPhotoDto(
     int Height,
     string? UploaderName,
     bool CanDelete,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    /// <summary>The account that added it, when known: what Block and Report act on.</summary>
+    Guid? UploaderUserId = null);
 
 /// <summary>An event's photo box as a guest or host sees it.</summary>
 public sealed record EventPhotoBoxDto(
