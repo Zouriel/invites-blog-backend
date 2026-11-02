@@ -53,6 +53,13 @@ public sealed class EventPhoto
     public string? UploaderName { get; set; }
 
     /// <summary>
+    /// The signed-in account that added it, when there was one. Lets a viewer block whoever posted it
+    /// and an admin suspend them. Null for QR contributors without an account and for rows from before
+    /// this was kept (a guest's older photos are matched to their account by contact instead).
+    /// </summary>
+    public Guid? UploaderUserId { get; set; }
+
+    /// <summary>
     /// Every pixel as uploaded, camera metadata stripped. Nothing in the app loads this — it exists to
     /// be downloaded. An event photo is somebody's own photograph and the copy they may want back is
     /// the one they took, so this box keeps it rather than only a copy sized for a screen.

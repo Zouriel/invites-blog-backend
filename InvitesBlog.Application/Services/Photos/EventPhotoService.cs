@@ -14,6 +14,7 @@ using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 using InvitesBlog.Application.Plans;
+using InvitesBlog.Application.Moderation;
 namespace InvitesBlog.Application.Services.Photos;
 
 /// <summary>The event photo box (§5): what guests shot at the party, for everyone who was there.</summary>
@@ -114,6 +115,9 @@ public interface IEventPhotoService
     /// The handshake exists because a response's headers are gone the moment the body starts — a name
     /// worked out afterwards would never reach the browser.
     /// </param>
+    /// <summary>An admin removing a reported photo or video: gone for everyone, its space given back.</summary>
+    Task RemoveForModerationAsync(Guid photoId, CancellationToken ct = default);
+
     Task WriteArchiveAsync(
         Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids,
         Func<string, Stream> begin, CancellationToken ct = default);
@@ -134,7 +138,9 @@ public sealed class EventPhotoService(
     Plans.IPlanService plans,
     ILogger<EventPhotoService>? logger = null,
     IVideoTools? videoTools = null,
-    IRepository<VideoTrimJob>? trimJobs = null) : IEventPhotoService
+    IRepository<VideoTrimJob>? trimJobs = null,
+    IModerationViewService? moderation = null,
+    IRepository<AppUser>? users = null) : IEventPhotoService
 {
     /// <summary>
     /// What a tap opens. NOT what a download hands over — the original is kept for that, so this is
@@ -173,12 +179,16 @@ public sealed class EventPhotoService(
             throw new ForbiddenException("The photos from this event are only available to its organiser now.");
         var view = await ViewForAsync(campaignId, moderates, viewerGuestId, ct);
 
+        // Minus what this viewer reported, and everything from people they blocked.
+        var hidden = await HiddenAsync(ct);
         var live = (await photos.Query()
                 .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
                 .OrderByDescending(p => p.CreatedAt)
                 .ToListAsync(ct))
             .Where(p => view is null || view.MaySee(p.BucketId))
+            .Where(p => !hidden.HidesPhoto(p))
             .ToList();
+        var owners = await UploadersAsync(live, ct);
 
         // The same three questions StoreAsync asks, asked in the same order — cancelled, then the
         // night. This used to report only the cancellation, so an event six months past still offered
@@ -217,7 +227,8 @@ public sealed class EventPhotoService(
             live.Select(p => new EventPhotoDto(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName,
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
-                p.CreatedAt)).ToList(),
+                p.CreatedAt,
+                owners.GetValueOrDefault(p.Id))).ToList(),
             closed,
             venue?.Name,
             venue?.LogoUrl,
@@ -253,14 +264,14 @@ public sealed class EventPhotoService(
         var bucket = await bucketService.ForCampaignAsync(campaign.Id, ct);
         var credit = guestId is null ? null : await GuestNameAsync(guestId.Value, ct);
 
-        return new UploadDoor(bucket.Id, campaign.Id, guestId, credit);
+        return new UploadDoor(bucket.Id, campaign.Id, guestId, credit, null, currentUser.UserId);
     }
 
     public Task<EventPhotoDto> StoreUploadedAsync(
         Guid id, UploadDoor door, byte[] content, string contentType, string fileName,
         CancellationToken ct = default) =>
         StoreAsync(door.BucketId, door.CampaignId, door.GuestId, door.UploaderName, content, contentType,
-            fileName, poster: null, ct, reservedId: id);
+            fileName, poster: null, ct, reservedId: id, uploaderUserId: door.UploaderUserId);
 
     public async Task<EventPhotoDto> StoreUploadedVideoAsync(
         Guid id, UploadDoor door, string path, byte[]? poster, CancellationToken ct = default)
@@ -301,6 +312,7 @@ public sealed class EventPhotoService(
             BucketId = door.BucketId,
             GuestId = door.GuestId,
             UploaderName = door.UploaderName,
+            UploaderUserId = door.UploaderUserId ?? currentUser.UserId,
             OriginalUrl = url,
             Url = url,
             ThumbUrl = tileUrl,
@@ -364,10 +376,14 @@ public sealed class EventPhotoService(
         var bucket = await bucketService.ViewAsync(bucketId, ct);
         var mine = await bucketService.OwnsAsync(bucketId, ct);
 
-        var live = await photos.Query()
-            .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
-            .OrderByDescending(p => p.CreatedAt)
-            .ToListAsync(ct);
+        var hidden = await HiddenAsync(ct);
+        var live = (await photos.Query()
+                .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync(ct))
+            .Where(p => !hidden.HidesPhoto(p))
+            .ToList();
+        var owners = await UploadersAsync(live, ct);
 
         return new EventPhotoBoxDto(
             bucket.CampaignId ?? Guid.Empty,
@@ -383,7 +399,8 @@ public sealed class EventPhotoService(
                 // and nothing else — these are photographs of an occasion that is not theirs to
                 // curate, and the moderation right belongs to whoever the occasion belonged to.
                 mine,
-                p.CreatedAt)).ToList(),
+                p.CreatedAt,
+                owners.GetValueOrDefault(p.Id))).ToList(),
             // Same sentence the writer would have given, and in the order that matters: "this closed
             // a week ago" is more useful than "this is full" when both are true.
             !bucket.IsOpen
@@ -437,7 +454,8 @@ public sealed class EventPhotoService(
     /// </summary>
     private async Task<EventPhotoDto> StoreAsync(
         Guid bucketId, Guid? campaignId, Guid? guestId, string? uploaderName, byte[] content,
-        string contentType, string fileName, byte[]? poster, CancellationToken ct, Guid? reservedId = null)
+        string contentType, string fileName, byte[]? poster, CancellationToken ct, Guid? reservedId = null,
+        Guid? uploaderUserId = null)
     {
         if (content.Length == 0)
             throw new BusinessRuleException("That photo file is empty.", "empty_image");
@@ -583,6 +601,7 @@ public sealed class EventPhotoService(
                 BucketId = bucketId,
                 GuestId = guestId,
                 UploaderName = uploaderName,
+                UploaderUserId = uploaderUserId ?? currentUser.UserId,
                 OriginalUrl = originalUrl,
                 Url = url,
                 ThumbUrl = thumbUrl,
@@ -643,6 +662,52 @@ public sealed class EventPhotoService(
     /// is marked first and the files go after: a crash between the two leaves stray files, never a
     /// live photo pointing at nothing.</para>
     /// </summary>
+    public async Task RemoveForModerationAsync(Guid photoId, CancellationToken ct = default)
+    {
+        var photo = await photos.Query(tracking: true).FirstOrDefaultAsync(p => p.Id == photoId, ct);
+        if (photo is null || photo.DeletedAt is not null) return;
+        await RemoveAsync(photo, ct);
+    }
+
+    private Task<ModerationView> HiddenAsync(CancellationToken ct) =>
+        moderation is null ? Task.FromResult(ModerationView.Empty) : moderation.ForCurrentAsync(ct);
+
+    /// <summary>
+    /// Who added each photo, for Block and Report: the account the upload recorded, or for a guest's
+    /// older photo the account with the guest's email or phone.
+    /// </summary>
+    private async Task<Dictionary<Guid, Guid?>> UploadersAsync(IReadOnlyList<EventPhoto> list, CancellationToken ct)
+    {
+        var result = list.Where(p => p.UploaderUserId is not null).ToDictionary(p => p.Id, p => p.UploaderUserId);
+        var guestIds = list.Where(p => p.UploaderUserId is null && p.GuestId is not null)
+            .Select(p => p.GuestId!.Value).Distinct().ToList();
+        if (guestIds.Count == 0 || users is null) return result;
+
+        var rows = await guestRepository.Query()
+            .Where(g => guestIds.Contains(g.Id))
+            .Select(g => new { g.Id, g.Email, g.PhoneE164 })
+            .ToListAsync(ct);
+        var emails = rows.Select(r => r.Email?.Trim().ToLowerInvariant()).Where(e => !string.IsNullOrEmpty(e)).Cast<string>().Distinct().ToList();
+        var phones = rows.Select(r => r.PhoneE164?.Trim()).Where(p => !string.IsNullOrEmpty(p)).Cast<string>().Distinct().ToList();
+        if (emails.Count == 0 && phones.Count == 0) return result;
+        var accounts = await users.Query()
+            .Where(u => (u.Email != null && emails.Contains(u.Email)) || (u.PhoneE164 != null && phones.Contains(u.PhoneE164)))
+            .Select(u => new { u.Id, u.Email, u.PhoneE164 })
+            .ToListAsync(ct);
+
+        foreach (var p in list.Where(p => p.UploaderUserId is null && p.GuestId is not null))
+        {
+            var g = rows.FirstOrDefault(r => r.Id == p.GuestId);
+            if (g is null) continue;
+            var email = g.Email?.Trim().ToLowerInvariant();
+            var phone = g.PhoneE164?.Trim();
+            var account = accounts.FirstOrDefault(a =>
+                (!string.IsNullOrEmpty(email) && a.Email == email) || (!string.IsNullOrEmpty(phone) && a.PhoneE164 == phone));
+            if (account is not null) result[p.Id] = account.Id;
+        }
+        return result;
+    }
+
     private async Task RemoveAsync(EventPhoto photo, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)

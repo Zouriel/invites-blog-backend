@@ -50,12 +50,12 @@ public sealed class AppAuthenticationHandler(
         }
         else if (token.Count(c => c == '.') == 2 && TryReadJwt(token, out var jwtClaims))
         {
-            // A token says who it was issued to, not that they still exist. A deleted account's token
+            // A token says who it was issued to, not that they still exist. A deleted (or suspended) account's token
             // authenticates nobody from that moment: the refusals below turn it into a 401, the same
             // as an expired one. One primary-key read per signed-in request is the price of "at once".
             // Tokens from an emailed code name a contact and no account, so they don't come here.
             if (Guid.TryParse(jwtClaims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value, out var userId)
-                && !await users.AnyAsync(u => u.Id == userId))
+                && !await users.AnyAsync(u => u.Id == userId && u.IsActive))
             {
                 var nobody = new ClaimsPrincipal(BuildIdentity(Roles.Public, authenticated: false));
                 return AuthenticateResult.Success(new AuthenticationTicket(nobody, SchemeName));

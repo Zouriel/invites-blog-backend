@@ -528,6 +528,17 @@ public sealed class AccountDeletionService(
         await db.PostComments.Where(c => c.ParentId != null && theirs.Contains(c.ParentId.Value) && c.UserId != userId)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.ParentId, (Guid?)null), ct);
         await db.PostComments.Where(c => c.UserId == userId).ExecuteDeleteAsync(ct);
+
+        // Their blocks (both ways) and their own reports go; reports about them lose the link to them,
+        // and photos they added stay in other people's albums without pointing at the account.
+        await db.UserBlocks.Where(b => b.BlockerUserId == userId || b.BlockedUserId == userId).ExecuteDeleteAsync(ct);
+        await db.ContentReports.Where(r => r.ReporterUserId == userId || (r.Kind == "user" && r.TargetId == userId)).ExecuteDeleteAsync(ct);
+        await db.ContentReports.Where(r => r.SubjectUserId == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.SubjectUserId, (Guid?)null), ct);
+        await db.EventPhotos.Where(ph => ph.UploaderUserId == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(ph => ph.UploaderUserId, (Guid?)null), ct);
+        await db.PendingUploads.Where(u => u.UploaderUserId == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.UploaderUserId, (Guid?)null), ct);
     }
 
     private async Task RemoveVenueAsync(Guid userId, RemovalQueue queue, DateTimeOffset now, CancellationToken ct)

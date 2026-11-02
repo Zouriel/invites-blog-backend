@@ -424,6 +424,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnName("post_cover_photo_ids")
                         .HasDefaultValueSql("'{}'::uuid[]");
 
+                    b.Property<DateTimeOffset?>("PostHiddenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("post_hidden_at");
+
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer")
                         .HasColumnName("retention_days");
@@ -649,6 +653,91 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("comment_likes", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.ContentReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("reason");
+
+                    b.Property<Guid>("ReporterUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reporter_user_id");
+
+                    b.Property<string>("Resolution")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("resolution");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("resolution_note");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by_user_id");
+
+                    b.Property<string>("Snapshot")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("snapshot");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("SubjectUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_user_id");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "TargetId")
+                        .HasDatabaseName("idx_content_reports_target");
+
+                    b.HasIndex("ReporterUserId", "Kind")
+                        .HasDatabaseName("idx_content_reports_reporter_kind");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("idx_content_reports_queue");
+
+                    b.ToTable("content_reports", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.DeliveryAttempt", b =>
                 {
                     b.Property<Guid>("Id")
@@ -800,6 +889,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<string>("UploaderName")
                         .HasColumnType("text")
                         .HasColumnName("uploader_name");
+
+                    b.Property<Guid?>("UploaderUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("uploader_user_id");
 
                     b.Property<string>("Url")
                         .IsConcurrencyToken()
@@ -1711,6 +1804,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("uploader_name");
 
+                    b.Property<Guid?>("UploaderUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("uploader_user_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Status", "NextAttemptAt")
@@ -2414,6 +2511,37 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("uploaded_guest_files", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.UserBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BlockedUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("blocked_user_id");
+
+                    b.Property<Guid>("BlockerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("blocker_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedUserId")
+                        .HasDatabaseName("idx_user_blocks_blocked");
+
+                    b.HasIndex("BlockerUserId", "BlockedUserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_blocks_pair");
+
+                    b.ToTable("user_blocks", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.UserExternalLogin", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2690,6 +2818,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.ContentReport", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("ReporterUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.DeviceToken", b =>
                 {
                     b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
@@ -2793,6 +2930,21 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.TemplateDesign", null)
                         .WithMany()
                         .HasForeignKey("DesignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.UserBlock", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("BlockedUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("BlockerUserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

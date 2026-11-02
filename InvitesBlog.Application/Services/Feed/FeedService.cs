@@ -12,6 +12,7 @@ using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using InvitesBlog.Application.Common;
+using InvitesBlog.Application.Moderation;
 
 namespace InvitesBlog.Application.Services.Feed;
 
@@ -34,6 +35,9 @@ public interface IFeedService
     Task<FeedPostDto> SetCaptionAsync(Guid campaignId, SetCaptionRequest req, CancellationToken ct = default);
     Task<FeedCoversDto> CoversAsync(Guid campaignId, CancellationToken ct = default);
     Task<FeedCoversDto> SetCoversAsync(Guid campaignId, SetFeedCoversRequest req, CancellationToken ct = default);
+
+    /// <summary>Whether the signed-in account has this event in its feed (so may report what's in it).</summary>
+    Task<bool> CanSeeAsync(Guid campaignId, CancellationToken ct = default);
 }
 
 public enum FeedRole
@@ -60,7 +64,8 @@ public sealed class FeedService(
     IRepository<CommentLike> commentLikes,
     IMediaBucketService bucketService,
     IUnitOfWork uow,
-    IPushQueue push) : IFeedService
+    IPushQueue push,
+    IModerationViewService? moderation = null) : IFeedService
 {
     /// <summary>How many photos a post's header shows.</summary>
     public const int HeaderImages = 6;
@@ -82,6 +87,13 @@ public sealed class FeedService(
             // A save the date is not an event post: it has no photos and the invitation follows it.
             .Where(c => ids.Contains(c.Id) && c.Status != CampaignStatus.Cancelled && c.Kind != CampaignKind.SaveTheDate)
             .ToListAsync(ct);
+        // Taken out of the feed after a report, or hidden by this viewer (reported, or from someone
+        // they blocked). An event's organisers always still see their own post.
+        var view = await ViewAsync(ct);
+        events = events
+            .Where(c => involved[c.Id] >= FeedRole.Manager
+                        || (c.PostHiddenAt is null && !view.HidesPost(c.Id, c.CreatedByUserId)))
+            .ToList();
         if (events.Count == 0) return new FeedPageDto([], false);
 
         // Newest activity first: the event being made, a photo added, or someone commenting.
@@ -115,7 +127,7 @@ public sealed class FeedService(
 
         var posts = new List<FeedPostDto>(page.Count);
         foreach (var (campaign, activity) in page)
-            posts.Add(await DescribeAsync(me, campaign, involved[campaign.Id], activity, ct));
+            posts.Add(await DescribeAsync(me, campaign, involved[campaign.Id], activity, ct, view));
 
         return new FeedPageDto(posts, skip + page.Count < ordered.Count);
     }
@@ -125,10 +137,13 @@ public sealed class FeedService(
         var me = await MeAsync(ct);
         var (campaign, role) = await RequireInvolvedAsync(me, campaignId, ct);
 
-        var all = await comments.Query()
-            .Where(c => c.CampaignId == campaignId)
-            .OrderBy(c => c.CreatedAt)
-            .ToListAsync(ct);
+        var view = await ViewAsync(ct);
+        var all = (await comments.Query()
+                .Where(c => c.CampaignId == campaignId)
+                .OrderBy(c => c.CreatedAt)
+                .ToListAsync(ct))
+            .Where(c => !view.HidesComment(c))
+            .ToList();
         return await DescribeCommentsAsync(me, campaign, role, all, ct);
     }
 
@@ -143,6 +158,7 @@ public sealed class FeedService(
             throw new BusinessRuleException("Write something first.", "comment_empty");
         if (body.Length > MaxCommentLength)
             throw new BusinessRuleException($"Keep a comment under {MaxCommentLength} characters.", "comment_too_long");
+        ObjectionableText.Check(body);
 
         if (req.ParentId is { } parentId)
         {
@@ -256,13 +272,14 @@ public sealed class FeedService(
         var caption = req.Caption?.Trim();
         if (caption is { Length: > MaxCaptionLength })
             throw new BusinessRuleException($"Keep the post under {MaxCaptionLength} characters.", "caption_too_long");
+        ObjectionableText.Check(caption);
 
         var tracked = await campaigns.GetByIdAsync(campaignId, ct) ?? campaign;
         tracked.PostCaption = string.IsNullOrWhiteSpace(caption) ? null : caption;
         campaigns.Update(tracked);
         await uow.SaveChangesAsync(ct);
 
-        return await DescribeAsync(me, tracked, role, DateTimeOffset.UtcNow, ct);
+        return await DescribeAsync(me, tracked, role, DateTimeOffset.UtcNow, ct, await ViewAsync(ct));
     }
 
     public async Task<FeedCoversDto> CoversAsync(Guid campaignId, CancellationToken ct = default)
@@ -404,7 +421,7 @@ public sealed class FeedService(
     // ---------- describing ----------
 
     private async Task<FeedPostDto> DescribeAsync(
-        AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct)
+        AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct, ModerationView view)
     {
         var defaultBucket = await DefaultBucketAsync(campaign.Id, ct);
 
@@ -419,18 +436,21 @@ public sealed class FeedService(
                 ? []
                 : (await photos.Query()
                         .Where(p => p.BucketId == bucketId && p.DeletedAt == null && picks.Contains(p.Id))
-                        .Select(p => new { p.Id, p.Url, p.ThumbUrl, p.ContentType, p.CreatedAt })
                         .ToListAsync(ct))
+                    .Where(p => !view.HidesPhoto(p))
                     .OrderBy(p => picks.IndexOf(p.Id))
                     .ToList();
+            // A few spare, so photos this viewer hid don't leave the header short.
             var shown = chosen.Count > 0
                 ? chosen
-                : await photos.Query()
-                    .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
-                    .OrderBy(p => p.CreatedAt)
+                : (await photos.Query()
+                        .Where(p => p.BucketId == bucketId && p.DeletedAt == null)
+                        .OrderBy(p => p.CreatedAt)
+                        .Take(view.IsEmpty ? HeaderImages : HeaderImages * 5)
+                        .ToListAsync(ct))
+                    .Where(p => !view.HidesPhoto(p))
                     .Take(HeaderImages)
-                    .Select(p => new { p.Id, p.Url, p.ThumbUrl, p.ContentType, p.CreatedAt })
-                    .ToListAsync(ct);
+                    .ToList();
             images = shown
                 .Select(p => p.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
                     ? new FeedImageDto(p.ThumbUrl, true)
@@ -452,8 +472,12 @@ public sealed class FeedService(
             .CountAsync(p => p.CampaignId == campaign.Id && p.DeletedAt == null, ct);
         var likeCount = await postLikes.Query().CountAsync(l => l.CampaignId == campaign.Id, ct);
         var likedByMe = await postLikes.Query().AnyAsync(l => l.CampaignId == campaign.Id && l.UserId == me.Id, ct);
-        var commentCount = await comments.Query()
-            .CountAsync(c => c.CampaignId == campaign.Id && c.DeletedAt == null, ct);
+        var commentCount = view.IsEmpty
+            ? await comments.Query().CountAsync(c => c.CampaignId == campaign.Id && c.DeletedAt == null, ct)
+            : (await comments.Query()
+                    .Where(c => c.CampaignId == campaign.Id && c.DeletedAt == null)
+                    .ToListAsync(ct))
+                .Count(c => !view.HidesComment(c));
 
         string? hostName = null;
         if (campaign.InviterId is { } inviterId)
@@ -481,7 +505,8 @@ public sealed class FeedService(
             role >= FeedRole.Manager,
             role == FeedRole.Guest ? $"/invitation/{campaign.Id}" : $"/dashboard/{campaign.Id}",
             activity,
-            hostUser?.AvatarUrl);
+            hostUser?.AvatarUrl,
+            campaign.CreatedByUserId);
     }
 
     private async Task<List<FeedCommentDto>> DescribeCommentsAsync(
@@ -513,7 +538,8 @@ public sealed class FeedService(
             likes.Any(l => l.CommentId == c.Id && l.UserId == me.Id),
             c.UserId == me.Id || role >= FeedRole.Manager,
             replies,
-            authors.GetValueOrDefault(c.UserId)?.AvatarUrl);
+            authors.GetValueOrDefault(c.UserId)?.AvatarUrl,
+            c.UserId);
 
         // A single new reply is described on its own; a full list nests replies under their comment.
         if (live.Count == 1 && live[0].ParentId is not null)
@@ -545,6 +571,17 @@ public sealed class FeedService(
             return (null, null);
         }
     }
+
+    public async Task<bool> CanSeeAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var me = await MeAsync(ct);
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        if (campaign is null) return false;
+        return (await InvolvedAsync(me, ct)).ContainsKey(campaignId);
+    }
+
+    private Task<ModerationView> ViewAsync(CancellationToken ct) =>
+        moderation is null ? Task.FromResult(ModerationView.Empty) : moderation.ForCurrentAsync(ct);
 
     private async Task<AppUser> MeAsync(CancellationToken ct)
     {

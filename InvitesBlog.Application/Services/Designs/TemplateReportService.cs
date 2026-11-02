@@ -41,7 +41,8 @@ public sealed class TemplateReportService(
     IRepository<TemplateReport> reports,
     IRepository<AppUser> users,
     ITemplateRepository templates,
-    IUnitOfWork uow) : ITemplateReportService
+    IUnitOfWork uow,
+    Moderation.IReportMailService? mail = null) : ITemplateReportService
 {
     public static readonly string[] Reasons = ["offensive", "copyright", "spam", "broken", "other"];
 
@@ -81,6 +82,15 @@ public sealed class TemplateReportService(
             CreatedAt = DateTimeOffset.UtcNow,
         }, ct);
         await uow.SaveChangesAsync(ct);
+
+        if (mail is not null)
+            await mail.SendAsync($"Report: a gallery template ({request.Reason})",
+            [
+                ("Template", $"{template.Name} (/templates/{template.Slug})"),
+                ("Reason", request.Reason),
+                ("Note", details),
+                ("Made by", template.DesignerName),
+            ], ct);
     }
 
     public async Task<IReadOnlyList<TemplateReportDto>> ListAsync(string? status, CancellationToken ct = default)
