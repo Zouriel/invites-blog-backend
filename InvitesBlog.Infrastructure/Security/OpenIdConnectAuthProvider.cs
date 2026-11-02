@@ -3,6 +3,7 @@ using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Exceptions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
 namespace InvitesBlog.Infrastructure.Security;
@@ -21,13 +22,15 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     private static readonly TimeSpan KeyCacheLifetime = TimeSpan.FromHours(12);
 
     private readonly IHttpClientFactory httpClientFactory;
+    private readonly ILogger? logger;
     private readonly SemaphoreSlim keyLock = new(1, 1);
     private IReadOnlyList<SecurityKey> cachedKeys = [];
     private DateTimeOffset keysFetchedAt = DateTimeOffset.MinValue;
 
-    protected OpenIdConnectAuthProvider(IConfiguration config, IHttpClientFactory httpClientFactory)
+    protected OpenIdConnectAuthProvider(IConfiguration config, IHttpClientFactory httpClientFactory, ILogger? logger = null)
     {
         this.httpClientFactory = httpClientFactory;
+        this.logger = logger;
         ClientId = config[$"OAuth:{ConfigSection}:ClientId"];
         AdditionalClientIds = SplitIds(config[$"OAuth:{ConfigSection}:AdditionalClientIds"]);
     }
@@ -90,6 +93,10 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
             throw new UnauthorizedException("No sign-in token was supplied.", "oauth_invalid_token");
 
         var principal = await ValidateAsync(idToken, allowKeyRefresh: true, ct);
+        // Which of our clients the token was for (web, or the iPhone app's own): how a first sign-in
+        // from a new platform can be confirmed from the log. No email, subject or token is logged.
+        logger?.LogInformation("{Provider} sign-in token accepted for client {ClientId}",
+            Provider, principal.FindFirst("aud")?.Value);
 
         var subject = principal.FindFirst("sub")?.Value;
         var email = principal.FindFirst("email")?.Value?.Trim().ToLowerInvariant();
@@ -160,8 +167,25 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         // sending us something unusable, so both are a 401 rather than a 500 with a stack trace.
         catch (Exception ex) when (ex is SecurityTokenException or ArgumentException)
         {
+            logger?.LogWarning("{Provider} sign-in token refused ({Reason}) for client {ClientId}",
+                Provider, ex.GetType().Name, UnverifiedAudience(handler, idToken));
             throw new UnauthorizedException(
                 $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");
+        }
+    }
+
+    /// <summary>The token's own (unverified) audience, for the refusal log only: shortened and printable.</summary>
+    private static string UnverifiedAudience(JwtSecurityTokenHandler handler, string idToken)
+    {
+        try
+        {
+            var aud = string.Join(",", handler.ReadJwtToken(idToken).Audiences);
+            var clean = new string(aud.Where(c => !char.IsControl(c)).Take(120).ToArray());
+            return clean.Length == 0 ? "(none)" : clean;
+        }
+        catch (Exception)
+        {
+            return "(unreadable)";
         }
     }
 
@@ -196,8 +220,8 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
 }
 
 /// <summary>Google sign-in (<c>OAuth:Google:ClientId</c>).</summary>
-public sealed class GoogleAuthProvider(IConfiguration config, IHttpClientFactory http)
-    : OpenIdConnectAuthProvider(config, http)
+public sealed class GoogleAuthProvider(IConfiguration config, IHttpClientFactory http, ILogger<GoogleAuthProvider>? logger = null)
+    : OpenIdConnectAuthProvider(config, http, logger)
 {
     public const string Key = "google";
 
@@ -219,7 +243,8 @@ public sealed class MicrosoftAuthProvider : OpenIdConnectAuthProvider
 
     private readonly string tenant;
 
-    public MicrosoftAuthProvider(IConfiguration config, IHttpClientFactory http) : base(config, http)
+    public MicrosoftAuthProvider(IConfiguration config, IHttpClientFactory http, ILogger<MicrosoftAuthProvider>? logger = null)
+        : base(config, http, logger)
     {
         tenant = config["OAuth:Microsoft:Tenant"] is { Length: > 0 } t ? t : "common";
     }

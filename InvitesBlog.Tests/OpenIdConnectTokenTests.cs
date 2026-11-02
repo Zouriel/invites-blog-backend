@@ -5,6 +5,7 @@ using System.Text.Json;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Infrastructure.Security;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using NSubstitute;
 using Xunit;
@@ -27,7 +28,7 @@ public class OpenIdConnectTokenTests
 
     private const string IosClientId = "ios-client-id.apps.googleusercontent.com";
 
-    private static GoogleAuthProvider Sut(string? additionalClientIds = null)
+    private static GoogleAuthProvider Sut(string? additionalClientIds = null, ILogger<GoogleAuthProvider>? logger = null)
     {
         var config = Substitute.For<IConfiguration>();
         config["OAuth:Google:ClientId"].Returns(ClientId);
@@ -35,7 +36,7 @@ public class OpenIdConnectTokenTests
 
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient().Returns(_ => new HttpClient(new JwksHandler()));
-        return new GoogleAuthProvider(config, factory);
+        return new GoogleAuthProvider(config, factory, logger);
     }
 
     private static string Sign(Dictionary<string, object> claims, string? audience = ClientId)
@@ -169,6 +170,32 @@ public class OpenIdConnectTokenTests
         Assert.Equal("someone@example.com", (await sut.VerifyAsync(VerifiedToken(ClientId))).Email);
         // Browsers and Android are given the web client id, never the iOS one.
         Assert.Equal(ClientId, sut.Descriptor().ClientId);
+    }
+
+    [Fact]
+    public async Task The_log_says_which_client_a_token_was_accepted_or_refused_for_and_nothing_personal()
+    {
+        var log = new ListLogger();
+        var sut = Sut(IosClientId, log);
+
+        await sut.VerifyAsync(VerifiedToken(IosClientId));
+        await Assert.ThrowsAsync<UnauthorizedException>(() => sut.VerifyAsync(VerifiedToken("someone-elses-app.apps.googleusercontent.com")));
+
+        Assert.Equal(2, log.Lines.Count);
+        Assert.Equal((LogLevel.Information, $"google sign-in token accepted for client {IosClientId}"), log.Lines[0]);
+        Assert.Equal(LogLevel.Warning, log.Lines[1].Level);
+        Assert.Contains("refused", log.Lines[1].Text);
+        Assert.EndsWith("for client someone-elses-app.apps.googleusercontent.com", log.Lines[1].Text);
+        Assert.DoesNotContain(log.Lines, l => l.Text.Contains("someone@example.com"));
+    }
+
+    private sealed class ListLogger : ILogger<GoogleAuthProvider>
+    {
+        public List<(LogLevel Level, string Text)> Lines { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Lines.Add((logLevel, formatter(state, exception)));
     }
 
     [Fact]
