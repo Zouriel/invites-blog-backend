@@ -227,7 +227,9 @@ public sealed class GooglePlayPublisher(IHttpClientFactory http, IConfiguration 
             using var response = await RequestTokenAsync(tokenUri, assertion, ct);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogError("Google refused the service account's sign-in: {Status}.", (int)response.StatusCode);
+                // Google's reason names the fault and holds no secret (for example "iat is not set").
+                var reason = await response.Content.ReadAsStringAsync(ct);
+                logger.LogError("Google refused the service account's sign-in: {Status} {Reason}.", (int)response.StatusCode, reason.Length > 200 ? reason[..200] : reason);
                 throw Failed(response.StatusCode);
             }
             JsonDocument doc;
@@ -273,7 +275,8 @@ public sealed class GooglePlayPublisher(IHttpClientFactory http, IConfiguration 
         var now = DateTime.UtcNow;
         var jwt = new JwtSecurityToken(
             issuer: email, audience: audience,
-            claims: [new Claim("scope", Scope)],
+            // Google refuses an assertion with no "iat", and this constructor doesn't add one.
+            claims: [new Claim("scope", Scope), new Claim("iat", EpochTime.GetIntDate(now).ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64)],
             notBefore: now, expires: now.AddMinutes(30),
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
         return new JwtSecurityTokenHandler().WriteToken(jwt);
