@@ -114,6 +114,8 @@ public static class PendingRemovalKinds
     public const string PlaySubscription = "play-subscription";
     /// <summary>A customer record at the payment gateway, with its saved cards.</summary>
     public const string PaymentCustomer = "payment-customer";
+    /// <summary>A Sign in with Apple refresh token to revoke at Apple, still sealed (AppleTokenSeal).</summary>
+    public const string AppleSignIn = "apple-signin";
 }
 
 /// <summary>

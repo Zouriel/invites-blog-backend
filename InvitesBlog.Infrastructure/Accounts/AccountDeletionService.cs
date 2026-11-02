@@ -328,6 +328,13 @@ public sealed class AccountDeletionService(
         queue.Prefix($"avatars/{me.Id:N}/");
         queue.Url(me.AvatarUrl);
 
+        // Sign in with Apple: the login goes with the account below; its token is revoked at Apple after
+        // the commit (App Store 5.1.1(v)). Kept sealed in the queue as it was on the login.
+        foreach (var sealedToken in await db.UserExternalLogins
+                     .Where(l => l.UserId == me.Id && l.Provider == "apple" && l.RefreshTokenSealed != null)
+                     .Select(l => l.RefreshTokenSealed!).ToListAsync(ct))
+            queue.AppleToken(sealedToken);
+
         db.PendingRemovals.AddRange(queue.Rows(now));
         db.AuditLogs.Add(new AuditLog
         {
@@ -636,6 +643,8 @@ public sealed class AccountDeletionService(
         public void PaymentCustomer(string id) => _items.Add((PendingRemovalKinds.PaymentCustomer, id));
 
         public void PlaySubscription(string token) => _items.Add((PendingRemovalKinds.PlaySubscription, token));
+
+        public void AppleToken(string sealedToken) => _items.Add((PendingRemovalKinds.AppleSignIn, sealedToken));
 
         public IEnumerable<PendingRemoval> Rows(DateTimeOffset now) => _items.Select(i => new PendingRemoval
         {

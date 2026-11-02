@@ -13,8 +13,14 @@ public sealed record ExternalAuthDescriptor(string Provider, string ClientId, st
 /// <param name="Email">The verified email address, lowercased.</param>
 /// <param name="DisplayName">Best available display name, falling back to the email's local part.</param>
 /// <param name="PictureUrl">The provider's profile picture (Google's <c>picture</c> claim), https only, or null.</param>
+/// <param name="EmailVerified">
+/// True unless the provider leaves the email unconfirmed. Apple's token carries no email at all on some
+/// sign-ins (then Email is empty) and must say <c>email_verified</c> before the email may link an
+/// existing account; Google and Microsoft keep their old meaning (refused only when it says false).
+/// </param>
 public sealed record ExternalIdentity(
-    string Provider, string SubjectId, string Email, string DisplayName, string? PictureUrl = null);
+    string Provider, string SubjectId, string Email, string DisplayName, string? PictureUrl = null,
+    bool EmailVerified = true);
 
 /// <summary>
 /// Verifies an ID token issued by an external identity provider (§designer OAuth sign-in). The client
@@ -37,8 +43,17 @@ public interface IExternalAuthProvider
     ExternalAuthDescriptor Descriptor();
 
     /// <summary>
+    /// True for a provider only the native apps can offer (Sign in with Apple: the website would need a
+    /// Services ID it doesn't have). Listed in the sign-in options only when an app asks for its platform.
+    /// </summary>
+    bool AppOnly => false;
+
+    /// <summary>
     /// Validates the ID token and returns the identity it asserts.
     /// Throws when the token is invalid, expired, for another audience, or carries an unverified email.
+    /// <paramref name="rawNonce"/>, when given, must hash (SHA-256, hex) to the token's <c>nonce</c>: the
+    /// app made it up and asked the provider to sign its hash, so a token lifted from elsewhere can't be
+    /// replayed here. Providers that need one refuse a sign-in without it.
     /// </summary>
-    Task<ExternalIdentity> VerifyAsync(string idToken, CancellationToken ct = default);
+    Task<ExternalIdentity> VerifyAsync(string idToken, string? rawNonce = null, CancellationToken ct = default);
 }

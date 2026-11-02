@@ -1,6 +1,7 @@
 using InvitesBlog.Domain.Enums;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Dtos.Accounts;
 using InvitesBlog.Application.Dtos.Otp;
 using InvitesBlog.Application.Exceptions;
@@ -81,8 +82,10 @@ public class AccountServiceTests
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
             _templates, _photos, TestData.NoCelebrants(), _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
             [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config,
-            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _pictures);
+            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _pictures, appleTokens: _apple);
     }
+
+    private IAppleSignInTokens? _apple;
 
     private static AppUser User(
         string? email = null, string? phone = null, string? password = null,
@@ -531,16 +534,196 @@ public class AccountServiceTests
         Assert.Equal("google-client-id", only.ClientId);
     }
 
+    // ----- Sign in with Apple ---------------------------------------------------------------------
+
+    private const string AppleSub = "001234.apple-sub";
+
+    private static ExternalIdentity Apple(string email = "abc@privaterelay.appleid.com", bool verified = true) =>
+        new("apple", AppleSub, email, email.Length == 0 ? "" : email.Split('@')[0], null, verified);
+
+    [Fact]
+    public void Options_list_apple_for_the_iphone_only()
+    {
+        _authProviders.Add(Provider("google"));
+        _authProviders.Add(Provider("apple", appOnly: true));
+
+        Assert.Equal(new[] { "google" }, Sut().Options().OAuthProviders.Select(p => p.Provider));
+        Assert.Equal(new[] { "google" }, Sut().Options("android").OAuthProviders.Select(p => p.Provider));
+        Assert.Equal(new[] { "apple", "google" }, Sut().Options("ios").OAuthProviders.Select(p => p.Provider));
+    }
+
+    [Fact]
+    public async Task Apple_s_nonce_reaches_the_provider()
+    {
+        var apple = Provider("apple", appOnly: true, identity: Apple());
+        _authProviders.Add(apple);
+        Existing();
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", Nonce: "raw-nonce"));
+
+        await apple.Received().VerifyAsync("id-token", "raw-nonce", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_first_apple_sign_in_names_the_new_account_from_what_the_app_sent()
+    {
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
+        AppUser? added = null;
+        await _users.AddAsync(Arg.Do<AppUser>(u => added = u), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", null, " Aisha ", "Ibrahim"));
+
+        Assert.Equal("Aisha Ibrahim", added!.DisplayName);
+        Assert.Equal("abc@privaterelay.appleid.com", added.Email);
+    }
+
+    [Fact]
+    public async Task A_relay_address_is_not_used_as_a_name()
+    {
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
+        AppUser? added = null;
+        await _users.AddAsync(Arg.Do<AppUser>(u => added = u), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n"));
+
+        Assert.Equal("You", added!.DisplayName);
+    }
+
+    [Fact]
+    public async Task An_apple_sign_in_with_no_email_and_no_link_creates_nothing()
+    {
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple(email: "", verified: false)));
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n")));
+
+        Assert.Equal("oauth_no_email", ex.ErrorCode);
+        await _users.DidNotReceive().AddAsync(Arg.Any<AppUser>(), Arg.Any<CancellationToken>());
+        await _logins.DidNotReceive().AddAsync(Arg.Any<UserExternalLogin>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_apple_sign_in_with_no_email_follows_its_link()
+    {
+        var linked = User(email: "abc@privaterelay.appleid.com", roleNames: Roles.Customer);
+        Existing(linked);
+        _logins.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new UserExternalLogin { Id = Guid.NewGuid(), UserId = linked.Id, Provider = "apple", ExternalSubjectId = AppleSub, Email = linked.Email! },
+        }.AsAsyncQueryable());
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple(email: "", verified: false)));
+
+        var result = await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n"));
+
+        Assert.Equal(linked.Id, result.Account.Id);
+    }
+
+    [Fact]
+    public async Task An_unverified_apple_email_does_not_take_over_an_existing_account()
+    {
+        Existing(User(email: "someone@example.com", password: "a-password", roleNames: Roles.Customer));
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple(email: "someone@example.com", verified: false)));
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n")));
+
+        Assert.Equal("oauth_email_unverified", ex.ErrorCode);
+        await _logins.DidNotReceive().AddAsync(Arg.Any<UserExternalLogin>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_verified_apple_email_links_the_existing_account()
+    {
+        var existing = User(email: "someone@example.com", password: "a-password", roleNames: Roles.Customer);
+        Existing(existing);
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple(email: "someone@example.com")));
+        UserExternalLogin? link = null;
+        await _logins.AddAsync(Arg.Do<UserExternalLogin>(l => link = l), Arg.Any<CancellationToken>());
+
+        var result = await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n"));
+
+        Assert.Equal(existing.Id, result.Account.Id);
+        Assert.Equal(AppleSub, link!.ExternalSubjectId);
+    }
+
+    [Fact]
+    public async Task Apple_s_code_becomes_a_sealed_refresh_token_when_a_key_is_configured()
+    {
+        _config["Jwt:SigningKey"].Returns("unit-test-signing-key-long-enough-0123456789abcdef");
+        _apple = Substitute.For<IAppleSignInTokens>();
+        _apple.IsConfigured.Returns(true);
+        _apple.ExchangeAsync("one-time-code", Arg.Any<CancellationToken>()).Returns("r.refresh-token");
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
+        UserExternalLogin? link = null;
+        await _logins.AddAsync(Arg.Do<UserExternalLogin>(l => link = l), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "one-time-code"));
+
+        Assert.NotNull(link!.RefreshTokenSealed);
+        Assert.DoesNotContain("refresh-token", link.RefreshTokenSealed);
+        Assert.Equal("r.refresh-token", AppleTokenSeal.Open(link.RefreshTokenSealed, _config));
+    }
+
+    [Fact]
+    public async Task Without_a_key_apple_s_code_is_not_sent_anywhere()
+    {
+        _apple = Substitute.For<IAppleSignInTokens>();
+        _apple.IsConfigured.Returns(false);
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
+        UserExternalLogin? link = null;
+        await _logins.AddAsync(Arg.Do<UserExternalLogin>(l => link = l), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "one-time-code"));
+
+        Assert.Null(link!.RefreshTokenSealed);
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_login_that_already_has_a_token_does_not_exchange_again()
+    {
+        _apple = Substitute.For<IAppleSignInTokens>();
+        _apple.IsConfigured.Returns(true);
+        var linked = User(email: "abc@privaterelay.appleid.com", roleNames: Roles.Customer);
+        Existing(linked);
+        _logins.Query(Arg.Any<bool>()).Returns(new[]
+        {
+            new UserExternalLogin { Id = Guid.NewGuid(), UserId = linked.Id, Provider = "apple", ExternalSubjectId = AppleSub, Email = linked.Email!, RefreshTokenSealed = "sealed" },
+        }.AsAsyncQueryable());
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "one-time-code"));
+
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Google_never_exchanges_a_code()
+    {
+        _apple = Substitute.For<IAppleSignInTokens>();
+        _apple.IsConfigured.Returns(true);
+        Existing();
+        _authProviders.Add(Provider("google", identity: new ExternalIdentity("google", "g-1", "g@example.com", "G")));
+
+        await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token", null, "one-time-code"));
+
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     private static IExternalAuthProvider Provider(
-        string name, bool configured = true, ExternalIdentity? identity = null)
+        string name, bool configured = true, ExternalIdentity? identity = null, bool appOnly = false)
     {
         var provider = Substitute.For<IExternalAuthProvider>();
         provider.Provider.Returns(name);
         provider.IsConfigured.Returns(configured);
+        provider.AppOnly.Returns(appOnly);
         if (configured)
             provider.Descriptor().Returns(new ExternalAuthDescriptor(name, $"{name}-client-id", $"https://{name}/auth"));
         if (identity is not null)
-            provider.VerifyAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(identity);
+            provider.VerifyAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(identity);
         return provider;
     }
 

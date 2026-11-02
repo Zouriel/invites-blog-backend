@@ -1,4 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Exceptions;
@@ -82,7 +84,24 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
             : throw new BusinessRuleException(
                 $"{Provider} sign-in isn't configured on this server.", "oauth_not_configured");
 
-    public async Task<ExternalIdentity> VerifyAsync(string idToken, CancellationToken ct = default)
+    /// <summary>True when a sign-in must carry the raw nonce whose hash is in the token (Apple).</summary>
+    protected virtual bool RequiresNonce => false;
+
+    /// <summary>
+    /// False when a token may carry no email (Apple sends it reliably on the first sign-in only); the
+    /// identity then has an empty email and only an existing link can sign it in.
+    /// </summary>
+    protected virtual bool RequiresEmail => true;
+
+    /// <summary>
+    /// What an absent <c>email_verified</c> means. Google and Microsoft: verified (unchanged). Apple
+    /// always states it, so for Apple absent means not verified and the email won't link an account.
+    /// </summary>
+    protected virtual bool EmailVerifiedWhenUnstated => true;
+
+    public virtual bool AppOnly => false;
+
+    public async Task<ExternalIdentity> VerifyAsync(string idToken, string? rawNonce = null, CancellationToken ct = default)
     {
         if (!IsConfigured)
             throw new BusinessRuleException(
@@ -92,16 +111,31 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         if (string.IsNullOrWhiteSpace(idToken))
             throw new UnauthorizedException("No sign-in token was supplied.", "oauth_invalid_token");
 
+        if (RequiresNonce && string.IsNullOrEmpty(rawNonce))
+        {
+            logger?.LogWarning("{Provider} sign-in token refused (no nonce sent)", Provider);
+            throw new UnauthorizedException(
+                $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");
+        }
+
         var principal = await ValidateAsync(idToken, allowKeyRefresh: true, ct);
+
+        if (!string.IsNullOrEmpty(rawNonce) && !NonceMatches(rawNonce, principal.FindFirst("nonce")?.Value))
+        {
+            logger?.LogWarning("{Provider} sign-in token refused (nonce mismatch) for client {ClientId}",
+                Provider, principal.FindFirst("aud")?.Value);
+            throw new UnauthorizedException(
+                $"That {Provider} sign-in couldn't be verified. Please try again.", "oauth_invalid_token");
+        }
         // Which of our clients the token was for (web, or the iPhone app's own): how a first sign-in
         // from a new platform can be confirmed from the log. No email, subject or token is logged.
         logger?.LogInformation("{Provider} sign-in token accepted for client {ClientId}",
             Provider, principal.FindFirst("aud")?.Value);
 
         var subject = principal.FindFirst("sub")?.Value;
-        var email = principal.FindFirst("email")?.Value?.Trim().ToLowerInvariant();
+        var email = principal.FindFirst("email")?.Value?.Trim().ToLowerInvariant() ?? "";
 
-        if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(email))
+        if (string.IsNullOrWhiteSpace(subject) || (RequiresEmail && string.IsNullOrWhiteSpace(email)))
             throw new UnauthorizedException(
                 $"{Provider} did not return an email address for this account.", "oauth_no_email");
 
@@ -110,6 +144,7 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         if (verified is not null && !string.Equals(verified, "true", StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedException(
                 $"Verify your email address with {Provider} before signing in here.", "oauth_email_unverified");
+        var emailVerified = email.Length > 0 && (verified is null ? EmailVerifiedWhenUnstated : true);
 
         var name = DisplayName(principal.Claims.ToDictionary(c => c.Type, c => c.Value, StringComparer.Ordinal));
         // Google puts a picture in the ID token when the `profile` scope was asked for; Microsoft's
@@ -118,7 +153,16 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         if (!Uri.TryCreate(picture, UriKind.Absolute, out var pictureUri) || pictureUri.Scheme != Uri.UriSchemeHttps)
             picture = null;
         return new ExternalIdentity(Provider, subject, email,
-            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name, picture);
+            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name, picture, emailVerified);
+    }
+
+    /// <summary>The token's nonce must be the hex SHA-256 of the raw nonce the app kept.</summary>
+    private static bool NonceMatches(string rawNonce, string? tokenNonce)
+    {
+        if (string.IsNullOrEmpty(tokenNonce)) return false;
+        var expected = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(rawNonce)));
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(tokenNonce.ToLowerInvariant()));
     }
 
     /// <summary>The provider's best display-name claim; null falls back to the email's local part.</summary>
@@ -279,4 +323,48 @@ public sealed class MicrosoftAuthProvider : OpenIdConnectAuthProvider
     /// <summary>Personal Microsoft accounts often carry only <c>preferred_username</c>.</summary>
     protected override string? DisplayName(IReadOnlyDictionary<string, string> claims) =>
         claims.GetValueOrDefault("name") ?? claims.GetValueOrDefault("preferred_username");
+}
+
+/// <summary>
+/// Sign in with Apple from the iPhone app (<c>OAuth:Apple:ClientId</c>, the app's bundle id
+/// blog.invites.app, which is the audience of a native sign-in's identity token).
+/// <list type="bullet">
+/// <item>The app must send the raw nonce; the token's <c>nonce</c> is its SHA-256.</item>
+/// <item><c>sub</c> is the stable id. The email may be a private relay address and may be missing on
+/// later sign-ins, so only an existing link signs in a token without one.</item>
+/// <item>App only: the website would need a Services ID, so the sign-in options list Apple only when
+/// an iPhone asks.</item>
+/// </list>
+/// <c>OAuth:Apple:BaseUrl</c> replaces https://appleid.apple.com for the keys (tests use a stand-in);
+/// the issuer is checked against Apple's real one either way.
+/// </summary>
+public sealed class AppleAuthProvider : OpenIdConnectAuthProvider
+{
+    public const string Key = "apple";
+    public const string Issuer = "https://appleid.apple.com";
+
+    private readonly string baseUrl;
+
+    public AppleAuthProvider(IConfiguration config, IHttpClientFactory http, ILogger<AppleAuthProvider>? logger = null)
+        : base(config, http, logger)
+    {
+        baseUrl = AppleBaseUrl(config);
+    }
+
+    /// <summary>Apple's sign-in host, or the stand-in tests point it at. No trailing slash.</summary>
+    public static string AppleBaseUrl(IConfiguration config) =>
+        (config["OAuth:Apple:BaseUrl"] is { Length: > 0 } b ? b : Issuer).TrimEnd('/');
+
+    public override string Provider => Key;
+    protected override string ConfigSection => "Apple";
+    protected override string JwksUri => $"{baseUrl}/auth/keys";
+    protected override string[] ValidIssuers => [Issuer];
+    protected override string AuthorizeUrl => $"{Issuer}/auth/authorize";
+    protected override bool RequiresNonce => true;
+    protected override bool RequiresEmail => false;
+    protected override bool EmailVerifiedWhenUnstated => false;
+    public override bool AppOnly => true;
+
+    /// <summary>Apple's identity token carries no name; the app sends it on the first sign-in.</summary>
+    protected override string? DisplayName(IReadOnlyDictionary<string, string> claims) => null;
 }
