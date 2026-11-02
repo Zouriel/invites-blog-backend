@@ -861,6 +861,32 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
+    public async Task Production_refusing_the_sweep_doesnt_hide_a_sandbox_refund_in_history()
+    {
+        // Apple's production server answers 401 until the app is on sale; TestFlight and App Review buy in the
+        // sandbox meanwhile, and their refunds must still be seen.
+        var host = await UserAsync();
+        var ev = await EventAsync(host);
+        await AllowingTests(async () =>
+        {
+            var (jws, id) = Bought("keep_photos_year", await TokenAsync(host, "keep_photos_year", ev), env: "Sandbox");
+            Assert.Equal(HttpStatusCode.OK, (await RedeemAsync(host, jws, ev)).Status);
+            api.AppStore.Transactions[id]["revocationDate"] = Ms(DateTimeOffset.UtcNow);
+            api.AppStore.History.Add((true, Notification("REFUND", id, env: "Sandbox")));
+            // Refused twice: the first try and the client's one retry with a fresh token.
+            api.AppStore.FailNext["/prod/inApps/v1/notifications/history"] = 401;
+            api.AppStore.FailNext["/prod/inApps/v1/notifications/hist"] = 401;
+
+            await SweepAsync();
+
+            Assert.True(api.AppStore.FailNext.IsEmpty, "production history was never asked");
+            Assert.True(api.AppStore.Count("/sandbox/inApps/v1/notifications/history") >= 1);
+            Assert.NotNull((await RowAsync(id))!.VoidedAt);
+            Assert.Null((await CampaignAsync(ev)).KeepPhotosUntil);
+        });
+    }
+
+    [PostgresFact]
     public async Task Cancelling_an_event_doesnt_send_an_App_Store_payment_to_the_card_gateway()
     {
         var host = await UserAsync();
