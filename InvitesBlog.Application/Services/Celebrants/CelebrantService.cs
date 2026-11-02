@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Push;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Campaigns;
@@ -35,7 +36,8 @@ public sealed class CelebrantService(
     IEmailSender email,
     PhoneNormalizer phones,
     IUnitOfWork uow,
-    IConfiguration config) : ICelebrantService
+    IConfiguration config,
+    IPushQueue push) : ICelebrantService
 {
     public async Task<IReadOnlyList<CelebrantDto>> ListAsync(Guid campaignId, CancellationToken ct = default)
     {
@@ -95,6 +97,9 @@ public sealed class CelebrantService(
         if (req.Notify && mail is not null) await SendHeadsUpAsync(campaignId, celebrant, ct);
 
         await uow.SaveChangesAsync(ct);
+        // On the app straight away, whether or not the host asked for the email: it reaches only a
+        // phone already signed in to an account that proved this email or number.
+        push.Enqueue(new CelebrantAdded(celebrant.Id, currentUser.UserId));
         return await ListInternalAsync(campaignId, ct);
     }
 

@@ -339,7 +339,8 @@ public sealed class AccountDeletionService(
         });
         await db.SaveChangesAsync(ct);
 
-        // Roles and external logins go by cascade. Everything else pointing here was dealt with above,
+        // Roles, external logins and push devices go by cascade (a deleted account's phones stop getting
+        // its notifications with it). Everything else pointing here was dealt with above,
         // and anything missed fails this statement and rolls the whole thing back.
         await db.Users.Where(u => u.Id == me.Id).ExecuteDeleteAsync(ct);
         return (scope.DeletedEvents.Count, queue.Count, told);

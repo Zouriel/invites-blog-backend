@@ -54,6 +54,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     public FlakyStorage Storage { get; private set; } = default!;
     public GooglePlayStub Google { get; } = new();
     public RecordingLogs Logs { get; } = new();
+    public ApnsStub Apns { get; } = new();
     public IServiceProvider Services => _factory!.Services;
     public string StorageRoot => _storageRoot;
 
@@ -99,11 +100,19 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["GooglePlay__Notifications__Audience"] = GooglePlayStub.Audience,
             ["GooglePlay__Notifications__ServiceAccountEmail"] = GooglePlayStub.PubSubEmail,
             ["GooglePlay__Notifications__JwksUrl"] = $"{Google.BaseUrl}/jwks",
+            // Apple push on, with a key made for this run; requests go to Apns, never to Apple.
+            ["Push__Apns__KeyId"] = ApnsStub.KeyId,
+            ["Push__Apns__TeamId"] = ApnsStub.TeamId,
+            ["Push__Apns__PrivateKey"] = Apns.PrivateKeyOneLine,
         })
             Environment.SetEnvironmentVariable(key, value);
 
         _factory = new ApiFactory(this);
         _ = _factory.Server; // starts the app: migrates and seeds
+
+        // Read once at start-up; cleared so no other test host in this process gets a push key.
+        foreach (var key in new[] { "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey" })
+            Environment.SetEnvironmentVariable(key, null);
         }
         finally
         {
@@ -143,6 +152,10 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         await write(db);
         await db.SaveChangesAsync();
     }
+
+    /// <summary>Sends every queued push now, as the worker would.</summary>
+    public Task<int> DrainPushesAsync() =>
+        Services.GetRequiredService<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>().DrainAsync();
 
     /// <summary>Works through the removal list until nothing more comes off it, as the service does.</summary>
     public async Task RunRemovalsAsync()
@@ -204,6 +217,12 @@ public sealed class PostgresApiFixture : IAsyncLifetime
                 services.AddSingleton<IEmailSender>(fixture.Mail);
 
                 services.AddSingleton<IStartupFilter, TestAddressFilter>();
+
+                // Apple's push service: the stand-in answers instead, behind the client's real pipeline.
+                services.AddHttpClient(InvitesBlog.Infrastructure.Notifications.Push.ApnsClient.ClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => new ApnsStub.Handler(fixture.Apns));
+                // The push worker isn't running (no hosted services): tests drain the line themselves.
+                services.AddSingleton<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>();
             });
         }
     }

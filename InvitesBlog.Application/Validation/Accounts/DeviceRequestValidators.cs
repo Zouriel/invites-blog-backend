@@ -12,6 +12,9 @@ public sealed class RegisterDeviceRequestValidator : AbstractValidator<RegisterD
         RuleFor(x => x.Platform)
             .Must(p => p is DeviceToken.Android or DeviceToken.Ios)
             .WithMessage("Platform must be android or ios.");
+        RuleFor(x => x.Environment)
+            .Must(e => e is null or DeviceToken.Production or DeviceToken.Sandbox)
+            .WithMessage("Environment must be production or sandbox.");
     }
 }
 

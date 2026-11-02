@@ -172,7 +172,10 @@ public class FcmPushSenderTests
             .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value))).Build();
         var services = new ServiceCollection();
         services.AddInvitesBlogInfrastructure(config);
-        return services.Single(d => d.ServiceType == typeof(IPushSender)).ImplementationType!;
+        var registration = services.Single(d => d.ServiceType == typeof(IPushSender));
+        if (registration.ImplementationType is { } type) return type;
+        // On, it's the composite of whichever services are configured: report the ones it is made of.
+        return services.Any(d => d.ServiceType == typeof(FcmPushSender)) ? typeof(FcmPushSender) : typeof(ApnsPushSender);
     }
 
     [Fact]
@@ -181,6 +184,18 @@ public class FcmPushSenderTests
     [Fact]
     public void Disabled_means_nothing_can_be_sent() =>
         Assert.Equal(typeof(NoOpPushSender), SenderFor(("Push:Enabled", "false")));
+
+    [Fact]
+    public void Apple_keys_alone_turn_on_apns_but_not_fcm()
+    {
+        using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        Assert.Equal(typeof(ApnsPushSender), SenderFor(
+            ("Push:Apns:KeyId", "K"), ("Push:Apns:TeamId", "T"), ("Push:Apns:PrivateKey", key.ExportPkcs8PrivateKeyPem())));
+    }
+
+    [Fact]
+    public void Half_set_apple_keys_send_nothing() =>
+        Assert.Equal(typeof(NoOpPushSender), SenderFor(("Push:Apns:KeyId", "K"), ("Push:Apns:TeamId", "T")));
 
     [Fact]
     public void Enabled_uses_fcm() =>

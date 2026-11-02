@@ -19,6 +19,15 @@ public sealed class DeviceToken
     /// <summary><see cref="Android"/> or <see cref="Ios"/>.</summary>
     public string Platform { get; set; } = default!;
 
+    /// <summary>
+    /// For iOS: which Apple push service issued the token, <see cref="Production"/> (TestFlight and the
+    /// App Store) or <see cref="Sandbox"/> (a build run from Xcode). Null means production.
+    /// </summary>
+    public string? Environment { get; set; }
+
+    public const string Production = "production";
+    public const string Sandbox = "sandbox";
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

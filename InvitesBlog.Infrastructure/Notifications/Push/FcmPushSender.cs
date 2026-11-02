@@ -31,7 +31,9 @@ public sealed class FcmPushSender(
     public async Task SendAsync(
         Guid userId, string title, string body, IReadOnlyDictionary<string, string>? data, CancellationToken ct)
     {
-        var mine = await devices.Query(tracking: true).Where(d => d.UserId == userId).ToListAsync(ct);
+        // Android only: iPhones are reached through APNs directly (ApnsPushSender).
+        var mine = await devices.Query(tracking: true)
+            .Where(d => d.UserId == userId && d.Platform == DeviceToken.Android).ToListAsync(ct);
         if (mine.Count == 0) return;
 
         string projectId, accessToken;

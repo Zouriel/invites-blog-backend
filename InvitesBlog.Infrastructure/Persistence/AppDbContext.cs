@@ -493,6 +493,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => x.Id);
             e.Property(x => x.Token).HasMaxLength(DeviceToken.MaxTokenLength);
             e.Property(x => x.Platform).HasMaxLength(16);
+            e.Property(x => x.Environment).HasMaxLength(16);
             // One row per device: a token registered again moves rather than duplicates.
             e.HasIndex(x => x.Token).IsUnique().HasDatabaseName("idx_device_tokens_token");
             e.HasIndex(x => x.UserId).HasDatabaseName("idx_device_tokens_user_id");

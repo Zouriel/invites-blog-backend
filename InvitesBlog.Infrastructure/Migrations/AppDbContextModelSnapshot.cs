@@ -590,6 +590,11 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("Environment")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("environment");
+
                     b.Property<string>("Platform")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -809,6 +814,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("gender");
+
+                    b.Property<DateTimeOffset?>("InvitePushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("invite_pushed_at");
 
                     b.Property<string>("MetadataJson")
                         .IsRequired()

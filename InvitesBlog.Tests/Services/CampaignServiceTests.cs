@@ -1,3 +1,4 @@
+using InvitesBlog.Tests.Support;
 using FluentValidation;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
@@ -64,7 +65,9 @@ public class CampaignServiceTests
         _storage, _provider,
         new PhoneNormalizer(), _config, _createV, _renameV, _contentV, _venueV, _inviterV, _deliveryV,
         TestData.FreePlans(), _allowance, TestData.PriceBook(),
-        TestData.Empty<MediaBucket>(), TestData.Empty<MediaBucketQr>(), TestData.Empty<EventPhoto>(), _users);
+        TestData.Empty<MediaBucket>(), TestData.Empty<MediaBucketQr>(), TestData.Empty<EventPhoto>(), _users, _push);
+
+    private readonly RecordingPushQueue _push = new();
 
     private InvitesBlog.Application.Plans.ISendingAllowanceService _allowance = TestData.Allowance();
 

@@ -25,7 +25,7 @@ public sealed class DeviceTokenService(
         var existing = await FindAsync(request.Token, ct);
         if (existing is not null)
         {
-            Apply(existing, userId, request.Platform, now);
+            Apply(existing, userId, request, now);
             await uow.SaveChangesAsync(ct);
             return;
         }
@@ -33,6 +33,7 @@ public sealed class DeviceTokenService(
         var added = new DeviceToken
         {
             Id = Guid.NewGuid(), UserId = userId, Token = request.Token, Platform = request.Platform,
+            Environment = EnvironmentOf(request),
             CreatedAt = now, UpdatedAt = now,
         };
         await devices.AddAsync(added, ct);
@@ -47,7 +48,7 @@ public sealed class DeviceTokenService(
             devices.Remove(added);
             var winner = await FindAsync(request.Token, ct);
             if (winner is null) throw;
-            Apply(winner, userId, request.Platform, now);
+            Apply(winner, userId, request, now);
             await uow.SaveChangesAsync(ct);
         }
     }
@@ -85,10 +86,17 @@ public sealed class DeviceTokenService(
     private Task<DeviceToken?> FindAsync(string token, CancellationToken ct) =>
         devices.Query(tracking: true).FirstOrDefaultAsync(d => d.Token == token, ct);
 
-    private static void Apply(DeviceToken device, Guid userId, string platform, DateTimeOffset now)
+    private static void Apply(DeviceToken device, Guid userId, RegisterDeviceRequest request, DateTimeOffset now)
     {
         device.UserId = userId;
-        device.Platform = platform;
+        device.Platform = request.Platform;
+        device.Environment = EnvironmentOf(request);
         device.UpdatedAt = now;
     }
+
+    /// <summary>Only iOS tokens have an environment; production unless the app says sandbox.</summary>
+    private static string? EnvironmentOf(RegisterDeviceRequest request) =>
+        request.Platform == DeviceToken.Ios
+            ? request.Environment == DeviceToken.Sandbox ? DeviceToken.Sandbox : DeviceToken.Production
+            : null;
 }

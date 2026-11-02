@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Push;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentValidation;
@@ -62,7 +63,8 @@ public sealed class CampaignService(
     IRepository<MediaBucket> mediaBuckets,
     IRepository<MediaBucketQr> bucketQrs,
     IRepository<EventPhoto> eventPhotos,
-    IRepository<AppUser> users) : ICampaignService
+    IRepository<AppUser> users,
+    IPushQueue push) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -405,6 +407,11 @@ public sealed class CampaignService(
         }
 
         await uow.SaveChangesAsync(ct);
+
+        // Everyone on the list now has it in their inbox: tell the ones with the app. Each guest hears
+        // once, however often the host sends again.
+        push.Enqueue(new InvitationsSent(id, guestList.Select(g => g.Id).ToList(), currentUser.UserId));
+
         return new FinalizeResponse(shareLink, guestList.Count, emailed, heldBack,
             allowance with { Used = allowance.Used + (allowance.Left - left) });
     }

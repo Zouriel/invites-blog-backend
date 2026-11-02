@@ -6,11 +6,17 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddDeviceTokens : Migration
+    public partial class AddPushDevices : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<DateTimeOffset>(
+                name: "invite_pushed_at",
+                table: "guests",
+                type: "timestamp with time zone",
+                nullable: true);
+
             migrationBuilder.CreateTable(
                 name: "device_tokens",
                 columns: table => new
@@ -19,6 +25,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
                     token = table.Column<string>(type: "character varying(1024)", maxLength: 1024, nullable: false),
                     platform = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
+                    environment = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: true),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -50,6 +57,10 @@ namespace InvitesBlog.Infrastructure.Migrations
         {
             migrationBuilder.DropTable(
                 name: "device_tokens");
+
+            migrationBuilder.DropColumn(
+                name: "invite_pushed_at",
+                table: "guests");
         }
     }
 }

@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Push;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentValidation;
@@ -43,7 +44,8 @@ public sealed class InviteService(
     IConfiguration config,
     IValidator<RsvpRequest> rsvpValidator,
     IPlanService plans,
-    IRepository<Venue> venues) : IInviteService
+    IRepository<Venue> venues,
+    IPushQueue push) : IInviteService
 {
     /// <summary>Max concurrently-trusted IPs per personal invite link — see class doc on <see cref="InviteTrustedIp"/>.</summary>
     private const int MaxTrustedIps = 3;
@@ -553,6 +555,8 @@ public sealed class InviteService(
         if (await campaigns.GetByIdAsync(invite.CampaignId, ct) is { Kind: CampaignKind.SaveTheDate })
             throw new BusinessRuleException(SaveTheDates.NoRepliesMessage, "save_the_date_no_replies");
 
+        // The host hears about a new answer, not the same one given again.
+        var changed = invite.RsvpStatus != status;
         invite.RsvpStatus = status;
         invite.RespondedAt = DateTimeOffset.UtcNow;
         await rsvpResponses.AddAsync(new RsvpResponse
@@ -574,6 +578,7 @@ public sealed class InviteService(
             CreatedAt = DateTimeOffset.UtcNow
         }, ct);
         await uow.SaveChangesAsync(ct);
+        if (changed) push.Enqueue(new GuestReplied(invite.Id, status, currentUser.UserId));
 
         return new RsvpResultResponse(status.ToString());
     }

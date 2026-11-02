@@ -13,8 +13,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InvitesBlog.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261101100924_AddDeviceTokens")]
-    partial class AddDeviceTokens
+    [Migration("20261102131001_AddPushDevices")]
+    partial class AddPushDevices
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -469,6 +469,12 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("email");
 
+                    b.Property<bool>("InheritsOwnership")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("inherits_ownership");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(120)
@@ -587,6 +593,11 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("Environment")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("environment");
+
                     b.Property<string>("Platform")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -661,6 +672,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnName("original_url");
 
                     b.Property<long>("SizeBytes")
+                        .IsConcurrencyToken()
                         .HasColumnType("bigint")
                         .HasColumnName("size_bytes");
 
@@ -674,6 +686,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnName("uploader_name");
 
                     b.Property<string>("Url")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("url");
@@ -691,6 +704,94 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasIndex("CampaignId", "DeletedAt", "CreatedAt");
 
                     b.ToTable("event_photos", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.GooglePlayPurchase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AutoRenewing")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("auto_renewing");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTimeOffset?>("FulfilledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fulfilled_at");
+
+                    b.Property<bool>("IsTest")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_test");
+
+                    b.Property<DateTimeOffset?>("LastCheckedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_checked_at");
+
+                    b.Property<string>("OrderId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid?>("PaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payment_id");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("PurchaseToken")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("purchase_token");
+
+                    b.Property<DateTimeOffset?>("SettledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("settled_at");
+
+                    b.Property<string>("SubscriptionState")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("subscription_state");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset?>("VoidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("voided_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseToken")
+                        .IsUnique()
+                        .HasDatabaseName("ux_google_play_purchases_token");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("google_play_purchases", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Guest", b =>
@@ -716,6 +817,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("gender");
+
+                    b.Property<DateTimeOffset?>("InvitePushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("invite_pushed_at");
 
                     b.Property<string>("MetadataJson")
                         .IsRequired()
@@ -1298,6 +1403,12 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("invite_count");
 
+                    b.Property<bool>("IsTest")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_test");
+
                     b.Property<int>("Kind")
                         .HasColumnType("integer")
                         .HasColumnName("kind");
@@ -1305,6 +1416,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("paid_at");
+
+                    b.Property<DateTimeOffset?>("PeriodEndsAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("period_ends_at");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -1346,11 +1461,55 @@ namespace InvitesBlog.Infrastructure.Migrations
 
                     b.HasIndex("CampaignId");
 
+                    b.HasIndex("ProviderPaymentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_payments_google_play_order")
+                        .HasFilter("provider = 'google_play' AND provider_payment_id IS NOT NULL");
+
                     b.HasIndex("ProviderSessionId");
 
                     b.HasIndex("UserId");
 
                     b.ToTable("payments", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PendingRemoval", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("target");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptAt")
+                        .HasDatabaseName("idx_pending_removals_next_attempt");
+
+                    b.ToTable("pending_removals", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.PendingUpload", b =>
@@ -2324,6 +2483,57 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("verified_contact_links", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.VideoTrimJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("MetadataClean")
+                        .HasColumnType("boolean")
+                        .HasColumnName("metadata_clean");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("note");
+
+                    b.Property<long>("OriginalBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_bytes");
+
+                    b.Property<long?>("ResultBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("result_bytes");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("idx_video_trim_jobs_due");
+
+                    b.ToTable("video_trim_jobs", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Campaign", b =>
                 {
                     b.HasOne("InvitesBlog.Domain.Entities.Venue", null)
@@ -2507,6 +2717,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.Venue", null)
                         .WithMany()
                         .HasForeignKey("VenueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.VideoTrimJob", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
+                        .WithMany()
+                        .HasForeignKey("Id")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
