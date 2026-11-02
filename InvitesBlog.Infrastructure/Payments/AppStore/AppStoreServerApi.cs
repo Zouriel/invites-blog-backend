@@ -128,7 +128,7 @@ public sealed class AppStoreServerApi(IHttpClientFactory http, IConfiguration co
         }
         // 400 (an id that isn't one) and 404 (TransactionIdNotFound) are answers: Apple doesn't know it.
         if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound) return null;
-        logger.LogWarning("The App Store Server API answered {Status}.", (int)response.StatusCode);
+        logger.LogWarning("The App Store Server API ({Environment}) answered {Status}.", sandbox ? "sandbox" : "production", (int)response.StatusCode);
         throw Unreachable();
     }
 

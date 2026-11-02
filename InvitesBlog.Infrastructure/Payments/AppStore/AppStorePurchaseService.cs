@@ -461,7 +461,13 @@ public sealed class AppStorePurchaseService(
         {
             if (s.IsTest && !AnyTesting) continue;
             try { await SyncSubscriptionAsync(s.OriginalTransactionId, s.IsTest, null, ct); }
-            catch (AppException ex) when (ex is not AppStoreUnavailableException)
+            catch (AppStoreUnavailableException)
+            {
+                // One environment not answering (production refuses until the app is on sale) mustn't stop
+                // the other's re-checks; this one is tried again next sweep.
+                logger.LogWarning("An App Store subscription re-check was skipped: Apple's {Environment} server isn't answering.", s.IsTest ? "sandbox" : "production");
+            }
+            catch (AppException ex)
             {
                 logger.LogInformation("An App Store subscription re-check was refused: {Code}.", ex.ErrorCode);
             }
@@ -472,7 +478,16 @@ public sealed class AppStorePurchaseService(
         // notified, whether or not the notification reached us. Three days back; each is safe to repeat.
         foreach (var sandbox in AnyTesting ? new[] { false, true } : [false])
         {
-            foreach (var payload in await api.NotificationHistoryAsync(now.AddDays(-3), now, sandbox, ct))
+            IReadOnlyList<string> history;
+            try { history = await api.NotificationHistoryAsync(now.AddDays(-3), now, sandbox, ct); }
+            catch (AppStoreUnavailableException)
+            {
+                // Each environment on its own: production answers 401 until the app is on sale, and that
+                // mustn't hide the sandbox's refunds (TestFlight, App Review), nor the other way round.
+                logger.LogWarning("App Store notification history skipped: Apple's {Environment} server isn't answering.", sandbox ? "sandbox" : "production");
+                continue;
+            }
+            foreach (var payload in history)
             {
                 try { await ActOnAsync(signed.Notification(payload), ct); }
                 catch (AppStoreRefusedException ex)
