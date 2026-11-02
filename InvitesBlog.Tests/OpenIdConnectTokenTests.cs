@@ -25,10 +25,13 @@ public class OpenIdConnectTokenTests
     private static readonly RSA Key = RSA.Create(2048);
     private const string KeyId = "test-key-1";
 
-    private static GoogleAuthProvider Sut()
+    private const string IosClientId = "ios-client-id.apps.googleusercontent.com";
+
+    private static GoogleAuthProvider Sut(string? additionalClientIds = null)
     {
         var config = Substitute.For<IConfiguration>();
         config["OAuth:Google:ClientId"].Returns(ClientId);
+        config["OAuth:Google:AdditionalClientIds"].Returns(additionalClientIds);
 
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient().Returns(_ => new HttpClient(new JwksHandler()));
@@ -127,6 +130,45 @@ public class OpenIdConnectTokenTests
 
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().VerifyAsync(token));
         Assert.Equal("oauth_invalid_token", ex.ErrorCode);
+    }
+
+    private static string VerifiedToken(string audience) => Sign(new Dictionary<string, object>
+    {
+        ["sub"] = "1", ["email"] = "someone@example.com", ["email_verified"] = "true"
+    }, audience: audience);
+
+    [Fact]
+    public async Task A_token_for_the_ios_client_is_accepted_once_that_client_is_configured()
+    {
+        // An iPhone's native Google sign-in returns a token addressed to the iOS client id.
+        var identity = await Sut($"{IosClientId}, other.apps.googleusercontent.com").VerifyAsync(VerifiedToken(IosClientId));
+
+        Assert.Equal("someone@example.com", identity.Email);
+    }
+
+    [Fact]
+    public async Task A_token_for_the_ios_client_is_refused_when_it_is_not_configured()
+    {
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().VerifyAsync(VerifiedToken(IosClientId)));
+        Assert.Equal("oauth_invalid_token", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Extra_clients_do_not_open_the_door_to_someone_elses_app()
+    {
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            Sut(IosClientId).VerifyAsync(VerifiedToken("someone-elses-app.apps.googleusercontent.com")));
+        Assert.Equal("oauth_invalid_token", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task The_web_client_still_works_alongside_extra_clients_and_is_the_one_handed_out()
+    {
+        var sut = Sut(IosClientId);
+
+        Assert.Equal("someone@example.com", (await sut.VerifyAsync(VerifiedToken(ClientId))).Email);
+        // Browsers and Android are given the web client id, never the iOS one.
+        Assert.Equal(ClientId, sut.Descriptor().ClientId);
     }
 
     [Fact]

@@ -29,6 +29,7 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     {
         this.httpClientFactory = httpClientFactory;
         ClientId = config[$"OAuth:{ConfigSection}:ClientId"];
+        AdditionalClientIds = SplitIds(config[$"OAuth:{ConfigSection}:AdditionalClientIds"]);
     }
 
     /// <summary>For a token addressed to something other than a sign-in client.</summary>
@@ -56,6 +57,19 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     protected virtual IssuerValidator? IssuerValidator => null;
 
     protected string? ClientId { get; }
+
+    /// <summary>
+    /// Other clients of OUR app whose tokens are accepted too (<c>OAuth:&lt;section&gt;:AdditionalClientIds</c>,
+    /// comma-separated). A native iPhone sign-in returns an ID token addressed to the iOS client id, not
+    /// the web one, so without this every iPhone sign-in is refused as "minted for a different client".
+    /// Never handed to clients: the descriptor still gives the web client id.
+    /// </summary>
+    protected IReadOnlyList<string> AdditionalClientIds { get; } = [];
+
+    private static IReadOnlyList<string> SplitIds(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split([',', ';', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId);
 
@@ -124,7 +138,7 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
             ValidateIssuer = true,
             ValidIssuers = ValidIssuers,
             ValidateAudience = true,
-            ValidAudience = ClientId,
+            ValidAudiences = [ClientId!, .. AdditionalClientIds],
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             IssuerSigningKeys = keys
