@@ -55,6 +55,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -484,6 +485,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("idx_user_external_logins_provider_subject");
             e.HasOne(x => x.User).WithMany(u => u.ExternalLogins)
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<DeviceToken>(e =>
+        {
+            e.ToTable("device_tokens");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Token).HasMaxLength(DeviceToken.MaxTokenLength);
+            e.Property(x => x.Platform).HasMaxLength(16);
+            // One row per device: a token registered again moves rather than duplicates.
+            e.HasIndex(x => x.Token).IsUnique().HasDatabaseName("idx_device_tokens_token");
+            e.HasIndex(x => x.UserId).HasDatabaseName("idx_device_tokens_user_id");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Role>(e =>

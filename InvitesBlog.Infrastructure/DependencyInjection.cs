@@ -190,6 +190,22 @@ public static class DependencyInjection
             services.AddSingleton<IRecurringPaymentProvider>(sp => sp.GetRequiredService<FakePaymentProvider>());
         }
 
+        // Push: off unless Push:Enabled is true. No resilience handler: a retry could show a notification twice.
+        if (bool.TryParse(config["Push:Enabled"], out var pushEnabled) && pushEnabled)
+        {
+            services.AddHttpClient(Notifications.Push.FcmPushSender.ClientName, c =>
+            {
+                c.BaseAddress = new Uri("https://fcm.googleapis.com/");
+                c.Timeout = TimeSpan.FromSeconds(15);
+            });
+            services.AddSingleton<Notifications.Push.IFcmCredentials, Notifications.Push.ServiceAccountFcmCredentials>();
+            services.AddScoped<IPushSender, Notifications.Push.FcmPushSender>();
+        }
+        else
+        {
+            services.AddSingleton<IPushSender, Notifications.Push.NoOpPushSender>();
+        }
+
         return services;
     }
 }
