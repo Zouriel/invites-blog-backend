@@ -874,7 +874,8 @@ public sealed class CampaignService(
             // Pre-dispatch: auto full refund of any paid initial payment (§14.3).
             // Not a store's: only the store can refund those, and the gateway here has never seen them.
             var paid = await payments.Query(tracking: true)
-                .Where(p => p.CampaignId == id && p.Status == PaymentStatus.Paid && p.Provider != PaymentProviders.GooglePlay).ToListAsync(ct);
+                .Where(p => p.CampaignId == id && p.Status == PaymentStatus.Paid
+                            && p.Provider != PaymentProviders.GooglePlay && p.Provider != PaymentProviders.AppStore).ToListAsync(ct);
             foreach (var p in paid)
             {
                 var refundRes = await paymentProvider.RefundAsync(

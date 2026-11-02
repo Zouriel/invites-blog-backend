@@ -20,6 +20,7 @@ builder.Services.AddHostedService<InvitesBlog.Infrastructure.Photos.DirectUpload
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Video.VideoTrimService>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.PaymentSweeper>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.GooglePlay.GooglePlaySweeper>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.AppStore.AppStoreSweeper>();
 // Removes what a deleted account left outside the database (files, the bank's customer record).
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Accounts.PendingRemovalService>();
 // Sends push notifications queued by requests (invitations, replies, comments), after they've answered.

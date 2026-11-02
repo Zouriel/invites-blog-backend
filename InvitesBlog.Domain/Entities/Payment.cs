@@ -51,6 +51,7 @@ public sealed class Payment
 public static class PaymentProviders
 {
     public const string GooglePlay = "google_play";
+    public const string AppStore = "app_store";
     /// <summary>ISO 4217's "no currency": a store payment whose amount the store hasn't told us yet. Never MVR.</summary>
     public const string UnknownCurrency = "XXX";
 }
@@ -85,6 +86,52 @@ public sealed class GooglePlayPurchase
     /// <summary>Subscription: it will renew by itself.</summary>
     public bool AutoRenewing { get; set; }
     public DateTimeOffset? LastCheckedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// One App Store purchase, by its original transaction id: one-time items have one transaction, and a
+/// subscription keeps its original id through every renewal, each renewal a <see cref="Payment"/> of its own.
+/// Unlike Google Play there is nothing to settle at Apple: the app finishes the transaction once we answer.
+/// </summary>
+public sealed class AppStorePurchase
+{
+    public Guid Id { get; set; }
+    public string OriginalTransactionId { get; set; } = default!;
+    /// <summary>The latest transaction applied (a renewal has a new one).</summary>
+    public string? TransactionId { get; set; }
+    public string ProductId { get; set; } = default!;
+    /// <summary>Whose it is, from the purchase intent. Null once that account has been deleted.</summary>
+    public Guid? UserId { get; set; }
+    /// <summary>The event it is bound to, from the purchase intent. Null for a subscription.</summary>
+    public Guid? CampaignId { get; set; }
+    /// <summary>The intent (appAccountToken) it was bought with.</summary>
+    public Guid? IntentId { get; set; }
+    /// <summary>Apple's sandbox: no money moved.</summary>
+    public bool IsTest { get; set; }
+    public Guid? PaymentId { get; set; }
+    public DateTimeOffset? FulfilledAt { get; set; }
+    /// <summary>Refunded or revoked; what it bought has been taken back.</summary>
+    public DateTimeOffset? VoidedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    /// <summary>Subscription: Apple's status number (1 active … 5 revoked), as of <see cref="LastCheckedAt"/>.</summary>
+    public int? SubscriptionStatus { get; set; }
+    public bool AutoRenewing { get; set; }
+    public DateTimeOffset? LastCheckedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// What a purchase is going to be for, made before StoreKit is asked. Its id goes into the purchase as
+/// <c>appAccountToken</c> and comes back signed by Apple, which is how a transaction is tied to an account
+/// and an event: StoreKit has no other field for it.
+/// </summary>
+public sealed class AppStoreIntent
+{
+    public Guid Id { get; set; }
+    public Guid? UserId { get; set; }
+    public Guid? CampaignId { get; set; }
+    public string ProductId { get; set; } = default!;
     public DateTimeOffset CreatedAt { get; set; }
 }
 

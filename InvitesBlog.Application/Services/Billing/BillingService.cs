@@ -32,7 +32,7 @@ public sealed record BillingPricesDto(
 /// <summary>The account's own plan: None, Premium or Venue.</summary>
 /// <param name="AutoRenew">What renews by itself at <paramref name="EndsAt"/> (premium-monthly,
 /// venue-monthly), charging the saved card; null when nothing does.</param>
-/// <param name="Store">"google_play" when the plan runs on a store subscription: it is managed in the
+/// <param name="Store">"google_play" or "app_store" when the plan runs on a store subscription: it is managed in the
 /// store, and our own "turn off automatic renewal" doesn't reach it.</param>
 /// <param name="StoreAutoRenew">That subscription will renew by itself.</param>
 public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active, string? AutoRenew = null,
@@ -138,7 +138,8 @@ public sealed class BillingService(
     IUnitOfWork uow,
     IRecurringPaymentProvider? recurring = null,
     Payments.IPaymentService? paymentService = null,
-    IRepository<GooglePlayPurchase>? playPurchases = null) : IBillingService
+    IRepository<GooglePlayPurchase>? playPurchases = null,
+    IRepository<AppStorePurchase>? appStorePurchases = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -492,13 +493,26 @@ public sealed class BillingService(
     private async Task<BillingAccountDto> AccountWithStoreAsync(AppUser user, DateTimeOffset now, CancellationToken ct)
     {
         var account = Account(user, now);
-        if (playPurchases is null || !account.Active) return account;
-        var store = await playPurchases.Query()
-            .Where(p => p.UserId == user.Id && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
-            .OrderByDescending(p => p.ExpiresAt)
-            .Select(p => new { p.AutoRenewing })
-            .FirstOrDefaultAsync(ct);
-        return store is null ? account : account with { Store = PaymentProviders.GooglePlay, StoreAutoRenew = store.AutoRenewing };
+        if (!account.Active) return account;
+        if (playPurchases is not null)
+        {
+            var store = await playPurchases.Query()
+                .Where(p => p.UserId == user.Id && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
+                .OrderByDescending(p => p.ExpiresAt)
+                .Select(p => new { p.AutoRenewing })
+                .FirstOrDefaultAsync(ct);
+            if (store is not null) return account with { Store = PaymentProviders.GooglePlay, StoreAutoRenew = store.AutoRenewing };
+        }
+        if (appStorePurchases is not null)
+        {
+            var store = await appStorePurchases.Query()
+                .Where(p => p.UserId == user.Id && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
+                .OrderByDescending(p => p.ExpiresAt)
+                .Select(p => new { p.AutoRenewing })
+                .FirstOrDefaultAsync(ct);
+            if (store is not null) return account with { Store = PaymentProviders.AppStore, StoreAutoRenew = store.AutoRenewing };
+        }
+        return account;
     }
 
     private static BillingAccountDto Account(AppUser user, DateTimeOffset now)
