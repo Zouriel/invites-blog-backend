@@ -176,6 +176,15 @@ public static class DependencyInjection
         services.AddSingleton<Payments.GooglePlay.GooglePubSubTokenVerifier>();
         services.AddScoped<Application.Services.Billing.IGooglePlayPurchases, Payments.GooglePlay.GooglePlayPurchaseService>();
 
+        // App Store: the same, with Apple's signed data checked against Apple's root (AppStoreTrust, code only).
+        services.AddHttpClient(Payments.AppStore.AppStoreServerApi.ClientName, c => c.Timeout = TimeSpan.FromSeconds(30))
+            // The factory's default logging writes each request's URL; keep transaction ids and paging tokens out of it.
+            .RemoveAllLoggers();
+        services.AddSingleton(_ => Payments.AppStore.AppStoreTrust.Apple());
+        services.AddSingleton<Application.Services.Billing.IAppStoreSignedData, Payments.AppStore.AppStoreSignedData>();
+        services.AddSingleton<Application.Services.Billing.IAppStoreServerApi, Payments.AppStore.AppStoreServerApi>();
+        services.AddScoped<Application.Services.Billing.IAppStorePurchases, Payments.AppStore.AppStorePurchaseService>();
+
         // Payments: Bank of Maldives (BML Connect) when configured, the no-network fake otherwise.
         if (string.Equals(config["Payments:Provider"], "Bml", StringComparison.OrdinalIgnoreCase))
         {

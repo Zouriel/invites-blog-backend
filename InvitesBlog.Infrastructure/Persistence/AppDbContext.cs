@@ -26,6 +26,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<GooglePlayPurchase> GooglePlayPurchases => Set<GooglePlayPurchase>();
+    public DbSet<AppStorePurchase> AppStorePurchases => Set<AppStorePurchase>();
+    public DbSet<AppStoreIntent> AppStoreIntents => Set<AppStoreIntent>();
     public DbSet<Refund> Refunds => Set<Refund>();
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<RsvpResponse> RsvpResponses => Set<RsvpResponse>();
@@ -271,6 +273,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.ProviderPaymentId).IsUnique()
                 .HasFilter("provider = 'google_play' AND provider_payment_id IS NOT NULL")
                 .HasDatabaseName("ux_payments_google_play_order");
+            // Named, so it is a second index on the column and not the one above reconfigured.
+            e.HasIndex(x => x.ProviderPaymentId, "ux_payments_app_store_transaction").IsUnique()
+                .HasFilter("provider = 'app_store' AND provider_payment_id IS NOT NULL");
         });
 
         b.Entity<GooglePlayPurchase>(e =>
@@ -286,6 +291,28 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.AutoRenewing).HasDefaultValue(false);
             e.HasIndex(x => x.UserId);
             // No foreign keys, like payments: these rows outlive what they name, as the accounts do.
+        });
+
+        b.Entity<AppStorePurchase>(e =>
+        {
+            e.ToTable("app_store_purchases");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OriginalTransactionId).HasMaxLength(64);
+            e.HasIndex(x => x.OriginalTransactionId).IsUnique().HasDatabaseName("ux_app_store_purchases_original");
+            e.Property(x => x.TransactionId).HasMaxLength(64);
+            e.Property(x => x.ProductId).HasMaxLength(64);
+            e.Property(x => x.IsTest).HasDefaultValue(false);
+            e.Property(x => x.AutoRenewing).HasDefaultValue(false);
+            e.HasIndex(x => x.UserId);
+            // No foreign keys, like payments: these rows outlive what they name.
+        });
+
+        b.Entity<AppStoreIntent>(e =>
+        {
+            e.ToTable("app_store_intents");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.ProductId).HasMaxLength(64);
+            e.HasIndex(x => x.UserId);
         });
 
         b.Entity<Refund>(e =>

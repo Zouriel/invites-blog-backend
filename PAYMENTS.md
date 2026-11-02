@@ -107,3 +107,52 @@ Test purchases (`purchaseType` 0, `testPurchase`) are refused unless `GooglePlay
 In `invites-blog-deploy`: `GOOGLE_PLAY_PACKAGE_NAME`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, `GOOGLE_PLAY_ALLOW_TEST_PURCHASES`, `GOOGLE_PLAY_NOTIFICATIONS_AUDIENCE`, `GOOGLE_PLAY_NOTIFICATIONS_EMAIL`.
 
 Tests: `GooglePlayPurchaseTests`, the real client over a socket to a stub of Google, on real Postgres (`IB_TEST_POSTGRES`). Never tried against Google itself until the Play Console is set up.
+
+## App Store (the iPhone app)
+
+The iPhone app pays through Apple's In-App Purchase (StoreKit 2), with the same products, ids and rules as Google Play
+(`AppStoreCatalog` is `GooglePlayCatalog`), and the same effect by the same path: `BillingService.FulfilAsync`. The code is
+`Infrastructure/Payments/AppStore`. Rules and sources: the app repo's `docs/APPLE-PURCHASES.md`.
+
+| Step | Where |
+|---|---|
+| The app asks what can be bought (`GET /api/billing/app-store/offers?eventId=`): the same answer as Play's offers (a test checks it) | `AppStorePurchaseService.OffersAsync` |
+| Before buying, `POST /api/billing/app-store/intents` `{productId, eventId?}` records account, event and product and returns a UUID. Refused unless it's on offer now. The app sets it as the purchase's `appAccountToken`; Apple signs it into the transaction. StoreKit has no other field of ours, so this is how a transaction is tied to an account and an event | `IntentAsync` |
+| `POST /api/billing/app-store/transactions` `{signedTransaction, eventId?}`: the JWS StoreKit returned. Its signature and certificate chain are checked against Apple Root CA - G3 (below); then Apple's server is asked for the same transaction (Get Transaction Info, or Get All Subscription Statuses), and only what it answers counts | `RedeemAsync` |
+| In one transaction, under the original transaction id's unique row: a `payments` row (`provider = app_store`, Apple's transaction id, amount and currency from Apple's signed `price`/`currency`) and `FulfilAsync`. Repeats and races find it done | |
+| The app finishes the StoreKit transaction only after "applied". Unfinished, StoreKit hands it to the app again at every start; there is nothing to settle with Apple from here | the app |
+| `POST /api/billing/app-store/notifications` `{signedPayload}`: App Store Server Notifications V2, signed by Apple and checked the same way (and the transaction inside it too). Only says what to ask Apple about | `HandleNotificationAsync` |
+| Every 6 hours: subscriptions near their end re-checked, and Apple's notification history for the last 3 days read and acted on, so refunds, renewals and purchases whose app never came back are seen with no notification at all | `AppStoreSweeper` |
+
+**Signature check.** What Apple's own app-store-server-library (`SignedDataVerifier`/`ChainVerifier`) checks; Apple publishes no .NET
+version. ES256 only; `x5c` of exactly leaf, intermediate, root; the leaf carries OID 1.2.840.113635.100.6.11.1 and the intermediate
+1.2.840.113635.100.6.2.1; the chain is built from the leaf through the intermediate that was sent to a root we hold (the root in `x5c`
+is never trusted for being there), valid now, revocation checked online (a check that can't be made is a 503, not a yes or a no); the
+signature by the leaf's P-256 key; the payload's `bundleId` is ours. The root is compiled in (`AppStoreTrust`, SHA-256
+63:34:3A:BF:…:3E:91:79, a test checks it) and can only be replaced in code, never by configuration: tests use their own.
+Transactions from Xcode's local StoreKit testing are signed by Xcode, not Apple, and are always refused.
+
+Refunds and revocations (`revocationDate`, `REFUND`/`REVOKE`) take back what was bought, as for Play (shared `StoreRefunds`). A
+subscription's end date is Apple's (grace period included). Apple has no API to stop someone's subscription, so account deletion
+tells them to cancel it in their Apple account and forgets who bought; the original transaction id stays, so it can't be redeemed again.
+Event cancel doesn't refund an App Store payment: only Apple can. Not handled: `REFUND_REVERSED` (a refund Apple undid stays taken
+back; grant it by hand) and `CONSUMPTION_REQUEST` (no consumption data is sent; Apple decides the refund without it).
+
+Sandbox purchases (TestFlight, sandbox testers) are refused unless `AppStore:AllowTestPurchases` is true, are checked with the
+sandbox server, and are recorded with `is_test`. Production notifications naming another app (`appAppleId`) are ignored.
+
+| Setting | Meaning |
+|---|---|
+| `AppStore:BundleId` | `blog.invites.app`. With the three below unset: off. Offers say nothing is available, everything else answers 503 |
+| `AppStore:IssuerId`, `AppStore:KeyId` | From App Store Connect > Users and Access > Integrations > In-App Purchase |
+| `AppStore:PrivateKey` or `AppStore:PrivateKeyFile` | The In-App Purchase key (.p8), its text (one line with `\n` is fine) or a path. Secret: never in git |
+| `AppStore:AppAppleId` | The app's numeric Apple ID. Optional; when set, production notifications for another app are ignored |
+| `AppStore:AllowTestPurchases` | Default false |
+| `AppStore:ApiBaseUrl`, `AppStore:SandboxApiBaseUrl` | Tests only. Default `https://api.storekit.apple.com/` and `https://api.storekit-sandbox.apple.com/` |
+
+In `invites-blog-deploy`: `APP_STORE_BUNDLE_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_ID`, `APP_STORE_PRIVATE_KEY`, `APP_STORE_APP_APPLE_ID`,
+`APP_STORE_ALLOW_TEST_PURCHASES`. In App Store Connect the Server Notifications V2 URL is `https://invites.blog/api/billing/app-store/notifications`
+for production (and the same for sandbox, on staging if preferred).
+
+Tests: `AppStorePurchaseTests`, the real client over a socket to a stub of Apple that signs with a chain made like Apple's, on real
+Postgres. Never tried against Apple itself: that needs the App Store Connect setup and a device or TestFlight build.

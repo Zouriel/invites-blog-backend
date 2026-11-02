@@ -86,16 +86,23 @@ public sealed class AccountDeletionService(
 
         var (channel, sentTo) = Destination(me);
         var storeRenews = await RenewingPlaySubscriptions(me.Id, now).AnyAsync(ct);
+        var appleRenews = await RenewingAppStoreSubscriptions(me.Id, now).AnyAsync(ct);
+        // Only say we'll stop it if we can. If we can't, they have to, or the store keeps charging.
+        // Apple has no way for us to stop one at all: only the subscriber can, in their Apple account.
+        var notes = new List<string>();
+        if (storeRenews)
+            notes.Add(play.IsConfigured
+                ? "Your Premium pass stops renewing on Google Play."
+                : "Your Premium pass renews through Google Play. Cancel it there too, or Google keeps charging you.");
+        if (appleRenews)
+            notes.Add("Your Premium pass renews through the App Store. Cancel it in your Apple account's subscriptions too, or Apple keeps charging you.");
         return new AccountDeletionSummaryDto(
             eventIds.Count, scope.Passed.Count, bucketIds.Count, media.Count - videos, videos,
             await PaidAsync(me, eventIds, now, ct),
-            me.AutoRenewKind is not null || storeRenews,
+            me.AutoRenewKind is not null || storeRenews || appleRenews,
             await IsLastAdminAsync(me.Id, ct) ? LastAdmin : null,
             channel, sentTo,
-            // Only say we'll stop it if we can. If we can't, they have to, or Google keeps charging.
-            !storeRenews ? null : play.IsConfigured
-                ? "Your Premium pass stops renewing on Google Play."
-                : "Your Premium pass renews through Google Play. Cancel it there too, or Google keeps charging you.");
+            notes.Count == 0 ? null : string.Join(" ", notes));
     }
 
     public async Task<CodeSentResponse> RequestCodeAsync(CancellationToken ct = default)
@@ -231,6 +238,9 @@ public sealed class AccountDeletionService(
     /// <summary>Store subscriptions that will charge again unless someone stops them.</summary>
     private IQueryable<GooglePlayPurchase> RenewingPlaySubscriptions(Guid userId, DateTimeOffset now) =>
         db.GooglePlayPurchases.Where(p => p.UserId == userId && p.CampaignId == null && p.AutoRenewing && p.VoidedAt == null && p.ExpiresAt > now);
+
+    private IQueryable<AppStorePurchase> RenewingAppStoreSubscriptions(Guid userId, DateTimeOffset now) =>
+        db.AppStorePurchases.Where(p => p.UserId == userId && p.CampaignId == null && p.AutoRenewing && p.VoidedAt == null && p.ExpiresAt > now);
 
     private async Task<List<string>> PaidAsync(AppUser me, List<Guid> eventIds, DateTimeOffset now, CancellationToken ct)
     {
@@ -612,6 +622,15 @@ public sealed class AccountDeletionService(
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.AutoRenewing, false), ct);
         await db.GooglePlayPurchases.Where(p => p.CampaignId != null && deletedEvents.Contains(p.CampaignId.Value))
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.CampaignId, (Guid?)null), ct);
+        // App Store: the same, except Apple can't be asked to stop a renewal; the summary told them to.
+        // The original transaction id stays, so it can never be redeemed again.
+        await db.AppStorePurchases.Where(p => p.UserId == me.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.AutoRenewing, false), ct);
+        await db.AppStorePurchases.Where(p => p.CampaignId != null && deletedEvents.Contains(p.CampaignId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, (Guid?)null).SetProperty(p => p.CampaignId, (Guid?)null), ct);
+        // Intents name the person and the event; an unused one is worth nothing, a used one is on the purchase.
+        await db.AppStoreIntents.Where(i => i.UserId == me.Id || (i.CampaignId != null && deletedEvents.Contains(i.CampaignId.Value)))
+            .ExecuteDeleteAsync(ct);
     }
 
     /// <summary>Collects what to remove after the commit, each thing once.</summary>

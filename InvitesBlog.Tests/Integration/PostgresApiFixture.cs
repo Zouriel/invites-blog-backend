@@ -53,6 +53,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     public RecordingMail Mail { get; } = new();
     public FlakyStorage Storage { get; private set; } = default!;
     public GooglePlayStub Google { get; } = new();
+    public AppStoreStub AppStore { get; } = new();
     public RecordingLogs Logs { get; } = new();
     public ApnsStub Apns { get; } = new();
     public AppleIdStub Apple { get; } = new();
@@ -76,6 +77,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 
         await Google.StartAsync();
         await Apple.StartAsync();
+        await AppStore.StartAsync();
 
         var conn = new NpgsqlConnectionStringBuilder(_server) { Database = _database }.ToString();
         // Environment rather than the factory's configuration hook: Program reads configuration while it
@@ -112,6 +114,13 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["OAuth__Apple__KeyId"] = AppleIdStub.KeyId,
             ["OAuth__Apple__PrivateKey"] = Apple.PrivateKeyOneLine,
             ["OAuth__Apple__BaseUrl"] = Apple.BaseUrl,
+            ["AppStore__BundleId"] = AppStoreStub.Bundle,
+            ["AppStore__IssuerId"] = AppStoreStub.Issuer,
+            ["AppStore__KeyId"] = AppStoreStub.KeyId,
+            ["AppStore__PrivateKey"] = AppStore.PrivateKeyPem(),
+            ["AppStore__AppAppleId"] = AppStoreStub.AppAppleId.ToString(),
+            ["AppStore__ApiBaseUrl"] = AppStore.ProductionUrl,
+            ["AppStore__SandboxApiBaseUrl"] = AppStore.SandboxUrl,
         })
             Environment.SetEnvironmentVariable(key, value);
 
@@ -140,6 +149,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         await _factory.DisposeAsync();
         await Google.DisposeAsync();
         await Apple.DisposeAsync();
+        await AppStore.DisposeAsync();
         NpgsqlConnection.ClearAllPools();
         await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(_server) { Database = "postgres" }.ToString());
         await admin.OpenAsync();
@@ -233,6 +243,9 @@ public sealed class PostgresApiFixture : IAsyncLifetime
                     .ConfigurePrimaryHttpMessageHandler(() => new ApnsStub.Handler(fixture.Apns));
                 // The push worker isn't running (no hosted services): tests drain the line themselves.
                 services.AddSingleton<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>();
+                // The stub's root in place of Apple's, with no revocation lookups: the only trust a test can change.
+                services.RemoveAll<InvitesBlog.Infrastructure.Payments.AppStore.AppStoreTrust>();
+                services.AddSingleton(new InvitesBlog.Infrastructure.Payments.AppStore.AppStoreTrust([fixture.AppStore.Chain.Root], checkRevocation: false));
             });
         }
     }
