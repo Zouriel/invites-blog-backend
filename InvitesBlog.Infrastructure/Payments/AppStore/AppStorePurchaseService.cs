@@ -51,6 +51,18 @@ public sealed class AppStorePurchaseService(
 
     private bool AllowTest => bool.TryParse(config["AppStore:AllowTestPurchases"], out var on) && on;
 
+    /// <summary>
+    /// Accounts whose sandbox purchases count even with test purchases off: App Review's demo account and our
+    /// own testers. App Review buys in the sandbox against the production server, so without this a reviewer's
+    /// purchase would be refused. Everyone else's sandbox purchases still are.
+    /// </summary>
+    private HashSet<Guid> TestAccounts =>
+        [.. (config["AppStore:TestAccountIds"] ?? "").Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty).Where(id => id != Guid.Empty)];
+
+    private bool MayTest(Guid? account) => AllowTest || (account is { } a && TestAccounts.Contains(a));
+    private bool AnyTesting => AllowTest || TestAccounts.Count > 0;
+
     // ----- What may be bought --------------------------------------------------------------------
 
     /// <summary>The same rules as Google Play's offers (a test checks they agree).</summary>
@@ -125,7 +137,7 @@ public sealed class AppStorePurchaseService(
         var claimed = signed.Transaction(jws);
         if (claimed.Environment is not ("Production" or "Sandbox"))
             throw new AppStoreRefusedException("That purchase isn't from the App Store.", "app_store_test_refused");
-        if (claimed.IsTest && !AllowTest)
+        if (claimed.IsTest && !MayTest(me))
             throw new AppStoreRefusedException("Test purchases aren't accepted here.", "app_store_test_refused");
 
         // Past this point the buyer has paid and may be waiting: don't let a closed screen cut it short.
@@ -154,9 +166,6 @@ public sealed class AppStorePurchaseService(
             await VoidOneTimeAsync(t.OriginalTransactionId, ct);
             throw new AppStoreRefusedException("This purchase was refunded.", "app_store_voided");
         }
-        if (t.IsTest && !AllowTest)
-            throw new AppStoreRefusedException("Test purchases aren't accepted here.", "app_store_test_refused");
-
         var intent = t.AppAccountToken is { } token
             ? await db.AppStoreIntents.AsNoTracking().FirstOrDefaultAsync(i => i.Id == token, ct) : null;
         var owner = intent?.UserId
@@ -169,6 +178,8 @@ public sealed class AppStorePurchaseService(
             ?? throw new AppStoreRefusedException("This purchase isn't tied to an event.", "app_store_wrong_event", HttpStatusCode.Forbidden);
         if (requestedEvent is { } asked && asked != eventId)
             throw new AppStoreRefusedException("This purchase is for a different event.", "app_store_wrong_event", HttpStatusCode.Forbidden);
+        if (t.IsTest && !MayTest(owner))
+            throw new AppStoreRefusedException("Test purchases aren't accepted here.", "app_store_test_refused");
 
         var now = DateTimeOffset.UtcNow;
         AppStorePurchase row;
@@ -281,7 +292,7 @@ public sealed class AppStorePurchaseService(
             throw new AppStoreRefusedException("This purchase isn't tied to an account.", "app_store_wrong_account", HttpStatusCode.Forbidden);
         if (caller is { } c && c != account)
             throw new AppStoreRefusedException("This purchase belongs to another account.", "app_store_wrong_account", HttpStatusCode.Forbidden);
-        if (t.IsTest && !AllowTest)
+        if (t.IsTest && !MayTest(account))
             throw new AppStoreRefusedException("Test purchases aren't accepted here.", "app_store_test_refused");
 
         var now = DateTimeOffset.UtcNow;
@@ -391,7 +402,7 @@ public sealed class AppStorePurchaseService(
             return;
         }
         if (n.Transaction is not { } t) return;   // a summary, or nothing about a transaction
-        if (n.Environment == "Sandbox" && !AllowTest)
+        if (n.Environment == "Sandbox" && !AnyTesting)
         {
             logger.LogInformation("Ignored a sandbox App Store notification.");
             return;
@@ -448,7 +459,7 @@ public sealed class AppStorePurchaseService(
             .Select(p => new { p.OriginalTransactionId, p.IsTest }).Take(200).ToListAsync(ct);
         foreach (var s in subscriptions)
         {
-            if (s.IsTest && !AllowTest) continue;
+            if (s.IsTest && !AnyTesting) continue;
             try { await SyncSubscriptionAsync(s.OriginalTransactionId, s.IsTest, null, ct); }
             catch (AppException ex) when (ex is not AppStoreUnavailableException)
             {
@@ -459,7 +470,7 @@ public sealed class AppStorePurchaseService(
 
         // Refunds, revocations and purchases whose app never came back, from Apple's own record of what it
         // notified, whether or not the notification reached us. Three days back; each is safe to repeat.
-        foreach (var sandbox in AllowTest ? new[] { false, true } : [false])
+        foreach (var sandbox in AnyTesting ? new[] { false, true } : [false])
         {
             foreach (var payload in await api.NotificationHistoryAsync(now.AddDays(-3), now, sandbox, ct))
             {

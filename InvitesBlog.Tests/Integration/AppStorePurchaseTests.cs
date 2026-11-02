@@ -584,6 +584,35 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
+    public async Task A_listed_test_account_App_Reviews_demo_can_buy_in_the_sandbox_and_no_one_else()
+    {
+        var demo = await UserAsync();
+        var other = await UserAsync();
+        var ev = await EventAsync(demo);
+        var otherEv = await EventAsync(other);
+        Config["AppStore:TestAccountIds"] = $"{Guid.NewGuid()}, {demo.Id}";
+        try
+        {
+            var (mine, _) = Bought("gold_pass", await TokenAsync(demo, "gold_pass", ev), env: "Sandbox");
+            var (theirs, theirsId) = Bought("gold_pass", await TokenAsync(other, "gold_pass", otherEv), env: "Sandbox");
+
+            var (s1, b1) = await RedeemAsync(demo, mine, ev);
+            Assert.Equal(HttpStatusCode.OK, s1);
+            Assert.True(b1.Data!.Test);
+            Assert.Equal("app_store_test_refused", Code((await RedeemAsync(other, theirs, otherEv)).Body));
+            // Nor by a notification, where nobody is signed in: the owner decides.
+            Assert.True((await NotifyAsync(Notification("ONE_TIME_CHARGE", theirsId, env: "Sandbox"))).IsSuccessStatusCode);
+            Assert.Equal(EventPassKind.None, (await CampaignAsync(otherEv)).EventPass);
+            Assert.Equal(EventPassKind.Gold, (await CampaignAsync(ev)).EventPass);
+
+            // A production purchase by the demo account is an ordinary one.
+            var (real, _) = Bought("extra_invites_100", await TokenAsync(demo, "extra_invites_100", ev), price: 3990);
+            Assert.False((await RedeemAsync(demo, real, ev)).Body.Data!.Test);
+        }
+        finally { Config["AppStore:TestAccountIds"] = ""; }
+    }
+
+    [PostgresFact]
     public async Task Apple_being_down_decides_nothing_and_a_retry_works()
     {
         var host = await UserAsync();

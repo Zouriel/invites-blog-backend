@@ -138,8 +138,11 @@ tells them to cancel it in their Apple account and forgets who bought; the origi
 Event cancel doesn't refund an App Store payment: only Apple can. Not handled: `REFUND_REVERSED` (a refund Apple undid stays taken
 back; grant it by hand) and `CONSUMPTION_REQUEST` (no consumption data is sent; Apple decides the refund without it).
 
-Sandbox purchases (TestFlight, sandbox testers) are refused unless `AppStore:AllowTestPurchases` is true, are checked with the
-sandbox server, and are recorded with `is_test`. Production notifications naming another app (`appAppleId`) are ignored.
+Sandbox purchases (TestFlight, sandbox testers, **App Review**) are refused unless `AppStore:AllowTestPurchases` is true or the
+buying account is in `AppStore:TestAccountIds`; they are checked with the sandbox server and recorded with `is_test`. App Review
+buys in the sandbox against the production server, so the review demo account must be listed there (or test purchases switched
+on while in review), or the reviewer's purchase is refused and the app rejected. Production notifications naming another app
+(`appAppleId`) are ignored.
 
 | Setting | Meaning |
 |---|---|
@@ -147,11 +150,12 @@ sandbox server, and are recorded with `is_test`. Production notifications naming
 | `AppStore:IssuerId`, `AppStore:KeyId` | From App Store Connect > Users and Access > Integrations > In-App Purchase |
 | `AppStore:PrivateKey` or `AppStore:PrivateKeyFile` | The In-App Purchase key (.p8), its text (one line with `\n` is fine) or a path. Secret: never in git |
 | `AppStore:AppAppleId` | The app's numeric Apple ID. Optional; when set, production notifications for another app are ignored |
-| `AppStore:AllowTestPurchases` | Default false |
+| `AppStore:AllowTestPurchases` | Default false: sandbox purchases count for nobody but the accounts below |
+| `AppStore:TestAccountIds` | Our account ids (GUIDs, comma-separated) whose sandbox purchases count: the App Review demo account, our testers |
 | `AppStore:ApiBaseUrl`, `AppStore:SandboxApiBaseUrl` | Tests only. Default `https://api.storekit.apple.com/` and `https://api.storekit-sandbox.apple.com/` |
 
 In `invites-blog-deploy`: `APP_STORE_BUNDLE_ID`, `APP_STORE_ISSUER_ID`, `APP_STORE_KEY_ID`, `APP_STORE_PRIVATE_KEY`, `APP_STORE_APP_APPLE_ID`,
-`APP_STORE_ALLOW_TEST_PURCHASES`. In App Store Connect the Server Notifications V2 URL is `https://invites.blog/api/billing/app-store/notifications`
+`APP_STORE_ALLOW_TEST_PURCHASES`, `APP_STORE_TEST_ACCOUNT_IDS`. In App Store Connect the Server Notifications V2 URL is `https://invites.blog/api/billing/app-store/notifications`
 for production (and the same for sandbox, on staging if preferred).
 
 Tests: `AppStorePurchaseTests`, the real client over a socket to a stub of Apple that signs with a chain made like Apple's, on real
