@@ -84,6 +84,8 @@ public sealed class GooglePlayStub : IAsyncDisposable
                 ValidAudience = $"{BaseUrl}/token",
                 IssuerSigningKey = new RsaSecurityKey(_key.ExportParameters(false)),
             }, out _);
+            // As Google: "Invalid JWT: iat (issued at) is not set."
+            if (claims.FindFirst("iat") is null) throw new SecurityTokenException("iat");
             if (claims.FindFirst("scope")?.Value != "https://www.googleapis.com/auth/androidpublisher") throw new SecurityTokenException("scope");
         }
         catch (Exception ex) when (ex is SecurityTokenException or ArgumentException)
