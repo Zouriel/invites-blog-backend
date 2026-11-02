@@ -77,7 +77,17 @@ public sealed record OAuthProviderDto(string Provider, string ClientId, string A
 /// Signing in with an ID token the browser obtained from the provider. The token is verified
 /// server-side against the provider's published keys, so nothing here is trusted as sent.
 /// </summary>
-public sealed record OAuthLoginRequest(string IdToken);
+/// <param name="IdToken">The provider's ID token.</param>
+/// <param name="Nonce">The raw nonce the app made up and sent hashed to the provider (Apple: required).</param>
+/// <param name="AuthorizationCode">
+/// Apple's one-time code, exchanged for the refresh token that account deletion revokes. Optional; never
+/// stored or logged as sent.
+/// </param>
+/// <param name="GivenName">The name Apple hands the app on the first sign-in only; used for a new account.</param>
+/// <param name="FamilyName">See <paramref name="GivenName"/>.</param>
+public sealed record OAuthLoginRequest(
+    string IdToken, string? Nonce = null, string? AuthorizationCode = null,
+    string? GivenName = null, string? FamilyName = null);
 
 /// <summary>
 /// Creating a designer account: someone who wants to publish templates rather than only receive

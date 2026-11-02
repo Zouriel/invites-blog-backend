@@ -65,6 +65,12 @@ public static class DependencyInjection
         services.AddHttpClient();
         services.AddSingleton<IExternalAuthProvider, Security.GoogleAuthProvider>();
         services.AddSingleton<IExternalAuthProvider, Security.MicrosoftAuthProvider>();
+        // Sign in with Apple (iPhone app only), and its token exchange/revocation for account deletion,
+        // which stays off until OAuth:Apple has a key. Apple's answers carry tokens: no request logging.
+        services.AddSingleton<IExternalAuthProvider, Security.AppleAuthProvider>();
+        services.AddHttpClient(Security.AppleSignInTokens.ClientName, c => c.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
+        services.AddSingleton<IAppleSignInTokens, Security.AppleSignInTokens>();
 
         // Storage (Local by default; MinIO/S3 when configured)
         var storageProvider = config["Storage:Provider"] ?? "Local";

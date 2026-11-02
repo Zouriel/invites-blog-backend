@@ -50,14 +50,20 @@ public sealed class AccountService(
     IRepository<Venue> venues,
     IRepository<VenueStaff> venueStaff,
     IProfilePictureService pictures,
-    IEventInheritance? inheritance = null) : IAccountService
+    IEventInheritance? inheritance = null,
+    IAppleSignInTokens? appleTokens = null) : IAccountService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(14);
 
-    public AuthOptionsDto Options() => new(
+    /// <param name="platform">
+    /// Which app is asking (<c>ios</c>). Providers only an app can offer (Sign in with Apple) are listed
+    /// for the iPhone only; the website and Android get exactly what they always did.
+    /// </param>
+    public AuthOptionsDto Options(string? platform = null) => new(
         SmsAvailable: SmsIsConfigured(),
         OAuthProviders: authProviders
             .Where(p => p.IsConfigured)
+            .Where(p => !p.AppOnly || string.Equals(platform, "ios", StringComparison.OrdinalIgnoreCase))
             .Select(p => p.Descriptor())
             .OrderBy(d => d.Provider, StringComparer.Ordinal)
             .Select(d => new OAuthProviderDto(d.Provider, d.ClientId, d.AuthorizeUrl))
@@ -165,7 +171,7 @@ public sealed class AccountService(
             throw new BusinessRuleException(
                 $"{provider} sign-in isn't configured on this server.", "oauth_not_configured");
 
-        var identity = await impl.VerifyAsync(request.IdToken, ct);
+        var identity = await impl.VerifyAsync(request.IdToken, request.Nonce, ct);
 
         var link = await externalLogins.Query(tracking: true)
             .FirstOrDefaultAsync(l => l.Provider == identity.Provider && l.ExternalSubjectId == identity.SubjectId, ct);
@@ -177,12 +183,24 @@ public sealed class AccountService(
         }
         else
         {
+            // Apple sends the email reliably on the first sign-in only. With no link and no email there
+            // is nothing to sign in or create: Apple sends it again once the person removes the app
+            // from their Apple ID's sign-in list.
+            if (string.IsNullOrWhiteSpace(identity.Email))
+                throw new UnauthorizedException(
+                    $"{ProviderName(identity.Provider)} didn't share an email address. On your iPhone, open Settings, tap your name, then Sign in with Apple, remove invites.blog and try again.",
+                    "oauth_no_email");
+
             // No link yet: attach to whoever owns this VERIFIED email, else create an account. That's
             // what stops someone who signed up with a password from ending up with a second one.
-            user = await LoadAsync(u => u.Email == identity.Email, ct)
-                   ?? await CreateFromExternalAsync(identity, ct);
+            var owner = await LoadAsync(u => u.Email == identity.Email, ct);
+            if (owner is not null && !identity.EmailVerified)
+                throw new BusinessRuleException(
+                    $"There's already an account with this email. Sign in to it another way; {ProviderName(identity.Provider)} hasn't confirmed the address.",
+                    "oauth_email_unverified");
+            user = owner ?? await CreateFromExternalAsync(identity with { DisplayName = GivenName(request) ?? identity.DisplayName }, ct);
 
-            await externalLogins.AddAsync(new UserExternalLogin
+            link = new UserExternalLogin
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
@@ -190,9 +208,12 @@ public sealed class AccountService(
                 ExternalSubjectId = identity.SubjectId,
                 Email = identity.Email,
                 CreatedAt = DateTimeOffset.UtcNow,
-            }, ct);
+            };
+            await externalLogins.AddAsync(link, ct);
             await uow.SaveChangesAsync(ct);
         }
+
+        await KeepAppleRefreshTokenAsync(link, request.AuthorizationCode, ct);
 
         // Google's picture, until the person picks their own. Best effort: it never fails a sign-in.
         await pictures.ImportFromProviderAsync(user, identity.PictureUrl, ct);
@@ -514,6 +535,38 @@ public sealed class AccountService(
     /// First sign-in through a provider with no account here yet. They get the Customer role, exactly
     /// like any other first sign-in — arriving via Google grants nothing extra.
     /// </summary>
+    /// <summary>
+    /// Apple: swaps the sign-in's one-time code for a refresh token, kept sealed so deleting the account
+    /// can revoke it (App Store 5.1.1(v)). Only while the login has none yet, and only with a key
+    /// configured. Best effort: a sign-in never fails over it, and the next sign-in brings a new code.
+    /// </summary>
+    private async Task KeepAppleRefreshTokenAsync(UserExternalLogin link, string? code, CancellationToken ct)
+    {
+        if (link.Provider != "apple" || string.IsNullOrWhiteSpace(code) || link.RefreshTokenSealed is not null) return;
+        if (appleTokens is not { IsConfigured: true }) return;
+        var refresh = await appleTokens.ExchangeAsync(code, ct);
+        if (refresh is null) return;
+        link.RefreshTokenSealed = AppleTokenSeal.Seal(refresh, config);
+        await uow.SaveChangesAsync(ct);
+    }
+
+    /// <summary>The name Apple gave the app on a first sign-in, tidied; null when none came.</summary>
+    private static string? GivenName(OAuthLoginRequest request)
+    {
+        var name = string.Join(' ', new[] { request.GivenName, request.FamilyName }
+            .Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!.Trim()));
+        name = new string(name.Where(c => !char.IsControl(c)).ToArray());
+        return name.Length == 0 ? null : name.Length > 100 ? name[..100] : name;
+    }
+
+    private static string ProviderName(string provider) => provider switch
+    {
+        "apple" => "Apple",
+        "google" => "Google",
+        "microsoft" => "Microsoft",
+        _ => provider,
+    };
+
     private async Task<AppUser> CreateFromExternalAsync(ExternalIdentity identity, CancellationToken ct)
     {
         var user = new AppUser
@@ -522,7 +575,11 @@ public sealed class AccountService(
             Email = identity.Email,
             DisplayName = string.IsNullOrWhiteSpace(identity.DisplayName)
                 ? identity.Email.Split('@')[0]
-                : identity.DisplayName,
+                // Apple's private relay address is random letters; a name that reads as one is no name.
+                : identity.Email.EndsWith("@privaterelay.appleid.com", StringComparison.Ordinal)
+                  && identity.DisplayName == identity.Email.Split('@')[0]
+                    ? "You"
+                    : identity.DisplayName,
             PasswordHash = null,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,

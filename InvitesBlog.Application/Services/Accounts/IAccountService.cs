@@ -10,7 +10,7 @@ namespace InvitesBlog.Application.Services.Accounts;
 public interface IAccountService
 {
     /// <summary>What the sign-in page can actually offer right now.</summary>
-    AuthOptionsDto Options();
+    AuthOptionsDto Options(string? platform = null);
 
     /// <summary>Email + password.</summary>
     Task<AuthResultDto> LoginWithPasswordAsync(PasswordLoginRequest request, CancellationToken ct = default);

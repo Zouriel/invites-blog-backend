@@ -64,6 +64,8 @@ public sealed class PendingRemovalService(
         var incoming = scope.ServiceProvider.GetRequiredService<IIncomingUploadStore>();
         var bank = scope.ServiceProvider.GetRequiredService<IRecurringPaymentProvider>();
         var play = scope.ServiceProvider.GetRequiredService<Application.Services.Billing.IGooglePlayPublisher>();
+        var apple = scope.ServiceProvider.GetRequiredService<IAppleSignInTokens>();
+        var config = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
 
         var now = DateTimeOffset.UtcNow;
         var due = await db.PendingRemovals.Where(r => r.NextAttemptAt <= now)
@@ -84,6 +86,13 @@ public sealed class PendingRemovalService(
                     case PendingRemovalKinds.PaymentCustomer: await bank.ForgetCustomerAsync(row.Target, ct); break;
                     // False means Google refused it, which it does for one already ended: nothing to stop.
                     case PendingRemovalKinds.PlaySubscription: await play.CancelSubscriptionAsync(row.Target, ct); break;
+                    case PendingRemovalKinds.AppleSignIn:
+                        // Unreadable means the server's secret changed since: nothing left to revoke with.
+                        if (Application.Common.AppleTokenSeal.Open(row.Target, config) is { } refresh)
+                            await apple.RevokeAsync(refresh, ct);
+                        else
+                            logger.LogWarning("Removal {RemovalId}: the Apple token couldn't be unsealed; dropped.", row.Id);
+                        break;
                     default: throw new InvalidOperationException($"Unknown removal kind {row.Kind}.");
                 }
                 db.PendingRemovals.Remove(row);

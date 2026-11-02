@@ -18,7 +18,7 @@ public sealed class AuthController(IAccountService accounts, IAccountDeletionSer
     /// <summary>What the sign-in page can offer — used to hide options this server can't deliver.</summary>
     [HttpGet("options")]
     [AllowAnonymous]
-    public IActionResult Options() => Success(accounts.Options());
+    public IActionResult Options([FromQuery] string? platform = null) => Success(accounts.Options(platform));
 
     [HttpPost("login")]
     [AllowAnonymous]

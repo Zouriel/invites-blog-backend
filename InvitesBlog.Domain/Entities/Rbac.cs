@@ -94,6 +94,11 @@ public sealed class UserExternalLogin
     /// <summary>The email the provider asserted at link time, for support/audit.</summary>
     public string Email { get; set; } = default!;
     public DateTimeOffset CreatedAt { get; set; }
+    /// <summary>
+    /// Apple only: the refresh token from a sign-in's authorization code, sealed (AppleTokenSeal), so
+    /// account deletion can revoke it as App Store guideline 5.1.1(v) asks. Null until one was exchanged.
+    /// </summary>
+    public string? RefreshTokenSealed { get; set; }
 }
 
 /// <summary>A named role that groups permissions (e.g. Admin, Inviter, Invitee).</summary>

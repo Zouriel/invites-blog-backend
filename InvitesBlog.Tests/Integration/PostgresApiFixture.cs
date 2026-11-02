@@ -55,6 +55,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     public GooglePlayStub Google { get; } = new();
     public RecordingLogs Logs { get; } = new();
     public ApnsStub Apns { get; } = new();
+    public AppleIdStub Apple { get; } = new();
     public IServiceProvider Services => _factory!.Services;
     public string StorageRoot => _storageRoot;
 
@@ -74,6 +75,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         }
 
         await Google.StartAsync();
+        await Apple.StartAsync();
 
         var conn = new NpgsqlConnectionStringBuilder(_server) { Database = _database }.ToString();
         // Environment rather than the factory's configuration hook: Program reads configuration while it
@@ -104,6 +106,12 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["Push__Apns__KeyId"] = ApnsStub.KeyId,
             ["Push__Apns__TeamId"] = ApnsStub.TeamId,
             ["Push__Apns__PrivateKey"] = Apns.PrivateKeyOneLine,
+            // Sign in with Apple, with a key made for this run; every call goes to Apple (the stub).
+            ["OAuth__Apple__ClientId"] = AppleIdStub.ClientId,
+            ["OAuth__Apple__TeamId"] = AppleIdStub.TeamId,
+            ["OAuth__Apple__KeyId"] = AppleIdStub.KeyId,
+            ["OAuth__Apple__PrivateKey"] = Apple.PrivateKeyOneLine,
+            ["OAuth__Apple__BaseUrl"] = Apple.BaseUrl,
         })
             Environment.SetEnvironmentVariable(key, value);
 
@@ -111,7 +119,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         _ = _factory.Server; // starts the app: migrates and seeds
 
         // Read once at start-up; cleared so no other test host in this process gets a push key.
-        foreach (var key in new[] { "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey" })
+        foreach (var key in new[] { "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey",
+                     "OAuth__Apple__ClientId", "OAuth__Apple__TeamId", "OAuth__Apple__KeyId", "OAuth__Apple__PrivateKey", "OAuth__Apple__BaseUrl" })
             Environment.SetEnvironmentVariable(key, null);
         }
         finally
@@ -130,6 +139,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         if (_factory is null) return;
         await _factory.DisposeAsync();
         await Google.DisposeAsync();
+        await Apple.DisposeAsync();
         NpgsqlConnection.ClearAllPools();
         await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(_server) { Database = "postgres" }.ToString());
         await admin.OpenAsync();

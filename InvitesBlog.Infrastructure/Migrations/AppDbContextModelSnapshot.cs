@@ -2317,6 +2317,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("provider");
 
+                    b.Property<string>("RefreshTokenSealed")
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token_sealed");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");

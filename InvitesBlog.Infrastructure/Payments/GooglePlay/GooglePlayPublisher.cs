@@ -328,7 +328,7 @@ public sealed class GooglePubSubTokenVerifier(IConfiguration config, IHttpClient
             throw new Application.Exceptions.UnauthorizedException("No token.", "pubsub_no_token");
         // VerifyAsync requires the email, checks email_verified, and answers 401 for a bad signature,
         // issuer, audience or expiry.
-        var identity = await VerifyAsync(authorization[prefix.Length..].Trim(), ct);
+        var identity = await VerifyAsync(authorization[prefix.Length..].Trim(), ct: ct);
         if (!string.Equals(identity.Email, _sender, StringComparison.Ordinal))
             throw new Application.Exceptions.UnauthorizedException("Not our subscription.", "pubsub_wrong_sender");
     }
