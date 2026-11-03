@@ -306,6 +306,7 @@ public class AccountServiceTests
         var b = TestData.Campaign(status: CampaignStatus.Dispatched);
         a.CreatedByUserId = me.Id;
         b.CreatedByUserId = me.Id;
+        a.TemplateManifestJson = """{"theme":{"accentColor":"#c9a227","backgroundColor":"#fdf1f4"}}""";
         _campaigns.Query(Arg.Any<bool>()).Returns(new[] { a, b }.AsAsyncQueryable());
 
         // Sut() stubs the guest queryable itself, so it has to be built before this overrides it.
@@ -320,6 +321,8 @@ public class AccountServiceTests
         Assert.Equal(3, list.Single(c => c.Id == a.Id).GuestCount);
         // Absent from the grouped result is the same zero the per-campaign count used to return.
         Assert.Equal(0, list.Single(c => c.Id == b.Id).GuestCount);
+        // The design's colours ride along for a tile with no picture.
+        Assert.Equal(["#fdf1f4", "#c9a227"], list.Single(c => c.Id == a.Id).Colours);
 
         // The whole point: nothing asks per campaign any more.
         await _guests.DidNotReceive().CountByCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
