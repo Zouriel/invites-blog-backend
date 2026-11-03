@@ -204,15 +204,19 @@ public sealed class ModerationTests(PostgresApiFixture api)
         await InviteAsync(ev, await GuestAsync(ev, "Pest", pest.Email), InviteStatus.Sent);
         var phone = Convert.ToHexString(Guid.NewGuid().ToByteArray()) + Convert.ToHexString(Guid.NewGuid().ToByteArray());
         Assert.Equal(HttpStatusCode.OK, (await api.Client(host.Token).PostAsJsonAsync("/api/me/devices", new { token = phone, platform = "ios" })).StatusCode);
+        var android = "fcm-" + Guid.NewGuid().ToString("N");
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(host.Token).PostAsJsonAsync("/api/me/devices", new { token = android, platform = "android" })).StatusCode);
 
         await CommentAsync(pest, ev, "First");
         await api.DrainPushesAsync();
         Assert.Single(api.Apns.To(phone));
+        Assert.Single(api.Fcm.To(android));
 
         await api.Client(host.Token).PutAsync($"/api/me/blocks/{pest.Id}", null);
         await CommentAsync(pest, ev, "Second");
         await api.DrainPushesAsync();
         Assert.Single(api.Apns.To(phone));
+        Assert.Single(api.Fcm.To(android));
     }
 
     // ----- The word filter --------------------------------------------------------------------------

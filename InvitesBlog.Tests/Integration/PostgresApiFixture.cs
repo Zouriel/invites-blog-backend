@@ -59,6 +59,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     public AppStoreStub AppStore { get; } = new();
     public RecordingLogs Logs { get; } = new();
     public ApnsStub Apns { get; } = new();
+    public FcmStub Fcm { get; } = new();
     public AppleIdStub Apple { get; } = new();
     public IServiceProvider Services => _factory!.Services;
     public string StorageRoot => _storageRoot;
@@ -112,6 +113,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["Push__Apns__KeyId"] = ApnsStub.KeyId,
             ["Push__Apns__TeamId"] = ApnsStub.TeamId,
             ["Push__Apns__PrivateKey"] = Apns.PrivateKeyOneLine,
+            // Android push (FCM) on too; requests go to Fcm, never to Google.
+            ["Push__Enabled"] = "true",
             // Sign in with Apple, with a key made for this run; every call goes to Apple (the stub).
             ["OAuth__Apple__ClientId"] = AppleIdStub.ClientId,
             ["OAuth__Apple__TeamId"] = AppleIdStub.TeamId,
@@ -132,7 +135,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
         _ = _factory.Server; // starts the app: migrates and seeds
 
         // Read once at start-up; cleared so no other test host in this process gets a push key.
-        foreach (var key in new[] { "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey",
+        foreach (var key in new[] { "Push__Enabled", "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey",
                      "OAuth__Apple__ClientId", "OAuth__Apple__TeamId", "OAuth__Apple__KeyId", "OAuth__Apple__PrivateKey", "OAuth__Apple__BaseUrl" })
             Environment.SetEnvironmentVariable(key, null);
         }
@@ -245,6 +248,11 @@ public sealed class PostgresApiFixture : IAsyncLifetime
                 // Apple's push service: the stand-in answers instead, behind the client's real pipeline.
                 services.AddHttpClient(InvitesBlog.Infrastructure.Notifications.Push.ApnsClient.ClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => new ApnsStub.Handler(fixture.Apns));
+                // FCM: the stand-in answers, with fixed credentials in place of a service-account file.
+                services.AddHttpClient(InvitesBlog.Infrastructure.Notifications.Push.FcmPushSender.ClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => new FcmStub.Handler(fixture.Fcm));
+                services.RemoveAll<InvitesBlog.Infrastructure.Notifications.Push.IFcmCredentials>();
+                services.AddSingleton<InvitesBlog.Infrastructure.Notifications.Push.IFcmCredentials>(new FcmStub.Credentials());
                 // The push worker isn't running (no hosted services): tests drain the line themselves.
                 services.AddSingleton<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>();
                 // The stub's root in place of Apple's, with no revocation lookups: the only trust a test can change.

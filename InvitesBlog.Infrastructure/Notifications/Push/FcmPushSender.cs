@@ -23,6 +23,9 @@ public sealed class FcmPushSender(
 {
     public const string ClientName = "fcm";
 
+    /// <summary>The Android notification channel the app creates (MainActivity.kt); must match.</summary>
+    public const string AndroidChannel = "events";
+
     private static readonly JsonSerializerOptions Json = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -90,6 +93,8 @@ public sealed class FcmPushSender(
                     token = device.Token,
                     notification = new { title, body },
                     data = data is { Count: > 0 } ? data : null,
+                    // High priority so a phone in Doze shows it now, on the app's own channel.
+                    android = new { priority = "HIGH", notification = new { channel_id = AndroidChannel } },
                 },
             }, options: Json),
         };
@@ -98,36 +103,52 @@ public sealed class FcmPushSender(
         using var response = await client.SendAsync(request, ct);
         if (response.IsSuccessStatusCode) return false;
 
-        var code = ErrorCode(await response.Content.ReadAsStringAsync(ct));
-        if (code == "UNREGISTERED") return true;
+        var (code, message) = Error(await response.Content.ReadAsStringAsync(ct));
+        if (IsGone(code, message)) return true;
 
         logger.LogWarning("Push to device {DeviceId} refused: {Status} {Code}.",
             device.Id, (int)response.StatusCode, code ?? "no error code");
         return false;
     }
 
-    /// <summary>The FcmError code from error.details, or null if the body has none.</summary>
-    private static string? ErrorCode(string body)
+    /// <summary>
+    /// Whether FCM's answer means this token will never work: UNREGISTERED (the app was removed or the
+    /// token replaced), SENDER_ID_MISMATCH (a token from another Firebase project), or INVALID_ARGUMENT
+    /// about the token itself ("The registration token is not a valid FCM registration token"). Any other
+    /// INVALID_ARGUMENT is about our message, so the device stays.
+    /// </summary>
+    public static bool IsGone(string? code, string? message) => code switch
+    {
+        "UNREGISTERED" or "SENDER_ID_MISMATCH" => true,
+        "INVALID_ARGUMENT" => message?.Contains("registration token", StringComparison.OrdinalIgnoreCase) == true,
+        _ => false,
+    };
+
+    /// <summary>The FcmError code from error.details and error.message; nulls if the body has none.</summary>
+    private static (string? Code, string? Message) Error(string body)
     {
         try
         {
             using var doc = JsonDocument.Parse(body);
             if (doc.RootElement.ValueKind != JsonValueKind.Object
                 || !doc.RootElement.TryGetProperty("error", out var error)
-                || error.ValueKind != JsonValueKind.Object
-                || !error.TryGetProperty("details", out var details)
-                || details.ValueKind != JsonValueKind.Array) return null;
+                || error.ValueKind != JsonValueKind.Object) return (null, null);
+
+            var message = error.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                ? m.GetString() : null;
+            if (!error.TryGetProperty("details", out var details) || details.ValueKind != JsonValueKind.Array)
+                return (null, message);
 
             foreach (var detail in details.EnumerateArray())
                 if (detail.ValueKind == JsonValueKind.Object
                     && detail.TryGetProperty("errorCode", out var code)
                     && code.ValueKind == JsonValueKind.String)
-                    return code.GetString();
-            return null;
+                    return (code.GetString(), message);
+            return (null, message);
         }
         catch (JsonException)
         {
-            return null;
+            return (null, null);
         }
     }
 }
