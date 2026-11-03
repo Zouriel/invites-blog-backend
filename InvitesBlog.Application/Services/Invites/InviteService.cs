@@ -441,7 +441,7 @@ public sealed class InviteService(
         return campaign is null ? null : ThemeOf(campaign, null);
     }
 
-    private static GuestThemeResponse ThemeOf(Campaign campaign, string? role)
+    internal static GuestThemeResponse ThemeOf(Campaign campaign, string? role)
     {
         // The template's authored defaults, from the manifest the campaign froze at booking.
         var declared = ParseJsonObject(campaign.TemplateManifestJson)?["theme"] as JsonObject;
@@ -655,7 +655,8 @@ public sealed class InviteService(
                         ?? TemplatePoster.OrNull(previews.GetValueOrDefault(c.TemplateId)),
                     photoCounts.GetValueOrDefault(c.Id),
                     SaveTheDates.Name(c.Kind),
-                    SaveTheDates.Is(c) ? CalendarFor(c) : null);
+                    SaveTheDates.Is(c) ? CalendarFor(c) : null,
+                    Application.Campaigns.PosterColours.Of(c));
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)

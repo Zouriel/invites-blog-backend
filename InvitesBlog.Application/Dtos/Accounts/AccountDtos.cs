@@ -119,7 +119,9 @@ public sealed record MyCampaignDto(
     /// <summary>What the event is on, for its badge: Free, GoldPass, PlatinumPass or Venue.</summary>
     string Plan = "Free",
     /// <summary>"invitation" or "saveTheDate".</summary>
-    string Kind = "invitation");
+    string Kind = "invitation",
+    /// <summary>The design's background and accent (#rrggbb), for a tile with no picture; null when it declares none.</summary>
+    IReadOnlyList<string>? Colours = null);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);
