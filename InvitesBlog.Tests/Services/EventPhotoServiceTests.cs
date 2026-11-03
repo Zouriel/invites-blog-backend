@@ -27,6 +27,11 @@ public class EventPhotoServiceTests
 {
     public EventPhotoServiceTests()
     {
+        // The archive reads originals as streams. The stores' own fallback (IStorageService's default)
+        // is to stream what GetAsync returns, so the tests' stubbed bytes are read the same way.
+        _storage.OpenReadAsync(default!, default).ReturnsForAnyArgs(async ci =>
+            await _storage.GetAsync(ci.ArgAt<string>(0), CancellationToken.None) is { } bytes ? (Stream)new MemoryStream(bytes) : null);
+
         // Every upload resolves a bucket first. A roomy one, so a full-bucket refusal never stands in
         // for the authorization answer a test was actually asking about.
         _buckets.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
@@ -290,6 +295,111 @@ public class EventPhotoServiceTests
     /// write — Kestrel with buffering off. The archive used to be written with the synchronous
     /// ZipArchive, which passed against a MemoryStream and failed every real download.
     /// </summary>
+    /// <summary>
+    /// A 40 MB video is read from storage a chunk at a time and each chunk goes on before the next is
+    /// read: the archive never holds a whole original. Before, every original was read whole (and then
+    /// copied again), and a 9.7 GB album took the API to 4.3 GB of memory for one download.
+    /// </summary>
+    [Fact]
+    public async Task A_large_original_is_streamed_in_chunks_and_never_read_whole()
+    {
+        var (campaign, guest) = OnTheGuestList();
+        const long size = 40L << 20;
+        var video = Stored(campaign.Id, ext: ".mp4");
+        var photo = Stored(campaign.Id);
+        _photos.Query().Returns(new[] { video, photo }.AsAsyncQueryable());
+        var videoKey = video.OriginalUrl["/assets/".Length..];
+        _storage.GetAsync(videoKey, Arg.Any<CancellationToken>()).Returns<byte[]?>(_ => throw new InvalidOperationException("read whole"));
+        _storage.OpenReadAsync(videoKey, Arg.Any<CancellationToken>()).Returns(_ => (Stream)new PatternStream(size));
+        var body = new ResponseBodyLike();
+
+        await Sut().WriteArchiveAsync(campaign.Id, guest.Id, null, _ => body);
+
+        // Nothing larger than one chunk (plus an entry header) was ever handed on at once.
+        Assert.InRange(body.LargestWrite, 1, EventPhotoService.ArchiveChunkBytes + 4096);
+        Assert.True(body.Writes > size / EventPhotoService.ArchiveChunkBytes, $"only {body.Writes} writes");
+        await _storage.DidNotReceive().GetAsync(videoKey, Arg.Any<CancellationToken>());
+        using var zip = new ZipArchive(new MemoryStream(body.ToArray()), ZipArchiveMode.Read);
+        Assert.Equal(2, zip.Entries.Count);
+        var entry = zip.Entries.Single(e => e.FullName.EndsWith(".mp4"));
+        Assert.Equal(size, entry.Length);
+        await using var read = await entry.OpenAsync();
+        Assert.True(await PatternStream.MatchesAsync(read, size), "the video came out different");
+    }
+
+    /// <summary>
+    /// An album bigger than 4 GB comes out as a valid Zip64 archive. Opt-in, because it writes 4.4 GB:
+    /// set IB_LARGE_ARCHIVE_DIR to a folder with room (not a RAM disk).
+    /// </summary>
+    [LargeArchiveFact]
+    public async Task An_album_over_4_GB_is_a_valid_archive()
+    {
+        var dir = Environment.GetEnvironmentVariable(LargeArchiveFact.Variable)!;
+        var (campaign, guest) = OnTheGuestList();
+        const long size = 250L * 1000 * 1000;
+        var videos = Enumerable.Range(0, 18).Select(i => Stored(campaign.Id, ext: ".mp4", at: DateTimeOffset.UtcNow.AddMinutes(i))).ToArray();
+        _photos.Query().Returns(videos.AsAsyncQueryable());
+        _storage.OpenReadAsync(Arg.Is<string>(k => k.EndsWith(".mp4")), Arg.Any<CancellationToken>())
+            .Returns(_ => (Stream)new PatternStream(size));
+        var path = Path.Combine(dir, $"large-{Guid.NewGuid():N}.zip");
+        try
+        {
+            await using (var file = File.Create(path))
+                await Sut().WriteArchiveAsync(campaign.Id, guest.Id, null, _ => file);
+
+            Assert.True(new FileInfo(path).Length > 4L * 1024 * 1024 * 1024);
+            using var zip = ZipFile.OpenRead(path);
+            Assert.Equal(18, zip.Entries.Count);
+            Assert.All(zip.Entries, e => Assert.Equal(size, e.Length));
+            await using var last = await zip.Entries.OrderBy(e => e.FullName).Last().OpenAsync();
+            Assert.True(await PatternStream.MatchesAsync(last, size), "the last video, past 4 GB, came out different");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>Bytes made up as they are read: a large original without holding one in memory.</summary>
+    private sealed class PatternStream(long length) : Stream
+    {
+        private long _at;
+        private static byte At(long i) => (byte)(i * 31 + (i >> 11));
+
+        public static async Task<bool> MatchesAsync(Stream s, long length)
+        {
+            var buffer = new byte[1 << 16];
+            long at = 0;
+            int n;
+            while ((n = await s.ReadAsync(buffer)) > 0)
+            {
+                for (var i = 0; i < n; i++) if (buffer[i] != At(at + i)) return false;
+                at += n;
+            }
+            return at == length;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            var n = (int)Math.Min(buffer.Length, length - _at);
+            for (var i = 0; i < n; i++) buffer[i] = At(_at + i);
+            _at += n;
+            return n;
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => ValueTask.FromResult(Read(buffer.Span));
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => Task.FromResult(Read(buffer, offset, count));
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => length;
+        public override long Position { get => _at; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class ResponseBodyLike : Stream
     {
         private readonly MemoryStream _inner = new();
@@ -310,10 +420,17 @@ public class EventPhotoServiceTests
         public override void WriteByte(byte value) => throw Sync();
 
         public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);
+        public int LargestWrite { get; private set; }
+        public int Writes { get; private set; }
+
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
-            _inner.WriteAsync(buffer, offset, count, ct);
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) =>
-            _inner.WriteAsync(buffer, ct);
+            WriteAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            LargestWrite = Math.Max(LargestWrite, buffer.Length);
+            Writes++;
+            return _inner.WriteAsync(buffer, ct);
+        }
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
@@ -1031,5 +1148,17 @@ public class EventPhotoServiceTests
         await Sut().DeleteAsync(campaign.Id, photo.Id, guest.Id);
 
         Assert.Equal(first, photo.DeletedAt);
+    }
+}
+
+/// <summary>Runs only when <see cref="Variable"/> names a folder with room for a 4.4 GB file; reported as skipped otherwise.</summary>
+public sealed class LargeArchiveFact : FactAttribute
+{
+    public const string Variable = "IB_LARGE_ARCHIVE_DIR";
+
+    public LargeArchiveFact()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(Variable)))
+            Skip = $"Set {Variable} to a folder with 5 GB free to write an archive over 4 GB.";
     }
 }

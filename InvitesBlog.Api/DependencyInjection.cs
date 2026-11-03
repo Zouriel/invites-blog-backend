@@ -55,6 +55,7 @@ public static class DependencyInjection
         // Same shape and the same key as the render ticket, under its own context string: what
         // somebody who scanned a bucket's QR carries while they are adding to it.
         services.AddSingleton<MediaBuckets.ContributorTickets>();
+        services.AddSingleton<Photos.ArchiveTickets>();
         services.AddScoped<Rendering.RenderedInvitations>();
 
         // Two named origins, never a wildcard — which is also what makes AllowCredentials safe to

@@ -37,6 +37,14 @@ public sealed class LocalFileStorageService : IStorageService
         return File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
     }
 
+    public Task<Stream?> OpenReadAsync(string key, CancellationToken ct = default)
+    {
+        var path = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        return Task.FromResult<Stream?>(File.Exists(path)
+            ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true)
+            : null);
+    }
+
     public async Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default)
     {
         var target = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
@@ -192,6 +200,43 @@ public sealed class S3StorageService : IStorageService
         catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return null;
+        }
+    }
+
+    /// <summary>The object's body as it arrives from the store; disposing it closes the response.</summary>
+    public async Task<Stream?> OpenReadAsync(string key, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = _bucket, Key = key }, ct);
+            return new OwnedResponseStream(res);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A GetObject body that also disposes the response it came with.</summary>
+    private sealed class OwnedResponseStream(GetObjectResponse response) : Stream
+    {
+        private readonly Stream _inner = response.ResponseStream;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => response.ContentLength;
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => _inner.ReadAsync(buffer, ct);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => _inner.ReadAsync(buffer, offset, count, ct);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _inner.Dispose(); response.Dispose(); }
+            base.Dispose(disposing);
         }
     }
 

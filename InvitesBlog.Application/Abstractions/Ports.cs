@@ -18,6 +18,14 @@ public interface IStorageService
     /// <summary>Reads a stored object's bytes, or null if it doesn't exist.</summary>
     Task<byte[]?> GetAsync(string key, CancellationToken ct = default);
 
+    /// <summary>
+    /// Opens a stored object for reading as it arrives, or null if it doesn't exist. For anything that
+    /// may be large (a video is up to 256 MB): the caller disposes the stream. The default reads the
+    /// whole object first; the real stores override it to stream.
+    /// </summary>
+    async Task<Stream?> OpenReadAsync(string key, CancellationToken ct = default) =>
+        await GetAsync(key, ct) is { } bytes ? new MemoryStream(bytes, writable: false) : null;
+
     /// <summary>Stores a file from disk, without holding it in memory (a video can be 256 MB).</summary>
     Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default);
 

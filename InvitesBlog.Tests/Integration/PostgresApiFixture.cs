@@ -364,6 +364,7 @@ public sealed class FlakyStorage(IStorageService inner) : IStorageService
     public volatile bool FailRemovals;
     public Task<string> PutAsync(string key, byte[] content, string contentType, CancellationToken ct = default) => inner.PutAsync(key, content, contentType, ct);
     public Task<byte[]?> GetAsync(string key, CancellationToken ct = default) => inner.GetAsync(key, ct);
+    public Task<Stream?> OpenReadAsync(string key, CancellationToken ct = default) => inner.OpenReadAsync(key, ct);
     public Task<string> PutFileAsync(string key, string path, string contentType, CancellationToken ct = default) => inner.PutFileAsync(key, path, contentType, ct);
     public Task<bool> DownloadToFileAsync(string key, string path, CancellationToken ct = default) => inner.DownloadToFileAsync(key, path, ct);
     public string PublicUrl(string key) => inner.PublicUrl(key);
