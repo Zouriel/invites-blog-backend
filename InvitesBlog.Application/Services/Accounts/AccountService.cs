@@ -427,7 +427,8 @@ public sealed class AccountService(
                         Domain.Enums.EventPassKind.Gold => "GoldPass",
                         _ => "Free",
                     },
-                Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind)));
+                Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind),
+                Colours: InvitesBlog.Application.Campaigns.PosterColours.Of(c)));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));
