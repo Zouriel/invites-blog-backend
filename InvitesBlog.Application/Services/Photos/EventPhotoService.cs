@@ -121,7 +121,21 @@ public interface IEventPhotoService
     Task WriteArchiveAsync(
         Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids,
         Func<string, Stream> begin, CancellationToken ct = default);
+
+    /// <summary>
+    /// The authorizing half of <see cref="WriteArchiveAsync(Guid, Guid?, IReadOnlyCollection{Guid}?, Func{string, Stream}, CancellationToken)"/>:
+    /// checks the caller may see the box and which of the photos they may have, and names the file.
+    /// Throws when there is nothing to send. What it returns may be written later, by anyone holding it.
+    /// </summary>
+    Task<PhotoArchive> PlanArchiveAsync(
+        Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids, CancellationToken ct = default);
+
+    /// <summary>Writes an archive already planned (and so already authorized). Photos deleted since are left out.</summary>
+    Task WriteArchiveAsync(PhotoArchive archive, Func<string, Stream> begin, CancellationToken ct = default);
 }
+
+/// <summary>An authorized zip of an event's originals, ready to write: what to call it and what goes in.</summary>
+public sealed record PhotoArchive(Guid CampaignId, string Name, IReadOnlyList<Guid> PhotoIds, long Bytes);
 
 /// <inheritdoc cref="IEventPhotoService"/>
 public sealed class EventPhotoService(
@@ -750,7 +764,11 @@ public sealed class EventPhotoService(
 
     public async Task WriteArchiveAsync(
         Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids,
-        Func<string, Stream> begin, CancellationToken ct = default)
+        Func<string, Stream> begin, CancellationToken ct = default) =>
+        await WriteArchiveAsync(await PlanArchiveAsync(campaignId, viewerGuestId, ids, ct), begin, ct);
+
+    public async Task<PhotoArchive> PlanArchiveAsync(
+        Guid campaignId, Guid? viewerGuestId, IReadOnlyCollection<Guid>? ids, CancellationToken ct = default)
     {
         var campaign = await campaigns.GetByIdAsync(campaignId, ct)
                        ?? throw new NotFoundException("That event no longer exists.");
@@ -769,6 +787,7 @@ public sealed class EventPhotoService(
                 .Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
                 .Where(p => wanted == null || wanted.Contains(p.Id))
                 .OrderBy(p => p.CreatedAt)
+                .Select(p => new { p.Id, p.BucketId, p.SizeBytes })
                 .ToListAsync(ct))
             .Where(p => view is null || view.MaySee(p.BucketId))
             .ToList();
@@ -776,8 +795,21 @@ public sealed class EventPhotoService(
         if (chosen.Count == 0)
             throw new BusinessRuleException("There are no photos to download.", "no_photos");
 
+        return new PhotoArchive(campaignId, ArchiveName(campaign.Title), chosen.Select(p => p.Id).ToList(), chosen.Sum(p => p.SizeBytes));
+    }
+
+    public async Task WriteArchiveAsync(PhotoArchive archive, Func<string, Stream> begin, CancellationToken ct = default)
+    {
+        var wanted = archive.PhotoIds.ToHashSet();
+        var chosen = await photos.Query()
+            .Where(p => p.CampaignId == archive.CampaignId && p.DeletedAt == null && wanted.Contains(p.Id))
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync(ct);
+        if (chosen.Count == 0)
+            throw new BusinessRuleException("There are no photos to download.", "no_photos");
+
         // Everything that can refuse this request has now refused it, so the response may commit.
-        var destination = begin(ArchiveName(campaign.Title));
+        var destination = begin(archive.Name);
 
         // ZipArchive never touches the response body directly. The body has buffering off, and Kestrel
         // refuses synchronous writes to it — and ZipArchive writes synchronously in places no async API
@@ -787,13 +819,17 @@ public sealed class EventPhotoService(
         // arrive as a truncated file.
         //
         // So the archive writes into a buffer, and the buffer is emptied into the body asynchronously
-        // after every entry. It still streams: what is held at once is one photograph, which the
-        // storage read below is holding anyway — never the archive.
+        // after every chunk. Each original is read from storage as a stream, a chunk at a time, so what
+        // is held at once is one chunk — never a whole video (up to 256 MB) and never the archive. An
+        // album of 1,550 files and 9.7 GB used to take the API to 4.3 GB of memory for one download.
+        // The steady flow of chunks also keeps bytes moving through Cloudflare, which drops a response
+        // that goes quiet for 100 seconds.
         //
         // leaveOpen: the buffer is ours to drain after the archive's final write.
         // NoCompression because every entry is already a JPEG — deflating it again spends CPU per
         // megabyte to save almost nothing, and this runs while somebody waits.
         var buffer = new DrainingStream(destination);
+        var chunk = new byte[ArchiveChunkBytes];
         using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
         {
             var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -805,14 +841,23 @@ public sealed class EventPhotoService(
                 var key = StorageKeyOf(photo.OriginalUrl) ?? StorageKeyOf(photo.Url);
                 if (key is null) continue;
 
-                var bytes = await storage.GetAsync(key, ct);
+                await using var source = await storage.OpenReadAsync(key, ct);
                 // One object that has gone from storage must not cost the guest the other ninety-nine.
-                if (bytes is null || bytes.Length == 0) continue;
+                if (source is null) continue;
+                var read = await source.ReadAsync(chunk, ct);
+                if (read == 0) continue;
 
                 var entry = zip.CreateEntry(EntryName(photo, index, key, used), CompressionLevel.NoCompression);
                 entry.LastWriteTime = photo.CreatedAt;
                 using (var into = entry.Open())
-                    into.Write(bytes);   // into the buffer; the descriptor lands there on dispose
+                {
+                    while (read > 0)
+                    {
+                        into.Write(chunk, 0, read);   // into the buffer
+                        await buffer.DrainAsync(ct);
+                        read = await source.ReadAsync(chunk, ct);
+                    }
+                }   // the descriptor lands in the buffer here
 
                 await buffer.DrainAsync(ct);
             }
@@ -821,6 +866,9 @@ public sealed class EventPhotoService(
         // The central directory, written when the archive closed.
         await buffer.DrainAsync(ct);
     }
+
+    /// <summary>How much of an original is read, zipped and sent at a time.</summary>
+    public const int ArchiveChunkBytes = 1 << 20;
 
     /// <summary>
     /// A write-only stream that holds what it is given until <see cref="DrainAsync"/> hands it on.

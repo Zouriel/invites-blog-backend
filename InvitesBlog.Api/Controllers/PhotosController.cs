@@ -2,6 +2,7 @@ using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Services.Invites;
 using InvitesBlog.Application.Services.Photos;
 using InvitesBlog.Domain.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -32,7 +33,7 @@ namespace InvitesBlog.Api.Controllers;
 /// controller attribute can lift.</para>
 /// </summary>
 [ApiController]
-public sealed class PhotosController(IEventPhotoService photos, IInviteService invites, IDirectUploadService directUploads) : BaseApiController
+public sealed class PhotosController(IEventPhotoService photos, IInviteService invites, IDirectUploadService directUploads, Photos.ArchiveTickets archives) : BaseApiController
 {
     // ---------- the host, from their dashboard ----------
 
@@ -72,6 +73,16 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     [HasPermission(Permissions.Photos.Read)]
     public Task DownloadAsHost(Guid campaignId, [FromQuery] Guid[]? ids, CancellationToken ct) =>
         WriteArchiveAsync(campaignId, viewerGuestId: null, ids, ct);
+
+    /// <summary>
+    /// A link the browser can save the zip from by itself (see <see cref="Photos.ArchiveTickets"/>).
+    /// The photos come in the body, so a selection of any size fits: in a query string 1,500 ids are
+    /// 60 KB, and servers refuse a request line past 8 KB.
+    /// </summary>
+    [HttpPost("/api/campaigns/{campaignId:guid}/photos/download-link")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> DownloadLinkAsHost(Guid campaignId, [FromBody] ArchiveLinkRequest? req, CancellationToken ct) =>
+        ArchiveLink(await photos.PlanArchiveAsync(campaignId, viewerGuestId: null, req?.Ids, ct));
 
     // ---------- a guest, from an invitation open in the app ----------
 
@@ -114,6 +125,30 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     public async Task DownloadAsGuest(Guid campaignId, [FromQuery] Guid[]? ids, CancellationToken ct) =>
         await WriteArchiveAsync(campaignId, await GuestAsync(campaignId, ct), ids, ct);
 
+    [HttpPost("/api/me/invitations/{campaignId:guid}/photos/download-link")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> DownloadLinkAsGuest(Guid campaignId, [FromBody] ArchiveLinkRequest? req, CancellationToken ct) =>
+        ArchiveLink(await photos.PlanArchiveAsync(campaignId, await GuestAsync(campaignId, ct), req?.Ids, ct));
+
+    /// <summary>
+    /// The zip a download link names. No session: the link was authorized when it was made, and is
+    /// worthless half an hour later.
+    /// </summary>
+    [HttpGet("/api/photos/archives/{ticket}")]
+    [AllowAnonymous]
+    public async Task DownloadByLink(string ticket, CancellationToken ct)
+    {
+        if (archives.Find(ticket) is not { } archive)
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            Response.ContentType = "text/plain; charset=utf-8";
+            await Response.WriteAsync("This download link has expired. Go back and press Download again.", ct);
+            return;
+        }
+        HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        await photos.WriteArchiveAsync(archive, name => ArchiveHeaders(name), ct);
+    }
+
     // ---------- shared ----------
 
     /// <summary>
@@ -141,14 +176,21 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         var buffering = HttpContext.Features.Get<IHttpResponseBodyFeature>();
         buffering?.DisableBuffering();
 
-        await photos.WriteArchiveAsync(campaignId, viewerGuestId, ids, name =>
-        {
-            // Runs once, after the service has authorized the caller and found something to send.
-            Response.ContentType = "application/zip";
-            Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
-            return Response.Body;
-        }, ct);
+        // Runs once, after the service has authorized the caller and found something to send.
+        await photos.WriteArchiveAsync(campaignId, viewerGuestId, ids, ArchiveHeaders, ct);
     }
+
+    private Stream ArchiveHeaders(string name)
+    {
+        Response.ContentType = "application/zip";
+        Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
+        // Never kept by a proxy or the browser's cache: it is one person's download.
+        Response.Headers.CacheControl = "no-store";
+        return Response.Body;
+    }
+
+    private IActionResult ArchiveLink(PhotoArchive archive) => Success(new ArchiveLinkDto(
+        $"/api/photos/archives/{archives.Issue(archive)}", archive.Name, archive.PhotoIds.Count, archive.Bytes));
 
     /// <summary>
     /// A phone's photo picker sends several at once, so the multi-file field is the normal case here
@@ -199,3 +241,9 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         return buffer.ToArray();
     }
 }
+
+/// <summary>Which photos to zip; none means every photo the caller can see.</summary>
+public sealed record ArchiveLinkRequest(Guid[]? Ids);
+
+/// <summary>A download link (a path on this API), what the file will be called, and what is in it.</summary>
+public sealed record ArchiveLinkDto(string Url, string Name, int Count, long Bytes);
