@@ -26,7 +26,10 @@ public sealed record EventPhotoDto(
     DateTimeOffset CreatedAt,
     /// <summary>The account that added it, when known: what Block and Report act on.</summary>
     Guid? UploaderUserId = null,
-    /// <summary>The original's size in bytes: what saving or sharing it will download.</summary>
+    /// <summary>
+    /// What the item counts against its album, in bytes: the original plus its viewing copies, so a little
+    /// more than saving or sharing it downloads. The app shows it as "about".
+    /// </summary>
     long SizeBytes = 0);
 
 /// <summary>An event's photo box as a guest or host sees it.</summary>
