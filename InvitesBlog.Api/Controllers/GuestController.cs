@@ -460,6 +460,45 @@ public sealed class GuestController(
     }
 
     /// <summary>
+    /// One photo or clip from the album, full screen, with Download, Share and (for the guest's own)
+    /// Remove. Same admission as the album itself; a photo that isn't in this guest's album is a 404.
+    /// </summary>
+    [HttpGet("/r/{renderId}/photos/{photoId:guid}")]
+    public async Task<IActionResult> ViewPhoto(string renderId, Guid photoId, CancellationToken ct)
+    {
+        var inviteId = Admitted(renderId);
+        if (inviteId is null) return Html(GuestPages.Expired(), StatusCodes.Status401Unauthorized);
+
+        var subject = await invites.InviteSubjectAsync(inviteId.Value, ct);
+        if (subject is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        var box = await photos.GetAsync(subject.Value.CampaignId, subject.Value.GuestId, ct);
+        var list = box.Photos.ToList();
+        var at = list.FindIndex(p => p.Id == photoId);
+        if (at < 0) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+        var photo = list[at];
+        var isVideo = photo.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+        var boxPath = $"/r/{renderId}/photos";
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+
+        var html = GuestPages.PhotoView(
+            boxPath, photo.Id, photo.Url, photo.OriginalUrl, isVideo, photo.UploaderName, photo.CanDelete,
+            at > 0 ? $"{boxPath}/{list[at - 1].Id}" : null,
+            at < list.Count - 1 ? $"{boxPath}/{list[at + 1].Id}" : null,
+            GuestPages.DownloadName(photo.Id, photo.OriginalUrl, isVideo),
+            await PaletteAsync(inviteId.Value, ct),
+            nonce);
+
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Content-Security-Policy"] =
+            $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+            + "img-src 'self'; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; "
+            + "frame-ancestors 'none'";
+        return Content(html, "text/html; charset=utf-8");
+    }
+
+    /// <summary>
     /// Asks first. The remove control sits on the corner of the photograph it deletes, which is where
     /// a thumb lands to open one — so this is the step between a mis-tap and a lost picture. A page
     /// rather than a dialog because the gallery is served with no script to raise one.
@@ -814,7 +853,7 @@ public sealed class GuestController(
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         Response.Headers["Content-Security-Policy"] =
             $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-            + $"img-src 'self'; connect-src 'self' {directUploads.UploadOrigin}; form-action 'self'; base-uri 'none'; "
+            + $"img-src 'self' data:; connect-src 'self' {directUploads.UploadOrigin}; form-action 'self'; base-uri 'none'; "
             + "frame-ancestors 'none'";
         return Content(html, "text/html; charset=utf-8");
     }

@@ -96,12 +96,37 @@ public static class GuestPages
         .who { position:absolute; left:0; right:0; bottom:0; padding:14px 6px 4px; font-size:.7rem;
                color:#fff; background:linear-gradient(transparent, rgba(0,0,0,.6));
                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .rm { position:absolute; top:4px; right:4px; }
-        .dl { position:absolute; top:4px; left:4px; width:22px; height:22px; display:grid;
-              place-items:center; font-size:.8rem; text-decoration:none; color:#fff;
-              background:rgba(0,0,0,.55); border-radius:999px; }
-        .rm { display:inline-block; padding:2px 7px; font-size:.75rem; line-height:1.5;
-              color:#fff; background:rgba(0,0,0,.55); border-radius:999px; text-decoration:none; }
+        /* No controls on a tile: a tap opens the photo (Download and Remove are there), a long press
+           or Select starts choosing several. Nothing to long-press-save or drag in the way. */
+        .tile, .tile * { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+        .tile .open { display:block; width:100%; height:100%; }
+        .tile img { transition:transform .18s ease; }
+        .grid.choosing .tile::before { content:""; position:absolute; top:6px; left:6px; z-index:1; width:22px; height:22px;
+            box-sizing:border-box; border-radius:999px; border:2px solid #fff; background:rgba(0,0,0,.35);
+            box-shadow:0 0 3px rgba(0,0,0,.4); pointer-events:none; }
+        .grid.choosing .tile.on::before { background:var(--accent) no-repeat center; border-color:var(--accent);
+            background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-size:14px 14px; }
+        .tile.on { outline:3px solid var(--accent); outline-offset:-3px; }
+        .tile.on img { transform:scale(.9); }
+        @media (prefers-reduced-motion: reduce) { .tile img { transition:none; } }
+        .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 1.4rem; }
+        .head .sub { margin:0; }
+        .pick { width:auto; margin:0; padding:.45rem .9rem; font-size:.85rem; font-weight:600; border-radius:999px;
+                cursor:pointer; color:var(--ink); background:transparent; border:1px solid var(--line); }
+        .pick[hidden] { display:none; }
+        /* The bar while choosing, in place of the upload bar. */
+        .sel { position:fixed; left:0; right:0; bottom:0; z-index:5; display:flex; align-items:center; gap:6px;
+               padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); }
+        .sel[hidden] { display:none; }
+        .sel__n { flex:1 1 0; min-width:0; font-weight:600; font-size:.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .sel button { flex:none; width:auto; margin:0; min-height:44px; padding:0 .8rem; font-size:.9rem; font-weight:600;
+                      border-radius:10px; cursor:pointer; color:var(--ink); background:transparent; border:1px solid var(--line); }
+        .sel button[hidden] { display:none; }
+        .sel button:disabled { opacity:.5; }
+        .sel .sel__x { border:0; min-width:44px; padding:0; font-size:1rem; }
+        .sel .sel__danger { color:var(--bad); border-color:var(--bad); }
+        body.choosing .bar { display:none; }
         .empty { padding:44px 20px; text-align:center; color:var(--muted);
                  border:1px dashed var(--line); border-radius:14px; }
         /* Fixed, because the point of this page is the button and the grid can be a thousand tiles. */
@@ -320,14 +345,9 @@ public static class GuestPages
             : $"""
                <div class="grid">
                  {string.Concat(photos.Select(p => $"""
-                   <div class="tile"{(p.IsVideo ? " data-kind=\"video\"" : "")}>
-                     <a href="{E(p.Url)}"><img src="{E(p.ThumbUrl)}" alt="" loading="lazy"></a>
-                     <a class="dl" href="{E(p.OriginalUrl)}" download title="Save the original">&#8615;</a>
+                   <div class="tile"{(p.IsVideo ? " data-kind=\"video\"" : "")} data-id="{p.Id}" data-original="{E(p.OriginalUrl)}"{(p.CanDelete ? " data-mine=\"1\"" : "")}>
+                     <a class="open" href="{E(action)}/{p.Id}"><img src="{E(p.ThumbUrl)}" alt="" loading="lazy" draggable="false"></a>
                      {(p.Who is null ? "" : $"<span class=\"who\">{E(p.Who)}</span>")}
-                     {(p.CanDelete ? $"""
-                       <a class="rm" href="{E(action)}/{p.Id}/remove"
-                          title="Remove this photo">Remove</a>
-                       """ : "")}
                    </div>
                    """))}
                </div>
@@ -355,7 +375,10 @@ public static class GuestPages
             <div class="wrap">
               {GuestCreditHtml.AlbumHeader(credit)}
               <h1>{E(eventTitle)}</h1>
-              <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the event</p>
+              <div class="head">
+                <p class="sub">{(photos.Count == 1 ? "1 photo" : $"{photos.Count} photos")} from the event</p>
+                {(photos.Count > 0 && nonce is not null ? "<button type=\"button\" class=\"pick\" id=\"pick\" hidden>Select</button>" : "")}
+              </div>
               {(error is null ? "" : $"<p class=\"err\">{E(error)}</p>")}
               {tiles}
               <a class="back" href="{E(backTo)}">Back to the invitation</a>
@@ -363,10 +386,32 @@ public static class GuestPages
             </div>
             {bar}
             {(nonce is null ? "" : $"""
+              <div class="sel" id="sel" role="region" aria-label="Selected photos" hidden>
+                <button type="button" class="sel__x" id="sel-cancel" aria-label="Stop selecting">&#10005;</button>
+                <span class="sel__n" id="sel-count" aria-live="polite">0 selected</span>
+                <button type="button" class="sel__b" id="sel-all">Select all</button>
+                <button type="button" class="sel__b" id="sel-share" hidden>Share</button>
+                <button type="button" class="sel__b sel__danger" id="sel-remove" hidden>Remove</button>
+              </div>
+              <div class="ask" id="busy" hidden>
+                <div class="ask__card" role="status">
+                  <h2 id="busy-title">Getting your photos ready</h2>
+                  <p id="busy-count">0 of 0</p>
+                  <button type="button" class="ghost" id="busy-cancel">Cancel</button>
+                </div>
+              </div>
+              <div class="ask" id="ready" hidden>
+                <div class="ask__card">
+                  <h2 id="ready-title">Ready to share</h2>
+                  <p id="ready-text">Tap Share to choose where they go.</p>
+                  <button type="button" id="ready-yes">Share</button>
+                  <button type="button" class="ghost" id="ready-no">Not now</button>
+                </div>
+              </div>
               <div class="ask" id="confirm" hidden>
                 <div class="ask__card">
-                  <h2>Remove this photo?</h2>
-                  <p>It disappears from everyone's photo box. This cannot be undone.</p>
+                  <h2 id="confirm-title">Remove this photo?</h2>
+                  <p id="confirm-text">It disappears from everyone's photo box. This cannot be undone.</p>
                   <button type="button" id="confirm-yes">Remove it</button>
                   <button type="button" class="ghost" id="confirm-no">Keep it</button>
                 </div>
@@ -387,6 +432,103 @@ public static class GuestPages
             <meta name="robots" content="noindex, nofollow">
             <title>Photos from {E(eventTitle)}</title>
             <style>{BoxCss(palette ?? GuestPalette.Fallback)}</style>
+            </head><body>{body}</body></html>
+            """;
+    }
+
+    /// <summary>
+    /// What a downloaded or shared file is called, the same names the app and the website use:
+    /// <c>invitesblog-</c> and the first 8 characters of the id, with the stored file's extension.
+    /// </summary>
+    public static string DownloadName(Guid id, string originalUrl, bool isVideo)
+    {
+        var path = Uri.TryCreate(originalUrl, UriKind.Absolute, out var abs) ? abs.AbsolutePath : originalUrl.Split('?')[0];
+        var dot = path.LastIndexOf('.');
+        var ext = dot < 0 ? "" : path[dot..].ToLowerInvariant();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(ext, "^\\.[a-z0-9]{2,5}$")) ext = isVideo ? ".mp4" : ".jpg";
+        return $"invitesblog-{id.ToString("N")[..8]}{ext}";
+    }
+
+    /// <summary>The viewer page's styles, over the album's.</summary>
+    private const string ViewCss = """
+        body { background:#000; color:#fff; }
+        .view { min-height:100vh; min-height:100svh; display:flex; flex-direction:column; }
+        .view__bar, .view__nav { display:flex; align-items:center; gap:8px; padding:10px 12px; flex-wrap:wrap; }
+        .view__bar { padding-top:calc(10px + env(safe-area-inset-top)); }
+        .view__nav { justify-content:space-between; padding-bottom:calc(10px + env(safe-area-inset-bottom)); }
+        .view__sp { flex:1; }
+        .view__btn { display:inline-flex; align-items:center; min-height:44px; padding:0 .9rem; border-radius:10px;
+        font:600 .9rem/1 ui-sans-serif, system-ui, sans-serif; color:#fff; text-decoration:none;
+        background:rgba(255,255,255,.12); border:0; cursor:pointer; width:auto; margin:0; }
+        .view__btn[hidden] { display:none; }
+        .view__danger { color:#ffb4b4; }
+        .view__stage { flex:1; min-height:0; display:grid; place-items:center; padding:0 8px; }
+        .media { max-width:100%; max-height:calc(100svh - 140px); object-fit:contain; display:block; }
+        .view__who { font-size:.8rem; opacity:.75; }
+        """;
+
+    /// <summary>
+    /// One photo or clip, full screen: the guest album's viewer. A tap on a tile lands here (it used to
+    /// open the bare file). Download, Share (with script) and Remove (for the guest's own, through the
+    /// confirmation page) live here and in the album's selection bar, never on a tile.
+    /// </summary>
+    public static string PhotoView(
+        string boxPath, Guid id, string url, string originalUrl, bool isVideo, string? who, bool canDelete,
+        string? prevPath, string? nextPath, string downloadName, GuestPalette? palette = null, string? nonce = null)
+    {
+        var media = isVideo
+            ? $"<video class=\"media\" src=\"{E(url)}\" controls playsinline preload=\"metadata\"></video>"
+            : $"<img class=\"media\" src=\"{E(url)}\" alt=\"{(who is null ? "Event photo" : "Photo by " + E(who))}\">";
+        var noun = isVideo ? "video" : "photo";
+        var body = $"""
+            <div class="view" data-id="{id}" data-original="{E(originalUrl)}">
+              <div class="view__bar">
+                <a class="view__btn" href="{E(boxPath)}">&#8592; Album</a>
+                <span class="view__sp"></span>
+                <a class="view__btn" href="{E(originalUrl)}" download="{E(downloadName)}">Download</a>
+                {(nonce is null ? "" : "<button type=\"button\" class=\"view__btn\" id=\"view-share\" hidden>Share</button>")}
+                {(canDelete ? $"<a class=\"view__btn view__danger\" href=\"{E(boxPath)}/{id}/remove\">Remove</a>" : "")}
+              </div>
+              <div class="view__stage">{media}</div>
+              <div class="view__nav">
+                {(prevPath is null ? "<span></span>" : $"<a class=\"view__btn\" href=\"{E(prevPath)}\" rel=\"prev\">&#8249; Previous</a>")}
+                {(who is null ? "<span></span>" : $"<span class=\"view__who\">From {E(who)}</span>")}
+                {(nextPath is null ? "<span></span>" : $"<a class=\"view__btn\" href=\"{E(nextPath)}\" rel=\"next\">Next &#8250;</a>")}
+              </div>
+            </div>
+            {(nonce is null ? "" : $"""
+              <div class="ask" id="busy" hidden>
+                <div class="ask__card" role="status">
+                  <h2 id="busy-title">Getting it ready</h2>
+                  <p id="busy-count">0 of 1</p>
+                  <button type="button" class="ghost" id="busy-cancel">Cancel</button>
+                </div>
+              </div>
+              <div class="ask" id="ready" hidden>
+                <div class="ask__card">
+                  <h2 id="ready-title">Ready to share</h2>
+                  <p id="ready-text">Tap Share to choose where it goes.</p>
+                  <button type="button" id="ready-yes">Share</button>
+                  <button type="button" class="ghost" id="ready-no">Not now</button>
+                </div>
+              </div>
+              <script nonce="{nonce}">
+              window.__ibGallery = true;
+              {Enhancement}
+              </script>
+              """)}
+            """;
+
+        return $"""
+            <!doctype html>
+            <html lang="en"><head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="robots" content="noindex, nofollow">
+            <title>A {noun} from the event</title>
+            <style>{BoxCss(palette ?? GuestPalette.Fallback)}
+            {ViewCss}
+            </style>
             </head><body>{body}</body></html>
             """;
     }

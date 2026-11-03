@@ -41,67 +41,90 @@ public class GuestPagesPhotoBarTests
         Assert.Contains("multiple", html);
     }
 
+    private static readonly Guid Mine = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid Theirs = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+    private static string Album(string? nonce = null) => GuestPages.Photos(
+        "/r/abc/photos", "/r/abc", "Raniya's birthday",
+        new List<(Guid, string, string, string, string?, bool, bool)>
+        {
+            (Mine, "t", "u", "/assets/buckets/o.jpg", "Ali", true, false),
+            (Theirs, "t2", "u2", "/assets/buckets/o2.mp4", "Hawwa", false, true),
+        },
+        true, null, "/r/abc/camera", GuestPalette.Fallback, nonce);
+
     /// <summary>
-    /// The remove control overlaps the corner of the photograph it deletes, which is exactly where a
-    /// thumb lands to open one. It must lead to a question, not straight to a POST.
+    /// The owner's rule: nothing on a tile deletes. A tap opens the photo's own page; removing is in
+    /// the selection bar and in that viewer.
     /// </summary>
     [Fact]
-    public void Removing_a_photo_asks_first()
+    public void No_tile_has_a_remove_control_and_a_tap_opens_the_photo()
     {
-        var photos = new List<(Guid, string, string, string, string?, bool, bool)>
+        foreach (var html in new[] { Album(), Album("n0nc3") })
         {
-            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true, false),
-        };
-        var html = GuestPages.Photos(
-            "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
-            GuestPalette.Fallback);
+            var grid = html[html.IndexOf("<div class=\"grid\">", StringComparison.Ordinal)..html.IndexOf("class=\"back\"", StringComparison.Ordinal)];
+            Assert.DoesNotContain("/remove", grid);
+            Assert.DoesNotContain("/delete", grid);
+            Assert.DoesNotContain("Remove", grid);
+            Assert.Contains($"href=\"/r/abc/photos/{Mine}\"", grid);
+            Assert.Contains($"href=\"/r/abc/photos/{Theirs}\"", grid);
+        }
+    }
 
-        Assert.Contains("/r/abc/photos/11111111-1111-1111-1111-111111111111/remove", html);
-        // The one-tap POST is gone from the grid; it now lives behind the confirmation.
-        Assert.DoesNotContain("/delete\"", html);
+    /// <summary>What the script needs to choose several: ids, originals and which are the guest's own.</summary>
+    [Fact]
+    public void Tiles_carry_what_choosing_needs_and_the_bar_is_in_the_page()
+    {
+        var html = Album("n0nc3");
+        Assert.Contains($"data-id=\"{Mine}\" data-original=\"/assets/buckets/o.jpg\" data-mine=\"1\"", html);
+        Assert.Contains($"data-id=\"{Theirs}\" data-original=\"/assets/buckets/o2.mp4\">", html);
+        Assert.Contains("id=\"pick\"", html);
+        Assert.Contains("id=\"sel-remove\"", html);
+        Assert.Contains("id=\"sel-share\"", html);
+        Assert.Contains("id=\"ready-yes\"", html);
+        // Markers from gallery.js itself, so an unembedded resource fails here rather than silently.
+        Assert.Contains("__ibGallery", html);
+        Assert.Contains("application/json", html);
+        Assert.Contains("navigator.share", html);
+        Assert.Contains("userActivation", html);
+    }
 
+    /// <summary>The viewer has Download (a saved file, not a new tab) and, for the guest's own, Remove.</summary>
+    [Fact]
+    public void The_viewer_offers_download_and_removes_only_the_guests_own_through_the_confirmation()
+    {
+        var own = GuestPages.PhotoView("/r/abc/photos", Mine, "u", "/assets/buckets/o.jpg", false, "Ali", true,
+            null, "/r/abc/photos/next", "invitesblog-11111111.jpg", GuestPalette.Fallback);
+        Assert.Contains("href=\"/assets/buckets/o.jpg\" download=\"invitesblog-11111111.jpg\"", own);
+        Assert.DoesNotContain("target=", own);
+        Assert.Contains($"href=\"/r/abc/photos/{Mine}/remove\"", own);
+        Assert.Contains("href=\"/r/abc/photos/next\"", own);
+        // No nonce, no script: Download and Remove still work as links.
+        Assert.DoesNotContain("<script", own);
+
+        var theirs = GuestPages.PhotoView("/r/abc/photos", Theirs, "u2", "/assets/buckets/o2.mp4", true, "Hawwa", false,
+            "/r/abc/photos/prev", null, "invitesblog-22222222.mp4", GuestPalette.Fallback, "n0nc3");
+        Assert.DoesNotContain("/remove", theirs);
+        Assert.Contains("<video", theirs);
+        Assert.Contains("id=\"view-share\"", theirs);
+        Assert.Contains("<script nonce=\"n0nc3\">", theirs);
+    }
+
+    [Fact]
+    public void Removing_from_the_viewer_still_asks_first()
+    {
         var confirm = GuestPages.ConfirmRemove("/r/abc/photos/1/delete", "/r/abc/photos");
         Assert.Contains("This cannot be undone", confirm);
         Assert.Contains("action=\"/r/abc/photos/1/delete\"", confirm);
         Assert.Contains("Keep it", confirm);
     }
 
-    /// <summary>
-    /// Confirming used to cost a page load before the question appeared, and the POST behind it
-    /// re-rendered every tile — about a second per photo on venue wifi, with the wait landing before
-    /// any sign the tap had registered. The question is asked in the page now.
-    /// </summary>
-    [Fact]
-    public void The_delete_confirmation_is_asked_in_the_page_when_script_can_run()
-    {
-        var html = Box(nonce: "n0nc3");
-
-        Assert.Contains("id=\"confirm\"", html);
-        Assert.Contains("<script nonce=\"n0nc3\">", html);
-        Assert.Contains("This cannot be undone", html);
-        // A marker from gallery.js itself, so an unembedded resource fails here rather than silently.
-        Assert.Contains("__ibGallery", html);
-        Assert.Contains("application/json", html);
-    }
-
-    /// <summary>
-    /// The enhancement is exactly that. Without a nonce the page ships no script, and Remove is
-    /// still a link to a confirmation page that works on its own.
-    /// </summary>
-    [Fact]
-    public void Without_script_the_remove_link_still_leads_to_a_confirmation()
-    {
-        var photos = new List<(Guid, string, string, string, string?, bool, bool)>
-        {
-            (Guid.Parse("11111111-1111-1111-1111-111111111111"), "t", "u", "o", "Ali", true, false),
-        };
-        var html = GuestPages.Photos(
-            "/r/abc/photos", "/r/abc", "Raniya's birthday", photos, true, null, "/r/abc/camera",
-            GuestPalette.Fallback);
-
-        Assert.DoesNotContain("<script", html);
-        Assert.Contains("/r/abc/photos/11111111-1111-1111-1111-111111111111/remove", html);
-    }
+    [Theory]
+    [InlineData("/assets/buckets/x/abc.PNG", false, "invitesblog-11111111.png")]
+    [InlineData("/assets/buckets/x/abc", true, "invitesblog-11111111.mp4")]
+    [InlineData("https://invites.blog/assets/b/c.jpeg?v=2", false, "invitesblog-11111111.jpeg")]
+    public void Download_names_match_the_app_and_website(string url, bool video, string expected) =>
+        Assert.Equal(expected, GuestPages.DownloadName(Mine, url, video));
 
     /// <summary>A cancelled event's box is a read-only archive — neither door opens.</summary>
     [Fact]
@@ -131,8 +154,8 @@ public class GuestPagesPhotoBarTests
             GuestPalette.Fallback);
 
         // The tile itself, not the CSS rule that styles it — both carry the same attribute text.
-        Assert.Equal(1, Regex.Matches(html, "<div class=\"tile\" data-kind=\"video\">").Count);
-        Assert.Contains("<div class=\"tile\">", html);
+        Assert.Equal(1, Regex.Matches(html, "<div class=\"tile\" data-kind=\"video\" data-id=").Count);
+        Assert.Equal(1, Regex.Matches(html, "<div class=\"tile\" data-id=").Count);
         Assert.Contains(".tile[data-kind=\"video\"]::after", html);
     }
 }
