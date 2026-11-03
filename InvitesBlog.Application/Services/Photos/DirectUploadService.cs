@@ -214,7 +214,7 @@ public sealed class DirectUploadService(
                 },
                 r.Error,
                 p is null ? null : new EventPhotoDto(
-                    p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName, true, p.CreatedAt));
+                    p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName, true, p.CreatedAt, SizeBytes: p.SizeBytes));
         }).ToList();
     }
 

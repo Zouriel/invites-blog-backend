@@ -33,6 +33,12 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
         // The three real ones among 1,500 ids, like an app naming a whole album.
         var ids = stored.Select(s => s.Id).Concat(Enumerable.Range(0, 1497).Select(_ => Guid.NewGuid())).ToArray();
 
+        // The album says how big each original is, so the app can say what saving it all will take.
+        var listed = (await JsonDocument.ParseAsync(await (await api.Client(host.Token).GetAsync($"/api/campaigns/{ev}/photos")).Content.ReadAsStreamAsync()))
+            .RootElement.GetProperty("data").GetProperty("photos").EnumerateArray()
+            .ToDictionary(p => p.GetProperty("id").GetGuid(), p => p.GetProperty("sizeBytes").GetInt64());
+        Assert.All(stored, s => Assert.Equal(s.Bytes.Length, listed[s.Id]));
+
         // (The same ids in a query string are 60 KB; Kestrel answers 414 past 8 KB. The test server
         // here doesn't apply that limit, so it was shown on a real Kestrel instead.)
 

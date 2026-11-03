@@ -242,7 +242,8 @@ public sealed class EventPhotoService(
                 p.Id, p.Url, p.ThumbUrl, p.OriginalUrl, p.ContentType, p.Width, p.Height, p.UploaderName,
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
                 p.CreatedAt,
-                owners.GetValueOrDefault(p.Id))).ToList(),
+                owners.GetValueOrDefault(p.Id),
+                p.SizeBytes)).ToList(),
             closed,
             venue?.Name,
             venue?.LogoUrl,
@@ -344,7 +345,7 @@ public sealed class EventPhotoService(
 
         return new EventPhotoDto(
             photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,
-            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt);
+            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt, SizeBytes: photo.SizeBytes);
     }
 
     /// <summary>Added to the caller's save, so a video can't be stored with its trim forgotten.</summary>
@@ -414,7 +415,8 @@ public sealed class EventPhotoService(
                 // curate, and the moderation right belongs to whoever the occasion belonged to.
                 mine,
                 p.CreatedAt,
-                owners.GetValueOrDefault(p.Id))).ToList(),
+                owners.GetValueOrDefault(p.Id),
+                p.SizeBytes)).ToList(),
             // Same sentence the writer would have given, and in the order that matters: "this closed
             // a week ago" is more useful than "this is full" when both are true.
             !bucket.IsOpen
@@ -648,7 +650,7 @@ public sealed class EventPhotoService(
 
         return new EventPhotoDto(
             photo.Id, photo.Url, photo.ThumbUrl, photo.OriginalUrl, photo.ContentType,
-            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt);
+            photo.Width, photo.Height, photo.UploaderName, true, photo.CreatedAt, SizeBytes: photo.SizeBytes);
     }
 
     public async Task DeleteAsync(
