@@ -133,14 +133,32 @@ public sealed class Campaign
     /// <summary>The venue this event is held at, when a venue runs its photo albums. See <see cref="Venue"/>.</summary>
     public Guid? VenueId { get; set; }
 
-    /// <summary>How far the "your photos are ending" emails have got: 0 none, 1 ended, 2 reminder, 3 final notice.</summary>
+    /// <summary>
+    /// How far the "your event goes back to Free" warnings have got after a pass (or Premium) ended:
+    /// 0 none, 1 the 30-day notice, 2 a week before, 3 a day before, 4 cut down to Free.
+    /// </summary>
     public int MediaNoticeStage { get; set; }
 
     /// <summary>The cover end those emails count from. A renewal moves it, which starts them over.</summary>
     public DateTimeOffset? MediaNoticeAnchor { get; set; }
 
-    /// <summary>When the event's photos were removed after its cover ran out.</summary>
+    /// <summary>When the event's photos were removed: only when it was cancelled (or, before 2026-11-03, after its cover ran out).</summary>
     public DateTimeOffset? MediaDeletedAt { get; set; }
+
+    /// <summary>
+    /// When anything above Free's space will be removed, once a pass (or Premium) has ended. Set by the
+    /// first warning, never sooner than 30 days after it; cleared when the cover moves again.
+    /// </summary>
+    public DateTimeOffset? MediaTrimAt { get; set; }
+
+    /// <summary>How many bytes that cut would remove, as of the last sweep (or the organiser's last pick).</summary>
+    public long? MediaTrimBytes { get; set; }
+
+    /// <summary>
+    /// When the event was cut down to Free's space. From then on it is a free event, kept for good,
+    /// until a new pass or "Keep your photos" covers it again.
+    /// </summary>
+    public DateTimeOffset? MediaTrimmedAt { get; set; }
     public bool IsSensitive { get; set; }                     // §4.9.1 OTP-before-view
     public int RetentionDays { get; set; } = 90;              // §15.4
 

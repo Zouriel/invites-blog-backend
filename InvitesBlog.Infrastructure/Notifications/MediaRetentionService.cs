@@ -14,14 +14,24 @@ using InvitesBlog.Application.Common;
 namespace InvitesBlog.Infrastructure.Notifications;
 
 /// <summary>
-/// What happens to an event's photos after its plan runs out.
+/// What happens to an event's photos after its pass (or its organiser's Premium) runs out.
 ///
-/// <para>Day 0: uploads stop and the organiser is emailed. Day 23: a reminder. Day 30: only the
-/// organiser can look (enforced where photos are read, from <see cref="MediaPhase"/>). Day 83: a
-/// final notice. Day 90: the photos are removed. Renewing at any point moves the cover end, which
-/// starts the emails over.</para>
+/// <para>Owner, 2026-11-03: free albums are kept forever, and "passes if not paid will be reduced to
+/// unsubed size and everything above it gets removed", "with appropriate warnings in times for them
+/// to backup". So a free event (never on a pass or Premium) is never touched. When a cover ends the
+/// event goes back to Free: uploads stop, everyone can still look, and if it holds more than Free's
+/// space the organiser is warned by email and push: at once (the 30-day notice, which sets the date
+/// of the cut at least <see cref="PlanCatalog.TrimNoticeDays"/> days away), a week before and a day
+/// before. On the day, what doesn't fit in Free's space is removed (<see cref="MediaTrim"/>) and the
+/// event is a free event from then on, kept for good. Nothing is removed unless the 30-day notice and
+/// at least one more have gone out. Extending, "Keep your photos" or Premium again moves the cover
+/// end, which calls the cut off.</para>
 ///
-/// <para>Runs inside the API host: there is no separate worker in production.</para>
+/// <para>A cancelled event's photos go at once; so do the albums of an event that was deleted.</para>
+///
+/// <para>Runs inside the API host: there is no separate worker in production. With
+/// <c>Notifications:MediaRetention:DryRun</c> it only logs what it would do, writing and sending
+/// nothing.</para>
 /// </summary>
 public sealed class MediaRetentionService(
     IServiceProvider services,
@@ -31,6 +41,7 @@ public sealed class MediaRetentionService(
     private static readonly TimeSpan SweepEvery = TimeSpan.FromHours(6);
 
     private bool Enabled => config.GetValue("Notifications:MediaRetention:Enabled", true);
+    private bool DryRun => config.GetValue("Notifications:MediaRetention:DryRun", false);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -50,18 +61,25 @@ public sealed class MediaRetentionService(
         }
     }
 
-    /// <summary>"Keep your photos" as the price book says at the start of each sweep, for the notices.</summary>
-    private decimal _keepPrice = PlanCatalog.KeepPhotosYearly;
+    /// <summary>What one sweep did (or, dry, would have done).</summary>
+    public sealed record SweepReport(int Events, int Warned, int Trimmed, int FilesRemoved, long BytesRemoved);
 
-    public async Task RunOnceAsync(CancellationToken ct)
+    private int _warned, _trimmed, _files;
+    private long _bytes;
+
+    public Task<SweepReport> RunOnceAsync(CancellationToken ct) => RunOnceAsync(DateTimeOffset.UtcNow, ct);
+
+    public async Task<SweepReport> RunOnceAsync(DateTimeOffset now, CancellationToken ct)
     {
+        _warned = _trimmed = _files = 0;
+        _bytes = 0;
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var plans = scope.ServiceProvider.GetRequiredService<IPlanService>();
-        _keepPrice = (await scope.ServiceProvider.GetRequiredService<IPriceBook>().CurrentAsync(ct)).KeepPhotosYearly;
         var email = scope.ServiceProvider.GetRequiredService<IEmailSender>();
+        var push = scope.ServiceProvider.GetService<IPushSender>();
+        var offers = scope.ServiceProvider.GetService<IPassOfferService>();
         _storage = scope.ServiceProvider.GetRequiredService<IStorageService>();
-        var now = DateTimeOffset.UtcNow;
 
         // Only events that still hold something.
         var withBuckets = await db.MediaBuckets.Where(b => b.UsedBytes > 0).Select(b => b.CampaignId).Distinct().ToListAsync(ct);
@@ -82,7 +100,7 @@ public sealed class MediaRetentionService(
         {
             try
             {
-                await SweepEventAsync(db, plans, email, id, now, ct);
+                await SweepEventAsync(db, plans, email, push, offers, id, now, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -90,15 +108,23 @@ public sealed class MediaRetentionService(
                 logger.LogError(ex, "Media retention failed for event {CampaignId}.", id);
             }
         }
+
+        var report = new SweepReport(ids.Count, _warned, _trimmed, _files, _bytes);
+        logger.LogInformation(
+            "Media retention sweep{Dry}: {Events} events with photos, {Warned} warned, {Trimmed} cut down to Free, {Files} files and {Bytes} bytes removed.",
+            DryRun ? " (dry run, nothing changed)" : "", report.Events, report.Warned, report.Trimmed, report.FilesRemoved, report.BytesRemoved);
+        return report;
     }
 
     private async Task SweepEventAsync(
-        AppDbContext db, IPlanService plans, IEmailSender email, Guid campaignId, DateTimeOffset now, CancellationToken ct)
+        AppDbContext db, IPlanService plans, IEmailSender email, IPushSender? push, IPassOfferService? offers,
+        Guid campaignId, DateTimeOffset now, CancellationToken ct)
     {
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, ct);
         if (campaign is null)
         {
             // The event is gone, so nothing may show these photos again: they go, with their albums.
+            if (DryRun) { logger.LogInformation("Dry run: would remove the albums of deleted event {CampaignId}.", campaignId); return; }
             await RemoveMediaAsync(db, campaignId, now, ct);
             await RemoveBucketsAsync(db, campaignId, ct);
             await db.SaveChangesAsync(ct);
@@ -108,6 +134,7 @@ public sealed class MediaRetentionService(
 
         if (campaign.Status == CampaignStatus.Cancelled)
         {
+            if (DryRun) { logger.LogInformation("Dry run: would remove the photos of cancelled event {CampaignId}.", campaignId); return; }
             await RemoveMediaAsync(db, campaignId, now, ct);
             await RemoveBucketsAsync(db, campaignId, ct);
             campaign.MediaDeletedAt ??= now;
@@ -120,49 +147,175 @@ public sealed class MediaRetentionService(
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         if (plan.CoveredUntil is not { } end || now < end)
         {
-            if (campaign.MediaNoticeStage != 0)
+            // Covered, or a free event kept for good: nothing pending.
+            if (campaign.MediaNoticeStage is not (0 or 4) || campaign.MediaTrimAt is not null || campaign.MediaTrimBytes is not null)
             {
-                campaign.MediaNoticeStage = 0;
+                campaign.MediaNoticeStage = campaign.MediaTrimmedAt is not null && plan.CoveredUntil is null ? 4 : 0;
                 campaign.MediaNoticeAnchor = null;
-                await db.SaveChangesAsync(ct);
+                campaign.MediaTrimAt = null;
+                campaign.MediaTrimBytes = null;
+                if (!DryRun) await db.SaveChangesAsync(ct);
             }
             return;
         }
 
         if (campaign.MediaNoticeAnchor != end)
         {
+            // A new end (a first lapse, or one after a renewal ran out): its warnings start over.
             campaign.MediaNoticeAnchor = end;
             campaign.MediaNoticeStage = 0;
+            campaign.MediaTrimAt = null;
         }
 
-        var days = (now - end).TotalDays;
-        if (days >= PlanCatalog.DeleteDay)
+        var cut = await PlanCutAsync(db, campaign, ct);
+        campaign.MediaTrimBytes = cut.RemoveBytes;
+
+        if (cut.Remove.Count == 0)
         {
-            await RemoveMediaAsync(db, campaignId, now, ct);
-            campaign.MediaDeletedAt = now;
+            // Everything fits in Free's space: it simply becomes a free event, kept for good.
+            campaign.MediaTrimmedAt = now;
             campaign.MediaNoticeStage = 4;
-            await db.SaveChangesAsync(ct);
-            logger.LogInformation("Removed the photos of event {CampaignId}; its plan ended {End}.", campaignId, end);
+            campaign.MediaTrimAt = null;
+            campaign.MediaTrimBytes = 0;
+            if (!DryRun) await db.SaveChangesAsync(ct);
+            logger.LogInformation("Event {CampaignId} went back to Free with nothing to remove{Dry}.", campaignId, DryRun ? " (dry run)" : "");
             return;
         }
 
-        // Only the latest notice that is due, so a sweep that runs late doesn't send three at once.
-        var due = days >= PlanCatalog.FinalNoticeDay ? 3 : days >= PlanCatalog.ReminderDay ? 2 : 1;
-        if (campaign.MediaNoticeStage >= due)
+        var trimAt = campaign.MediaTrimAt;
+        if (campaign.MediaNoticeStage >= 2 && trimAt is { } due && now >= due)
         {
-            await db.SaveChangesAsync(ct);
+            await TrimAsync(db, campaign, cut, now, ct);
+            return;
+        }
+
+        // The warning that is due now. Only the latest, so a late sweep doesn't send several at once.
+        int stage;
+        if (campaign.MediaNoticeStage == 0 || trimAt is null)
+        {
+            stage = 1;
+            // At least the full notice from today, whenever the cover actually ended: an event already
+            // past its end when this shipped gets its 30 days from now.
+            trimAt = now.AddDays(PlanCatalog.TrimNoticeDays);
+        }
+        else
+        {
+            var daysLeft = (trimAt.Value - now).TotalDays;
+            stage = daysLeft <= PlanCatalog.TrimFinalDaysBefore ? 3
+                : daysLeft <= PlanCatalog.TrimReminderDaysBefore ? 2
+                : 1;
+            // The second warning is what allows the cut. If it is going out late, it still promises a
+            // real date: never sooner than a day away.
+            if (stage >= 2 && campaign.MediaNoticeStage < 2)
+            {
+                stage = 2;
+                var earliest = now.AddDays(PlanCatalog.TrimFinalDaysBefore);
+                if (trimAt < earliest) trimAt = earliest;
+            }
+        }
+
+        if (campaign.MediaNoticeStage >= stage)
+        {
+            if (!DryRun) await db.SaveChangesAsync(ct);
             return;
         }
 
         var recipients = await RecipientsAsync(db, campaign, plan, ct);
-        var (subject, body) = Notice(due, campaign, end);
+        if (recipients.Count == 0 && plan.OwnerUserId is null)
+        {
+            // Nobody to warn means nothing may be removed: the event stays as it is.
+            logger.LogWarning("Event {CampaignId} went back to Free but has nobody to warn; nothing will be removed.", campaignId);
+            if (!DryRun) await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        campaign.MediaTrimAt = trimAt;
+        _warned++;
+        if (DryRun)
+        {
+            logger.LogInformation("Dry run: would send warning {Stage} for event {CampaignId}: {Files} files, {Bytes} bytes above Free, removed on {TrimAt:yyyy-MM-dd}.",
+                stage, campaignId, cut.Remove.Count, cut.RemoveBytes, trimAt);
+            return;
+        }
+
+        var extension = campaign.EventPass != EventPassKind.None && offers is not null
+            ? (await offers.ForCampaignAsync(campaign.Id, ct)).ExtensionPrice(campaign.EventPass)
+            : (decimal?)null;
+        var (subject, body) = Notice(stage, campaign, trimAt.Value, cut.RemoveBytes, extension);
         foreach (var to in recipients)
             await email.SendAsync(new EmailMessage(
                 To: to, Subject: subject, Html: body, Stream: EmailStream.System,
-                Tags: new[] { new KeyValuePair<string, string>("kind", $"media_retention_{due}") }), ct);
+                Tags: new[] { new KeyValuePair<string, string>("kind", $"media_trim_{stage}") }), ct);
 
-        campaign.MediaNoticeStage = due;
+        campaign.MediaNoticeStage = stage;
+        // Saved before the push: a push sender may save the unit of work itself.
         await db.SaveChangesAsync(ct);
+
+        if (push is not null && plan.OwnerUserId is { } owner)
+            await push.SendAsync(owner, PushTitle(stage, campaign, trimAt.Value), PushBody(trimAt.Value, cut.RemoveBytes),
+                new Dictionary<string, string> { ["path"] = $"/dashboard/{campaign.Id}" }, ct);
+    }
+
+    /// <summary>The event's live photos and videos, and what of them doesn't fit in Free's space.</summary>
+    private static async Task<MediaTrim.Plan> PlanCutAsync(AppDbContext db, Campaign campaign, CancellationToken ct)
+    {
+        var bucketIds = await db.MediaBuckets.Where(b => b.CampaignId == campaign.Id).Select(b => b.Id).ToListAsync(ct);
+        var items = await db.EventPhotos
+            .Where(p => p.DeletedAt == null
+                        && (p.CampaignId == campaign.Id || (p.BucketId != null && bucketIds.Contains(p.BucketId.Value))))
+            .Select(p => new MediaTrim.Item(p.Id, p.SizeBytes, p.CreatedAt, p.KeepWhenTrimmed))
+            .ToListAsync(ct);
+        return MediaTrim.For(items, campaign.PostCoverPhotoIds, PlanCatalog.FreeEventBytes);
+    }
+
+    /// <summary>Removes what doesn't fit, frees its space and files, and makes it a free event.</summary>
+    private async Task TrimAsync(AppDbContext db, Campaign campaign, MediaTrim.Plan cut, DateTimeOffset now, CancellationToken ct)
+    {
+        _trimmed++;
+        _files += cut.Remove.Count;
+        _bytes += cut.RemoveBytes;
+        if (DryRun)
+        {
+            logger.LogInformation("Dry run: would cut event {CampaignId} down to Free: {Files} files, {Bytes} bytes.",
+                campaign.Id, cut.Remove.Count, cut.RemoveBytes);
+            return;
+        }
+
+        var ids = cut.Remove.ToList();
+        var photos = await db.EventPhotos.Where(p => ids.Contains(p.Id) && p.DeletedAt == null).ToListAsync(ct);
+        foreach (var photo in photos) photo.DeletedAt = now;
+        campaign.MediaTrimmedAt = now;
+        campaign.MediaNoticeStage = 4;
+        campaign.MediaTrimAt = null;
+        campaign.MediaTrimBytes = 0;
+        await db.SaveChangesAsync(ct);
+
+        // Space back, in the database directly (UsedBytes is ignored on a tracked save; see AppDbContext).
+        foreach (var group in photos.Where(p => p.BucketId != null).GroupBy(p => p.BucketId!.Value))
+        {
+            var freed = group.Sum(p => p.SizeBytes);
+            await db.MediaBuckets.Where(b => b.Id == group.Key)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(b => b.UsedBytes, b => b.UsedBytes - freed < 0 ? 0 : b.UsedBytes - freed)
+                    .SetProperty(b => b.UpdatedAt, now), ct);
+        }
+
+        if (_storage is { } storage)
+            foreach (var key in photos.SelectMany(p => new[] { p.OriginalUrl, p.Url, p.ThumbUrl })
+                         .Select(storage.KeyFor).OfType<string>().Distinct())
+            {
+                try
+                {
+                    await storage.DeleteAsync(key, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Couldn't remove {Key} while cutting event {CampaignId} down to Free.", key, campaign.Id);
+                }
+            }
+
+        logger.LogInformation("Cut event {CampaignId} down to Free: removed {Files} files, {Bytes} bytes.",
+            campaign.Id, photos.Count, photos.Sum(p => p.SizeBytes));
     }
 
     private IStorageService? _storage;
@@ -175,8 +328,8 @@ public sealed class MediaRetentionService(
     }
 
     /// <summary>
-    /// Deletes the event's photos: marks every row deleted and removes the files behind them, ones
-    /// deleted earlier included. Marking alone kept every byte stored after the promised deletion.
+    /// Deletes all of a cancelled or deleted event's photos: marks every row deleted and removes the
+    /// files behind them, ones deleted earlier included.
     /// </summary>
     private async Task RemoveMediaAsync(AppDbContext db, Guid campaignId, DateTimeOffset now, CancellationToken ct)
     {
@@ -232,35 +385,57 @@ public sealed class MediaRetentionService(
             .Select(e => e.Trim().ToLowerInvariant()).Distinct().ToList();
     }
 
-    private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset end)
+    /// <summary>"1.4 GB", "350 MB": how much will be removed, in the words the pages use.</summary>
+    public static string Size(long bytes) =>
+        bytes >= PlanCatalog.Gb
+            ? $"{bytes / (double)PlanCatalog.Gb:0.#} GB"
+            : $"{Math.Max(1, (long)Math.Ceiling(bytes / (double)PlanCatalog.Mb))} MB";
+
+    private static string FreeSize => Size(PlanCatalog.FreeEventBytes);
+
+    private static string PushTitle(int stage, Campaign campaign, DateTimeOffset trimAt) => stage switch
+    {
+        1 => $"{campaign.Title} is back on Free",
+        2 => $"A week left to keep everything from {campaign.Title}",
+        _ => $"Tomorrow: photos above {FreeSize} from {campaign.Title} are removed",
+    };
+
+    private static string PushBody(DateTimeOffset trimAt, long bytes) =>
+        $"On {trimAt:d MMMM} about {Size(bytes)} above Free's {FreeSize} will be removed. Download everything or extend to keep it all.";
+
+    private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension)
     {
         var baseUrl = config.InviterBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
-        var pricing = $"{baseUrl}/pricing";
         var title = WebUtility.HtmlEncode(campaign.Title);
-        var organiserOnly = end.AddDays(PlanCatalog.OrganiserOnlyDay).ToString("d MMMM yyyy");
-        var deleteOn = end.AddDays(PlanCatalog.DeleteDay).ToString("d MMMM yyyy");
+        var on = trimAt.ToString("d MMMM yyyy");
+        var size = Size(bytes);
+        var pass = campaign.EventPass == EventPassKind.Platinum ? "Platinum pass" : campaign.EventPass == EventPassKind.Gold ? "Gold pass" : null;
+        var keep = pass is not null && extension is { } price
+            ? $"extend the {pass} for a year ({PlanCatalog.Currency} {price:0})"
+            : "subscribe to Premium again";
 
-        var (subject, lines) = stage switch
+        var (subject, lead) = stage switch
         {
-            1 => ($"The photos from {campaign.Title}: guests can no longer add to them",
-                $"Guests can no longer add photos to <strong>{title}</strong>. " +
-                $"Guests can still look at the photos until {organiserOnly}. After that only you can, " +
-                $"and the photos are removed on {deleteOn}. Download everything now, or keep them online for another year " +
-                $"({PlanCatalog.Currency} {_keepPrice:0} a year)."),
-            2 => ($"One week left for guests to see the photos from {campaign.Title}",
-                $"From {organiserOnly}, only you will be able to see the photos from <strong>{title}</strong>. " +
-                $"They are removed on {deleteOn} unless you keep them online for another year."),
-            _ => ($"The photos from {campaign.Title} will be removed in 7 days",
-                $"The photos and videos from <strong>{title}</strong> will be removed on {deleteOn}. " +
-                "Download everything now, or keep them online for another year. Your invitation, guest list and replies stay."),
+            1 => ($"{campaign.Title} goes back to Free on {on}",
+                $"{(pass is null ? "Your Premium" : $"The {pass} for <strong>{title}</strong>")} has ended, so the event goes back to Free. " +
+                $"Free events are kept for good, up to {FreeSize}."),
+            2 => ($"One week left to keep everything from {campaign.Title}",
+                $"<strong>{title}</strong> goes back to Free on {on}."),
+            _ => ($"Tomorrow: photos above {FreeSize} from {campaign.Title} are removed",
+                $"<strong>{title}</strong> goes back to Free on {on}."),
         };
+        var lines =
+            $"{lead} On {on}, anything above {FreeSize} will be removed: about {size} of photos and videos. " +
+            $"To keep everything, {keep}, or download everything before then. " +
+            "The event's cover photos are kept first, then the earliest uploads. " +
+            "Your invitation, guest list and replies always stay.";
 
         var html =
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">{lines}</p>" +
-            $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Open the event and download</a></p>" +
-            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{pricing}\" style=\"color:#1b3d59\">Keep your photos</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Download everything</a></p>" +
+            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{dashboard}\" style=\"color:#1b3d59\">{(pass is null ? "Get Premium again" : "Extend the pass")}</a></p>" +
             "<p style=\"font-size:12px;color:#4a6378;line-height:1.6\">Sent via invites.blog</p></div>";
 
         return (subject, html);

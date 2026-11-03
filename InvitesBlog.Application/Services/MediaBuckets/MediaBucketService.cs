@@ -1203,7 +1203,7 @@ public sealed class MediaBucketService(
             ? []
             : await campaigns.Query()
                 .Where(c => campaignIds.Contains(c.Id))
-                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId, c.CardThemeJson))
+                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId, c.CardThemeJson, c.MediaTrimAt, c.MediaTrimBytes))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
         // Which bucket each event posts to by default — the oldest, matching ForCampaignAsync. Read
@@ -1275,7 +1275,11 @@ public sealed class MediaBucketService(
                 venue?.Name,
                 venue?.LogoUrl,
                 // The table card is printed in the event's colours, so every album's card matches.
-                events.TryGetValue(b.CampaignId, out var card) ? InvitesBlog.Application.Campaigns.GuestColours.ReadCard(card.CardThemeJson) : null);
+                events.TryGetValue(b.CampaignId, out var card) ? InvitesBlog.Application.Campaigns.GuestColours.ReadCard(card.CardThemeJson) : null,
+                // Back to Free after a pass: when anything above Free's space goes, and how much.
+                plan.Phase == MediaPhase.UploadsClosed ? face?.TrimAt : null,
+                plan.Phase == MediaPhase.UploadsClosed ? face?.TrimBytes : null,
+                PlanCatalog.FreeEventBytes);
         }).ToList();
     }
 
@@ -1288,7 +1292,7 @@ public sealed class MediaBucketService(
     /// <summary>How an event presents itself: the things a bucket used to duplicate, and where it is held.</summary>
     private sealed record EventFace(
         Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt, Guid? VenueId,
-        string? CardThemeJson = null);
+        string? CardThemeJson = null, DateTimeOffset? TrimAt = null, long? TrimBytes = null);
 
     /// <summary>
     /// The night, read from the EVENT rather than from the copy taken when the bucket was made.

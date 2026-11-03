@@ -85,8 +85,10 @@ published for the customer in the designer.
 
 **Privacy.** EXIF, IPTC and XMP are stripped from every uploaded image — these are photographs of
 other people's guests, and a GPS tag would publish where a wedding was. There is a suppression list,
-per-guest data removal by token (the link is in every invitation email), and a media retention job
-that removes an event's photos 90 days after its plan's cover ends, with notices along the way.
+per-guest data removal by token (the link is in every invitation email), and a media retention job.
+Free events are kept for good. When a pass (or Premium) ends, the event goes back to Free: after a
+30-day notice (email and push at once, a week before and a day before) anything above Free's 300 MB
+is removed, cover photos and the earliest uploads kept first, and the rest is kept for good.
 
 ## Companion repos
 

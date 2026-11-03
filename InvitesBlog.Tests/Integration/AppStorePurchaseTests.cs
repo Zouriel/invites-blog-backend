@@ -261,6 +261,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.EventPass, EventPassKind.Gold).SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)))); // keeping is for an event whose pass has ended
         var before = (await CampaignAsync(ev)).PaidInviteCapacity;
         await RedeemAsync(host, Bought("keep_photos_year", await TokenAsync(host, "keep_photos_year", ev)).Jws, ev);
         await RedeemAsync(host, Bought("extra_invites_100", await TokenAsync(host, "extra_invites_100", ev), price: 3990).Jws, ev);
@@ -845,6 +846,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.EventPass, EventPassKind.Gold).SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)))); // keeping is for an event whose pass has ended
         var (jws, id) = Bought("keep_photos_year", await TokenAsync(host, "keep_photos_year", ev));
         await RedeemAsync(host, jws, ev);
         api.AppStore.Transactions[id]["revocationDate"] = Ms(DateTimeOffset.UtcNow);
@@ -867,6 +869,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         // sandbox meanwhile, and their refunds must still be seen.
         var host = await UserAsync();
         var ev = await EventAsync(host);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.EventPass, EventPassKind.Gold).SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)))); // keeping is for an event whose pass has ended
         await AllowingTests(async () =>
         {
             var (jws, id) = Bought("keep_photos_year", await TokenAsync(host, "keep_photos_year", ev), env: "Sandbox");

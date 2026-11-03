@@ -49,7 +49,8 @@ public sealed record PaymentStatusDto(Guid Id, string Item, string Description, 
 public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
     DateTimeOffset? PassUntil, DateTimeOffset? KeepPhotosUntil, DateTimeOffset? CoveredUntil, string Phase,
-    SendingAllowanceDto Sending, bool AtVenue, string Pass, bool PassActive, PassOfferDto Offer, bool IsDraft);
+    SendingAllowanceDto Sending, bool AtVenue, string Pass, bool PassActive, PassOfferDto Offer, bool IsDraft,
+    DateTimeOffset? TrimAt = null, long? TrimBytes = null);
 
 public sealed record BillingPaymentDto(
     Guid Id, string Item, string Description, decimal Amount, string Currency, string Status,
@@ -197,7 +198,9 @@ public sealed class BillingService(
             pass == EventPassKind.None ? null : c.EventPassUntil, c.KeepPhotosUntil, plan.CoveredUntil,
             plan.Phase.ToString(), await allowances.ForCampaignAsync(c.Id, ct), c.VenueId is not null,
             c.EventPass.ToString(), pass != EventPassKind.None, await offers.ForCampaignAsync(c.Id, ct),
-            c.Status == CampaignStatus.Draft);
+            c.Status == CampaignStatus.Draft,
+            plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimAt : null,
+            plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimBytes : null);
     }
 
     public async Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default)
@@ -355,6 +358,9 @@ public sealed class BillingService(
         if (kind is PaymentKind.GoldExtension or PaymentKind.PlatinumExtension
             && campaign.EventPass != (kind == PaymentKind.PlatinumExtension ? EventPassKind.Platinum : EventPassKind.Gold))
             throw new BusinessRuleException("Extending is for the pass the event already has.", "extension_needs_pass");
+        // A free event (one that never had a pass) is kept for good, so there is nothing to keep.
+        if (kind == PaymentKind.KeepPhotos && campaign.EventPass == EventPassKind.None)
+            throw new BusinessRuleException("The photos from a free event are kept for good already.", "keep_not_needed");
     }
 
     /// <summary>Whether this account can have this plan now. Checkout and a store purchase ask the same question.</summary>

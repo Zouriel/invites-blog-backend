@@ -276,6 +276,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.EventPass, EventPassKind.Gold).SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)))); // keeping is for an event whose pass has ended
 
         await RedeemAsync(host, "keep_photos_year", Bought("keep_photos_year", host.Id, ev), ev);
         await RedeemAsync(host, "extra_invites_100", Bought("extra_invites_100", host.Id, ev), ev);
@@ -676,13 +677,14 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
-        Assert.Equal(["gold_pass", "platinum_pass", "keep_photos_year", "extra_invites_100"], await OffersAsync(host, ev));
+        // A free event is kept for good: nothing to keep.
+        Assert.Equal(["gold_pass", "platinum_pass", "extra_invites_100"], await OffersAsync(host, ev));
 
         await RedeemAsync(host, "gold_pass", Bought("gold_pass", host.Id, ev), ev);
-        Assert.Equal(["platinum_pass", "gold_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
+        Assert.Equal(["platinum_pass", "gold_pass_extend", "keep_photos_year", "extra_invites_100"], await OffersAsync(host, ev));
 
         await RedeemAsync(host, "platinum_pass", Bought("platinum_pass", host.Id, ev), ev);
-        Assert.Equal(["platinum_pass_extend", "extra_invites_100"], await OffersAsync(host, ev));
+        Assert.Equal(["platinum_pass_extend", "keep_photos_year", "extra_invites_100"], await OffersAsync(host, ev));
     }
 
     [PostgresFact]
@@ -1135,6 +1137,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var ev = await EventAsync(host);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(s => s.SetProperty(c => c.EventPass, EventPassKind.Gold).SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)))); // keeping is for an event whose pass has ended
         var token = Bought("keep_photos_year", host.Id, ev);
         await RedeemAsync(host, "keep_photos_year", token, ev);
         await NotifyAsync(VoidedNote(token, (string)Product("keep_photos_year", token)["orderId"]!));
