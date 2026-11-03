@@ -25,7 +25,9 @@ public sealed record EventPhotoDto(
     bool CanDelete,
     DateTimeOffset CreatedAt,
     /// <summary>The account that added it, when known: what Block and Report act on.</summary>
-    Guid? UploaderUserId = null);
+    Guid? UploaderUserId = null,
+    /// <summary>The original's size in bytes: what saving or sharing it will download.</summary>
+    long SizeBytes = 0);
 
 /// <summary>An event's photo box as a guest or host sees it.</summary>
 public sealed record EventPhotoBoxDto(
