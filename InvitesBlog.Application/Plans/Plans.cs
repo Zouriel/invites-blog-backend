@@ -89,7 +89,7 @@ public static class PlanCatalog
     // Default prices. What is charged comes from IPriceBook, which an admin can change; these are
     // what it starts from and falls back to.
     public const decimal GoldPassPrice = 199m;
-    public const decimal PlatinumPassPrice = 699m;
+    public const decimal PlatinumPassPrice = 499m;
     public const decimal KeepPhotosYearly = 150m;
     /// <summary>Another year of a pass, without invitations: half the pass.</summary>
     public const decimal GoldExtension = 99m;

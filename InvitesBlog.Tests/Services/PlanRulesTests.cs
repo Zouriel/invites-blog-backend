@@ -205,7 +205,7 @@ public class PlanRulesTests
     public void Venue_passes_cost_half()
     {
         Assert.Equal(100m, Prices.Defaults.VenuePassPrice(EventPassKind.Gold));
-        Assert.Equal(350m, Prices.Defaults.VenuePassPrice(EventPassKind.Platinum));
+        Assert.Equal(250m, Prices.Defaults.VenuePassPrice(EventPassKind.Platinum)); // 249.50, rounded up
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class PlanRulesTests
         Assert.Equal("MVR", catalog.Currency);
         Assert.Equal(["Free", "GoldPass", "PlatinumPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
         // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
-        Assert.Equal([0m, 199m, 699m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
+        Assert.Equal([0m, 199m, 499m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
         Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
         Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, (long?)null],
             catalog.Plans.Select(p => p.EventBytes));
