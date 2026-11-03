@@ -86,6 +86,6 @@ public class PassRenameTests
         Assert.Equal("Gold pass", gold.Name);
         Assert.Equal("Platinum pass", platinum.Name);
         Assert.Equal((199m, 99m, 5 * PlanCatalog.Gb, 2, 3, 100), (gold.Price, gold.ExtensionPrice!.Value, gold.EventBytes!.Value, gold.MaxBuckets!.Value, gold.MaxWindowDays!.Value, gold.IncludedInvites));
-        Assert.Equal((699m, 349m, 10 * PlanCatalog.Gb, 5, 5, 500), (platinum.Price, platinum.ExtensionPrice!.Value, platinum.EventBytes!.Value, platinum.MaxBuckets!.Value, platinum.MaxWindowDays!.Value, platinum.IncludedInvites));
+        Assert.Equal((499m, 349m, 10 * PlanCatalog.Gb, 5, 5, 500), (platinum.Price, platinum.ExtensionPrice!.Value, platinum.EventBytes!.Value, platinum.MaxBuckets!.Value, platinum.MaxWindowDays!.Value, platinum.IncludedInvites));
     }
 }

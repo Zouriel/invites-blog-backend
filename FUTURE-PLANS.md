@@ -688,7 +688,7 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
 
 - **Hosts pay per event, not per month.** Free (1 GB, one album, one night, 90 days, a small "Made
   with invites.blog" on the invitation and album), a **Gold pass** (MVR 199: 10 GB, two albums, three
-  days, a year, 100 invitations sent) and a **Platinum pass** (MVR 699: 100 GB, five albums, five days,
+  days, a year, 100 invitations sent) and a **Platinum pass** (MVR 499: 100 GB, five albums, five days,
   private albums, a year, 500 invitations). **Keep your photos** adds a year for MVR 150. Sending
   beyond a pass is MVR 50 per 100. Limits are `PlanCatalog`; prices are the admin price book
   (`IPriceBook`, Admin → Prices) with `PlanCatalog` as its defaults. The frontend's fallback copy must
