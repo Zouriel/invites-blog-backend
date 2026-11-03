@@ -95,6 +95,34 @@ public sealed class AppleSignInTests(PostgresApiFixture api)
         Assert.DoesNotContain(api.Logs.Lines, l => l.Contains(refresh));
     }
 
+    /// <summary>Web sign-in is off unless switched on (this server leaves it off).</summary>
+    [PostgresFact]
+    public async Task With_web_sign_in_off_the_website_endpoints_refuse_and_a_website_token_is_refused()
+    {
+        var browser = api.BrowserClient();
+
+        var start = await browser.PostAsync("/api/auth/apple/web/start", null);
+        Assert.False(start.IsSuccessStatusCode);
+        Assert.Contains("isn't available on the website", await start.Content.ReadAsStringAsync());
+        Assert.False(start.Headers.Contains("Set-Cookie"));
+
+        var callback = await browser.PostAsync("/auth/apple/callback",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["state"] = "s", ["id_token"] = "t" }));
+        Assert.Equal(HttpStatusCode.SeeOther, callback.StatusCode);
+        Assert.Equal("http://localhost/login?appleError=apple_web_off", callback.Headers.Location!.ToString());
+
+        var redeem = await browser.PostAsJsonAsync("/api/auth/apple/web/redeem", new { code = "anything" });
+        Assert.False(redeem.IsSuccessStatusCode);
+        Assert.Contains("isn't available on the website", await redeem.Content.ReadAsStringAsync());
+
+        // A genuine token for the website's Services ID, straight to the app's endpoint: refused.
+        var sub = $"001234.{Guid.NewGuid():N}.0009";
+        var direct = await SignInAsync(api.Client(),
+            api.Apple.IdentityTokenAsGiven(sub, $"r{Guid.NewGuid():N}@privaterelay.appleid.com", AppleIdStub.NonceHash("n"), AppleIdStub.WebClientId), "n");
+        Assert.Equal(HttpStatusCode.Unauthorized, direct.Status);
+        Assert.False(await api.ReadAsync(db => db.UserExternalLogins.AnyAsync(l => l.ExternalSubjectId == sub)));
+    }
+
     [PostgresFact]
     public async Task A_token_without_the_nonce_it_was_made_for_signs_nobody_in()
     {

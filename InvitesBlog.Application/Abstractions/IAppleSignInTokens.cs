@@ -15,8 +15,11 @@ public interface IAppleSignInTokens
 
     /// <summary>The refresh token for a sign-in's authorization code, or null when Apple refuses it or
     /// can't be reached. Never throws for Apple's answer: a sign-in must not fail over this.</summary>
-    Task<string?> ExchangeAsync(string authorizationCode, CancellationToken ct = default);
+    /// <param name="clientId">The client the code was issued to (the identity token's audience: the app's
+    /// bundle id or the website's Services ID); null means the app's. One we don't own is refused.</param>
+    Task<string?> ExchangeAsync(string authorizationCode, string? clientId = null, CancellationToken ct = default);
 
     /// <summary>Revokes a refresh token. Throws when Apple doesn't confirm it, so the caller retries.</summary>
-    Task RevokeAsync(string refreshToken, CancellationToken ct = default);
+    /// <param name="clientId">The client the token was issued to; null means the app's.</param>
+    Task RevokeAsync(string refreshToken, string? clientId = null, CancellationToken ct = default);
 }

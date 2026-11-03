@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
@@ -29,6 +30,8 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
     private readonly ILogger<AppleSignInTokens> logger;
     private readonly string baseUrl;
     private readonly string? clientId;
+    /// <summary>Every client of ours a code or token may belong to: the app, and the website's Services ID.</summary>
+    private readonly HashSet<string> ownClients = new(StringComparer.Ordinal);
     private readonly string? teamId;
     private readonly string? keyId;
     private readonly ECDsa? key;
@@ -42,6 +45,10 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
         teamId = config["OAuth:Apple:TeamId"]?.Trim();
         keyId = config["OAuth:Apple:KeyId"]?.Trim();
         var pem = config["OAuth:Apple:PrivateKey"];
+        if (!string.IsNullOrWhiteSpace(clientId)) ownClients.Add(clientId);
+        // The website's client, whether or not web sign-in is on right now: a token it issued while it was
+        // on must still be revocable after it is switched off.
+        if (AppleWebSettings.From(config).ClientId is { } webClient) ownClients.Add(webClient);
 
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(teamId) ||
             string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(pem))
@@ -63,15 +70,21 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
 
     public bool IsConfigured => key is not null;
 
-    public async Task<string?> ExchangeAsync(string authorizationCode, CancellationToken ct = default)
+    public async Task<string?> ExchangeAsync(string authorizationCode, string? client = null, CancellationToken ct = default)
     {
         if (!IsConfigured || string.IsNullOrWhiteSpace(authorizationCode)) return null;
+        client ??= clientId!;
+        if (!ownClients.Contains(client))
+        {
+            logger.LogWarning("Not exchanging a Sign in with Apple code for a client that isn't ours.");
+            return null;
+        }
         try
         {
             using var response = await PostAsync("/auth/token", new Dictionary<string, string>
             {
-                ["client_id"] = clientId!,
-                ["client_secret"] = ClientSecret(),
+                ["client_id"] = client,
+                ["client_secret"] = ClientSecret(client),
                 ["code"] = authorizationCode,
                 ["grant_type"] = "authorization_code",
             }, ct);
@@ -94,14 +107,17 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
         }
     }
 
-    public async Task RevokeAsync(string refreshToken, CancellationToken ct = default)
+    public async Task RevokeAsync(string refreshToken, string? client = null, CancellationToken ct = default)
     {
         if (!IsConfigured)
             throw new InvalidOperationException("Sign in with Apple has no key (OAuth:Apple:KeyId/PrivateKey), so its token can't be revoked yet.");
+        client ??= clientId!;
+        if (!ownClients.Contains(client))
+            throw new InvalidOperationException("The Apple token belongs to a client this server isn't configured for (OAuth:Apple:WebClientId?).");
         using var response = await PostAsync("/auth/revoke", new Dictionary<string, string>
         {
-            ["client_id"] = clientId!,
-            ["client_secret"] = ClientSecret(),
+            ["client_id"] = client,
+            ["client_secret"] = ClientSecret(client),
             ["token"] = refreshToken,
             ["token_type_hint"] = "refresh_token",
         }, ct);
@@ -119,8 +135,9 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
         return await client.PostAsync(baseUrl + path, content, ct);
     }
 
-    /// <summary>The client secret Apple wants instead of a password; made fresh for each call.</summary>
-    internal string ClientSecret()
+    /// <summary>The client secret Apple wants instead of a password, for one of our clients (its <c>sub</c>);
+    /// made fresh for each call. One Sign in with Apple key serves the app and the website alike.</summary>
+    internal string ClientSecret(string? client = null)
     {
         var now = DateTime.UtcNow;
         var handler = new JwtSecurityTokenHandler { SetDefaultTimesOnTokenCreation = false };
@@ -128,7 +145,7 @@ public sealed class AppleSignInTokens : IAppleSignInTokens, IDisposable
         {
             Issuer = teamId,
             Audience = AppleAuthProvider.Issuer,
-            Subject = new ClaimsIdentity([new Claim("sub", clientId!)]),
+            Subject = new ClaimsIdentity([new Claim("sub", client ?? clientId!)]),
             IssuedAt = now,
             NotBefore = null,
             Expires = now + SecretLifetime,

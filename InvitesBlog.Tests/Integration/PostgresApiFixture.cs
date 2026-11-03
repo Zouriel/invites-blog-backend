@@ -36,7 +36,7 @@ public sealed class PostgresFactAttribute : FactAttribute
 }
 
 /// <summary>The whole API on a real database, its migrations included, with outside services replaced.</summary>
-public sealed class PostgresApiFixture : IAsyncLifetime
+public class PostgresApiFixture : IAsyncLifetime
 {
     public const string ServerVariable = "IB_TEST_POSTGRES";
 
@@ -117,6 +117,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["Push__Enabled"] = "true",
             // Sign in with Apple, with a key made for this run; every call goes to Apple (the stub).
             ["OAuth__Apple__ClientId"] = AppleIdStub.ClientId,
+            // As production: the website's Services ID is named, and web sign-in stays off unless a test switches it on.
+            ["OAuth__Apple__WebClientId"] = AppleIdStub.WebClientId,
             ["OAuth__Apple__TeamId"] = AppleIdStub.TeamId,
             ["OAuth__Apple__KeyId"] = AppleIdStub.KeyId,
             ["OAuth__Apple__PrivateKey"] = Apple.PrivateKeyOneLine,
@@ -128,7 +130,7 @@ public sealed class PostgresApiFixture : IAsyncLifetime
             ["AppStore__AppAppleId"] = AppStoreStub.AppAppleId.ToString(),
             ["AppStore__ApiBaseUrl"] = AppStore.ProductionUrl,
             ["AppStore__SandboxApiBaseUrl"] = AppStore.SandboxUrl,
-        })
+        }.Concat(ExtraSettings))
             Environment.SetEnvironmentVariable(key, value);
 
         _factory = new ApiFactory(this);
@@ -136,7 +138,8 @@ public sealed class PostgresApiFixture : IAsyncLifetime
 
         // Read once at start-up; cleared so no other test host in this process gets a push key.
         foreach (var key in new[] { "Push__Enabled", "Push__Apns__KeyId", "Push__Apns__TeamId", "Push__Apns__PrivateKey",
-                     "OAuth__Apple__ClientId", "OAuth__Apple__TeamId", "OAuth__Apple__KeyId", "OAuth__Apple__PrivateKey", "OAuth__Apple__BaseUrl" })
+                     "OAuth__Apple__ClientId", "OAuth__Apple__TeamId", "OAuth__Apple__KeyId", "OAuth__Apple__PrivateKey", "OAuth__Apple__BaseUrl", "OAuth__Apple__WebClientId" }
+                     .Concat(ExtraSettings.Keys))
             Environment.SetEnvironmentVariable(key, null);
         }
         finally
@@ -189,6 +192,25 @@ public sealed class PostgresApiFixture : IAsyncLifetime
     {
         var service = Services.GetRequiredService<PendingRemovalService>();
         while (await service.RunOnceAsync(CancellationToken.None) > 0) { }
+    }
+
+    /// <summary>Settings a variant of this fixture adds (read at start-up, then cleared like the others).</summary>
+    protected virtual IReadOnlyDictionary<string, string> ExtraSettings { get; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// A browser: https (so Secure cookies come back), keeping cookies, NOT following redirects, with an
+    /// address of its own.
+    /// </summary>
+    public HttpClient BrowserClient()
+    {
+        var client = _factory!.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+        client.DefaultRequestHeaders.Add(TestAddressHeader, $"10.{Random.Shared.Next(1, 250)}.{Random.Shared.Next(1, 250)}.{Random.Shared.Next(1, 250)}");
+        return client;
     }
 
     /// <summary>A client with its own address, so one test's requests don't use up another's limits.</summary>

@@ -22,6 +22,12 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
 
+        // Sign in with Apple on the website (off unless OAuth:Apple:WebEnabled): its settings, read once,
+        // and the one-time codes that carry a finished sign-in back into the page.
+        services.AddSingleton(AppleWebSettings.From(config));
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<Controllers.AppleWebHandoffs>();
+
         // Every request is resolved into a permissioned principal by our scheme (full-RBAC model).
         services.AddAuthentication(AppAuthenticationHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, AppAuthenticationHandler>(AppAuthenticationHandler.SchemeName, null);
@@ -89,6 +95,11 @@ public static class DependencyInjection
             // The open link is the one lookup an anonymous caller can aim at freely, and the code
             // behind it is short by design. 59 bits is far past guessable, but a limiter is what
             // turns "not worth trying" into "not possible to try at scale".
+            // Sign in with Apple on the website: start, Apple's return and the redeem are three calls per
+            // sign-in, so it has its own allowance rather than spending the code-senders' five.
+            options.AddPolicy(Controllers.AppleWebSignInController.RateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(10) }));
             options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));

@@ -656,7 +656,7 @@ public class AccountServiceTests
         _config["Jwt:SigningKey"].Returns("unit-test-signing-key-long-enough-0123456789abcdef");
         _apple = Substitute.For<IAppleSignInTokens>();
         _apple.IsConfigured.Returns(true);
-        _apple.ExchangeAsync("one-time-code", Arg.Any<CancellationToken>()).Returns("r.refresh-token");
+        _apple.ExchangeAsync("one-time-code", Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns("r.refresh-token");
         Existing();
         _authProviders.Add(Provider("apple", appOnly: true, identity: Apple()));
         UserExternalLogin? link = null;
@@ -667,6 +667,33 @@ public class AccountServiceTests
         Assert.NotNull(link!.RefreshTokenSealed);
         Assert.DoesNotContain("refresh-token", link.RefreshTokenSealed);
         Assert.Equal("r.refresh-token", AppleTokenSeal.Open(link.RefreshTokenSealed, _config));
+    }
+
+    [Fact]
+    public async Task A_website_sign_in_exchanges_its_code_as_the_website_client_and_keeps_that_client()
+    {
+        _config["Jwt:SigningKey"].Returns("unit-test-signing-key-long-enough-0123456789abcdef");
+        _apple = Substitute.For<IAppleSignInTokens>();
+        _apple.IsConfigured.Returns(true);
+        _apple.ExchangeAsync("web-code", "blog.invites.web", Arg.Any<CancellationToken>()).Returns("r.web-refresh");
+        Existing();
+        _authProviders.Add(Provider("apple", appOnly: true, identity: Apple() with { Audience = "blog.invites.web" }));
+        UserExternalLogin? link = null;
+        await _logins.AddAsync(Arg.Do<UserExternalLogin>(l => link = l), Arg.Any<CancellationToken>());
+
+        await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "web-code"));
+
+        Assert.Equal(("r.web-refresh", "blog.invites.web"), AppleTokenSeal.OpenWithClient(link!.RefreshTokenSealed, _config));
+        Assert.Equal("r.web-refresh", AppleTokenSeal.Open(link.RefreshTokenSealed, _config));
+    }
+
+    [Fact]
+    public void A_seal_made_before_clients_were_kept_opens_as_the_app_s()
+    {
+        _config["Jwt:SigningKey"].Returns("unit-test-signing-key-long-enough-0123456789abcdef");
+        var old = AppleTokenSeal.Seal("r.old-refresh", _config);
+
+        Assert.Equal(("r.old-refresh", (string?)null), AppleTokenSeal.OpenWithClient(old, _config));
     }
 
     [Fact]
@@ -682,7 +709,7 @@ public class AccountServiceTests
         await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "one-time-code"));
 
         Assert.Null(link!.RefreshTokenSealed);
-        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -700,7 +727,7 @@ public class AccountServiceTests
 
         await Sut().OAuthAsync("apple", new OAuthLoginRequest("id-token", "n", "one-time-code"));
 
-        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -713,7 +740,7 @@ public class AccountServiceTests
 
         await Sut().OAuthAsync("google", new OAuthLoginRequest("id-token", null, "one-time-code"));
 
-        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _apple.DidNotReceive().ExchangeAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     private static IExternalAuthProvider Provider(
@@ -725,6 +752,11 @@ public class AccountServiceTests
         provider.AppOnly.Returns(appOnly);
         if (configured)
             provider.Descriptor().Returns(new ExternalAuthDescriptor(name, $"{name}-client-id", $"https://{name}/auth"));
+        // What the real providers do (AppleAuthProvider's own per-platform choice is tested with it).
+        provider.DescriptorFor(Arg.Any<string?>()).Returns(ci =>
+            !configured || (appOnly && (string?)ci[0] != "ios")
+                ? null
+                : new ExternalAuthDescriptor(name, $"{name}-client-id", $"https://{name}/auth"));
         if (identity is not null)
             provider.VerifyAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(identity);
         return provider;

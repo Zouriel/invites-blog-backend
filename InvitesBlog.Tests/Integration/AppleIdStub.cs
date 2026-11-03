@@ -22,6 +22,8 @@ namespace InvitesBlog.Tests.Integration;
 public sealed class AppleIdStub : IAsyncDisposable
 {
     public const string ClientId = "blog.invites.app";
+    /// <summary>The website's Services ID.</summary>
+    public const string WebClientId = "blog.invites.web";
     public const string TeamId = "TEAMSTUB01";
     public const string KeyId = "SIWASTUB01";
 
@@ -34,6 +36,10 @@ public sealed class AppleIdStub : IAsyncDisposable
     /// <summary>Codes this "Apple" will exchange, each once, and the refresh token each gives.</summary>
     public ConcurrentDictionary<string, string> Codes { get; } = new();
     public ConcurrentBag<string> Revoked { get; } = [];
+    /// <summary>Which client a code was issued to, when a test says (Apple refuses it for any other).</summary>
+    public ConcurrentDictionary<string, string> CodeClients { get; } = new();
+    /// <summary>Each revoked token with the client_id it was revoked as.</summary>
+    public ConcurrentBag<(string Token, string ClientId)> RevokedAs { get; } = [];
     public int SecretsRefused;
     /// <summary>Answer the next revoke with 503.</summary>
     public volatile bool FailNextRevoke;
@@ -56,6 +62,8 @@ public sealed class AppleIdStub : IAsyncDisposable
         {
             var form = await ctx.Request.ReadFormAsync();
             if (!SecretOk(form)) return Results.Json(new { error = "invalid_client" }, statusCode: 400);
+            if (CodeClients.TryGetValue(form["code"].ToString(), out var issuedTo) && issuedTo != form["client_id"])
+                return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
             if (form["grant_type"] != "authorization_code" || !Codes.TryRemove(form["code"].ToString(), out var refresh))
                 return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
             return Results.Json(new { access_token = "a." + Guid.NewGuid().ToString("N"), token_type = "Bearer", expires_in = 3600, refresh_token = refresh, id_token = "unused" });
@@ -66,6 +74,7 @@ public sealed class AppleIdStub : IAsyncDisposable
             if (!SecretOk(form)) return Results.Json(new { error = "invalid_client" }, statusCode: 400);
             if (FailNextRevoke) { FailNextRevoke = false; return Results.StatusCode(503); }
             Revoked.Add(form["token"].ToString());
+            RevokedAs.Add((form["token"].ToString(), form["client_id"].ToString()));
             return Results.Ok();
         });
         await _app.StartAsync();
@@ -76,7 +85,7 @@ public sealed class AppleIdStub : IAsyncDisposable
     {
         try
         {
-            if (form["client_id"] != ClientId) throw new SecurityTokenException("client_id");
+            if (form["client_id"] != ClientId && form["client_id"] != WebClientId) throw new SecurityTokenException("client_id");
             var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
             var principal = handler.ValidateToken(form["client_secret"].ToString(), new TokenValidationParameters
             {
@@ -87,7 +96,7 @@ public sealed class AppleIdStub : IAsyncDisposable
                 ClockSkew = TimeSpan.Zero,
             }, out var token);
             if (((JwtSecurityToken)token).Header.Kid != KeyId) throw new SecurityTokenException("kid");
-            if (principal.FindFirst("sub")?.Value != ClientId) throw new SecurityTokenException("sub");
+            if (principal.FindFirst("sub")?.Value != form["client_id"]) throw new SecurityTokenException("sub");
             return true;
         }
         catch (Exception)
@@ -100,16 +109,23 @@ public sealed class AppleIdStub : IAsyncDisposable
     public static string NonceHash(string raw) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
 
     /// <summary>An identity token as Apple would give the app; email null as on a later sign-in.</summary>
-    public string IdentityToken(string sub, string? email, string rawNonce)
+    public string IdentityToken(string sub, string? email, string rawNonce) =>
+        IdentityTokenAsGiven(sub, email, NonceHash(rawNonce), ClientId);
+
+    /// <summary>
+    /// An identity token whose nonce is exactly what the requester gave Apple (Apple copies it as-is),
+    /// addressed to <paramref name="audience"/>.
+    /// </summary>
+    public string IdentityTokenAsGiven(string sub, string? email, string nonceAsGiven, string audience)
     {
-        var claims = new Dictionary<string, object> { ["sub"] = sub, ["nonce"] = NonceHash(rawNonce), ["nonce_supported"] = true };
+        var claims = new Dictionary<string, object> { ["sub"] = sub, ["nonce"] = nonceAsGiven, ["nonce_supported"] = true };
         if (email is not null) { claims["email"] = email; claims["email_verified"] = "true"; claims["is_private_email"] = "true"; }
         var now = DateTime.UtcNow;
         var handler = new JwtSecurityTokenHandler { SetDefaultTimesOnTokenCreation = false };
         return handler.WriteToken(handler.CreateToken(new SecurityTokenDescriptor
         {
             Issuer = "https://appleid.apple.com",
-            Audience = ClientId,
+            Audience = audience,
             IssuedAt = now,
             Expires = now.AddMinutes(10),
             Claims = claims,

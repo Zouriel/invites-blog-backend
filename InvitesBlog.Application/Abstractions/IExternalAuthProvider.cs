@@ -5,7 +5,8 @@ namespace InvitesBlog.Application.Abstractions;
 /// and our public client id. No secret is involved — the client returns an ID token, which the server
 /// then verifies against the provider's published keys.
 /// </summary>
-public sealed record ExternalAuthDescriptor(string Provider, string ClientId, string AuthorizeUrl);
+/// <param name="RedirectUri">The return URL registered with the provider, when the server fixes it (Apple on the web).</param>
+public sealed record ExternalAuthDescriptor(string Provider, string ClientId, string AuthorizeUrl, string? RedirectUri = null);
 
 /// <summary>The verified identity an OAuth provider asserted about a signer-in.</summary>
 /// <param name="Provider">Lowercased provider key — <c>google</c> | <c>microsoft</c>.</param>
@@ -18,9 +19,10 @@ public sealed record ExternalAuthDescriptor(string Provider, string ClientId, st
 /// sign-ins (then Email is empty) and must say <c>email_verified</c> before the email may link an
 /// existing account; Google and Microsoft keep their old meaning (refused only when it says false).
 /// </param>
+/// <param name="Audience">Which of our clients the token was addressed to (its verified <c>aud</c>).</param>
 public sealed record ExternalIdentity(
     string Provider, string SubjectId, string Email, string DisplayName, string? PictureUrl = null,
-    bool EmailVerified = true);
+    bool EmailVerified = true, string? Audience = null);
 
 /// <summary>
 /// Verifies an ID token issued by an external identity provider (§designer OAuth sign-in). The client
@@ -47,6 +49,16 @@ public interface IExternalAuthProvider
     /// Services ID it doesn't have). Listed in the sign-in options only when an app asks for its platform.
     /// </summary>
     bool AppOnly => false;
+
+    /// <summary>
+    /// The button a given platform may offer (<c>ios</c>, <c>android</c>, or null/<c>web</c> for the
+    /// website), or null when this provider isn't offered there. Apple overrides it: the iPhone gets the
+    /// app's client id, the website the Services ID while web sign-in is switched on.
+    /// </summary>
+    ExternalAuthDescriptor? DescriptorFor(string? platform) =>
+        !IsConfigured || (AppOnly && !string.Equals(platform, "ios", StringComparison.OrdinalIgnoreCase))
+            ? null
+            : Descriptor();
 
     /// <summary>
     /// Validates the ID token and returns the identity it asserts.

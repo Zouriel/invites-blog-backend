@@ -71,7 +71,8 @@ public sealed record LinkResultDto(
 public sealed record AuthOptionsDto(bool SmsAvailable, IReadOnlyList<OAuthProviderDto> OAuthProviders);
 
 /// <summary>One OAuth button the sign-in page can offer.</summary>
-public sealed record OAuthProviderDto(string Provider, string ClientId, string AuthorizeUrl);
+/// <param name="RedirectUri">The return URL the provider must send the person back to, when it is fixed (Apple on the web).</param>
+public sealed record OAuthProviderDto(string Provider, string ClientId, string AuthorizeUrl, string? RedirectUri = null);
 
 /// <summary>
 /// Signing in with an ID token the browser obtained from the provider. The token is verified
