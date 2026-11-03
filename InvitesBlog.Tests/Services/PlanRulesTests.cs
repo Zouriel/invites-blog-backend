@@ -16,14 +16,14 @@ public class PlanRulesTests
         EventPassKind pass = EventPassKind.None, DateTimeOffset? passUntil = null, DateTimeOffset? keep = null,
         bool? venueActive = null, DateTimeOffset? venueEnded = null,
         DateTimeOffset? legacyCover = null, DateTimeOffset? now = null, DateTimeOffset? night = null,
-        (bool, DateTimeOffset?)? premium = null) =>
+        (bool, DateTimeOffset?)? premium = null, DateTimeOffset? trimmedAt = null) =>
         PlanRules.Evaluate(
             now ?? Now, night ?? Night, pass, passUntil, keep,
             venueActive is { } active ? (VenueId, active, venueEnded) : null,
-            legacyCover, null, Guid.NewGuid(), premium);
+            legacyCover, null, Guid.NewGuid(), premium, trimmedAt);
 
     [Fact]
-    public void A_free_event_gets_1_gb_one_album_one_night_90_days_and_the_mark()
+    public void A_free_event_gets_300_mb_one_album_one_night_kept_for_good_and_the_mark()
     {
         var plan = Evaluate();
 
@@ -35,8 +35,48 @@ public class PlanRulesTests
         Assert.Equal(0, plan.IncludedInvites);
         Assert.False(plan.PrivateAlbums);
         Assert.True(plan.Branded);
-        Assert.Equal(Night.AddDays(90), plan.CoveredUntil);
+        Assert.Null(plan.CoveredUntil);
         Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    /// <summary>Owner, 2026-11-03: free albums are kept forever, as on any social platform.</summary>
+    [Fact]
+    public void A_free_event_is_still_kept_years_later()
+    {
+        var plan = Evaluate(now: Night.AddYears(10));
+        Assert.Equal(PlanKind.Free, plan.Kind);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    [Fact]
+    public void Once_cut_down_to_free_an_ended_pass_event_is_kept_for_good()
+    {
+        var ended = Night.AddMonths(12);
+        var waiting = Evaluate(EventPassKind.Gold, ended, now: ended.AddDays(10));
+        Assert.Equal(ended, waiting.CoveredUntil);
+        Assert.Equal(MediaPhase.UploadsClosed, waiting.Phase);
+
+        var cut = ended.AddDays(40);
+        var trimmed = Evaluate(EventPassKind.Gold, ended, now: ended.AddYears(5), trimmedAt: cut);
+        Assert.Equal(PlanKind.Free, trimmed.Kind);
+        Assert.Equal(PlanCatalog.FreeEventBytes, trimmed.EventBytes);
+        Assert.Null(trimmed.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, trimmed.Phase);
+    }
+
+    [Fact]
+    public void A_new_pass_after_the_cut_covers_the_event_again()
+    {
+        var cut = Night.AddMonths(14);
+        var again = Night.AddMonths(30);
+        var plan = Evaluate(EventPassKind.Platinum, again, now: Night.AddMonths(20), trimmedAt: cut);
+        Assert.Equal(PlanKind.PlatinumPass, plan.Kind);
+        Assert.Equal(again, plan.CoveredUntil);
+
+        // And when that one ends, it goes back to Free again (a new cut is pending).
+        var later = Evaluate(EventPassKind.Platinum, again, now: again.AddDays(1), trimmedAt: cut);
+        Assert.Equal(MediaPhase.UploadsClosed, later.Phase);
     }
 
     [Fact]
@@ -133,19 +173,29 @@ public class PlanRulesTests
         Assert.Null(withPass.AccountBytes);
         Assert.Null(withPass.VenueId);
         Assert.Equal(PlanKind.Free, without.Kind);
-        Assert.NotNull(without.CoveredUntil);
+        Assert.Null(without.CoveredUntil);
     }
 
     [Fact]
-    public void An_ended_venue_covers_its_events_until_it_ended_then_the_full_lapse()
+    public void An_event_at_a_venue_that_ended_without_a_pass_is_a_free_event_kept_for_good()
     {
         var ended = Night.AddDays(400);
         var plan = Evaluate(venueActive: false, venueEnded: ended, now: ended.AddDays(40));
 
         Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Null(plan.VenueId);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    [Fact]
+    public void A_venue_s_pass_event_goes_back_to_free_like_any_other()
+    {
+        var ended = Night.AddMonths(12);
+        var plan = Evaluate(EventPassKind.Gold, ended, venueActive: true, now: ended.AddDays(3));
+        Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Equal(ended, plan.CoveredUntil);
-        Assert.Equal(MediaPhase.OrganiserOnly, plan.Phase);
+        Assert.Equal(MediaPhase.UploadsClosed, plan.Phase);
     }
 
     [Fact]
@@ -164,7 +214,7 @@ public class PlanRulesTests
     public void Keeping_the_photos_moves_the_cover_and_nothing_else()
     {
         var keep = Night.AddMonths(30);
-        var plan = Evaluate(keep: keep, now: Night.AddMonths(20));
+        var plan = Evaluate(EventPassKind.Gold, Night.AddMonths(12), keep: keep, now: Night.AddMonths(20));
 
         Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Equal(keep, plan.CoveredUntil);
@@ -172,13 +222,14 @@ public class PlanRulesTests
         Assert.Equal(300 * PlanCatalog.Mb, plan.EventBytes);
     }
 
+    /// <summary>A lapse never makes photos organiser-only or removes them all any more: it only waits for the cut.</summary>
     [Theory]
     [InlineData(0, MediaPhase.UploadsClosed)]
     [InlineData(29, MediaPhase.UploadsClosed)]
-    [InlineData(30, MediaPhase.OrganiserOnly)]
-    [InlineData(89, MediaPhase.OrganiserOnly)]
-    [InlineData(90, MediaPhase.Deleted)]
-    public void Photos_move_through_the_phases_after_the_cover_ends(int days, MediaPhase expected)
+    [InlineData(30, MediaPhase.UploadsClosed)]
+    [InlineData(89, MediaPhase.UploadsClosed)]
+    [InlineData(400, MediaPhase.UploadsClosed)]
+    public void After_the_cover_ends_the_event_waits_for_the_cut_with_everything_visible(int days, MediaPhase expected)
     {
         var end = Night.AddDays(90);
         Assert.Equal(expected, PlanRules.PhaseOf(end.AddDays(days).AddMinutes(1), end, null));
@@ -187,18 +238,18 @@ public class PlanRulesTests
     [Fact]
     public void An_event_from_before_the_plans_gets_its_plan_s_space_and_no_more()
     {
-        // Covered by the pre-plans promise, and still sized by the plan: Free is 300 MB.
+        // Sized by the plan: Free is 300 MB. With no pass it is a free event, kept for good.
         var plan = Evaluate(legacyCover: Night.AddMonths(6), now: Night.AddDays(1));
 
         Assert.Equal(PlanCatalog.FreeEventBytes, plan.EventBytes);
-        Assert.Equal(Night.AddMonths(6), plan.CoveredUntil);
+        Assert.Null(plan.CoveredUntil);
     }
 
     [Fact]
     public void A_later_legacy_cover_date_wins()
     {
-        var cover = Night.AddDays(300);
-        Assert.Equal(cover, Evaluate(legacyCover: cover).CoveredUntil);
+        var cover = Night.AddMonths(20);
+        Assert.Equal(cover, Evaluate(EventPassKind.Gold, Night.AddMonths(12), legacyCover: cover).CoveredUntil);
     }
 
     [Fact]

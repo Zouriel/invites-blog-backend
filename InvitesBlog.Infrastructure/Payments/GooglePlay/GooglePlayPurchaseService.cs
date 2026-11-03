@@ -89,7 +89,8 @@ public sealed class GooglePlayPurchaseService(
             if (campaign.EventPass == EventPassKind.Gold) list.Add("gold_pass_extend");
             if (campaign.EventPass == EventPassKind.Platinum) list.Add("platinum_pass_extend");
         }
-        if (campaign.Kind != CampaignKind.SaveTheDate && campaign.EventPass == EventPassKind.None) list.Add("keep_photos_year");
+        // Free events are kept for good (owner, 2026-11-03): keeping is for an event that has had a pass.
+        if (campaign.Kind != CampaignKind.SaveTheDate && campaign.EventPass != EventPassKind.None) list.Add("keep_photos_year");
         list.Add("extra_invites_100");
         return new GooglePlayOffersDto(true, list, account, Ids.Of(id));
     }

@@ -399,6 +399,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // would credit the old size and remove the old file, so it has to notice (see RemoveAsync).
             e.Property(x => x.Url).IsConcurrencyToken();
             e.Property(x => x.SizeBytes).IsConcurrencyToken();
+            e.Property(x => x.KeepWhenTrimmed).HasDefaultValue(false);
         });
 
         b.Entity<VideoTrimJob>(e =>

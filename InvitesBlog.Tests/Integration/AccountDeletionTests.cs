@@ -733,10 +733,11 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             Assert.True(kept.KeepPhotosUntil > DateTimeOffset.UtcNow.AddMinutes(-5));
             return true;
         });
-        // The lapse restarts today, as when a plan ends: uploads closed, photos there for 90 days.
+        // Their event never had a pass, so it is a free event: kept for good (owner, 2026-11-03).
         using var scope = api.Services.CreateScope();
         var plan = await scope.ServiceProvider.GetRequiredService<InvitesBlog.Application.Plans.IPlanService>().ForCampaignAsync(theirs);
-        Assert.Equal(InvitesBlog.Application.Plans.MediaPhase.UploadsClosed, plan.Phase);
+        Assert.Equal(InvitesBlog.Application.Plans.MediaPhase.Active, plan.Phase);
+        Assert.Null(plan.CoveredUntil);
     }
 
     [PostgresFact]

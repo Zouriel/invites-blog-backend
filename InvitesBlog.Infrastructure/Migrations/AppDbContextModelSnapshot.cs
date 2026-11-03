@@ -391,6 +391,18 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("media_notice_stage");
 
+                    b.Property<DateTimeOffset?>("MediaTrimAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("media_trim_at");
+
+                    b.Property<long?>("MediaTrimBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("media_trim_bytes");
+
+                    b.Property<DateTimeOffset?>("MediaTrimmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("media_trimmed_at");
+
                     b.Property<bool>("OpenGuestList")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -870,6 +882,12 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<int>("Height")
                         .HasColumnType("integer")
                         .HasColumnName("height");
+
+                    b.Property<bool>("KeepWhenTrimmed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("keep_when_trimmed");
 
                     b.Property<string>("OriginalUrl")
                         .IsRequired()

@@ -80,7 +80,8 @@ public sealed class PlanService(
             legacyCover,
             campaign.MediaDeletedAt,
             ownerId is { } id && id != Guid.Empty ? id : null,
-            premium);
+            premium,
+            campaign.MediaTrimmedAt);
     }
 
     public async Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default)

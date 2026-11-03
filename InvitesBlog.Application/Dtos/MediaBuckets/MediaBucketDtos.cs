@@ -57,7 +57,16 @@ public sealed record MediaBucketDto(
     string? VenueName = null,
     string? VenueLogoUrl = null,
     /// <summary>The colours the QR table card is printed in, or null for the original cream and gold.</summary>
-    InvitesBlog.Application.Dtos.Campaigns.ColourSetDto? CardTheme = null);
+    InvitesBlog.Application.Dtos.Campaigns.ColourSetDto? CardTheme = null,
+    /// <summary>
+    /// After a pass (or Premium) ends: the day anything above Free's space is removed, once the
+    /// organiser has been warned. Null when nothing is pending (free events are kept for good).
+    /// </summary>
+    DateTimeOffset? TrimAt = null,
+    /// <summary>About how many bytes that removes, as of the last check.</summary>
+    long? TrimBytes = null,
+    /// <summary>What a free event keeps for good.</summary>
+    long FreeBytes = 0);
 
 /// <summary>
 /// The space a venue's events share: how much there is and how much is used. For anyone who isn't a

@@ -19,17 +19,21 @@ public enum PlanKind
 }
 
 /// <summary>
-/// Where an event's photos are after its cover runs out. See <see cref="PlanCatalog"/> for the days.
+/// Where an event's photos are after its pass runs out. See <see cref="PlanCatalog"/> for the days.
+/// A free event never leaves <see cref="Active"/>: it has no end.
 /// </summary>
 public enum MediaPhase
 {
     /// <summary>Covered. Guests can add and look.</summary>
     Active,
-    /// <summary>Days 0–29 after the cover ended: nothing new can be added, guests can still look.</summary>
+    /// <summary>
+    /// The pass (or Premium) has ended and the event hasn't been cut down to Free yet: nothing new can
+    /// be added, everyone can still look, and the organiser is being warned.
+    /// </summary>
     UploadsClosed,
-    /// <summary>Days 30–89: only the organiser can look and download.</summary>
+    /// <summary>No longer produced (a lapse used to make photos organiser-only); kept for stored values.</summary>
     OrganiserOnly,
-    /// <summary>Day 90 onwards: the photos are removed.</summary>
+    /// <summary>The photos are gone: the event was cancelled.</summary>
     Deleted,
 }
 
@@ -66,7 +70,10 @@ public static class PlanCatalog
     public const int GoldIncludedInvites = 100;
     public const int PlatinumIncludedInvites = 500;
 
-    /// <summary>How long a free event is covered, counted from the event day.</summary>
+    /// <summary>
+    /// The least a pass event is covered, counted from the event day (a pass's own year always runs
+    /// longer). Free events are no longer covered by days at all: they are kept for good.
+    /// </summary>
     public const int FreeCoverDays = 90;
 
     /// <summary>How long a pass covers its event, counted from the event day.</summary>
@@ -75,7 +82,15 @@ public static class PlanCatalog
     /// <summary>What one "Keep your photos" buys.</summary>
     public const int KeepPhotosMonths = 12;
 
-    /// <summary>Days after the cover ends.</summary>
+    /// <summary>
+    /// After a pass (or Premium) ends: the first warning gives at least this many days before anything
+    /// above Free's space is removed, then one a week before and one a day before.
+    /// </summary>
+    public const int TrimNoticeDays = 30;
+    public const int TrimReminderDaysBefore = 7;
+    public const int TrimFinalDaysBefore = 1;
+
+    // The old lapse (days after the cover ended), still served in /api/plans for older app builds.
     public const int ReminderDay = 23;
     public const int OrganiserOnlyDay = 30;
     public const int FinalNoticeDay = 83;
@@ -119,8 +134,9 @@ public static class PlanCatalog
             Currency,
             p.MvrPerUsd,
             [
+                // Kept for good: no retention days.
                 new PlanDto("Free", "Free", 0m, "every event",
-                    FreeEventBytes, FreeBuckets, FreeWindowDays, FreeCoverDays, 0, false, true),
+                    FreeEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, true),
                 new PlanDto("GoldPass", "Gold pass", p.GoldPass, "per event",
                     GoldEventBytes, GoldBuckets, GoldWindowDays, 365, GoldIncludedInvites, false, false,
                     ExtensionPrice: p.GoldExtension),
@@ -143,7 +159,7 @@ public static class PlanCatalog
 
 /// <summary>One plan as the pricing page shows it. Venue has no event limits of its own: nulls.</summary>
 /// <param name="ExtensionPrice">Another year of this pass, without invitations; null for the rest.</param>
-/// <param name="RetentionDays">How long photos are kept from the event day; null while a subscription covers them.</param>
+/// <param name="RetentionDays">How long photos are kept from the event day; null when they are kept for good (Free) or while a subscription covers them.</param>
 /// <param name="EventBytes">Space for each event; for Premium, each event its subscriber organises.</param>
 /// <param name="IncludedInvites">Invitations sent for the event without charge.</param>
 /// <param name="PrivateAlbums">Whether an album can be closed to some guests.</param>
@@ -169,7 +185,7 @@ public sealed record PlanCatalogDto(
 /// <summary>What one event may do right now, and how long it is covered for.</summary>
 /// <param name="AccountBytes">A venue's space across all of its events; null for everything else.</param>
 /// <param name="IncludedInvites">Invitations invites.blog sends for it without charging.</param>
-/// <param name="CoveredUntil">When its cover ends; null while its organiser's Premium (with no end) covers it.</param>
+/// <param name="CoveredUntil">When its cover ends; null when it never does: a free event (one that never had a pass), or while its organiser's Premium (with no end) covers it.</param>
 /// <param name="OwnerUserId">Whoever organised the event: the one told when its photos are ending.</param>
 /// <param name="VenueId">The venue whose plan covers it, when one does. Its space is counted across the venue.</param>
 public sealed record EventPlan(
@@ -202,6 +218,7 @@ public static class PlanRules
     /// Kept for its end date, which still never shortens a cover.
     /// </param>
     /// <param name="legacyCoverUntil">The latest date anything from before the plans is covered to.</param>
+    /// <param name="trimmedAt">When the event was cut down to Free's space after its last cover ended, if it was.</param>
     /// <param name="premium">
     /// The organiser's Premium subscription, if they have or had one: whether it is in force and when it
     /// ends (null: no end). While it lasts their events get Premium's space and keep their photos; once it
@@ -217,7 +234,8 @@ public static class PlanRules
         DateTimeOffset? legacyCoverUntil,
         DateTimeOffset? mediaDeletedAt,
         Guid? ownerUserId,
-        (bool Active, DateTimeOffset? EndsAt)? premium = null)
+        (bool Active, DateTimeOffset? EndsAt)? premium = null,
+        DateTimeOffset? trimmedAt = null)
     {
         var passActive = pass != EventPassKind.None && passUntil is { } until && until > now;
         var premiumActive = premium is { Active: true };
@@ -238,14 +256,23 @@ public static class PlanRules
         // their old size, which made an event on Free show and allow more than Free, while its
         // settings said a fixed size. Only their cover date is still honoured (legacyCoverUntil).
 
-        // The cover is the latest of the free 90 days, a pass, "Keep your photos", a venue plan that
+        // For a pass event, the cover is the latest of 90 days from the event, its pass, "Keep your photos", a venue plan that
         // covered it before venues bought passes, the organiser's Premium, and what anything from
         // before the plans was promised — so ending one never shortens another.
         var end = eventDate.AddDays(PlanCatalog.FreeCoverDays);
         foreach (var candidate in new[] { pass != EventPassKind.None ? passUntil : null, keepPhotosUntil, venue?.EndedAt, legacyCoverUntil, premium?.EndsAt })
             if (candidate is { } c && c > end) end = c;
-        // Premium with no end keeps the photos for as long as it lasts: no end date at all.
-        DateTimeOffset? coveredUntil = premium is { Active: true, EndsAt: null } ? null : end;
+        // Free events are kept for good, as on any social platform (owner, 2026-11-03): an event that
+        // never had a pass or its organiser's Premium has no end date, so no warnings and no removal.
+        // One that had either is covered to `end`; after that it goes back to Free, and once it has
+        // been cut down to Free's space (trimmedAt) it is a free event like any other, kept for good,
+        // until something new covers it past the cut. Premium with no end has no end date either.
+        var everPaid = pass != EventPassKind.None || premium is not null;
+        DateTimeOffset? coveredUntil =
+            !everPaid ? null
+            : premium is { Active: true, EndsAt: null } ? null
+            : trimmedAt is { } cut && cut >= end ? null
+            : end;
 
         var large = kind is PlanKind.PlatinumPass;
         return new EventPlan(
@@ -271,9 +298,9 @@ public static class PlanRules
     {
         if (deletedAt is not null) return MediaPhase.Deleted;
         if (coveredUntil is not { } end || now < end) return MediaPhase.Active;
-        var days = (now - end).TotalDays;
-        return days < PlanCatalog.OrganiserOnlyDay ? MediaPhase.UploadsClosed
-            : days < PlanCatalog.DeleteDay ? MediaPhase.OrganiserOnly
-            : MediaPhase.Deleted;
+        // Ended and not yet cut down to Free: everyone can still look; nothing new can be added.
+        // Photos are never all removed for a lapse any more (owner, 2026-11-03), so the old
+        // organiser-only and deleted phases only come from a cancelled event.
+        return MediaPhase.UploadsClosed;
     }
 }

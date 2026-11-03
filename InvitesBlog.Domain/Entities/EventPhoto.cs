@@ -85,5 +85,11 @@ public sealed class EventPhoto
     /// </summary>
     public DateTimeOffset? DeletedAt { get; set; }
 
+    /// <summary>
+    /// The organiser picked this one to keep when the event goes back to Free after its pass ends:
+    /// it is kept ahead of everything but the cover photos (see <c>MediaTrim</c>).
+    /// </summary>
+    public bool KeepWhenTrimmed { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }
