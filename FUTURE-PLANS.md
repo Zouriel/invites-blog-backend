@@ -686,7 +686,7 @@ The web half, on all three guest surfaces. No native app; the camera is the brow
 
 Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plans of 2026-09-15.
 
-- **Hosts pay per event, not per month.** Free (1 GB, one album, one night, 90 days, a small "Made
+- **Hosts pay per event, not per month.** (Since 2026-11-03 Free is 300 MB kept forever, and an ended pass goes back to Free: see MediaRetentionService.) Free (1 GB, one album, one night, 90 days, a small "Made
   with invites.blog" on the invitation and album), a **Gold pass** (MVR 199: 10 GB, two albums, three
   days, a year, 100 invitations sent) and a **Platinum pass** (MVR 499: 100 GB, five albums, five days,
   private albums, a year, 500 invitations). **Keep your photos** adds a year for MVR 150. Sending
