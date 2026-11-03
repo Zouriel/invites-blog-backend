@@ -57,16 +57,16 @@ public sealed class AccountService(
 
     /// <param name="platform">
     /// Which app is asking (<c>ios</c>). Providers only an app can offer (Sign in with Apple) are listed
-    /// for the iPhone only; the website and Android get exactly what they always did.
+    /// for the iPhone, and for the website only while web sign-in is switched on (with the website's own
+    /// client id and return URL); Android gets exactly what it always did.
     /// </param>
     public AuthOptionsDto Options(string? platform = null) => new(
         SmsAvailable: SmsIsConfigured(),
         OAuthProviders: authProviders
-            .Where(p => p.IsConfigured)
-            .Where(p => !p.AppOnly || string.Equals(platform, "ios", StringComparison.OrdinalIgnoreCase))
-            .Select(p => p.Descriptor())
+            .Select(p => p.DescriptorFor(platform))
+            .OfType<ExternalAuthDescriptor>()
             .OrderBy(d => d.Provider, StringComparer.Ordinal)
-            .Select(d => new OAuthProviderDto(d.Provider, d.ClientId, d.AuthorizeUrl))
+            .Select(d => new OAuthProviderDto(d.Provider, d.ClientId, d.AuthorizeUrl, d.RedirectUri))
             .ToList());
 
     // ----- Sign up -----------------------------------------------------------------------------
@@ -213,7 +213,7 @@ public sealed class AccountService(
             await uow.SaveChangesAsync(ct);
         }
 
-        await KeepAppleRefreshTokenAsync(link, request.AuthorizationCode, ct);
+        await KeepAppleRefreshTokenAsync(link, request.AuthorizationCode, identity.Audience, ct);
 
         // Google's picture, until the person picks their own. Best effort: it never fails a sign-in.
         await pictures.ImportFromProviderAsync(user, identity.PictureUrl, ct);
@@ -540,13 +540,15 @@ public sealed class AccountService(
     /// can revoke it (App Store 5.1.1(v)). Only while the login has none yet, and only with a key
     /// configured. Best effort: a sign-in never fails over it, and the next sign-in brings a new code.
     /// </summary>
-    private async Task KeepAppleRefreshTokenAsync(UserExternalLogin link, string? code, CancellationToken ct)
+    /// The code is exchanged as the client it was issued to (the token's audience: the app or the website),
+    /// and that client is sealed with the token, since Apple revokes a token only for its own client.
+    private async Task KeepAppleRefreshTokenAsync(UserExternalLogin link, string? code, string? clientId, CancellationToken ct)
     {
         if (link.Provider != "apple" || string.IsNullOrWhiteSpace(code) || link.RefreshTokenSealed is not null) return;
         if (appleTokens is not { IsConfigured: true }) return;
-        var refresh = await appleTokens.ExchangeAsync(code, ct);
+        var refresh = await appleTokens.ExchangeAsync(code, clientId, ct);
         if (refresh is null) return;
-        link.RefreshTokenSealed = AppleTokenSeal.Seal(refresh, config);
+        link.RefreshTokenSealed = AppleTokenSeal.Seal(refresh, config, clientId);
         await uow.SaveChangesAsync(ct);
     }
 

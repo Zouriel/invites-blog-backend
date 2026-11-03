@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Exceptions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -71,6 +72,9 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     /// </summary>
     protected IReadOnlyList<string> AdditionalClientIds { get; } = [];
 
+    /// <summary>Further audiences a subclass accepts while some switch is on (Apple's website client).</summary>
+    protected virtual IEnumerable<string> SwitchedAudiences => [];
+
     private static IReadOnlyList<string> SplitIds(string? raw) =>
         string.IsNullOrWhiteSpace(raw)
             ? []
@@ -100,6 +104,13 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     protected virtual bool EmailVerifiedWhenUnstated => true;
 
     public virtual bool AppOnly => false;
+
+    /// <summary>Declared here (not only as the interface's default) so a subclass can override it: a
+    /// default interface method would be what callers get, whatever a subclass declares.</summary>
+    public virtual ExternalAuthDescriptor? DescriptorFor(string? platform) =>
+        !IsConfigured || (AppOnly && !string.Equals(platform, "ios", StringComparison.OrdinalIgnoreCase))
+            ? null
+            : Descriptor();
 
     public async Task<ExternalIdentity> VerifyAsync(string idToken, string? rawNonce = null, CancellationToken ct = default)
     {
@@ -153,7 +164,8 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
         if (!Uri.TryCreate(picture, UriKind.Absolute, out var pictureUri) || pictureUri.Scheme != Uri.UriSchemeHttps)
             picture = null;
         return new ExternalIdentity(Provider, subject, email,
-            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name, picture, emailVerified);
+            string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name, picture, emailVerified,
+            principal.FindFirst("aud")?.Value);
     }
 
     /// <summary>The token's nonce must be the hex SHA-256 of the raw nonce the app kept.</summary>
@@ -189,7 +201,7 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
             ValidateIssuer = true,
             ValidIssuers = ValidIssuers,
             ValidateAudience = true,
-            ValidAudiences = [ClientId!, .. AdditionalClientIds],
+            ValidAudiences = [ClientId!, .. AdditionalClientIds, .. SwitchedAudiences],
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             IssuerSigningKeys = keys
@@ -332,8 +344,9 @@ public sealed class MicrosoftAuthProvider : OpenIdConnectAuthProvider
 /// <item>The app must send the raw nonce; the token's <c>nonce</c> is its SHA-256.</item>
 /// <item><c>sub</c> is the stable id. The email may be a private relay address and may be missing on
 /// later sign-ins, so only an existing link signs in a token without one.</item>
-/// <item>App only: the website would need a Services ID, so the sign-in options list Apple only when
-/// an iPhone asks.</item>
+/// <item>The website signs in through its own Services ID (<c>OAuth:Apple:WebClientId</c>,
+/// blog.invites.web), accepted as an audience and listed in the website's options only while
+/// <c>OAuth:Apple:WebEnabled</c> is on (<see cref="AppleWebSettings"/>). Android never lists Apple.</item>
 /// </list>
 /// <c>OAuth:Apple:BaseUrl</c> replaces https://appleid.apple.com for the keys (tests use a stand-in);
 /// the issuer is checked against Apple's real one either way.
@@ -344,11 +357,13 @@ public sealed class AppleAuthProvider : OpenIdConnectAuthProvider
     public const string Issuer = "https://appleid.apple.com";
 
     private readonly string baseUrl;
+    private readonly AppleWebSettings web;
 
     public AppleAuthProvider(IConfiguration config, IHttpClientFactory http, ILogger<AppleAuthProvider>? logger = null)
         : base(config, http, logger)
     {
         baseUrl = AppleBaseUrl(config);
+        web = AppleWebSettings.From(config);
     }
 
     /// <summary>Apple's sign-in host, or the stand-in tests point it at. No trailing slash.</summary>
@@ -364,6 +379,22 @@ public sealed class AppleAuthProvider : OpenIdConnectAuthProvider
     protected override bool RequiresEmail => false;
     protected override bool EmailVerifiedWhenUnstated => false;
     public override bool AppOnly => true;
+
+    protected override IEnumerable<string> SwitchedAudiences => web.IsOn ? [web.ClientId!] : [];
+
+    /// <summary>
+    /// The iPhone: the app's own client id. The website (no platform, or <c>web</c>): the Services ID and
+    /// its return URL, only while web sign-in is on. Anything else (Android): not offered.
+    /// </summary>
+    public override ExternalAuthDescriptor? DescriptorFor(string? platform)
+    {
+        if (!IsConfigured) return null;
+        if (string.Equals(platform, "ios", StringComparison.OrdinalIgnoreCase)) return Descriptor();
+        var website = string.IsNullOrEmpty(platform) || string.Equals(platform, "web", StringComparison.OrdinalIgnoreCase);
+        return website && web.IsOn
+            ? new ExternalAuthDescriptor(Provider, web.ClientId!, AuthorizeUrl, web.RedirectUri)
+            : null;
+    }
 
     /// <summary>Apple's identity token carries no name; the app sends it on the first sign-in.</summary>
     protected override string? DisplayName(IReadOnlyDictionary<string, string> claims) => null;

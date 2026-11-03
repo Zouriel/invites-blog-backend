@@ -88,8 +88,9 @@ public sealed class PendingRemovalService(
                     case PendingRemovalKinds.PlaySubscription: await play.CancelSubscriptionAsync(row.Target, ct); break;
                     case PendingRemovalKinds.AppleSignIn:
                         // Unreadable means the server's secret changed since: nothing left to revoke with.
-                        if (Application.Common.AppleTokenSeal.Open(row.Target, config) is { } refresh)
-                            await apple.RevokeAsync(refresh, ct);
+                        // Revoked as the client it was issued to (the app, or the website's Services ID).
+                        if (Application.Common.AppleTokenSeal.OpenWithClient(row.Target, config) is { } refresh)
+                            await apple.RevokeAsync(refresh.Token, refresh.ClientId, ct);
                         else
                             logger.LogWarning("Removal {RemovalId}: the Apple token couldn't be unsealed; dropped.", row.Id);
                         break;

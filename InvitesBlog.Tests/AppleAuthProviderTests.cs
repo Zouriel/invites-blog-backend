@@ -6,6 +6,7 @@ using System.Text.Json;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.Infrastructure.Security;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using NSubstitute;
 using Xunit;
@@ -27,15 +28,21 @@ public class AppleAuthProviderTests
 
     private static string Hash(string raw) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
 
-    private static AppleAuthProvider Sut(string? clientId = BundleId)
+    private const string WebClientId = "blog.invites.web";
+
+    private static AppleAuthProvider Sut(string? clientId = BundleId, bool? webEnabled = null, ILogger<AppleAuthProvider>? logger = null)
     {
         var config = Substitute.For<IConfiguration>();
         config["OAuth:Apple:ClientId"].Returns(clientId);
         config["OAuth:Apple:BaseUrl"].Returns("https://apple.test");
+        // As compose sets it: the website's Services ID is always named; the switch decides.
+        config["OAuth:Apple:WebClientId"].Returns(WebClientId);
+        config["Urls:InviterBase"].Returns("https://invites.blog");
+        if (webEnabled is { } on) config["OAuth:Apple:WebEnabled"].Returns(on ? "true" : "false");
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient().Returns(_ => new HttpClient(new JwksHandler()));
         factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(new JwksHandler()));
-        return new AppleAuthProvider(config, factory);
+        return new AppleAuthProvider(config, factory, logger);
     }
 
     private static string Token(
@@ -137,6 +144,87 @@ public class AppleAuthProviderTests
         Assert.True(sut.AppOnly);
         Assert.Equal(BundleId, sut.Descriptor().ClientId);
         Assert.False(Sut(clientId: null).IsConfigured);
+    }
+
+    // ----- The website (Services ID blog.invites.web) ---------------------------------------------
+
+    [Fact]
+    public async Task With_web_sign_in_on_a_token_for_the_website_is_accepted_and_says_which_client()
+    {
+        var log = new ListLogger();
+        var identity = await Sut(webEnabled: true, logger: log).VerifyAsync(Token(audience: WebClientId), RawNonce);
+
+        Assert.Equal("001234.abcdef0123456789.0123", identity.SubjectId);
+        Assert.Equal(WebClientId, identity.Audience);
+        Assert.Equal((LogLevel.Information, $"apple sign-in token accepted for client {WebClientId}"), log.Lines.Single());
+    }
+
+    [Fact]
+    public async Task With_web_sign_in_off_a_token_for_the_website_is_refused_and_logged_as_such()
+    {
+        var log = new ListLogger();
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            Sut(webEnabled: false, logger: log).VerifyAsync(Token(audience: WebClientId), RawNonce));
+
+        Assert.Equal("oauth_invalid_token", ex.ErrorCode);
+        Assert.Equal(LogLevel.Warning, log.Lines.Single().Level);
+        Assert.StartsWith("apple sign-in token refused", log.Lines.Single().Text);
+        Assert.EndsWith($"for client {WebClientId}", log.Lines.Single().Text);
+        // Unset is off too.
+        await Assert.ThrowsAsync<UnauthorizedException>(() => Sut().VerifyAsync(Token(audience: WebClientId), RawNonce));
+    }
+
+    [Fact]
+    public async Task With_web_sign_in_on_the_app_still_works_and_an_unknown_client_is_still_refused()
+    {
+        var sut = Sut(webEnabled: true);
+
+        Assert.Equal(BundleId, (await sut.VerifyAsync(Token(), RawNonce)).Audience);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => sut.VerifyAsync(Token(audience: "com.someone.else"), RawNonce));
+    }
+
+    /// <summary>
+    /// The website sends Apple the nonce's hash and keeps the raw one, as the app does; Apple puts what it
+    /// was given in the token as-is. So the token carries the hash and the raw nonce is what verifies it.
+    /// Had the raw nonce been sent to Apple (so the token carries it as-is), the sign-in would be refused.
+    /// </summary>
+    [Fact]
+    public async Task A_website_token_verifies_with_the_raw_nonce_whose_hash_apple_was_given()
+    {
+        var sut = Sut(webEnabled: true);
+
+        await sut.VerifyAsync(Token(audience: WebClientId, nonce: Hash(RawNonce)), RawNonce);
+        await Assert.ThrowsAsync<UnauthorizedException>(() => sut.VerifyAsync(Token(audience: WebClientId, nonce: RawNonce), RawNonce));
+        await Assert.ThrowsAsync<UnauthorizedException>(() => sut.VerifyAsync(Token(audience: WebClientId, nonce: Hash(RawNonce)), Hash(RawNonce)));
+    }
+
+    [Fact]
+    public void The_website_is_offered_apple_only_while_web_sign_in_is_on_and_android_never()
+    {
+        var off = Sut(webEnabled: false);
+        Assert.Null(off.DescriptorFor(null));
+        Assert.Null(off.DescriptorFor("web"));
+        Assert.Equal(BundleId, off.DescriptorFor("ios")!.ClientId);
+
+        var on = Sut(webEnabled: true);
+        var website = on.DescriptorFor(null)!;
+        Assert.Equal(WebClientId, website.ClientId);
+        Assert.Equal("https://invites.blog/auth/apple/callback", website.RedirectUri);
+        Assert.Equal(WebClientId, on.DescriptorFor("web")!.ClientId);
+        Assert.Null(on.DescriptorFor("android"));
+        Assert.Equal(BundleId, on.DescriptorFor("ios")!.ClientId);
+        Assert.Null(on.DescriptorFor("ios")!.RedirectUri);
+
+        Assert.Null(Sut(clientId: null, webEnabled: true).DescriptorFor(null));
+    }
+
+    private sealed class ListLogger : ILogger<AppleAuthProvider>
+    {
+        public List<(LogLevel Level, string Text)> Lines { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Lines.Add((logLevel, formatter(state, exception)));
     }
 
     private static async Task Refused(string token, string? rawNonce = RawNonce)
