@@ -6,6 +6,7 @@ using InvitesBlog.Domain.Authorization;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace InvitesBlog.Tests.Integration;
@@ -173,6 +174,99 @@ public sealed class PushNotificationTests(PostgresApiFixture api)
         var push = Assert.Single(api.Apns.To(iphone));
         Assert.Equal(("You've been added to Nikah", $"/dashboard/{ev}"), (push.Title, push.Path));
         Assert.Empty(api.Apns.To(android));
+        // ...and only Android phones go to Google.
+        var fcm = Assert.Single(api.Fcm.To(android));
+        Assert.Equal(("You've been added to Nikah", push.Body, $"/dashboard/{ev}"), (fcm.Title, fcm.Body, fcm.Path));
+        Assert.Empty(api.Fcm.To(iphone));
+    }
+
+    // ----- Android ----------------------------------------------------------------------------------
+
+    /// <summary>Every kind of notification reaches an Android phone with the same words and path as the iPhone.</summary>
+    [PostgresFact]
+    public async Task Android_phones_get_every_notification_an_iPhone_gets_in_the_same_words()
+    {
+        var host = await UserAsync(name: "Mariyam");
+        var guest = await UserAsync(name: "Hawwa");
+        var celebrant = await UserAsync();
+        var ev = await EventAsync(host, title: "Mariyam's party", inviterName: "Mariyam");
+        var guestRow = await GuestAsync(ev, "Hawwa", guest.Email);
+        var phones = new Dictionary<Person, (string Ios, string Android)>();
+        foreach (var p in new[] { host, guest, celebrant })
+            phones[p] = (await RegisterAsync(p, DeviceToken()), await RegisterAsync(p, DeviceToken(), platform: "android"));
+
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(host.Token).PostAsync($"/api/campaigns/{ev}/finalize", null)).StatusCode);
+        await api.DrainPushesAsync();
+        var invite = await InviteAsync(ev, guestRow, InviteStatus.Sent);
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(guest.Token).PostAsJsonAsync($"/api/invites/{invite}/rsvp", new { status = "Going" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(guest.Token).PostAsJsonAsync($"/api/me/feed/{ev}/comments", new { body = "Can't wait" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(host.Token).PostAsJsonAsync($"/api/campaigns/{ev}/celebrants", new { name = "C", email = celebrant.Email })).StatusCode);
+        await api.DrainPushesAsync();
+
+        var kinds = new List<string>();
+        foreach (var (person, (ios, android)) in phones)
+        {
+            var apple = api.Apns.To(ios).Select(r => (r.Title, r.Body, r.Path)).ToList();
+            var google = api.Fcm.To(android).Select(r => (r.Title, r.Body, r.Path)).ToList();
+            Assert.NotEmpty(apple);
+            Assert.Equal(apple, google);
+            kinds.AddRange(google.Select(g => g.Path.Split('/')[1].Split('?')[0]));
+            foreach (var r in api.Fcm.To(android))
+            {
+                Assert.Equal($"https://fcm.googleapis.com/v1/projects/{FcmStub.Project}/messages:send", r.Url);
+                Assert.Equal($"Bearer {FcmStub.AccessToken}", r.Authorization);
+                Assert.Equal("HIGH", r.Message.GetProperty("android").GetProperty("priority").GetString());
+            }
+        }
+        // Invitation (guest), answer (host, and the celebrant: the line is drained after they were added),
+        // comment (host), being added (celebrant).
+        Assert.Equal(["dashboard", "dashboard", "dashboard", "feed", "invitation"], kinds.Order());
+        AssertNoTokenLogged([.. phones.Values.SelectMany(v => new[] { v.Ios, v.Android })]);
+    }
+
+    [PostgresFact]
+    public async Task Android_tokens_Google_reports_dead_are_forgotten_and_the_others_kept()
+    {
+        var host = await UserAsync();
+        var person = await UserAsync();
+        var ev = await EventAsync(host);
+        var good = await RegisterAsync(person, DeviceToken(), platform: "android");
+        var uninstalled = await RegisterAsync(person, DeviceToken(), platform: "android");
+        var notAToken = await RegisterAsync(person, DeviceToken(), platform: "android");
+        var busy = await RegisterAsync(person, DeviceToken(), platform: "android");
+        api.Fcm.Refuse[uninstalled] = (HttpStatusCode.NotFound, FcmStub.Unregistered);
+        api.Fcm.Refuse[notAToken] = (HttpStatusCode.BadRequest, FcmStub.NotAToken);
+        api.Fcm.Refuse[busy] = (HttpStatusCode.TooManyRequests, FcmStub.Quota);
+
+        await api.Client(host.Token).PostAsJsonAsync($"/api/campaigns/{ev}/celebrants", new { name = "P", email = person.Email });
+        await api.DrainPushesAsync();
+
+        Assert.Single(api.Fcm.To(good));
+        var left = await api.ReadAsync(db => db.DeviceTokens.Where(d => d.UserId == person.Id).Select(d => d.Token).ToListAsync());
+        Assert.Equal(new[] { good, busy }.Order(), left.Order());
+        AssertNoTokenLogged(good, uninstalled, notAToken, busy);
+    }
+
+    /// <summary>The command the owner's test push uses, against the running API's database and FCM.</summary>
+    [PostgresFact]
+    public async Task The_test_push_command_reaches_the_account_s_phones_and_says_what_it_did()
+    {
+        var person = await UserAsync();
+        var android = await RegisterAsync(person, DeviceToken(), platform: "android");
+        var iphone = await RegisterAsync(person, DeviceToken());
+        var nobody = await UserAsync();
+
+        using var scope = api.Services.CreateScope();
+        var output = new StringWriter();
+        Assert.Equal(0, await InvitesBlog.Api.PushTestCommand.SendAsync(scope.ServiceProvider, person.Email.ToUpperInvariant(), output));
+        Assert.Contains("android 1", output.ToString());
+        Assert.Contains("ios 1", output.ToString());
+        var fcm = Assert.Single(api.Fcm.To(android));
+        Assert.Equal((InvitesBlog.Api.PushTestCommand.Body, "/inbox"), (fcm.Body, fcm.Path));
+        Assert.Single(api.Apns.To(iphone));
+
+        Assert.Equal(1, await InvitesBlog.Api.PushTestCommand.SendAsync(scope.ServiceProvider, nobody.Email, new StringWriter()));
+        Assert.Equal(1, await InvitesBlog.Api.PushTestCommand.SendAsync(scope.ServiceProvider, "nobody-at-all@example.com", new StringWriter()));
     }
 
     // ----- Dead tokens and failures -----------------------------------------------------------------

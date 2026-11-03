@@ -113,10 +113,38 @@ public class FcmPushSenderTests
         Assert.Equal(["alive-1", "alive-2"], Remaining());
     }
 
+    /// <summary>The answers FCM gives for a token that will never work again (seen from the real API).</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, """{"error":{"code":400,"message":"The registration token is not a valid FCM registration token","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"INVALID_ARGUMENT"}]}}""")]
+    [InlineData(HttpStatusCode.Forbidden, """{"error":{"code":403,"message":"SenderId mismatch","status":"PERMISSION_DENIED","details":[{"errorCode":"SENDER_ID_MISMATCH"}]}}""")]
+    public async Task A_token_fcm_calls_invalid_or_foreign_is_forgotten(HttpStatusCode status, string body)
+    {
+        Device("alive");
+        Device("dead");
+        _fcm.Reply["dead"] = (status, body);
+
+        await Send();
+
+        Assert.Equal(["alive"], Remaining());
+    }
+
+    [Fact]
+    public async Task Android_gets_high_priority_on_the_app_s_channel()
+    {
+        Device("phone");
+
+        await Send();
+
+        var android = _fcm.Requests.Single().Body["message"]!["android"]!;
+        Assert.Equal("HIGH", (string?)android["priority"]);
+        Assert.Equal("events", (string?)android["notification"]!["channel_id"]);
+    }
+
     /// <summary>A 404 or 400 on its own doesn't mean the device is gone: our message or project could be wrong.</summary>
     [Theory]
     [InlineData(HttpStatusCode.NotFound, """{"error":{"code":404,"status":"NOT_FOUND"}}""")]
     [InlineData(HttpStatusCode.BadRequest, """{"error":{"status":"INVALID_ARGUMENT","details":[{"errorCode":"INVALID_ARGUMENT"}]}}""")]
+    [InlineData(HttpStatusCode.BadRequest, """{"error":{"message":"Invalid JSON payload received. Unknown name \"foo\"","status":"INVALID_ARGUMENT","details":[{"errorCode":"INVALID_ARGUMENT"}]}}""")]
     [InlineData(HttpStatusCode.ServiceUnavailable, "<html>not json</html>")]
     [InlineData(HttpStatusCode.InternalServerError, "[]")]
     public async Task Any_other_failure_keeps_the_device(HttpStatusCode status, string body)

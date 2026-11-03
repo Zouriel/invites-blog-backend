@@ -5,6 +5,13 @@ using InvitesBlog.Infrastructure.Notifications;
 using InvitesBlog.Infrastructure.Seed;
 using Microsoft.AspNetCore.HttpOverrides;
 
+// `dotnet InvitesBlog.Api.dll send-test-push <email>`: one test notification, then exit (PushTestCommand).
+if (args.Length > 0 && args[0] == PushTestCommand.Name)
+{
+    Environment.ExitCode = await PushTestCommand.RunAsync(args);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInvitesBlogInfrastructure(builder.Configuration);
@@ -27,6 +34,17 @@ builder.Services.AddHostedService<InvitesBlog.Infrastructure.Accounts.PendingRem
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.Push.PushWorker>();
 
 var app = builder.Build();
+
+// Which push services are on, said at every start; a missing FCM service-account file is said loudly
+// here rather than at the first notification.
+{
+    var fcmOn = bool.TryParse(app.Configuration["Push:Enabled"], out var fcm) && fcm;
+    var apnsOn = InvitesBlog.Infrastructure.Notifications.Push.ApnsSettings.From(app.Configuration).IsConfigured;
+    app.Logger.LogInformation("Push: Android (FCM) {Fcm}, iPhone (APNs) {Apns}.", fcmOn ? "on" : "off", apnsOn ? "on" : "off");
+    var saPath = app.Configuration[InvitesBlog.Infrastructure.Notifications.Push.ServiceAccountFcmCredentials.ConfigKey];
+    if (fcmOn && (string.IsNullOrWhiteSpace(saPath) || !File.Exists(saPath)))
+        app.Logger.LogError("Push: FCM is on but the service-account file at Push:ServiceAccountPath is missing; Android pushes will fail.");
+}
 
 // There is no real payment provider yet, so production runs on the Fake one on purpose. Said out loud
 // at every start so it is never mistaken for a working checkout: with it, "paid" means somebody
