@@ -487,7 +487,8 @@ public sealed class GuestController(
             at < list.Count - 1 ? $"{boxPath}/{list[at + 1].Id}" : null,
             GuestPages.DownloadName(photo.Id, photo.OriginalUrl, isVideo),
             await PaletteAsync(inviteId.Value, ct),
-            nonce);
+            nonce,
+            photo.FavouriteCount);
 
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -844,7 +845,8 @@ public sealed class GuestController(
             $"/r/{renderId}/camera",
             await PaletteAsync(inviteId, ct),
             nonce,
-            await invites.CreditForCampaignAsync(subject.Value.CampaignId, ct));
+            await invites.CreditForCampaignAsync(subject.Value.CampaignId, ct),
+            box.Photos.ToDictionary(p => p.Id, p => p.FavouriteCount));
 
         // Mostly photographs, so it needs img-src; and it carries one nonced script so a deletion
         // can be confirmed and carried out without two page loads. Not sandboxed — it holds the
