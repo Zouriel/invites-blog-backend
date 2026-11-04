@@ -176,6 +176,12 @@ public sealed class MediaBucket
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>When the owner and the people the event is for were last told about new favourites here.</summary>
+    public DateTimeOffset? FavouritesNotifiedAt { get; set; }
+
+    /// <summary>The newest favourite that notice covered; anything after it is still to tell.</summary>
+    public DateTimeOffset? FavouritesNotifiedUpTo { get; set; }
 }
 
 /// <summary>

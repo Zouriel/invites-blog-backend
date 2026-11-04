@@ -951,6 +951,37 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("event_photos", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.Favourite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("PhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("photo_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PhotoId")
+                        .HasDatabaseName("idx_favourites_photo_id");
+
+                    b.HasIndex("UserId", "PhotoId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_favourites_user_photo");
+
+                    b.ToTable("favourites", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.GooglePlayPurchase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1357,6 +1388,14 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("EventDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("event_date");
+
+                    b.Property<DateTimeOffset?>("FavouritesNotifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("favourites_notified_at");
+
+                    b.Property<DateTimeOffset?>("FavouritesNotifiedUpTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("favourites_notified_up_to");
 
                     b.Property<bool>("IsRestricted")
                         .HasColumnType("boolean")
@@ -2865,6 +2904,21 @@ namespace InvitesBlog.Infrastructure.Migrations
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.DeviceToken", b =>
                 {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.Favourite", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
+                        .WithMany()
+                        .HasForeignKey("PhotoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
