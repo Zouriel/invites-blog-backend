@@ -196,6 +196,19 @@ public sealed class PushNotificationService(
         return ids.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Who hears about hearts in an album: its owner, and (when it belongs to an event) the event's
+    /// organisers and the people it is for.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> AlbumPeopleAsync(MediaBucket bucket, CancellationToken ct)
+    {
+        var ids = new List<Guid> { bucket.OwnerUserId };
+        if (bucket.CampaignId != Guid.Empty && await campaigns.GetByIdAsync(bucket.CampaignId, ct) is { } campaign
+            && campaign.Status != CampaignStatus.Cancelled)
+            ids.AddRange(await PeopleOfAsync(campaign, ct));
+        return ids.Distinct().ToList();
+    }
+
     /// <summary>The organisers and the people the event is for: everyone who sees its dashboard.</summary>
     private async Task<IReadOnlyList<Guid>> PeopleOfAsync(Campaign campaign, CancellationToken ct)
     {

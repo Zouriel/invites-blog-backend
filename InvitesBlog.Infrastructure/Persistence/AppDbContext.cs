@@ -60,6 +60,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
     public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
+    public DbSet<Favourite> Favourites => Set<Favourite>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -548,6 +549,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("idx_user_external_logins_provider_subject");
             e.HasOne(x => x.User).WithMany(u => u.ExternalLogins)
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Favourite>(e =>
+        {
+            e.ToTable("favourites");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.PhotoId }).IsUnique().HasDatabaseName("ux_favourites_user_photo");
+            e.HasIndex(x => x.PhotoId).HasDatabaseName("idx_favourites_photo_id");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.PhotoId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<DeviceToken>(e =>

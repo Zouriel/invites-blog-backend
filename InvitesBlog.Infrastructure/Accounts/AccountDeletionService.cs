@@ -521,6 +521,8 @@ public sealed class AccountDeletionService(
     {
         await db.CommentLikes.Where(l => l.UserId == userId).ExecuteDeleteAsync(ct);
         await db.PostLikes.Where(l => l.UserId == userId).ExecuteDeleteAsync(ct);
+        // Their hearts: a reference to someone else's photo, nothing of theirs to keep.
+        await db.Favourites.Where(f => f.UserId == userId).ExecuteDeleteAsync(ct);
 
         // The feed shows a reply only under its comment. Other people's replies to theirs are other
         // people's words, so they move up to the top level instead of disappearing.

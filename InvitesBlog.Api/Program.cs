@@ -20,6 +20,8 @@ builder.Services.AddInvitesBlogApi(builder.Configuration);
 // worker because the worker is not deployed; it must stay registered in exactly one host, or the
 // digest goes out twice. Dormant unless Notifications:PhotoDigest:Enabled is true.
 builder.Services.AddHostedService<PhotoDigestService>();
+// Hearts in an album, batched to one push per album per quiet period. Exactly one host, like the digest.
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.FavouriteNoticeService>();
 // Emails organisers as a pass event's photo cover runs out, and removes the photos 90 days after.
 // Free events have no end and are never touched.
 builder.Services.AddHostedService<MediaRetentionService>();

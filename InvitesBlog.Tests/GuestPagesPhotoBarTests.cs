@@ -158,4 +158,19 @@ public class GuestPagesPhotoBarTests
         Assert.Equal(1, Regex.Matches(html, "<div class=\"tile\" data-id=").Count);
         Assert.Contains(".tile[data-kind=\"video\"]::after", html);
     }
+
+    [Fact]
+    public void Tiles_show_their_hearts_in_a_corner_and_nothing_at_zero()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var html = GuestPages.Photos("/r/x/photos", "/r/x", "Party",
+            [(a, "t.jpg", "u.jpg", "o.jpg", null, false, false), (b, "t2.jpg", "u2.jpg", "o2.jpg", null, false, false)],
+            false, null, "/r/x/camera", likes: new Dictionary<Guid, int> { [a] = 1234, [b] = 0 });
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "class=\"likes\""));
+        Assert.Contains("aria-label=\"1234 likes\"", html);
+        Assert.Contains("</svg>1.2k</span>", html);
+        Assert.Equal("999k", GuestPages.CompactCount(999_499));
+        Assert.Equal("", GuestPages.LikesPill(0));
+    }
 }

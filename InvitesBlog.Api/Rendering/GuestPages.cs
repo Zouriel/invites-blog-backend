@@ -100,6 +100,10 @@ public static class GuestPages
            or Select starts choosing several. Nothing to long-press-save or drag in the way. */
         .tile, .tile * { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
         .tile .open { display:block; width:100%; height:100%; }
+        .likes { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:999px;
+          background:rgba(0,0,0,.55); color:#fff; font-size:.72rem; font-weight:600; line-height:1.2; pointer-events:none; }
+        .likes svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:2; stroke-linejoin:round; }
+        .tile .likes { position:absolute; right:5px; bottom:5px; z-index:1; }
         .tile img { transition:transform .18s ease; }
         .grid.choosing .tile::before { content:""; position:absolute; top:6px; left:6px; z-index:1; width:22px; height:22px;
             box-sizing:border-box; border-radius:999px; border:2px solid #fff; background:rgba(0,0,0,.35);
@@ -335,7 +339,8 @@ public static class GuestPages
         IReadOnlyList<(Guid Id, string ThumbUrl, string Url, string OriginalUrl, string? Who,
             bool CanDelete, bool IsVideo)> photos,
         bool canUpload, string? error, string cameraPath, GuestPalette? palette = null,
-        string? nonce = null, Application.Dtos.Invites.GuestCredit? credit = null)
+        string? nonce = null, Application.Dtos.Invites.GuestCredit? credit = null,
+        IReadOnlyDictionary<Guid, int>? likes = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -348,6 +353,7 @@ public static class GuestPages
                    <div class="tile"{(p.IsVideo ? " data-kind=\"video\"" : "")} data-id="{p.Id}" data-original="{E(p.OriginalUrl)}"{(p.CanDelete ? " data-mine=\"1\"" : "")}>
                      <a class="open" href="{E(action)}/{p.Id}"><img src="{E(p.ThumbUrl)}" alt="" loading="lazy" draggable="false"></a>
                      {(p.Who is null ? "" : $"<span class=\"who\">{E(p.Who)}</span>")}
+                     {LikesPill(likes?.GetValueOrDefault(p.Id) ?? 0)}
                    </div>
                    """))}
                </div>
@@ -472,9 +478,25 @@ public static class GuestPages
     /// open the bare file). Download, Share (with script) and Remove (for the guest's own, through the
     /// confirmation page) live here and in the album's selection bar, never on a tile.
     /// </summary>
+    /// <summary>The heart and count in a tile's corner; nothing at 0. A guest by link sees hearts but can't add one.</summary>
+    public static string LikesPill(int count) => count <= 0
+        ? ""
+        : $"<span class=\"likes\" role=\"img\" aria-label=\"{count} {(count == 1 ? "like" : "likes")}\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 20.5C9 18.6 2.5 14.4 2.5 9 2.5 5.9 4.8 3.75 7.5 3.75c1.9 0 3.5 1.05 4.5 2.65 1-1.6 2.6-2.65 4.5-2.65 2.7 0 5 2.15 5 5.25 0 5.4-6.5 9.6-9.5 11.5z\"/></svg>{CompactCount(count)}</span>";
+
+    /// <summary>1234 -> "1.2k": the same shortening as the apps' like counts.</summary>
+    public static string CompactCount(int n)
+    {
+        if (n < 1000) return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var (d, s) = n < 1_000_000 ? (1000.0, "k") : (1_000_000.0, "m");
+        var x = n / d;
+        var v = x < 10 ? Math.Floor(x * 10) / 10 : Math.Floor(x);
+        return v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + s;
+    }
+
     public static string PhotoView(
         string boxPath, Guid id, string url, string originalUrl, bool isVideo, string? who, bool canDelete,
-        string? prevPath, string? nextPath, string downloadName, GuestPalette? palette = null, string? nonce = null)
+        string? prevPath, string? nextPath, string downloadName, GuestPalette? palette = null, string? nonce = null,
+        int likes = 0)
     {
         var media = isVideo
             ? $"<video class=\"media\" src=\"{E(url)}\" controls playsinline preload=\"metadata\"></video>"
@@ -485,6 +507,7 @@ public static class GuestPages
               <div class="view__bar">
                 <a class="view__btn" href="{E(boxPath)}">&#8592; Album</a>
                 <span class="view__sp"></span>
+                {LikesPill(likes)}
                 <a class="view__btn" href="{E(originalUrl)}" download="{E(downloadName)}">Download</a>
                 {(nonce is null ? "" : "<button type=\"button\" class=\"view__btn\" id=\"view-share\" hidden>Share</button>")}
                 {(canDelete ? $"<a class=\"view__btn view__danger\" href=\"{E(boxPath)}/{id}/remove\">Remove</a>" : "")}
