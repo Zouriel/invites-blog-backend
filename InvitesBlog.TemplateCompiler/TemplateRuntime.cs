@@ -27,6 +27,56 @@ public static class TemplateRuntime
             window.dispatchEvent(new CustomEvent('invite:data', { detail: data }));
           } catch (e) {}
 
+          // The event's date and time, rewritten in the viewer's own locale (day/month order, 12 or 24
+          // hour clock) on the EVENT's clock, plus "(9:00 pm your time)" when the viewer's clock reads
+          // differently. The server already wrote a plain English default, so a browser without Intl,
+          // or a template whose host typed their own wording (dateAuto/timeAuto false), keeps what it has.
+          function localiseWhen() {
+            try {
+              var ev = data && data.event;
+              if (!ev || !ev.startsAt || !ev.timeZone || !window.Intl) return;
+              var ms = Date.parse(ev.startsAt);
+              if (isNaN(ms)) return;
+              var zone = ev.timeZone;
+              var locale = (navigator.languages && navigator.languages[0]) || navigator.language || undefined;
+              var mine = Intl.DateTimeFormat().resolvedOptions().timeZone;
+              function fmt(opts, z) {
+                opts.timeZone = z;
+                return new Intl.DateTimeFormat(locale, opts).format(new Date(ms)).replace(/[  ]/g, ' ');
+              }
+              function offset(z) {
+                var f = new Intl.DateTimeFormat('en-US', { timeZone: z, hourCycle: 'h23', year: 'numeric',
+                  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                var p = {};
+                f.formatToParts(new Date(ms)).forEach(function (x) { if (x.type !== 'literal') p[x.type] = +x.value; });
+                return Math.round((Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second) -
+                  Math.floor(ms / 1000) * 1000) / 60000);
+              }
+              function label(z) {
+                var parts = new Intl.DateTimeFormat(locale, { timeZone: z, timeZoneName: 'short' }).formatToParts(new Date(ms));
+                for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') {
+                  return parts[i].value.replace(/^(GMT|UTC)[+-]0(:00)?$/, 'GMT');
+                }
+                return z;
+              }
+              var clock = { hour: 'numeric', minute: '2-digit' };
+              var dateText = fmt({ weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }, zone);
+              var timeText = fmt(clock, zone) + ' ' + label(zone);
+              if (mine && mine !== zone && offset(mine) !== offset(zone)) {
+                var dayHere = fmt({ year: 'numeric', month: 'numeric', day: 'numeric' }, zone);
+                var dayThere = fmt({ year: 'numeric', month: 'numeric', day: 'numeric' }, mine);
+                timeText += ' (' + (dayHere !== dayThere ? fmt({ weekday: 'short' }, mine) + ' ' : '') +
+                  fmt(clock, mine) + ' your time)';
+              }
+              if (ev.dateAuto) {
+                Array.prototype.forEach.call(document.querySelectorAll('[data-var="event.date"]'), function (n) { n.textContent = dateText; });
+              }
+              if (ev.timeAuto && !ev.allDay) {
+                Array.prototype.forEach.call(document.querySelectorAll('[data-var="event.time"]'), function (n) { n.textContent = timeText; });
+              }
+            } catch (e) {}
+          }
+
           var sections = [];
           var envelope = null;
 
@@ -58,6 +108,7 @@ public static class TemplateRuntime
             sections = Array.prototype.slice.call(
               document.querySelectorAll('.ib-section, [data-reveal]'));
             envelope = document.querySelector('.ib-envelope, [data-envelope]');
+            localiseWhen();
             revealInView(); // whatever is already on screen
             publish(0);
             window.addEventListener('scroll', function () {

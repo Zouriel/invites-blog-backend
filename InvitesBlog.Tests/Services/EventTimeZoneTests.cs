@@ -175,6 +175,32 @@ public class EventTimeZoneTests
     // ----- The invitation itself ---------------------------------------------------------------------
 
     [Fact]
+    public void Wording_the_host_typed_is_not_rewritten_by_the_page()
+    {
+        var render = new InviteRenderService(new RuleEngine(), new ConfigurationBuilder().Build());
+        var campaign = new Campaign
+        {
+            Id = Guid.NewGuid(), Title = "Wedding", TemplateVersion = "1.0.0", Status = CampaignStatus.Dispatched,
+            EventStartAt = LondonWinter, TimeZone = London,
+            CustomContentJson = "{\"date\":\"Sunday morning\"}", ThemeOverridesJson = "{}", RulesJson = "{\"rules\":[]}", TemplateManifestJson = "{}",
+        };
+        var ev = (JsonObject)((JsonObject)render.Build(campaign, TestData.Template(), new Guest { Id = Guid.NewGuid(), Name = "N", Gender = "female" },
+            new Invite { Id = Guid.NewGuid() }, "https://x/i/t", "Host", null, null).Data)["event"]!;
+        Assert.False(ev["dateAuto"]!.GetValue<bool>());
+        Assert.True(ev["timeAuto"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void The_page_script_writes_the_date_and_time_for_the_viewers_locale_and_zone()
+    {
+        var js = InvitesBlog.TemplateCompiler.TemplateRuntime.Js;
+        Assert.Contains("localiseWhen();", js);
+        Assert.Contains("your time)", js);
+        Assert.Contains("navigator.languages", js);
+        Assert.Contains("ev.dateAuto", js);
+    }
+
+    [Fact]
     public void The_invitation_shows_the_events_date_and_time_with_its_zone()
     {
         var render = new InviteRenderService(new RuleEngine(), new ConfigurationBuilder().Build());
@@ -191,6 +217,9 @@ public class EventTimeZoneTests
         Assert.Equal("7:00 pm GMT", ev["time"]!.ToString());
         Assert.Equal("2027-01-16T19:00:00Z", ev["startsAt"]!.ToString());
         Assert.Equal(London, ev["timeZone"]!.ToString());
+        // Generated defaults: the page may re-write them in the viewer's locale and add "your time".
+        Assert.True(ev["dateAuto"]!.GetValue<bool>());
+        Assert.True(ev["timeAuto"]!.GetValue<bool>());
 
         // The same instant on a Maldives event (every event made before zones existed).
         campaign.TimeZone = Male;
