@@ -164,7 +164,7 @@ public sealed class SubscriptionRenewalService(
             await billing.FulfilAsync(paid, ct);
             var renewed = await users.Query().FirstAsync(u => u.Id == user.Id, ct);
             if (renewed.Email is { } to)
-                await email.SendAsync(RenewalEmails.Renewed(to, plan, amount, currency, renewed.SubscriptionEndsAt, BillingLink), ct);
+                await email.SendAsync(RenewalEmails.Renewed(to, plan, amount, currency, renewed.SubscriptionEndsAt, BillingLink, renewed.TimeZone), ct);
             logger.LogInformation("Renewed {Plan} for account {UserId}.", plan, user.Id);
             return true;
         }

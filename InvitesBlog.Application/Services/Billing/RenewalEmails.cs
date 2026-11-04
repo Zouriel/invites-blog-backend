@@ -11,10 +11,10 @@ public static class RenewalEmails
     private const string Sans = "-apple-system,'Segoe UI',Roboto,Arial,sans-serif";
 
     /// <summary>The saved card was charged: here is the receipt, and when it renews next.</summary>
-    public static EmailMessage Renewed(string to, string plan, decimal amount, string currency, DateTimeOffset? until, string link) =>
+    public static EmailMessage Renewed(string to, string plan, decimal amount, string currency, DateTimeOffset? until, string link, string? timeZone = null) =>
         Build(to, $"Your {plan} plan has renewed",
             $"We've renewed <strong>{E(plan)}</strong> and charged <strong>{E(currency)} {amount:0.00}</strong> to your saved card." +
-            (until is { } u ? $" It now runs until {E(Day(u))} and renews again then." : "") +
+            (until is { } u ? $" It now runs until {E(Day(u, timeZone))} and renews again then." : "") +
             " Please keep this email as your receipt. You can turn off automatic renewal at any time under Billing.",
             "See billing", link);
 
@@ -35,8 +35,10 @@ public static class RenewalEmails
             "Renew it from Billing to keep it running.",
             "Renew now", link);
 
-    private static string Day(DateTimeOffset d) =>
-        d.ToOffset(TimeSpan.FromHours(5)).ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("en-GB"));
+    /// <summary>The day in the account's own time zone (Maldives time for accounts that never set one).</summary>
+    public static string Day(DateTimeOffset d, string? timeZone) =>
+        InvitesBlog.Application.Events.EventTime.Local(d, timeZone)
+            .ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("en-GB"));
 
     private static EmailMessage Build(string to, string subject, string bodyHtml, string cta, string link)
     {
