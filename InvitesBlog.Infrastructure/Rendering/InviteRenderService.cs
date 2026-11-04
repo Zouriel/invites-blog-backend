@@ -48,6 +48,11 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             // the IANA zone it belongs to.
             ["startsAt"] = campaign.EventStartAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             ["timeZone"] = campaign.TimeZone,
+            // Whether the date/time above are the generated defaults (the page then re-writes them in the
+            // viewer's locale and adds "your time") or wording the host typed (kept as typed).
+            ["dateAuto"] = Str(content, "date") is null,
+            ["timeAuto"] = Str(content, "time") is null,
+            ["allDay"] = campaign.AllDay,
             ["schedule"] = Str(content, "schedule"),
             ["dressCode"] = Str(content, "dressCode"),
             ["venue"] = new JsonObject

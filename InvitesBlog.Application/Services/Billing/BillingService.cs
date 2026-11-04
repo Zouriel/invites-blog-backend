@@ -50,7 +50,7 @@ public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
     DateTimeOffset? PassUntil, DateTimeOffset? KeepPhotosUntil, DateTimeOffset? CoveredUntil, string Phase,
     SendingAllowanceDto Sending, bool AtVenue, string Pass, bool PassActive, PassOfferDto Offer, bool IsDraft,
-    DateTimeOffset? TrimAt = null, long? TrimBytes = null);
+    DateTimeOffset? TrimAt = null, long? TrimBytes = null, string? TimeZone = null);
 
 public sealed record BillingPaymentDto(
     Guid Id, string Item, string Description, decimal Amount, string Currency, string Status,
@@ -200,7 +200,8 @@ public sealed class BillingService(
             c.EventPass.ToString(), pass != EventPassKind.None, await offers.ForCampaignAsync(c.Id, ct),
             c.Status == CampaignStatus.Draft,
             plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimAt : null,
-            plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimBytes : null);
+            plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimBytes : null,
+            c.TimeZone);
     }
 
     public async Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default)
