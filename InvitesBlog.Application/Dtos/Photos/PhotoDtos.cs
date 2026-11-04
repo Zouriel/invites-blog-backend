@@ -30,7 +30,11 @@ public sealed record EventPhotoDto(
     /// What the item counts against its album, in bytes: the original plus its viewing copies, so a little
     /// more than saving or sharing it downloads. The app shows it as "about".
     /// </summary>
-    long SizeBytes = 0);
+    long SizeBytes = 0,
+    /// <summary>How many people hearted this (accounts still active). Shown in a corner of the tile.</summary>
+    int FavouriteCount = 0,
+    /// <summary>Whether the signed-in caller hearted it. Always false for a guest without an account.</summary>
+    bool Favourited = false);
 
 /// <summary>An event's photo box as a guest or host sees it.</summary>
 public sealed record EventPhotoBoxDto(

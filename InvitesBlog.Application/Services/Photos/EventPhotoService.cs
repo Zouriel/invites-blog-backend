@@ -154,8 +154,31 @@ public sealed class EventPhotoService(
     IVideoTools? videoTools = null,
     IRepository<VideoTrimJob>? trimJobs = null,
     IModerationViewService? moderation = null,
-    IRepository<AppUser>? users = null) : IEventPhotoService
+    IRepository<AppUser>? users = null,
+    IRepository<Favourite>? favourites = null) : IEventPhotoService
 {
+    /// <summary>
+    /// Hearts on these photos: how many active accounts hearted each, and which the caller did. One
+    /// query per album read, never one per photo.
+    /// </summary>
+    private async Task<(Dictionary<Guid, int> Counts, HashSet<Guid> Mine)> HeartsAsync(
+        IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        if (favourites is null || ids.Count == 0) return ([], []);
+        var rows = favourites.Query().Where(f => ids.Contains(f.PhotoId));
+        if (users is not null)
+            rows = rows.Where(f => users.Query().Any(u => u.Id == f.UserId && u.IsActive));
+        var counts = await rows.GroupBy(f => f.PhotoId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+        var me = currentUser.UserId;
+        var mine = me is { } uid
+            ? (await favourites.Query().Where(f => f.UserId == uid && ids.Contains(f.PhotoId))
+                .Select(f => f.PhotoId).ToListAsync(ct)).ToHashSet()
+            : [];
+        return (counts, mine);
+    }
+
     /// <summary>
     /// What a tap opens. NOT what a download hands over — the original is kept for that, so this is
     /// free to be a screen-sized copy rather than a compromise between viewing and keeping.
@@ -203,6 +226,7 @@ public sealed class EventPhotoService(
             .Where(p => !hidden.HidesPhoto(p))
             .ToList();
         var owners = await UploadersAsync(live, ct);
+        var (hearts, mine) = await HeartsAsync(live.Select(p => p.Id).ToList(), ct);
 
         // The same three questions StoreAsync asks, asked in the same order — cancelled, then the
         // night. This used to report only the cancellation, so an event six months past still offered
@@ -243,7 +267,9 @@ public sealed class EventPhotoService(
                 moderates || (viewerGuestId is { } me && p.GuestId == me),
                 p.CreatedAt,
                 owners.GetValueOrDefault(p.Id),
-                p.SizeBytes)).ToList(),
+                p.SizeBytes,
+                hearts.GetValueOrDefault(p.Id),
+                mine.Contains(p.Id))).ToList(),
             closed,
             venue?.Name,
             venue?.LogoUrl,
@@ -399,6 +425,7 @@ public sealed class EventPhotoService(
             .Where(p => !hidden.HidesPhoto(p))
             .ToList();
         var owners = await UploadersAsync(live, ct);
+        var (hearts, hearted) = await HeartsAsync(live.Select(p => p.Id).ToList(), ct);
 
         return new EventPhotoBoxDto(
             bucket.CampaignId ?? Guid.Empty,
@@ -416,7 +443,9 @@ public sealed class EventPhotoService(
                 mine,
                 p.CreatedAt,
                 owners.GetValueOrDefault(p.Id),
-                p.SizeBytes)).ToList(),
+                p.SizeBytes,
+                hearts.GetValueOrDefault(p.Id),
+                hearted.Contains(p.Id))).ToList(),
             // Same sentence the writer would have given, and in the order that matters: "this closed
             // a week ago" is more useful than "this is full" when both are true.
             !bucket.IsOpen
@@ -804,7 +833,9 @@ public sealed class EventPhotoService(
     {
         var wanted = archive.PhotoIds.ToHashSet();
         var chosen = await photos.Query()
-            .Where(p => p.CampaignId == archive.CampaignId && p.DeletedAt == null && wanted.Contains(p.Id))
+            // Guid.Empty: a set already authorised one by one across albums (someone's Favourites).
+            .Where(p => (archive.CampaignId == Guid.Empty || p.CampaignId == archive.CampaignId)
+                        && p.DeletedAt == null && wanted.Contains(p.Id))
             .OrderBy(p => p.CreatedAt)
             .ToListAsync(ct);
         if (chosen.Count == 0)
