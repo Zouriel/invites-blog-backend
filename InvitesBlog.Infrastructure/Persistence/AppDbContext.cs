@@ -148,6 +148,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Kind).HasDefaultValue(CampaignKind.Invitation);
             e.Property(x => x.AllDay).HasDefaultValue(false);
             e.Property(x => x.OpenGuestList).HasDefaultValue(false);
+            // Every event before time zones existed was a Maldives event: they keep its clock.
+            e.Property(x => x.TimeZone).HasMaxLength(64).HasDefaultValue(InvitesBlog.Domain.Events.EventZones.Legacy);
             e.Property(x => x.CardThemeJson).HasColumnType("jsonb").HasDefaultValue("{}");
             e.HasIndex(x => x.AccessTokenHash).IsUnique().HasDatabaseName("idx_campaigns_access_token_hash");
             e.HasIndex(x => x.DashboardTokenHash).HasDatabaseName("idx_campaigns_dashboard_token_hash");
@@ -533,6 +535,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("idx_users_email");
             e.HasIndex(x => x.PhoneE164).IsUnique().HasDatabaseName("idx_users_phone_e164");
             e.Property(x => x.PaymentCustomerId).HasMaxLength(64);
+            e.Property(x => x.Country).HasMaxLength(2);
+            e.Property(x => x.TimeZone).HasMaxLength(64);
         });
 
         b.Entity<UserExternalLogin>(e =>

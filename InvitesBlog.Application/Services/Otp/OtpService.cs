@@ -49,8 +49,9 @@ public sealed class OtpService(
         string recipient;
         if (channel == OtpChannel.Sms)
         {
-            var norm = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV");
-            if (!norm.IsUsable) throw new OtpInvalidPhoneException();
+            var norm = await phones.NormalizeAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);
+            if (!norm.IsUsable)
+                throw new OtpInvalidPhoneException(norm.Warning == PhoneNormalizer.NeedsCountryCode ? PhoneNormalizer.NeedsCountryCode : null);
             phone = norm.E164;
             recipient = phone!;
         }
@@ -109,14 +110,14 @@ public sealed class OtpService(
         // instead would send the code somewhere they may not be watching.
         if (!string.IsNullOrWhiteSpace(req.Phone))
         {
-            var norm = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV");
+            var norm = await phones.NormalizeAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);
             if (!norm.IsUsable) return new CampaignOtpResponse(false, false, null, 0);
 
             var onList = guestList.Any(g => g.PhoneE164 == norm.E164);
             if (!onList) return new CampaignOtpResponse(false, false, null, 0);
 
             var smsChallenge = await RequestAsync(
-                new SendOtpRequest("sms", norm.E164, null, req.DefaultCountry), ct: ct);
+                new SendOtpRequest("sms", norm.E164, null, null), ct: ct);
             return new CampaignOtpResponse(true, false, smsChallenge.ChallengeId, smsChallenge.ExpiresInSeconds);
         }
 

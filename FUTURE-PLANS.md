@@ -140,7 +140,9 @@ changes close that, and both are worth doing on their own merits:
 fourth:
 
 1. **Account** — the web app. Email + password or Google/Microsoft sign-in.
-2. **Personal invite link** — delivered by the system (email today; Viber/WhatsApp later). The link
+2. **Personal invite link** — automatic invitations go by email only; hosts also send each guest
+   their link personally on WhatsApp, Viber or Telegram from their own phone (a share link, see
+   `InviteShareLinks`, recorded as a `*-manual` delivery attempt). The link
    itself is the key; the first opener is auto-authenticated and the link binds to that IP.
 3. **Public link for one invitation** — OTP proves the opener is on that campaign's guest list, and
    that **device** stays authenticated **for that invitation**.
@@ -151,8 +153,8 @@ admin who also authors templates doesn't have to pick an identity per sign-in. T
 `GetByTokenAsync` + `InviteTrustedIp`: first-ever open auto-trusts its IP, up to 3 are kept, a fourth
 evicts the least-recently-seen, and an unrecognized IP gets an OTP sent to the contact **on the guest
 row** — never one the visitor types, because the link already says who they are. It deliberately calls
-`VerifyContactAsync` rather than `VerifyAsync`, so reauth mints no session. Adding Viber/WhatsApp is a
-delivery-channel change (`IOtpSender` + dispatch), not an auth change.
+`VerifyContactAsync` rather than `VerifyAsync`, so reauth mints no session. The share link a host
+sends by hand opens the same invite through the same gate, so it is not an auth change either.
 
 ### Where 3 has drifted
 

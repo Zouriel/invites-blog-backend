@@ -1,7 +1,9 @@
 namespace InvitesBlog.Application.Dtos.Otp;
 
 /// <summary>Request an OTP code by SMS or email (§10.7 / §11.1).</summary>
-public sealed record SendOtpRequest(string Channel, string? Phone, string? Email, string? DefaultCountry);
+/// <param name="DefaultCountry">ISO2 country of a phone typed without its country code.</param>
+/// <param name="PhoneCountry">The same, under the name every phone-taking request uses; wins over DefaultCountry.</param>
+public sealed record SendOtpRequest(string Channel, string? Phone, string? Email, string? DefaultCountry, string? PhoneCountry = null);
 
 /// <summary>Verify a previously requested OTP code.</summary>
 public sealed record VerifyOtpRequest(Guid ChallengeId, string Code);
@@ -17,7 +19,7 @@ public sealed record OtpTokensResponse(string AccessToken, string RefreshToken);
 /// campaign's guest list, so an uninvited contact never triggers a send. Either identifier works —
 /// a guest a host listed by number can prove themselves the same way one listed by email can.
 /// </summary>
-public sealed record CampaignOtpRequest(string? Email, string? Phone = null, string? DefaultCountry = null);
+public sealed record CampaignOtpRequest(string? Email, string? Phone = null, string? DefaultCountry = null, string? PhoneCountry = null);
 
 /// <summary>
 /// Result of a guest-list-gated OTP request. A challenge is created (and a code emailed) only when

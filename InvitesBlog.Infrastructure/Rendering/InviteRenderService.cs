@@ -40,9 +40,14 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             ["title"] = Str(content, "title") ?? campaign.Title,
             ["subtitle"] = Str(content, "subtitle"),
             ["description"] = Str(content, "description"),
-            // Malé's clock, the only one the platform has; a day with no time yet shows no time.
-            ["date"] = Str(content, "date") ?? campaign.EventStartAt.ToOffset(EventDayWindow.Male).ToString("dddd, d MMMM yyyy"),
-            ["time"] = Str(content, "time") ?? (campaign.AllDay ? null : campaign.EventStartAt.ToOffset(EventDayWindow.Male).ToString("h:mm tt")),
+            // The event's own clock, labelled ("7:00 pm GMT"), so a guest in another zone reads the
+            // time the event happens there; a day with no time yet shows no time.
+            ["date"] = Str(content, "date") ?? EventTime.DateText(campaign.EventStartAt, campaign.TimeZone),
+            ["time"] = Str(content, "time") ?? (campaign.AllDay ? null : EventTime.TimeText(campaign.EventStartAt, campaign.TimeZone)),
+            // The same moment for clients and templates that show it themselves: an ISO instant and
+            // the IANA zone it belongs to.
+            ["startsAt"] = campaign.EventStartAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+            ["timeZone"] = campaign.TimeZone,
             ["schedule"] = Str(content, "schedule"),
             ["dressCode"] = Str(content, "dressCode"),
             ["venue"] = new JsonObject
@@ -132,7 +137,7 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
             // camera apart from a payload rendered before there was one.
             ["camera"] = !saveTheDate && CameraIsOpen(
                 campaign.EventStartAt, invite.RsvpStatus, DateTimeOffset.UtcNow,
-                DateIgnoredFor(campaign.Id), bucketWindowDays, rsvpRequired: !isStatic)
+                DateIgnoredFor(campaign.Id), bucketWindowDays, rsvpRequired: !isStatic, campaign.TimeZone)
                 ? new JsonObject { ["link"] = $"{inviteLink}/camera" }
                 : new JsonObject(),
             ["theme"] = theme,
@@ -334,11 +339,11 @@ public sealed class InviteRenderService(RuleEngine ruleEngine, IConfiguration co
     /// </param>
     public static bool CameraIsOpen(
         DateTimeOffset eventStartAt, RsvpStatus rsvp, DateTimeOffset now, bool ignoreDate = false,
-        int windowDays = 1, bool rsvpRequired = true)
+        int windowDays = 1, bool rsvpRequired = true, string? timeZone = null)
     {
         if (rsvpRequired && rsvp != RsvpStatus.Going) return false;
         if (ignoreDate) return true;
-        return EventDayWindow.IsOpen(eventStartAt, now, windowDays);
+        return EventDayWindow.IsOpen(eventStartAt, now, windowDays, timeZone);
     }
 
     /// <summary>Campaigns exempt from the date, as configured. Ids only; anything else is ignored.</summary>

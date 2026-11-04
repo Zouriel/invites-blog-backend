@@ -7,8 +7,8 @@ namespace InvitesBlog.Application.Validation.Campaigns;
 public sealed class UpdateDeliverySettingsRequestValidator : AbstractValidator<UpdateDeliverySettingsRequest>
 {
     // "share" = give the inviter the link to pass on (the open link, or the OTP-gated /e/{id});
-    // "email" = also mail every guest their own /i/{token} link. Viber/whatsapp/telegram/sms are
-    // disabled for now. Read back by Delivery.DeliverySettings, for every send.
+    // "email" = also mail every guest their own /i/{token} link. Email is the only automatic
+    // channel; phone-only guests are sent their link by the host on WhatsApp (whatsapp-manual). Read back by Delivery.DeliverySettings, for every send.
     private static readonly HashSet<string> Allowed =
         new(StringComparer.OrdinalIgnoreCase) { "email", "share" };
 
@@ -19,9 +19,8 @@ public sealed class UpdateDeliverySettingsRequestValidator : AbstractValidator<U
         RuleFor(x => x.DeliverySettingsJson)
             .Must(BeValidJson).WithMessage("Delivery settings must be valid JSON.")
             .Must(HaveOnlyAllowedChannels)
-            // Name the channels that are actually allowed. This used to say "viber, email, direct",
-            // two of which have never been accepted, so the one message a caller gets when they get
-            // this wrong sent them looking for channels that do not exist.
+            // Name the channels that are actually allowed, so a caller who gets this wrong is not
+            // sent looking for channels that do not exist.
             .WithMessage("Delivery channels must be one of: email, share.");
     }
 

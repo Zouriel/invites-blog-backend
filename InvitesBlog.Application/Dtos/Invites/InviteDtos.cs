@@ -47,7 +47,9 @@ public sealed record InboxCardResponse(
     string Kind = "invitation",
     CalendarLinksDto? Calendar = null,
     /// <summary>The design's background and accent (#rrggbb), for a tile with no picture; null when it declares none.</summary>
-    IReadOnlyList<string>? Colours = null);
+    IReadOnlyList<string>? Colours = null,
+    /// <summary>The event's IANA time zone: EventDate (an instant) is the time on this clock.</summary>
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 /// <summary>Add to calendar, pre-filled: Google, Outlook.com and Microsoft 365.</summary>
 public sealed record CalendarLinksDto(string Google, string Outlook, string Office365);

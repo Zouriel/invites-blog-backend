@@ -5,7 +5,8 @@ namespace InvitesBlog.Application.Dtos.Campaigns;
 
 /// <summary>Create a draft campaign from a template (§10.3).</summary>
 /// <param name="Kind">"invitation" or "saveTheDate"; left out, a design from the Save the Date category makes a save the date.</param>
-public sealed record CreateCampaignRequest(Guid TemplateId, string Title, string? Kind = null);
+/// <param name="TimeZone">The event's IANA zone (the browser's or device's); left out, the account's, else Indian/Maldives.</param>
+public sealed record CreateCampaignRequest(Guid TemplateId, string Title, string? Kind = null, string? TimeZone = null);
 
 /// <summary>Patch the campaign content/theme/rules and event metadata (partial — nulls are ignored).</summary>
 /// <summary>The campaign's cover photo. Null clears it, falling back to the template's preview.</summary>
@@ -27,7 +28,9 @@ public sealed record UpdateContentRequest(
     DateTimeOffset? EventStartAt,
     DateTimeOffset? EventEndAt,
     string? EventType,
-    bool? AllDay = null);
+    bool? AllDay = null,
+    /// <summary>The event's IANA time zone ("Europe/London"). Null leaves it as it is.</summary>
+    string? TimeZone = null);
 
 /// <summary>Set the venue block (stored inside CustomContentJson.venue).</summary>
 public sealed record UpdateVenueRequest(
@@ -51,7 +54,9 @@ public sealed record UpdateInviterRequest(
     string? Organization,
     string? BillingName,
     string? BillingCountry,
-    string? DefaultCountry);
+    string? DefaultCountry,
+    /// <summary>ISO2 country of <c>Phone</c> when typed without a code; same as DefaultCountry, which it overrides.</summary>
+    string? PhoneCountry = null);
 
 /// <summary>Replace the campaign delivery settings JSON.</summary>
 public sealed record UpdateDeliverySettingsRequest(string DeliverySettingsJson);

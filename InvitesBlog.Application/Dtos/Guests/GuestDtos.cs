@@ -13,12 +13,16 @@ namespace InvitesBlog.Application.Dtos.Guests;
 public sealed record AddGuestRequest(
     string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
     bool? SendNow = null,
-    IReadOnlyList<string>? Roles = null);
+    IReadOnlyList<string>? Roles = null,
+    /// <summary>ISO2 country of <c>Phone</c> when it has no country code. Overrides DefaultCountry (the older name).</summary>
+    string? PhoneCountry = null);
 
 /// <summary>Fix a guest's contact details (§4.7.4).</summary>
 public sealed record UpdateGuestRequest(
     string? Email, string? Phone, string? Name, string? Role, string? Gender, string? DefaultCountry,
-    IReadOnlyList<string>? Roles = null);
+    IReadOnlyList<string>? Roles = null,
+    /// <summary>ISO2 country of <c>Phone</c> when it has no country code. Overrides DefaultCountry (the older name).</summary>
+    string? PhoneCountry = null);
 
 /// <summary>Confirm a previously parsed upload, materializing its guests (§15.3).</summary>
 public sealed record ConfirmUploadRequest(Guid UploadId);

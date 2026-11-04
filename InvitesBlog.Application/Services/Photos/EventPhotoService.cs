@@ -225,7 +225,7 @@ public sealed class EventPhotoService(
                     ? "Finish setting up this event first. Its album opens once it's done."
                 : plan.Phase != Plans.MediaPhase.Active
                     ? "This event's photos are no longer collecting. Everything already added is still here for now."
-                : !EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays)
+                : !EventDayWindow.IsOpen(campaign.EventStartAt, DateTimeOffset.UtcNow, windowDays, campaign.TimeZone)
                     ? DateTimeOffset.UtcNow < campaign.EventStartAt
                         ? "This one isn't open yet — it opens the day before the event."
                         : "This one has closed. Everything already added is still here."

@@ -72,7 +72,7 @@ public class InviteServiceTests
         return new(
             _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks,
             _trustedIps, _photos, _otp, _bucketService, _uow, _currentUser, _config, _rsvpValidator,
-            TestData.FreePlans(), TestData.Empty<Venue>(), _push);
+            TestData.FreePlans(), TestData.Empty<Venue>(), _push, TestData.ShareLinks());
     }
 
     private readonly RecordingPushQueue _push = new();

@@ -36,10 +36,9 @@ public static class EventDayWindow
     public const int MaxWindowDays = 5;
 
     /// <summary>
-    /// Malé's offset, and the only local day this platform has. Hard-coded rather than looked up
-    /// because the Maldives has never observed daylight saving — +05:00 holds every day of the year
-    /// — and because a zone database id is spelled differently on Windows and Linux, which is a way
-    /// for this to fail in production and not in a test.
+    /// Malé's offset: the clock of every event made before events had a time zone of their own
+    /// (Indian/Maldives, which has never observed daylight saving). Only a legacy default now; the
+    /// window is counted on the event's own zone (<c>Campaign.TimeZone</c>).
     /// </summary>
     public static readonly TimeSpan Male = TimeSpan.FromHours(5);
 
@@ -52,17 +51,18 @@ public static class EventDayWindow
     /// same wedding. The camera on the invitation and the bucket it posts to share this answer, so a
     /// camera is never offered that leads to a bucket refusing the photo.</para>
     ///
-    /// <para><b>Whose day.</b> Malé's, not UTC's. The column is normalised to UTC and the offset the
-    /// inviter typed does not survive the round trip, so the day has to be reconstructed. Taking UTC's
-    /// would move every boundary to 05:00 local. <see cref="Male"/> is what everyone here means by
-    /// the date.</para>
+    /// <para><b>Whose day.</b> The event's, in its own time zone (<paramref name="timeZone"/>), not
+    /// UTC's. The column is normalised to UTC and the offset the inviter typed does not survive the
+    /// round trip, so the day has to be reconstructed on the event's clock; taking UTC's would move
+    /// every boundary. Null is the legacy Maldives zone.</para>
     /// </summary>
     /// <param name="windowDays">
     /// For an album on a pass, how many days it stays open counted from the moment the event
     /// begins. It can only make the window longer: it closes at whichever is later, the end of the
     /// day after or the start plus this many days. Clamped to 1..<see cref="MaxWindowDays"/>.
     /// </param>
-    public static bool IsOpen(DateTimeOffset eventStartAt, DateTimeOffset now, int windowDays = 1)
+    /// <param name="timeZone">The event's IANA zone; null or unknown is Indian/Maldives.</param>
+    public static bool IsOpen(DateTimeOffset eventStartAt, DateTimeOffset now, int windowDays = 1, string? timeZone = null)
     {
         // A date near either end of the representable range cannot be shifted into Malé's offset:
         // `DateTimeOffset` throws rather than saturating. That is reachable with real data (a bucket
@@ -71,7 +71,7 @@ public static class EventDayWindow
         if (eventStartAt < DateTimeOffset.MinValue + guard || eventStartAt > DateTimeOffset.MaxValue - guard)
             return false;
 
-        var (opens, closes) = Bounds(eventStartAt, windowDays);
+        var (opens, closes) = Bounds(eventStartAt, windowDays, timeZone);
         return now >= opens && now < closes;
     }
 
@@ -79,13 +79,15 @@ public static class EventDayWindow
     /// When the window opens and closes, for pages that say so. The same arithmetic as
     /// <see cref="IsOpen"/>; callers pass a real event date (IsOpen guards the extremes).
     /// </summary>
-    public static (DateTimeOffset Opens, DateTimeOffset Closes) Bounds(DateTimeOffset eventStartAt, int windowDays = 1)
+    public static (DateTimeOffset Opens, DateTimeOffset Closes) Bounds(DateTimeOffset eventStartAt, int windowDays = 1, string? timeZone = null)
     {
         var days = Math.Clamp(windowDays, 1, MaxWindowDays);
-        var eventDay = new DateTimeOffset(eventStartAt.ToOffset(Male).Date, Male);
+        // Midnights on the event's own clock. Each boundary is found separately rather than by adding
+        // 24 hours, so a daylight saving change inside the window moves it by the right amount.
+        var eventDay = EventTime.Day(eventStartAt, timeZone);
 
-        var opens = eventDay.AddDays(-DaysBefore);
-        var dayAfterEnds = eventDay.AddDays(DaysAfter + 1);
+        var opens = EventTime.StartOfDay(eventDay.AddDays(-DaysBefore), timeZone);
+        var dayAfterEnds = EventTime.StartOfDay(eventDay.AddDays(DaysAfter + 1), timeZone);
         var longWindowEnds = eventStartAt + ClosesAfter * days;
         return (opens, dayAfterEnds > longWindowEnds ? dayAfterEnds : longWindowEnds);
     }

@@ -71,9 +71,9 @@ public sealed class EmailInviteDeliveryProvider(IEmailSender email) : IInviteDel
     /// <summary>The day, big — the one thing a save the date is for — with the time and place when known.</summary>
     private static string SaveTheDateHeader(CalendarEntry e, string sans)
     {
-        var day = e.Start.ToOffset(EventDayWindow.Male);
-        var when = day.ToString("dddd, d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
-        var time = e.AllDay ? null : day.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+        // On the event's own clock, with its zone label, whoever opens the email and wherever.
+        var when = EventTime.DateText(e.Start, e.TimeZone);
+        var time = e.AllDay ? null : EventTime.TimeText(e.Start, e.TimeZone);
         var detail = string.Join(" · ", new[] { time, e.Location }.Where(x => !string.IsNullOrWhiteSpace(x)));
         string H(string? v) => System.Net.WebUtility.HtmlEncode(v ?? "");
         return

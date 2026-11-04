@@ -64,7 +64,8 @@ public sealed class CampaignService(
     IRepository<MediaBucketQr> bucketQrs,
     IRepository<EventPhoto> eventPhotos,
     IRepository<AppUser> users,
-    IPushQueue push) : ICampaignService
+    IPushQueue push,
+    InviteShareLinks shareLinks) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -79,6 +80,8 @@ public sealed class CampaignService(
             throw new TemplateNotAvailableException();
         if (!await CanUsePrivateAsync(template, currentUser.UserId, ct))
             throw new TemplateNotAvailableException();
+        if (!string.IsNullOrWhiteSpace(req.TimeZone) && !Events.EventTime.IsValidZone(req.TimeZone))
+            throw new BusinessRuleException(InvalidTimeZone, "invalid_time_zone");
 
         var rawToken = TokenService.GenerateToken();
         var now = DateTimeOffset.UtcNow;
@@ -100,6 +103,9 @@ public sealed class CampaignService(
             // so without this a draft abandoned before then belongs to nobody and is unreachable.
             CreatedByUserId = currentUser.UserId,
             EventStartAt = now.AddDays(30),
+            // The zone the client sent (the browser's or device's), else the host's own, else the
+            // legacy Maldives zone. It is the clock the event is shown on, not a conversion.
+            TimeZone = Events.EventTime.ZoneOrDefault(req.TimeZone, await AccountZoneAsync(ct)),
             Kind = SaveTheDates.Parse(req.Kind)
                    ?? (template.Category == SaveTheDates.Category ? CampaignKind.SaveTheDate : CampaignKind.Invitation),
             CreatedAt = now,
@@ -139,17 +145,25 @@ public sealed class CampaignService(
             }
             campaign.IsSensitive = req.IsSensitive.Value;
         }
+        if (req.TimeZone is not null)
+        {
+            if (!Events.EventTime.IsValidZone(req.TimeZone))
+                throw new Exceptions.BusinessRuleException(InvalidTimeZone, "invalid_time_zone");
+            campaign.TimeZone = req.TimeZone.Trim();
+        }
         if (req.EventStartAt is not null)
         {
             // Moving an event into the past would close its camera and bucket for good. Keeping a date
-            // that is already past (an old event being tidied up) is still allowed.
-            var sameDay = req.EventStartAt.Value.ToOffset(Events.EventDayWindow.Male).Date
-                          == campaign.EventStartAt.ToOffset(Events.EventDayWindow.Male).Date;
-            if (!sameDay && IsBeforeToday(req.EventStartAt.Value))
+            // that is already past (an old event being tidied up) is still allowed. Days are the
+            // event's own, on its clock.
+            var sameDay = Events.EventTime.Day(req.EventStartAt.Value, campaign.TimeZone)
+                          == Events.EventTime.Day(campaign.EventStartAt, campaign.TimeZone);
+            if (!sameDay && IsBeforeToday(req.EventStartAt.Value, campaign.TimeZone))
                 throw new Exceptions.BusinessRuleException("Pick today or a later date.", "event_date_in_past");
-            campaign.EventStartAt = req.EventStartAt.Value;
+            // Npgsql stores timestamptz in UTC only; an offset the client sent is normalised here.
+            campaign.EventStartAt = req.EventStartAt.Value.ToUniversalTime();
         }
-        if (req.EventEndAt is not null) campaign.EventEndAt = req.EventEndAt;
+        if (req.EventEndAt is not null) campaign.EventEndAt = req.EventEndAt.Value.ToUniversalTime();
         if (req.AllDay is not null) campaign.AllDay = req.AllDay.Value;
         if (req.EventType is not null) campaign.EventType = req.EventType;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
@@ -244,7 +258,7 @@ public sealed class CampaignService(
         var campaign = await LoadOwnedAsync(id, ct);
 
         var normEmail = req.Email.Trim().ToLowerInvariant();
-        var phone = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV");
+        var phone = await phones.NormalizeAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);
         var inviter = await inviters.GetByEmailAsync(normEmail, ct);
         if (inviter is null)
         {
@@ -390,13 +404,26 @@ public sealed class CampaignService(
                 {
                     invite.TokenHash = TokenService.Hash(rawToken);
                     invite.RequiresOtp = campaign.IsSensitive;
-                    if (invite.Status == InviteStatus.Created || invite.Status == InviteStatus.Queued)
+                    if (invite.Status is InviteStatus.Created or InviteStatus.Queued or InviteStatus.NotSent)
                         invite.Status = InviteStatus.Sent;
                 }
 
                 var letter = InviteLetter.For(
                     campaign, g, invite.Id, settings, inviteeBase, rawToken, inviter?.Name, inviter?.Email);
-                await emailChannel.SendAsync(letter.To("email", g.Email), ct);
+                var result = await emailChannel.SendAsync(letter.To("email", g.Email), ct);
+                // Recorded like every other send, so the guest list can show the email's tick (and the
+                // provider's later delivered/bounced report finds its row by message id).
+                await deliveryAttempts.AddAsync(new DeliveryAttempt
+                {
+                    Id = Guid.NewGuid(),
+                    InviteId = invite.Id,
+                    Channel = "email",
+                    RecipientAddress = g.Email!,
+                    Status = result is { Success: false } ? DeliveryStatus.Failed : DeliveryStatus.Sent,
+                    ProviderMessageId = result?.ProviderMessageId,
+                    ErrorMessage = result?.Error,
+                    AttemptedAt = DateTimeOffset.UtcNow,
+                }, ct);
                 emailed++;
                 if (firstTime)
                 {
@@ -554,13 +581,17 @@ public sealed class CampaignService(
 
     public async Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false)
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false,
+        string? timeZone = null)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new BusinessRuleException("Give your event a name.", "title_required");
         if (eventDate is null)
             throw new BusinessRuleException("Pick the date of your event.", "event_date_required");
-        if (!allowPastDate && IsBeforeToday(eventDate.Value))
+        if (!string.IsNullOrWhiteSpace(timeZone) && !Events.EventTime.IsValidZone(timeZone))
+            throw new BusinessRuleException(InvalidTimeZone, "invalid_time_zone");
+        var zone = Events.EventTime.ZoneOrDefault(timeZone, await AccountZoneAsync(ct));
+        if (!allowPastDate && IsBeforeToday(eventDate.Value, zone))
             throw new BusinessRuleException("Pick today or a later date.", "event_date_in_past");
 
         // A placeholder to pin. Marked Imported, which every gallery read already fails to match, so
@@ -571,7 +602,7 @@ public sealed class CampaignService(
         await templates.AddAsync(placeholder, ct);
         await uow.SaveChangesAsync(ct);
 
-        var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim(), SaveTheDates.Name(kind)), ct);
+        var created = await CreateAsync(new CreateCampaignRequest(placeholder.Id, title.Trim(), SaveTheDates.Name(kind), zone), ct);
 
         // Written straight through, not via a separate ownership-checked update — see the interface note: that one
         // checks ownership, and the token making this campaign theirs is in the response being built.
@@ -725,7 +756,7 @@ public sealed class CampaignService(
             campaign.OpenLinkCode is { } openCode ? OpenLinkUrl(openCode) : null,
             inviter?.Name, inviter?.Email, inviter?.PhoneE164, inviter?.Organization,
             await allowances.ForCampaignAsync(id, ct),
-            SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.OpenGuestList);
+            SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.OpenGuestList, campaign.TimeZone);
     }
 
     /// <summary>The campaign's frozen package URL, falling back to the live template's for campaigns
@@ -764,11 +795,20 @@ public sealed class CampaignService(
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: true, ct);
         var inviteList = await invites.ListByCampaignAsync(id, ct);
 
-        // Nothing was sent to someone who added themselves from the link, so they don't count as sent.
+        var inviteIds = inviteList.Select(i => i.Id).ToList();
+        var attemptList = await deliveryAttempts.Query()
+            .Where(a => inviteIds.Contains(a.InviteId) && a.Channel != "none" && !a.IsOtp)
+            .ToListAsync(ct);
+        // Sent by hand (WhatsApp, Viber, Telegram): those count as sent, the host's own word for it.
+        var handSent = attemptList.Where(a => ManualSends.IsManual(a.Channel)).Select(a => a.InviteId).ToHashSet();
+
+        // Nothing was sent to someone who added themselves from the link, so they don't count as sent
+        // (unless the host has since sent them their link by hand).
         var selfAddedIds = guestList.Where(g => g.SelfAdded).Select(g => g.Id).ToHashSet();
         var report = new DashboardReportDto(
             Total: inviteList.Count,
-            Sent: inviteList.Count(i => (i.Status is InviteStatus.Sent or InviteStatus.Viewed) && !selfAddedIds.Contains(i.GuestId)),
+            Sent: inviteList.Count(i => (i.Status is InviteStatus.Sent or InviteStatus.Viewed)
+                                        && (!selfAddedIds.Contains(i.GuestId) || handSent.Contains(i.Id))),
             Failed: inviteList.Count(i => i.Status == InviteStatus.Failed),
             Viewed: inviteList.Count(i => i.ViewedAt != null),
             NotSent: inviteList.Count(i => i.Status == InviteStatus.NotSent),
@@ -777,15 +817,32 @@ public sealed class CampaignService(
                 Maybe: inviteList.Count(i => i.RsvpStatus == RsvpStatus.Maybe),
                 NotGoing: inviteList.Count(i => i.RsvpStatus == RsvpStatus.NotGoing)));
 
-        // Latest real delivery channel per invite ("viber"/"email"), so the dashboard can show
-        // "via Viber" / "via email". The "none" placeholder channel (not-sent) is excluded.
-        var inviteIds = inviteList.Select(i => i.Id).ToList();
-        var attemptList = await deliveryAttempts.Query()
-            .Where(a => inviteIds.Contains(a.InviteId) && a.Channel != "none")
-            .ToListAsync(ct);
+        // Latest automatic delivery channel per invite ("email"; historic rows may say "viber"), so the
+        // dashboard can show "via email". The "none" placeholder and hand sends are left out.
         var latestChannel = attemptList
+            .Where(a => !ManualSends.IsManual(a.Channel))
             .GroupBy(a => a.InviteId)
             .ToDictionary(grp => grp.Key, grp => grp.OrderByDescending(a => a.AttemptedAt).First().Channel);
+        // The email row's tick: the latest invitation email per invite.
+        var latestEmail = attemptList
+            .Where(a => a.Channel == "email")
+            .GroupBy(a => a.InviteId)
+            .ToDictionary(grp => grp.Key, grp => grp.OrderByDescending(a => a.AttemptedAt).First());
+        // Each messenger's own tick: the latest hand send per invite and app.
+        var manualByInvite = attemptList
+            .Where(a => ManualSends.IsManual(a.Channel))
+            .GroupBy(a => a.InviteId)
+            .ToDictionary(grp => grp.Key, grp => (IReadOnlyDictionary<string, DateTimeOffset>)grp
+                .GroupBy(a => ManualSends.AppOf(a.Channel)!)
+                .ToDictionary(app => app.Key, app => app.Max(a => a.AttemptedAt)));
+
+        // What the host sends by hand, prepared here so the app opens on the tap itself (a browser
+        // blocks a window opened after a round trip). Managers only, like the phone numbers.
+        var settings = DeliverySettings.Parse(campaign.DeliverySettingsJson);
+        var inviterName = showContacts && campaign.InviterId is { } dashInviterId
+            ? (await inviters.GetByIdAsync(dashInviterId, ct))?.Name
+            : null;
+        var inviteeBase = config.InviteeBase();
 
         // Their latest answers. Replies were being stored and never read back anywhere, so asking a
         // question used to collect something the host could never see — including the four the form
@@ -802,6 +859,10 @@ public sealed class CampaignService(
             var answers = inv is not null && latestAnswer.TryGetValue(inv.Id, out var reply)
                 ? AnswersOf(reply)
                 : null;
+            var email = showContacts && inv is not null && latestEmail.TryGetValue(inv.Id, out var mail) ? mail : null;
+            var share = showContacts && inv is not null
+                ? ManualSends.Compose(g, inv.Id, settings, inviteeBase, shareLinks, inviterName)
+                : ((string Link, string Text)?)null;
             return new DashboardGuestDto(
                 g.Id, g.Name, showContacts ? g.Email : null, showContacts ? g.PhoneE164 : null,
                 g.Role, g.Gender, g.OptedOut,
@@ -812,7 +873,15 @@ public sealed class CampaignService(
                 answers,
                 g.AllRoles(),
                 g.SelfAdded,
-                showContacts ? g.TypedContact : null);
+                showContacts ? g.TypedContact : null,
+                email?.Status.ToString(),
+                email?.AttemptedAt,
+                email?.ErrorMessage,
+                !showContacts ? null
+                    : inv is not null && manualByInvite.TryGetValue(inv.Id, out var hand) ? hand
+                    : new Dictionary<string, DateTimeOffset>(),
+                share?.Link,
+                share?.Text);
         }).ToList();
 
         return new DashboardResponse(
@@ -835,7 +904,8 @@ public sealed class CampaignService(
                 },
                 SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.EventStartAt,
                 campaign.InvitationCampaignId,
-                campaign.OpenGuestList),
+                campaign.OpenGuestList,
+                campaign.TimeZone),
             report, guestRows, questions, await allowances.ForCampaignAsync(campaign.Id, ct));
     }
 
@@ -1040,10 +1110,15 @@ public sealed class CampaignService(
     /// finding the row again — reading it here would make a rename over there silently turn this
     /// feature off.</para>
     /// </summary>
-    /// <summary>Whether a date falls on a day before today, by Malé's calendar.</summary>
-    private static bool IsBeforeToday(DateTimeOffset when) =>
-        when.ToOffset(Events.EventDayWindow.Male).Date
-        < DateTimeOffset.UtcNow.ToOffset(Events.EventDayWindow.Male).Date;
+    /// <summary>Whether a date falls on a day before today, by the event's own calendar.</summary>
+    private static bool IsBeforeToday(DateTimeOffset when, string? zone) =>
+        Events.EventTime.Day(when, zone) < Events.EventTime.Day(DateTimeOffset.UtcNow, zone);
+
+    private const string InvalidTimeZone = "Pick a time zone from the list (for example Europe/London).";
+
+    /// <summary>The signed-in host's own time zone, the default for their new events; null when unknown.</summary>
+    private async Task<string?> AccountZoneAsync(CancellationToken ct) =>
+        currentUser.UserId is { } id ? (await users.GetByIdAsync(id, ct))?.TimeZone : null;
 
     private async Task<bool> IsImportedAsync(Campaign campaign, CancellationToken ct)
     {

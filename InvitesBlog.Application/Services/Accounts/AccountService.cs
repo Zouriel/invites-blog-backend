@@ -428,7 +428,8 @@ public sealed class AccountService(
                         _ => "Free",
                     },
                 Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind),
-                Colours: InvitesBlog.Application.Campaigns.PosterColours.Of(c)));
+                Colours: InvitesBlog.Application.Campaigns.PosterColours.Of(c),
+                TimeZone: c.TimeZone));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));
@@ -486,11 +487,14 @@ public sealed class AccountService(
                 "Signing in by phone isn't switched on yet — use your email address instead.",
                 "sms_not_configured");
 
-        var normalized = phones.Normalize(raw, request.DefaultCountry ?? "MV");
+        var normalized = await phones.NormalizeAsync(raw, request.PhoneCountry ?? request.DefaultCountry, ct);
         if (!normalized.IsUsable)
-            throw new BusinessRuleException("That doesn't look like a valid phone number.", "invalid_phone");
+            throw new BusinessRuleException(
+                normalized.Warning == PhoneNormalizer.NeedsCountryCode
+                    ? PhoneNormalizer.NeedsCountryCode
+                    : "That doesn't look like a valid phone number.", "invalid_phone");
 
-        var sms = await otp.RequestAsync(new SendOtpRequest("sms", normalized.E164, null, request.DefaultCountry), ct: ct);
+        var sms = await otp.RequestAsync(new SendOtpRequest("sms", normalized.E164, null, null), ct: ct);
         return new CodeSentResponse(sms.ChallengeId, "sms", MaskPhone(normalized.E164!), sms.ExpiresInSeconds);
     }
 
@@ -623,6 +627,14 @@ public sealed class AccountService(
 
         if (inheritance is not null) await inheritance.ClaimAsync(user, ct);
 
+        // The person's country, from the request (Cloudflare's CF-IPCountry), the first time it is
+        // known; after that it is theirs to change. Every sign-in method ends here.
+        if (user.Country is null && RequestCountry.Read(currentUser.RequestCountry) is { } country)
+        {
+            user.Country = country;
+            await uow.SaveChangesAsync(ct);
+        }
+
         var roleNames = RoleNames(user);
         if (roleNames.Count == 0) roleNames.Add(Roles.Customer);
 
@@ -650,6 +662,35 @@ public sealed class AccountService(
 
         return await ToDtoAsync(user, ct);
     }
+
+    /// <summary>The signed-in account, as /auth/me shows it.</summary>
+    public async Task<AccountDto> MeAsync(CancellationToken ct = default) => await ToDtoAsync(await CurrentAsync(ct), ct);
+
+    /// <summary>
+    /// Country and time zone. Null leaves a field alone, an empty string clears it; anything else must
+    /// be a region libphonenumber knows (ISO2) or an IANA zone this server knows.
+    /// </summary>
+    public async Task<AccountDto> UpdateSettingsAsync(UpdateAccountSettingsRequest req, CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+        if (req.Country is not null)
+        {
+            if (req.Country.Trim().Length == 0) user.Country = null;
+            else user.Country = PhoneNormalizer.Region(req.Country)
+                ?? throw new BusinessRuleException("Pick a country from the list.", "invalid_country");
+        }
+        if (req.TimeZone is not null)
+        {
+            if (req.TimeZone.Trim().Length == 0) user.TimeZone = null;
+            else if (Events.EventTime.IsValidZone(req.TimeZone.Trim())) user.TimeZone = req.TimeZone.Trim();
+            else throw new BusinessRuleException("Pick a time zone from the list (for example Europe/London).", "invalid_time_zone");
+        }
+        await uow.SaveChangesAsync(ct);
+        return await ToDtoAsync(user, ct);
+    }
+
+    /// <summary>The request's country, for pages shown before anyone signs in.</summary>
+    public GeoDto Geo() => new(RequestCountry.Read(currentUser.RequestCountry));
 
     public async Task<AccountDto> SetAvatarAsync(byte[] content, string contentType, CancellationToken ct = default)
     {
@@ -695,7 +736,9 @@ public sealed class AccountService(
                 : "None",
             user.SubscriptionEndsAt,
             await AtVenueAsync(user, ct),
-            user.AvatarUrl);
+            user.AvatarUrl,
+            user.Country,
+            user.TimeZone);
     }
 
     /// <summary>Whether the account owns a venue or works at one, so its menu leads there.</summary>

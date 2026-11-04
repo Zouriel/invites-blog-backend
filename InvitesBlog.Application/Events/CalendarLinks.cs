@@ -5,9 +5,11 @@ namespace InvitesBlog.Application.Events;
 
 /// <summary>
 /// One entry for a guest's calendar. <see cref="AllDay"/> when the host knows the day but not the
-/// time — the usual case for a save the date — and then only the Malé date of <see cref="Start"/>
-/// matters.
+/// time — the usual case for a save the date — and then only the date of <see cref="Start"/> in
+/// <see cref="TimeZone"/> matters. Timed entries are written in UTC (with a Z), which every calendar
+/// shows on its own owner's clock.
 /// </summary>
+/// <param name="TimeZone">The event's IANA zone; it decides the day of an all-day entry.</param>
 /// <param name="Uid">Stable per event, so saving the same date twice updates rather than duplicates.</param>
 public sealed record CalendarEntry(
     string Title,
@@ -17,7 +19,8 @@ public sealed record CalendarEntry(
     string? Location,
     string? Details,
     string Uid,
-    string? Url);
+    string? Url,
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 /// <summary>
 /// "Add to calendar" for the calendars people here actually use: a pre-filled link for Google
@@ -32,7 +35,7 @@ public static class CalendarLinks
     public static string Google(CalendarEntry e)
     {
         var dates = e.AllDay
-            ? $"{Day(e.Start):yyyyMMdd}/{Day(e.Start).AddDays(1):yyyyMMdd}"
+            ? $"{Day(e):yyyyMMdd}/{Day(e).AddDays(1):yyyyMMdd}"
             : $"{Utc(e.Start)}/{Utc(EndOf(e))}";
         return "https://calendar.google.com/calendar/render?action=TEMPLATE"
                + Q("text", e.Title) + "&dates=" + dates
@@ -48,8 +51,8 @@ public static class CalendarLinks
     private static string OutlookCompose(string host, CalendarEntry e)
     {
         var (start, end) = e.AllDay
-            ? (Day(e.Start).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-               Day(e.Start).AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            ? (Day(e).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+               Day(e).AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             : (e.Start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
                EndOf(e).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
         return $"{host}/calendar/0/action/compose?path=%2Fcalendar%2Faction%2Fcompose&rru=addevent"
@@ -77,8 +80,8 @@ public static class CalendarLinks
         };
         if (e.AllDay)
         {
-            lines.Add($"DTSTART;VALUE=DATE:{Day(e.Start):yyyyMMdd}");
-            lines.Add($"DTEND;VALUE=DATE:{Day(e.Start).AddDays(1):yyyyMMdd}");
+            lines.Add($"DTSTART;VALUE=DATE:{Day(e):yyyyMMdd}");
+            lines.Add($"DTEND;VALUE=DATE:{Day(e).AddDays(1):yyyyMMdd}");
         }
         else
         {
@@ -98,8 +101,8 @@ public static class CalendarLinks
         return sb.ToString();
     }
 
-    /// <summary>The event's day as Malé counts it — the only local day this platform has.</summary>
-    private static DateTime Day(DateTimeOffset at) => at.ToOffset(EventDayWindow.Male).Date;
+    /// <summary>The event's day on its own clock.</summary>
+    private static DateTime Day(CalendarEntry e) => EventTime.Day(e.Start, e.TimeZone);
 
     private static DateTimeOffset EndOf(CalendarEntry e) =>
         e.End is { } end && end > e.Start ? end : e.Start + DefaultLength;

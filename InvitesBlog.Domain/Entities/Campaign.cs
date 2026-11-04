@@ -89,12 +89,19 @@ public sealed class Campaign
     public DateTimeOffset EventStartAt { get; set; }
     public DateTimeOffset? EventEndAt { get; set; }
 
+    /// <summary>
+    /// The event's time zone, an IANA id ("Europe/London"). <see cref="EventStartAt"/> is an instant
+    /// (timestamptz); this is the clock it is SHOWN on and whose calendar days the event's windows
+    /// count. Events made before time zones existed are "Indian/Maldives", so nothing about them moves.
+    /// </summary>
+    public string TimeZone { get; set; } = Events.EventZones.Legacy;
+
     /// <summary>An invitation, or a save the date (no album, no camera, no replies).</summary>
     public CampaignKind Kind { get; set; }
 
     /// <summary>
     /// The host knows the day but not the time yet: calendars get an all-day entry and pages show the
-    /// date alone. Only the Malé date of <see cref="EventStartAt"/> means anything then.
+    /// date alone. Only the date of <see cref="EventStartAt"/> in <see cref="TimeZone"/> means anything then.
     /// </summary>
     public bool AllDay { get; set; }
 

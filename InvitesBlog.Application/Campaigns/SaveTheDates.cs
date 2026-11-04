@@ -57,7 +57,8 @@ public static class EventCalendar
             Location: place.Length == 0 ? null : place,
             Details: SaveTheDates.Is(campaign) ? "Save the date. The invitation will follow." : null,
             Uid: $"{campaign.Id:N}@invites.blog",
-            Url: url);
+            Url: url,
+            TimeZone: campaign.TimeZone);
     }
 
     private static string? Text(System.Text.Json.Nodes.JsonNode? node)

@@ -49,7 +49,12 @@ public static class DependencyInjection
         services.AddValidatorsFromAssemblyContaining<PhoneNormalizer>();
 
         // Pure application services
-        services.AddSingleton<PhoneNormalizer>();
+        // Scoped: a number typed without its country code is read in the signed-in account's country,
+        // else the request's (CF-IPCountry). There is no default country.
+        services.AddScoped<IPhoneRegionSource, PhoneRegionSource>();
+        // The stateless share links hosts send by hand (InviteShareLinks): one key, read once.
+        services.AddSingleton<Application.Security.InviteShareLinks>();
+        services.AddScoped<PhoneNormalizer>(sp => new PhoneNormalizer(sp.GetRequiredService<IPhoneRegionSource>()));
         services.AddSingleton<RuleEngine>();
         services.AddScoped<GuestUploadParser>();
         services.AddScoped<RbacSeeder>();

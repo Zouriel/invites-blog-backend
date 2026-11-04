@@ -71,6 +71,16 @@ public sealed class AppUser
     /// designer still publishes privately, but can't put anything in the public gallery.
     /// </summary>
     public DateTimeOffset? PublicPublishingRevokedAt { get; set; }
+
+    /// <summary>
+    /// The person's country (ISO 3166-1 alpha-2, e.g. "GB"). Set from the request's Cloudflare
+    /// country the first time they sign in, and changeable in Account settings. It is the default
+    /// region for phone numbers typed without a country code, never a rule.
+    /// </summary>
+    public string? Country { get; set; }
+
+    /// <summary>The person's time zone (IANA id, e.g. "Europe/London"); new events default to it.</summary>
+    public string? TimeZone { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

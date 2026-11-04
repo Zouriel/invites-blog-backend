@@ -164,4 +164,11 @@ internal static class TestData
             .Returns<Task<ValidationResult>>(_ => throw new ValidationException(failures));
         return v;
     }
+
+    /// <summary>Share links under a fixed test key.</summary>
+    public static InvitesBlog.Application.Security.InviteShareLinks ShareLinks(string key = "test-share-link-key") =>
+        new(Microsoft.Extensions.Configuration.MemoryConfigurationBuilderExtensions.AddInMemoryCollection(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder(),
+                new Dictionary<string, string?> { ["Invites:ShareLinkKey"] = key })
+            .Build());
 }

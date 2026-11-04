@@ -50,7 +50,8 @@ public interface IMediaBucketService
     /// them under, because on a door that exists to demand proof a self-declared name would be the
     /// one unproved value left in the flow.</para>
     /// </summary>
-    Task<Guest?> GuestForContactAsync(Guid bucketId, string contact, CancellationToken ct = default);
+    /// <param name="phoneCountry">ISO2 country of a phone typed without its country code.</param>
+    Task<Guest?> GuestForContactAsync(Guid bucketId, string contact, CancellationToken ct = default, string? phoneCountry = null);
 
     Task<MediaBucketDto> GetAsync(Guid bucketId, CancellationToken ct = default);
 
@@ -327,13 +328,13 @@ public sealed class MediaBucketService(
     }
 
     public async Task<Guest?> GuestForContactAsync(
-        Guid bucketId, string contact, CancellationToken ct = default)
+        Guid bucketId, string contact, CancellationToken ct = default, string? phoneCountry = null)
     {
         var bucket = await buckets.GetByIdAsync(bucketId, ct);
         if (bucket is null) return null;
         var campaignId = bucket.CampaignId;
 
-        var (normalized, _) = NormalizeContact(contact);
+        var (normalized, _) = await NormalizeContactAsync(contact, ct, phoneCountry);
         var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
         return guests.FirstOrDefault(g => Matches(g, [normalized]));
     }
@@ -383,7 +384,7 @@ public sealed class MediaBucketService(
             var contact = currentUser.Contact.Trim();
             proved.Add(contact.Contains('@')
                 ? contact.ToLowerInvariant()
-                : phones.Normalize(contact) is { IsUsable: true, E164: { } e164 } ? e164 : contact);
+                : phones.Normalize(contact, null) is { IsUsable: true, E164: { } e164 } ? e164 : contact);
         }
 
         return proved;
@@ -396,10 +397,10 @@ public sealed class MediaBucketService(
     /// The comparison this feeds is exact, and the other side of it is <c>AppUser.PhoneE164</c> — so
     /// an owner typing "7819157" or "960 781 9157" for somebody whose account proved
     /// "+9607819157" would produce a member row that could never match anybody, and phone membership
-    /// would fail silently for every owner who used it. Same normalizer, same default region, as
-    /// every other place phone identity is load-bearing.</para>
+    /// would fail silently for every owner who used it. Same normalizer, same region rules (the
+    /// account's country, else the request's), as every other place phone identity is load-bearing.</para>
     /// </summary>
-    private (string Contact, string Kind) NormalizeContact(string? raw)
+    private async Task<(string Contact, string Kind)> NormalizeContactAsync(string? raw, CancellationToken ct, string? phoneCountry = null)
     {
         var value = (raw ?? string.Empty).Trim();
         if (value.Length == 0)
@@ -407,7 +408,7 @@ public sealed class MediaBucketService(
 
         if (value.Contains('@')) return (value.ToLowerInvariant(), "email");
 
-        var phone = phones.Normalize(value);
+        var phone = await phones.NormalizeAsync(value, phoneCountry, ct);
         if (!phone.IsUsable || string.IsNullOrWhiteSpace(phone.E164))
             throw new BusinessRuleException(
                 "That doesn't look like an email or a phone number.", "contact_invalid");
@@ -969,10 +970,10 @@ public sealed class MediaBucketService(
 
         // Through the EVENT, the same way the DTO reads it — see Night(). The copy on the bucket is
         // only reached when there is somehow no event behind it.
-        var night = (await campaigns.GetByIdAsync(bucket.CampaignId, ct))?.EventStartAt
-                    ?? bucket.EventDate;
+        var owner = await campaigns.GetByIdAsync(bucket.CampaignId, ct);
+        var night = owner?.EventStartAt ?? bucket.EventDate;
 
-        if (EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays)) return;
+        if (EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays, owner?.TimeZone)) return;
 
         // Which side of it they are on, because "closed" means two completely different things to
         // somebody standing at the party a day early and somebody looking a week later.
@@ -1077,7 +1078,7 @@ public sealed class MediaBucketService(
         // be added. Refusing at the door would show a scanner a dead link and tell them nothing.
         var campaign = await campaigns.GetByIdAsync(bucket.CampaignId, ct);
         var night = campaign?.EventStartAt ?? bucket.EventDate;
-        var open = EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays);
+        var open = EventDayWindow.IsOpen(night, DateTimeOffset.UtcNow, bucket.UploadWindowDays, campaign?.TimeZone);
 
         // Space and cover come from the event's plan, exactly as the upload itself checks them. The
         // bucket's own CapacityBytes is a leftover from per-bucket sizes and is 0 on every bucket made
@@ -1102,7 +1103,7 @@ public sealed class MediaBucketService(
         var title = campaign?.Title ?? "Album";
 
         var venue = plan?.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
-        var (opensAt, closesAt) = EventDayWindow.Bounds(night, bucket.UploadWindowDays);
+        var (opensAt, closesAt) = EventDayWindow.Bounds(night, bucket.UploadWindowDays, campaign?.TimeZone);
         return new MediaBucketQrAdmission(
             code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night,
             plan?.Branded ?? true, venue?.Name, venue?.LogoUrl, opensAt, closesAt);
@@ -1203,7 +1204,7 @@ public sealed class MediaBucketService(
             ? []
             : await campaigns.Query()
                 .Where(c => campaignIds.Contains(c.Id))
-                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId, c.CardThemeJson, c.MediaTrimAt, c.MediaTrimBytes))
+                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId, c.CardThemeJson, c.MediaTrimAt, c.MediaTrimBytes, c.TimeZone))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
         // Which bucket each event posts to by default — the oldest, matching ForCampaignAsync. Read
@@ -1260,7 +1261,8 @@ public sealed class MediaBucketService(
                 b.CampaignId,
                 Title(b, events),
                 Night(b, events),
-                EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays),
+                EventDayWindow.IsOpen(Night(b, events), now, b.UploadWindowDays,
+                    events.TryGetValue(b.CampaignId, out var zoned) ? zoned.TimeZone : null),
                 b.UploadWindowDays,
                 defaults.Contains(b.Id),
                 plan.CoveredUntil,
@@ -1292,7 +1294,7 @@ public sealed class MediaBucketService(
     /// <summary>How an event presents itself: the things a bucket used to duplicate, and where it is held.</summary>
     private sealed record EventFace(
         Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt, Guid? VenueId,
-        string? CardThemeJson = null, DateTimeOffset? TrimAt = null, long? TrimBytes = null);
+        string? CardThemeJson = null, DateTimeOffset? TrimAt = null, long? TrimBytes = null, string? TimeZone = null);
 
     /// <summary>
     /// The night, read from the EVENT rather than from the copy taken when the bucket was made.

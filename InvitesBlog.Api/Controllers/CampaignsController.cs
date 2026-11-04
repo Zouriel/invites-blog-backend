@@ -261,7 +261,7 @@ public sealed class CampaignsController(
         return Created(await campaigns.CreateBareAsync(
             req.Title, req.EventDate, ct,
             Application.Campaigns.SaveTheDates.Parse(req.Kind) ?? Domain.Enums.CampaignKind.Invitation,
-            req.AllDay ?? false));
+            req.AllDay ?? false, timeZone: req.TimeZone));
     }
 
     /// <summary>
@@ -332,4 +332,5 @@ public sealed record AttachTemplateRequest(Guid TemplateId);
 /// <summary>Starting an event: what it is called and the night it is for.</summary>
 /// <param name="Kind">"invitation" (the default) or "saveTheDate".</param>
 /// <param name="AllDay">The host gave a day but no time.</param>
-public sealed record CreateBareCampaignRequest(string Title, DateTimeOffset? EventDate, string? Kind = null, bool? AllDay = null);
+/// <param name="TimeZone">The event's IANA zone (the browser's or device's); left out, the account's, else Indian/Maldives.</param>
+public sealed record CreateBareCampaignRequest(string Title, DateTimeOffset? EventDate, string? Kind = null, bool? AllDay = null, string? TimeZone = null);
