@@ -252,7 +252,7 @@ public sealed class MediaRetentionService(
         await db.SaveChangesAsync(ct);
 
         if (push is not null && plan.OwnerUserId is { } owner)
-            await push.SendAsync(owner, PushTitle(stage, campaign, trimAt.Value), PushBody(trimAt.Value, cut.RemoveBytes),
+            await push.SendAsync(owner, PushTitle(stage, campaign, trimAt.Value), PushBody(InvitesBlog.Application.Events.EventTime.Local(trimAt.Value, campaign.TimeZone), cut.RemoveBytes),
                 new Dictionary<string, string> { ["path"] = $"/dashboard/{campaign.Id}" }, ct);
     }
 
@@ -408,7 +408,9 @@ public sealed class MediaRetentionService(
         var baseUrl = config.InviterBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
         var title = WebUtility.HtmlEncode(campaign.Title);
-        var on = trimAt.ToString("d MMMM yyyy");
+        // The day on the event's own clock (the server runs on UTC).
+        var on = InvitesBlog.Application.Events.EventTime.Local(trimAt, campaign.TimeZone)
+            .ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
         var size = Size(bytes);
         var pass = campaign.EventPass == EventPassKind.Platinum ? "Platinum pass" : campaign.EventPass == EventPassKind.Gold ? "Gold pass" : null;
         var keep = pass is not null && extension is { } price

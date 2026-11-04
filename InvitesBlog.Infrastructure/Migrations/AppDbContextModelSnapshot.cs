@@ -186,6 +186,11 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("avatar_url");
 
+                    b.Property<string>("Country")
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)")
+                        .HasColumnName("country");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -239,6 +244,11 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<string>("ThemePreference")
                         .HasColumnType("text")
                         .HasColumnName("theme_preference");
+
+                    b.Property<string>("TimeZone")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("time_zone");
 
                     b.HasKey("Id");
 
@@ -499,6 +509,14 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("theme_overrides_json");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("Indian/Maldives")
+                        .HasColumnName("time_zone");
 
                     b.Property<string>("Title")
                         .IsRequired()

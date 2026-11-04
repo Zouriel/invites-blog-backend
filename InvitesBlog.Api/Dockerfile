@@ -12,7 +12,7 @@ RUN dotnet publish InvitesBlog.Api/InvitesBlog.Api.csproj -c Release -o /app --n
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 # For videos: checking what arrived, removing camera metadata, trimming (VideoTrimService).
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tzdata && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app ./
 EXPOSE 8080

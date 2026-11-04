@@ -6,7 +6,7 @@ namespace InvitesBlog.Application.Services.Guests;
 public interface IGuestService
 {
     Task<GuestUploadSummaryDto> UploadAsync(
-        Guid campaignId, Stream fileStream, string fileName, string defaultCountry, CancellationToken ct = default);
+        Guid campaignId, Stream fileStream, string fileName, string? defaultCountry, CancellationToken ct = default);
 
     Task<ConfirmUploadResultDto> ConfirmUploadAsync(Guid campaignId, ConfirmUploadRequest req, CancellationToken ct = default);
 

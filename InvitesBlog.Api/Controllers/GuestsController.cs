@@ -13,16 +13,18 @@ namespace InvitesBlog.Api.Controllers;
 /// <see cref="DispatchService"/> (which the Application layer cannot reference).
 /// </summary>
 [Route("api/campaigns/{id:guid}/guests")]
-public sealed class GuestsController(IGuestService guests, DispatchService dispatch) : BaseApiController
+public sealed class GuestsController(IGuestService guests, DispatchService dispatch, IManualSendService manualSends) : BaseApiController
 {
-    // POST /api/campaigns/{id}/guests/upload — multipart xlsx + defaultCountry (§10.4)
+    // POST /api/campaigns/{id}/guests/upload — multipart xlsx + optional defaultCountry/phoneCountry (ISO2) (§10.4).
+    // No country given: the account's, else the request's (CF-IPCountry); there is no built-in default.
     [HttpPost("upload")]
     [HasPermission(Permissions.Guests.Upload)]
     public async Task<IActionResult> Upload(
-        Guid id, IFormFile file, [FromForm] string defaultCountry = "MV", CancellationToken ct = default)
+        Guid id, IFormFile file, [FromForm] string? defaultCountry = null, [FromForm] string? phoneCountry = null,
+        CancellationToken ct = default)
     {
         await using var stream = file.OpenReadStream();
-        var summary = await guests.UploadAsync(id, stream, file.FileName, defaultCountry, ct);
+        var summary = await guests.UploadAsync(id, stream, file.FileName, phoneCountry ?? defaultCountry, ct);
         return Success(summary);
     }
 
@@ -77,4 +79,14 @@ public sealed class GuestsController(IGuestService guests, DispatchService dispa
         var sent = await dispatch.ResendAsync(guestId, ct);
         return Success(new ResendResultDto(sent));
     }
+
+    // POST /api/campaigns/{id}/guests/{guestId}/manual-send — {channel: whatsapp|viber|telegram}.
+    // The host is sending this guest their invitation by hand from their own phone: records it
+    // ("<channel>-manual", shown on every device) and returns {link, text, sentAt} to put in the app.
+    // Free: not an emailed invitation, and not counted in the resend limit.
+    [HttpPost("{guestId:guid}/manual-send")]
+    [HasPermission(Permissions.Guests.Resend)]
+    public async Task<IActionResult> ManualSend(
+        Guid id, Guid guestId, [FromBody] ManualSendRequest req, CancellationToken ct) =>
+        Success(await manualSends.RecordAsync(id, guestId, req, ct));
 }

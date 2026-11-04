@@ -37,9 +37,12 @@ public sealed class GuestService(
     IValidator<ConfirmUploadRequest> confirmValidator) : IGuestService
 {
     public async Task<GuestUploadSummaryDto> UploadAsync(
-        Guid campaignId, Stream fileStream, string fileName, string defaultCountry, CancellationToken ct = default)
+        Guid campaignId, Stream fileStream, string fileName, string? defaultCountry, CancellationToken ct = default)
     {
         var campaign = await EnsureCampaignAsync(campaignId, ct);
+        // Numbers without a country code are read in the country picked for the file, else the
+        // account's, else the request's. Without any, such rows are refused ("Add the country code").
+        defaultCountry = await phones.ResolveRegionAsync(defaultCountry, ct);
 
         var result = parser.Parse(fileStream, defaultCountry, DefinedRoles(campaign.RolesJson));
         if (result.FileRejected)
@@ -51,7 +54,7 @@ public sealed class GuestService(
             Id = Guid.NewGuid(),
             CampaignId = campaignId,
             FileName = fileName,
-            DefaultCountry = defaultCountry,
+            DefaultCountry = defaultCountry ?? "",
             TotalRows = result.TotalRows,
             ValidRows = result.ValidRows,
             InvalidRows = result.InvalidRows,
@@ -120,7 +123,7 @@ public sealed class GuestService(
 
         var phone = string.IsNullOrWhiteSpace(req.Phone)
             ? null
-            : phones.Normalize(req.Phone, req.DefaultCountry ?? "MV").E164;
+            : await UsablePhoneAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);
         if (string.IsNullOrWhiteSpace(req.Email) && string.IsNullOrWhiteSpace(phone))
             throw new GuestContactRequiredException();
 
@@ -170,7 +173,9 @@ public sealed class GuestService(
         if (req.Phone is not null)
         {
             guest.PhoneRaw = req.Phone;
-            guest.PhoneE164 = phones.Normalize(req.Phone, req.DefaultCountry ?? "MV").E164;
+            guest.PhoneE164 = string.IsNullOrWhiteSpace(req.Phone)
+                ? null
+                : await UsablePhoneAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);
         }
         if (req.Name is not null) guest.Name = req.Name;
         // The list wins when it is sent; a caller that only knows the single field still works.
@@ -192,7 +197,9 @@ public sealed class GuestService(
         var since = DateTimeOffset.UtcNow.AddHours(-24);
         var guestInviteIds = invites.Query().Where(i => i.GuestId == guestId).Select(i => i.Id);
         var recent = await deliveryAttempts.Query()
-            .Where(a => guestInviteIds.Contains(a.InviteId) && a.AttemptedAt >= since && !a.IsOtp)
+            // A send the host made by hand (WhatsApp etc.) costs the platform nothing and isn't counted.
+            .Where(a => guestInviteIds.Contains(a.InviteId) && a.AttemptedAt >= since && !a.IsOtp
+                        && !a.Channel.EndsWith(InvitesBlog.Application.Delivery.ManualSends.Suffix))
             .CountAsync(ct);
         if (recent >= 3)
             throw new ResendLimitExceededException();
@@ -227,6 +234,22 @@ public sealed class GuestService(
         // Bucket admissions go with the guest (cascade on media_bucket_members).
         guests.Remove(guest);
         await uow.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// The number in E.164, or a clear refusal. A number that can't be read (no country code and no
+    /// country to read it in, or simply not a number) used to be stored as nothing at all, so the
+    /// guest silently lost their phone.
+    /// </summary>
+    private async Task<string> UsablePhoneAsync(string raw, string? country, CancellationToken ct)
+    {
+        var result = await phones.NormalizeAsync(raw, country, ct);
+        if (result is { IsUsable: true, E164: { } e164 }) return e164;
+        throw new Exceptions.BusinessRuleException(
+            result.Warning == PhoneNormalizer.NeedsCountryCode
+                ? PhoneNormalizer.NeedsCountryCode
+                : "That doesn't look like a valid phone number.",
+            "invalid_phone");
     }
 
     private async Task<Campaign> EnsureCampaignAsync(Guid campaignId, CancellationToken ct)

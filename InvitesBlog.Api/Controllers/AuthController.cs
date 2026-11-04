@@ -88,6 +88,28 @@ public sealed class AuthController(IAccountService accounts, IAccountDeletionSer
     public async Task<IActionResult> SetTheme([FromBody] SetThemeRequest req, CancellationToken ct) =>
         Success(await accounts.SetThemeAsync(req, ct));
 
+    /// <summary>The signed-in account: identifiers, roles, plan, country and time zone.</summary>
+    [HttpGet("me")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));
+
+    /// <summary>
+    /// The account's country (ISO2, the default for phone numbers without a code) and time zone
+    /// (IANA, the default for new events). Null leaves a field alone; "" clears it.
+    /// </summary>
+    [HttpPut("me/settings")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> UpdateSettings([FromBody] UpdateAccountSettingsRequest req, CancellationToken ct) =>
+        Success(await accounts.UpdateSettingsAsync(req, ct));
+
+    /// <summary>
+    /// The visitor's country from Cloudflare (CF-IPCountry), for pages shown before sign-in: the phone
+    /// inputs start on it. <c>{ "country": null }</c> when unknown ("XX", Tor, or no header).
+    /// </summary>
+    [HttpGet("/api/geo")]
+    [AllowAnonymous]
+    public IActionResult Geo() => Success(accounts.Geo());
+
     /// <summary>The signed-in account's profile picture, uploaded as a file.</summary>
     [HttpPost("me/avatar")]
     [HasPermission(Permissions.Templates.Read)]

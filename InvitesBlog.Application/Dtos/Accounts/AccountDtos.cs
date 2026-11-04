@@ -6,11 +6,13 @@ public sealed record PasswordLoginRequest(string Email, string Password);
 /// <summary>
 /// Asks for a sign-in code. One field: a phone number or an email address, whichever they typed.
 /// </summary>
-public sealed record RequestCodeRequest(string Identifier, string? DefaultCountry = null);
+/// <param name="DefaultCountry">ISO2 country of a phone typed without its country code (older name).</param>
+/// <param name="PhoneCountry">The same; wins over DefaultCountry. Neither: the request's country (CF-IPCountry).</param>
+public sealed record RequestCodeRequest(string Identifier, string? DefaultCountry = null, string? PhoneCountry = null);
 
 /// <summary>Where a code was sent, so the next screen can say so without echoing the full address.</summary>
 /// <param name="Channel">"sms" or "email".</param>
-/// <param name="SentTo">Masked destination, e.g. <c>+960 77• ••34</c> or <c>a•••a@example.com</c>.</param>
+/// <param name="SentTo">Masked destination, e.g. <c>+447•••23</c> or <c>a•••a@example.com</c>.</param>
 public sealed record CodeSentResponse(
     Guid ChallengeId, string Channel, string SentTo, int ExpiresInSeconds);
 
@@ -41,7 +43,24 @@ public sealed record AccountDto(
     /// <summary>Owns a venue or is on a venue's staff, so the venue's page is theirs to open.</summary>
     bool AtVenue = false,
     /// <summary>The profile picture, or null to show initials.</summary>
-    string? AvatarUrl = null);
+    string? AvatarUrl = null,
+    /// <summary>
+    /// ISO2 country ("GB"): the default for phone numbers typed without a country code. Set from the
+    /// request's country (Cloudflare) at the first sign-in; null when never known.
+    /// </summary>
+    string? Country = null,
+    /// <summary>IANA time zone ("Europe/London"), the default for new events; null until the person sets one.</summary>
+    string? TimeZone = null);
+
+/// <summary>
+/// The account's region settings. A field left out (null) is left as it is; an empty string clears it.
+/// </summary>
+/// <param name="Country">ISO 3166-1 alpha-2, one libphonenumber knows ("GB", "US", "MV").</param>
+/// <param name="TimeZone">An IANA id ("Europe/London").</param>
+public sealed record UpdateAccountSettingsRequest(string? Country = null, string? TimeZone = null);
+
+/// <summary>The visitor's country as the request reports it (Cloudflare), or null when unknown.</summary>
+public sealed record GeoDto(string? Country);
 
 /// <summary>Sets the account's light/dark preference. Anything but "dark" is treated as light.</summary>
 public sealed record SetThemeRequest(string? Theme);
@@ -122,7 +141,9 @@ public sealed record MyCampaignDto(
     /// <summary>"invitation" or "saveTheDate".</summary>
     string Kind = "invitation",
     /// <summary>The design's background and accent (#rrggbb), for a tile with no picture; null when it declares none.</summary>
-    IReadOnlyList<string>? Colours = null);
+    IReadOnlyList<string>? Colours = null,
+    /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);

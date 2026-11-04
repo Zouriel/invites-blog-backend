@@ -19,5 +19,11 @@ public interface ICurrentUser
 
     Guid? UserId { get; }
 
+    /// <summary>
+    /// The visitor's country from Cloudflare's <c>CF-IPCountry</c> header, raw (may be "XX"/"T1");
+    /// read it through <c>Phones.RequestCountry.Read</c>. Null outside a request.
+    /// </summary>
+    string? RequestCountry => null;
+
     bool HasPermission(string permission);
 }

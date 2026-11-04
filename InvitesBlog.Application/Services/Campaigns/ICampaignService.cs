@@ -42,7 +42,8 @@ public interface ICampaignService
     /// </param>
     Task<CreateCampaignResponse> CreateBareAsync(
         string title, DateTimeOffset? eventDate = null, CancellationToken ct = default,
-        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false);
+        CampaignKind kind = CampaignKind.Invitation, bool allDay = false, bool live = false, bool allowPastDate = false,
+        string? timeZone = null);
 
     /// <summary>
     /// Finishes an event that has no invitation (photos only) on its plan as it stands: it stops

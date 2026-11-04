@@ -7,7 +7,7 @@ public sealed class UploadedGuestFile
     public Guid Id { get; set; }
     public Guid CampaignId { get; set; }
     public string FileName { get; set; } = default!;
-    public string DefaultCountry { get; set; } = "MV";
+    public string DefaultCountry { get; set; } = string.Empty;   // ISO2 used for numbers without a code; "" when none was known
     public int TotalRows { get; set; }
     public int ValidRows { get; set; }
     public int InvalidRows { get; set; }

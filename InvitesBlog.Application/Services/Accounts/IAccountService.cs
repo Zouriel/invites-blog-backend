@@ -40,6 +40,15 @@ public interface IAccountService
     /// </summary>
     Task<AccountDto> SetThemeAsync(SetThemeRequest req, CancellationToken ct = default);
 
+    /// <summary>The signed-in account.</summary>
+    Task<AccountDto> MeAsync(CancellationToken ct = default);
+
+    /// <summary>Sets the account's country and/or time zone.</summary>
+    Task<AccountDto> UpdateSettingsAsync(UpdateAccountSettingsRequest req, CancellationToken ct = default);
+
+    /// <summary>The request's country (CF-IPCountry), for pages before sign-in.</summary>
+    GeoDto Geo();
+
     /// <summary>Replaces the signed-in account's profile picture with an uploaded image.</summary>
     Task<AccountDto> SetAvatarAsync(byte[] content, string contentType, CancellationToken ct = default);
 

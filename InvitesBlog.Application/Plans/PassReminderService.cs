@@ -56,7 +56,7 @@ public sealed class PassReminderService(
             var offer = await offers.ForCampaignAsync(c.Id, ct);
             var passName = c.EventPass == EventPassKind.Platinum ? "Platinum pass" : "Gold pass";
             await email.SendAsync(PassEmails.EndingSoon(to, c.Title, passName, c.EventPassUntil!.Value,
-                offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}"), ct);
+                offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}", c.TimeZone), ct);
             sent++;
         }
         if (due.Count > 0) await uow.SaveChangesAsync(ct);

@@ -58,7 +58,7 @@ public sealed class GuestUploadParser
     /// Null or empty skips the check (a design the customer uploaded has no roles).
     /// </param>
     public GuestUploadResult Parse(
-        Stream excelStream, string defaultCountry = "MV", IReadOnlyCollection<string>? knownRoles = null)
+        Stream excelStream, string? defaultCountry, IReadOnlyCollection<string>? knownRoles = null)
     {
         XLWorkbook workbook;
         try

@@ -59,7 +59,9 @@ public sealed record CampaignSummaryDto(
     /// <summary>The host gave a day but no time.</summary>
     bool AllDay = false,
     /// <summary>People who open the link can add themselves by replying (Campaign.OpenGuestList).</summary>
-    bool OpenGuestList = false);
+    bool OpenGuestList = false,
+    /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 /// <summary>Result of uploading a campaign image — the stored public URL to bind to a template image slot.</summary>
 public sealed record CampaignImageDto(string Url);
@@ -162,7 +164,9 @@ public sealed record DashboardCampaignDto(
     /// <summary>On a save the date: the invitation made from it, once there is one.</summary>
     Guid? InvitationCampaignId = null,
     /// <summary>People who open the link can add themselves by replying (Campaign.OpenGuestList).</summary>
-    bool OpenGuestList = false);
+    bool OpenGuestList = false,
+    /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 
@@ -179,7 +183,13 @@ public sealed record DashboardGuestDto(
     string InviteStatus,
     string RsvpStatus,
     DateTimeOffset? ViewedAt,
-    string? DeliveryChannel,   // channel of the latest delivery attempt ("viber" / "email" / …)
+    /// <summary>
+    /// The channel of the latest AUTOMATIC delivery attempt: "email" today. Hand sends ("*-manual") and
+    /// the "none" placeholder are left out (see ManualSends). Old events can still show "viber" from
+    /// the automatic Viber sender that was removed in 2026-11; those rows are kept as they were and
+    /// clients label them "Viber (old)".
+    /// </summary>
+    string? DeliveryChannel,
     /// <summary>Their latest answers, keyed by question. Empty until they reply.</summary>
     IReadOnlyDictionary<string, string>? RsvpAnswers = null,
     /// <summary>Every role the guest holds; <c>Role</c> is the first of them.</summary>
@@ -187,7 +197,28 @@ public sealed record DashboardGuestDto(
     /// <summary>They added themselves from the open guest list.</summary>
     bool SelfAdded = false,
     /// <summary>What a self-added guest typed as a phone or email, unchecked. Hidden like Email and PhoneE164.</summary>
-    string? TypedContact = null);
+    string? TypedContact = null,
+    /// <summary>
+    /// The latest invitation email's status: Pending, Sent, Delivered, Failed, Bounced or Skipped
+    /// (held back by the event's limit); null when none was ever tried. Hidden like Email.
+    /// </summary>
+    string? EmailStatus = null,
+    /// <summary>When that email was tried (UTC).</summary>
+    DateTimeOffset? EmailAt = null,
+    /// <summary>Why it failed or was held back; null when it didn't.</summary>
+    string? EmailError = null,
+    /// <summary>
+    /// When the host last sent this guest their invitation by hand, per app: keys "whatsapp", "viber",
+    /// "telegram", present only for apps used. Empty when none. Hidden like PhoneE164.
+    /// </summary>
+    IReadOnlyDictionary<string, DateTimeOffset>? ManualSends = null,
+    /// <summary>
+    /// The guest's personal link to send by hand (a share link: stable, and the emailed link keeps
+    /// working). Null when the guest has no invite yet: POST .../manual-send makes one and returns it.
+    /// </summary>
+    string? ShareLink = null,
+    /// <summary>The host's message for this guest with <see cref="ShareLink"/> in it, raw text, ready to URL-encode.</summary>
+    string? ShareText = null);
 
 public sealed record DashboardResponse(
     DashboardCampaignDto Campaign,

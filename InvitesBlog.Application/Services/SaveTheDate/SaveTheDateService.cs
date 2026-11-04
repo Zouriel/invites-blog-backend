@@ -59,7 +59,7 @@ public sealed class SaveTheDateService(
         // The save the date's day may have passed (or moved): the invitation is still made, and the
         // details step asks for a date that hasn't.
         var created = await campaignService.CreateBareAsync(std.Title, std.EventStartAt, ct, CampaignKind.Invitation, std.AllDay,
-            allowPastDate: true);
+            allowPastDate: true, timeZone: std.TimeZone);
         var invitation = await campaigns.Query(tracking: true).FirstAsync(c => c.Id == created.CampaignId, ct);
         var now = DateTimeOffset.UtcNow;
 

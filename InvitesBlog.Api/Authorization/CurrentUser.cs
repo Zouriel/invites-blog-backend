@@ -19,6 +19,9 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     public string? ContactType => Principal?.FindFirstValue(AppClaims.ContactType);
     public string? Contact => Principal?.FindFirstValue(AppClaims.Contact);
 
+    public string? RequestCountry =>
+        accessor.HttpContext?.Request.Headers[Application.Phones.RequestCountry.Header].ToString() is { Length: > 0 } c ? c : null;
+
     public Guid? UserId =>
         Guid.TryParse(Principal?.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 

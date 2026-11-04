@@ -147,7 +147,7 @@ public class SaveTheDateTests
         var campaignRepo = Substitute.For<ICampaignRepository>();
         campaignRepo.Query(Arg.Any<bool>()).Returns(_ => new[] { std, invitation }.AsAsyncQueryable());
         var campaignService = Substitute.For<ICampaignService>();
-        campaignService.CreateBareAsync(std.Title, std.EventStartAt, Arg.Any<CancellationToken>(), CampaignKind.Invitation, true, false, true)
+        campaignService.CreateBareAsync(std.Title, std.EventStartAt, Arg.Any<CancellationToken>(), CampaignKind.Invitation, true, false, true, std.TimeZone)
             .Returns(new CreateCampaignResponse(invitation.Id, "Draft", "tok"));
         var ownership = Substitute.For<ICampaignOwnershipService>();
         ownership.OwnsAsync(std.Id, Arg.Any<CancellationToken>()).Returns(true);

@@ -29,7 +29,9 @@ public sealed record FeedPostDto(
     DateTimeOffset LastActivityAt,
     string? HostAvatarUrl = null,
     /// <summary>The account that made the event, for Report and Block. Null for very old events.</summary>
-    Guid? HostUserId = null);
+    Guid? HostUserId = null,
+    /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
 
 public sealed record FeedPageDto(IReadOnlyList<FeedPostDto> Items, bool HasMore);
 

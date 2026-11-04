@@ -15,9 +15,10 @@ public static class PassEmails
             "Finish and send", link);
 
     /// <summary>A month, then a week, before a pass ends: the photos' space and albums go with it.</summary>
-    public static EmailMessage EndingSoon(string to, string eventTitle, string passName, DateTimeOffset endsAt, decimal extendPrice, string link)
+    /// <param name="timeZone">The event's IANA zone: the day is the one the pass ends on there.</param>
+    public static EmailMessage EndingSoon(string to, string eventTitle, string passName, DateTimeOffset endsAt, decimal extendPrice, string link, string? timeZone = null)
     {
-        var on = endsAt.ToOffset(TimeSpan.FromHours(5)).ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
+        var on = Events.EventTime.Local(endsAt, timeZone).ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
         return Build(to, $"Your {passName} for {eventTitle} ends on {on}",
             $"The <strong>{E(passName)}</strong> on <strong>{E(eventTitle)}</strong> ends on {E(on)}. After that its extra space and albums go, " +
             $"and the photos start to wind down. Keep it another year for {PlanCatalog.Currency} {extendPrice:0} (no invitations included).",

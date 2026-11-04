@@ -506,7 +506,8 @@ public sealed class FeedService(
             role == FeedRole.Guest ? $"/invitation/{campaign.Id}" : $"/dashboard/{campaign.Id}",
             activity,
             hostUser?.AvatarUrl,
-            campaign.CreatedByUserId);
+            campaign.CreatedByUserId,
+            campaign.TimeZone);
     }
 
     private async Task<List<FeedCommentDto>> DescribeCommentsAsync(

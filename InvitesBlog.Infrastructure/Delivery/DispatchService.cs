@@ -51,7 +51,8 @@ public sealed class DispatchService(
         foreach (var guest in guests)
         {
             var invite = await db.Invites.FirstOrDefaultAsync(i => i.GuestId == guest.Id, ct);
-            if (invite is { Status: InviteStatus.Sent or InviteStatus.Viewed })
+            if (invite is { Status: InviteStatus.Sent or InviteStatus.Viewed }
+                && !await OnlySentByHandAsync(invite, guest, settings, ct))
             {
                 sent++;
                 continue; // already delivered — never double-send
@@ -60,7 +61,7 @@ public sealed class DispatchService(
             var ok = await DeliverToGuestAsync(campaign, guest, settings, inviter?.Name, inviter?.Email, ct);
             if (ok) sent++;
             else if (HasAnyContact(guest, settings)) failed++;
-            else notSent++;   // §product rule: no phone (Viber) and no email — recorded, not a failure
+            else notSent++;   // §product rule: no email to send to — recorded, not a failure
         }
 
         // A "not sent — no contact" guest is not a delivery failure: a campaign where every
@@ -170,6 +171,21 @@ public sealed class DispatchService(
         return ok;
     }
 
+    /// <summary>
+    /// A guest the host sent to by hand (WhatsApp etc.) is marked Sent, but still has their email to
+    /// come when the event emails: true when they have an email address the event uses, were never
+    /// emailed, and no automatic send ever reached them.
+    /// </summary>
+    private async Task<bool> OnlySentByHandAsync(Invite invite, Guest guest, DeliverySettings settings, CancellationToken ct)
+    {
+        if (invite.Status != InviteStatus.Sent || invite.FirstEmailedAt is not null) return false;
+        if (!settings.Uses("email") || string.IsNullOrWhiteSpace(guest.Email)) return false;
+        var automatic = await db.DeliveryAttempts.AnyAsync(a => a.InviteId == invite.Id && !a.IsOtp
+            && (a.Status == DeliveryStatus.Sent || a.Status == DeliveryStatus.Delivered)
+            && !a.Channel.EndsWith(ManualSends.Suffix), ct);
+        return !automatic;
+    }
+
     /// <summary>True if any configured/fallback channel could reach this guest (has the contact it needs).</summary>
     private static bool HasAnyContact(Guest g, DeliverySettings s) =>
         !string.IsNullOrWhiteSpace(g.Email) || !string.IsNullOrWhiteSpace(g.PhoneE164);
@@ -233,10 +249,13 @@ public sealed class DispatchService(
         return false;
     }
 
+    /// <summary>
+    /// Where an automatic channel sends. Email is the only automatic channel: phone-only guests are
+    /// reached by the host by hand (ManualSends: WhatsApp, Viber, Telegram), never by the platform.
+    /// </summary>
     private static string? AddressFor(string channel, Guest g) => channel.ToLowerInvariant() switch
     {
         "email" => string.IsNullOrWhiteSpace(g.Email) ? null : g.Email,
-        "sms" or "whatsapp" or "viber" or "telegram" => string.IsNullOrWhiteSpace(g.PhoneE164) ? null : g.PhoneE164,
         "direct" => "direct-link",
         _ => null
     };

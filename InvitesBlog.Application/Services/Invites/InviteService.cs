@@ -45,15 +45,15 @@ public sealed class InviteService(
     IValidator<RsvpRequest> rsvpValidator,
     IPlanService plans,
     IRepository<Venue> venues,
-    IPushQueue push) : IInviteService
+    IPushQueue push,
+    InviteShareLinks shareLinks) : IInviteService
 {
     /// <summary>Max concurrently-trusted IPs per personal invite link — see class doc on <see cref="InviteTrustedIp"/>.</summary>
     private const int MaxTrustedIps = 3;
 
     public async Task<object> GetByTokenAsync(string token, string? ipAddress, InviteRenderer render, CancellationToken ct = default)
     {
-        var hash = TokenService.Hash(token);
-        var invite = await invites.GetByTokenHashAsync(hash, ct)
+        var invite = await invites.FindByTokenAsync(shareLinks, token, ct)
             ?? throw new InviteNotFoundException();
 
         var campaign = await campaigns.GetByIdAsync(invite.CampaignId, ct)
@@ -223,7 +223,7 @@ public sealed class InviteService(
             campaign.Title,
             IsStatic: true,
             IsOpen: InvitesBlog.Application.Events.EventDayWindow.IsOpen(
-                campaign.EventStartAt, DateTimeOffset.UtcNow, bucket.UploadWindowDays),
+                campaign.EventStartAt, DateTimeOffset.UtcNow, bucket.UploadWindowDays, campaign.TimeZone),
             IsCancelled: campaign.Status == CampaignStatus.Cancelled);
     }
 
@@ -362,8 +362,7 @@ public sealed class InviteService(
     {
         await rsvpValidator.ValidateAndThrowAsync(req, ct);
 
-        var hash = TokenService.Hash(token);
-        var invite = await invites.GetByTokenHashAsync(hash, ct)
+        var invite = await invites.FindByTokenAsync(shareLinks, token, ct)
             ?? throw new InviteNotFoundException();
 
         // Same IP-trust gate as viewing (see GetByTokenAsync) — otherwise the reauth challenge on
@@ -656,7 +655,8 @@ public sealed class InviteService(
                     photoCounts.GetValueOrDefault(c.Id),
                     SaveTheDates.Name(c.Kind),
                     SaveTheDates.Is(c) ? CalendarFor(c) : null,
-                    Application.Campaigns.PosterColours.Of(c));
+                    Application.Campaigns.PosterColours.Of(c),
+                    c.TimeZone);
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)
@@ -698,7 +698,7 @@ public sealed class InviteService(
 
     public async Task<InviteReauthRequestedResponse> RequestReauthAsync(string token, CancellationToken ct = default)
     {
-        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
+        var invite = await invites.FindByTokenAsync(shareLinks, token, ct)
             ?? throw new InviteNotFoundException();
         var guest = await guests.GetByIdAsync(invite.GuestId, ct)
             ?? throw new InviteNotFoundException();
@@ -733,7 +733,7 @@ public sealed class InviteService(
     public async Task<object> VerifyReauthAsync(
         string token, string? ipAddress, VerifyOtpRequest req, InviteRenderer render, CancellationToken ct = default)
     {
-        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
+        var invite = await invites.FindByTokenAsync(shareLinks, token, ct)
             ?? throw new InviteNotFoundException();
 
         // Consumes the challenge — proves the caller is really reachable at whatever contact

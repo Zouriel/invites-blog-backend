@@ -46,7 +46,7 @@ public enum InviteStatus
     Failed,
     Viewed,
     Cancelled,
-    NotSent   // no deliverable contact (no phone for Viber and no email) — appended; EF stores ints
+    NotSent   // no email to send to: phone-only guests are reached by the host on WhatsApp — appended; EF stores ints
 }
 
 public enum RsvpStatus

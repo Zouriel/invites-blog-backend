@@ -17,7 +17,7 @@ public class PrivacyServiceTests
     private readonly IRepository<AuditLog> _auditLogs = Substitute.For<IRepository<AuditLog>>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
-    private PrivacyService Sut() => new(_invites, _guests, _campaigns, _suppression, _auditLogs, _uow);
+    private PrivacyService Sut() => new(_invites, _guests, _campaigns, _suppression, _auditLogs, _uow, TestData.ShareLinks());
 
     private const string Token = "removal-token";
     private static string Hash => TokenService.Hash(Token);

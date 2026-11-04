@@ -18,7 +18,8 @@ public sealed class PrivacyService(
     ICampaignRepository campaigns,
     ISuppressionRepository suppression,
     IRepository<AuditLog> auditLogs,
-    IUnitOfWork uow) : IPrivacyService
+    IUnitOfWork uow,
+    InviteShareLinks shareLinks) : IPrivacyService
 {
     public async Task<PrivacyRemovalInfoDto> GetRemovalInfoAsync(string token, CancellationToken ct = default)
     {
@@ -66,7 +67,7 @@ public sealed class PrivacyService(
         if (string.IsNullOrWhiteSpace(token))
             throw new PrivacyInviteNotFoundException();
 
-        var invite = await invites.GetByTokenHashAsync(TokenService.Hash(token), ct)
+        var invite = await invites.FindByTokenAsync(shareLinks, token, ct)
                      ?? throw new PrivacyInviteNotFoundException();
         // Tracked load so mutations in RemoveAsync are persisted on SaveChanges.
         var guest = await guests.GetByIdAsync(invite.GuestId, ct)

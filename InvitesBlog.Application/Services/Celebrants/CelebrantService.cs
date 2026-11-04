@@ -61,9 +61,12 @@ public sealed class CelebrantService(
         string? phone = null;
         if (!string.IsNullOrWhiteSpace(req.Phone))
         {
-            var normalized = phones.Normalize(req.Phone);
+            var normalized = await phones.NormalizeAsync(req.Phone, req.PhoneCountry, ct);
             if (!normalized.IsUsable || string.IsNullOrWhiteSpace(normalized.E164))
-                throw new BusinessRuleException("That phone number doesn't look right.", "celebrant_phone_invalid");
+                throw new BusinessRuleException(
+                    normalized.Warning == PhoneNormalizer.NeedsCountryCode
+                        ? PhoneNormalizer.NeedsCountryCode
+                        : "That phone number doesn't look right.", "celebrant_phone_invalid");
             phone = normalized.E164;
         }
 

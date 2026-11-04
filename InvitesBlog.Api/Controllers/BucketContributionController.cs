@@ -115,7 +115,7 @@ public sealed class BucketContributionController(
         if (string.IsNullOrWhiteSpace(contact))
             return BadRequest(ApiResponse<object?>.Fail("Enter an email or a phone number."));
 
-        if (await buckets.GuestForContactAsync(admission.BucketId, contact, ct) is null)
+        if (await buckets.GuestForContactAsync(admission.BucketId, contact, ct, req.PhoneCountry ?? req.DefaultCountry) is null)
             return BadRequest(ApiResponse<object?>.Fail(
                 "That contact isn't on the guest list. Ask whoever's hosting to add you."));
 
