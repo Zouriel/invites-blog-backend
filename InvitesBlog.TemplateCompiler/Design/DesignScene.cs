@@ -203,6 +203,10 @@ public sealed class DesignAsset
     [JsonPropertyName("height")] public double Height { get; set; }
     /// <summary>Recolourable colours found in an SVG, in order: <c>--c0</c>, <c>--c1</c>, …</summary>
     [JsonPropertyName("colors")] public List<string>? Colors { get; set; }
+    /// <summary>For an image: whether it has see-through pixels (null: not known).</summary>
+    [JsonPropertyName("alpha")] public bool? Alpha { get; set; }
+    /// <summary>For an opaque image: a PNG whose alpha is how much of each pixel a silhouette tint paints.</summary>
+    [JsonPropertyName("mask")] public string? Mask { get; set; }
     [JsonPropertyName("name")] public string? Name { get; set; }
 }
 
@@ -456,6 +460,10 @@ public sealed class DesignImage
     /// <summary>cover | contain.</summary>
     [JsonPropertyName("fit")] public string Fit { get; set; } = "cover";
     [JsonPropertyName("radius")] public double Radius { get; set; }
+    /// <summary>One colour reference to paint the picture in; null shows it as it is.</summary>
+    [JsonPropertyName("tint")] public string? Tint { get; set; }
+    /// <summary>For an opaque picture: silhouette (default; its brightness mask) | overlay (the colour multiplied over it).</summary>
+    [JsonPropertyName("tintMode")] public string? TintMode { get; set; }
 }
 
 /// <summary>An image the inviter uploads in the builder — a <c>data-src</c> slot.</summary>

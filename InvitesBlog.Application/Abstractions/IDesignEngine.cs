@@ -33,7 +33,12 @@ public sealed record DesignBuild(
 
 public sealed record DesignAssetDto(
     string Id, string Kind, string Data, double Width, double Height,
-    IReadOnlyList<string>? Colors, string Name, int Bytes);
+    IReadOnlyList<string>? Colors, string Name, int Bytes, bool? Alpha = null);
+
+/// <summary>What tinting a picture needs: whether it has see-through pixels, and for an opaque one its brightness mask.</summary>
+public sealed record ImageTintInfoDto(bool Alpha, string? Mask);
+
+public sealed record AnalyseImageRequest(string Data);
 
 /// <summary>
 /// An asset to make smaller for the largest size it's shown at in the design (<paramref name="Width"/> x
@@ -75,6 +80,9 @@ public interface IDesignEngine
     /// what that size can show. Hands back the asset as it was when nothing would be gained.
     /// </summary>
     DesignAssetDto ShrinkAsset(ShrinkAssetRequest request);
+
+    /// <summary>Whether a picture has see-through pixels, and for an opaque one the brightness mask a silhouette tint paints through.</summary>
+    ImageTintInfoDto AnalyseImage(string data);
 
     /// <summary>
     /// Prepares a hand-written template for conversion: bound with sample data and carrying the

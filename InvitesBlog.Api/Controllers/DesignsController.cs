@@ -78,6 +78,12 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art) :
     [EnableRateLimiting("design-assets")]
     public IActionResult ShrinkAsset([FromBody] ShrinkAssetRequest request) => Success(designs.ShrinkAsset(request));
 
+    /// <summary>What tinting a picture needs: whether it has see-through pixels, and an opaque one's brightness mask.</summary>
+    [HttpPost("assets/analyse")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    [EnableRateLimiting("design-assets")]
+    public IActionResult AnalyseImage([FromBody] AnalyseImageRequest request) => Success(designs.AnalyseImage(request.Data));
+
     // ----- Art library ----------------------------------------------------------------------------
 
     [HttpGet("art/sources")]

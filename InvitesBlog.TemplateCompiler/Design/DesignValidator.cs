@@ -108,6 +108,9 @@ public static partial class DesignValidator
                 case "image":
                     if (bytes > DesignCatalog.MaxImageBytes * 4 / 3 + 64) Error("image_too_large", $"“{asset.Name ?? id}” is over {DesignCatalog.MaxImageBytes / 1024}KB.");
                     if (DesignCompiler.ImageDataUri(asset.Data) is null) Error("image_invalid", $"“{asset.Name ?? id}” isn't a usable picture.");
+                    if (asset.Mask is not null && (DesignCompiler.ImageDataUri(asset.Mask) is null
+                        || Encoding.UTF8.GetByteCount(asset.Mask) > DesignCatalog.MaxImageBytes * 4 / 3 + 64))
+                        Error("image_invalid", $"“{asset.Name ?? id}” has a tint mask that isn't usable.");
                     break;
                 default:
                     Error("asset_kind", $"“{asset.Name ?? id}” is a kind of file the designer doesn't use.");
@@ -265,6 +268,12 @@ public static partial class DesignValidator
                 case "image":
                     if (el.Image is null || !scene.Assets.TryGetValue(el.Image.Asset, out var imageAsset) || imageAsset.Kind != "image")
                         Error("asset_missing", $"“{label}” points at a picture that isn't in the design.", el.Id);
+                    else
+                    {
+                        CheckColor(el.Image.Tint, label, el.Id!, themeKeys, Error, Warn);
+                        if (el.Image.TintMode is not (null or "silhouette" or "overlay"))
+                            Error("tint_mode", $"“{label}” has a tint mode that isn't silhouette or overlay.", el.Id);
+                    }
                     break;
                 case "slot":
                     var slot = el.Slot ?? new DesignSlot();

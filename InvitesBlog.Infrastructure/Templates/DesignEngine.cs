@@ -6,6 +6,8 @@ using InvitesBlog.Application.Exceptions;
 using InvitesBlog.TemplateCompiler;
 using InvitesBlog.TemplateCompiler.Design;
 using InvitesBlog.TemplateCompiler.Design.Art;
+using InvitesBlog.Infrastructure.Images;
+using SixLabors.ImageSharp;
 using Microsoft.Extensions.Configuration;
 
 namespace InvitesBlog.Infrastructure.Templates;
@@ -141,7 +143,7 @@ public sealed class DesignEngine(
             var optimized = optimizer.Optimize(content, type, edge);
             if (optimized.Content.Length > DesignCatalog.MaxImageBytes) continue;
             var data = $"data:{type};base64,{Convert.ToBase64String(optimized.Content)}";
-            return new DesignAssetDto(id, "image", data, optimized.Width, optimized.Height, null, name, optimized.Content.Length);
+            return new DesignAssetDto(id, "image", data, optimized.Width, optimized.Height, null, name, optimized.Content.Length, TintMask.HasAlpha(optimized.Content));
         }
         throw new BusinessRuleException(
             $"That picture is too big to embed even when shrunk — keep it under {DesignCatalog.MaxImageBytes / 1024}KB.", "image_too_large");
@@ -173,13 +175,7 @@ public sealed class DesignEngine(
         }
 
         if (request.Kind != "image") throw new BusinessRuleException("Only pictures and illustrations can be shrunk.", "asset_invalid");
-        var match = System.Text.RegularExpressions.Regex.Match(request.Data, "^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$");
-        if (!match.Success) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
-        byte[] content;
-        try { content = Convert.FromBase64String(match.Groups[2].Value); }
-        catch (FormatException) { throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid"); }
-        var type = ImageSniffer.Detect(content);
-        if (type is not ("image/png" or "image/jpeg" or "image/webp" or "image/gif")) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        var (content, type) = DecodeImage(request.Data);
 
         // Twice the size it's shown at: sharp on a 2x screen, which is most phones' and laptops' density.
         // The format stays: turning a PNG into a JPEG would put smudges round lettering and flat colour.
@@ -187,7 +183,36 @@ public sealed class DesignEngine(
         var optimized = optimizer.Optimize(content, type, Math.Max(16, edge));
         if (!optimized.Changed || optimized.Content.Length >= content.Length) return unchanged with { Bytes = content.Length };
         return new DesignAssetDto(request.Id, "image", $"data:{optimized.ContentType};base64,{Convert.ToBase64String(optimized.Content)}",
-            optimized.Width, optimized.Height, null, name, optimized.Content.Length);
+            optimized.Width, optimized.Height, null, name, optimized.Content.Length, TintMask.HasAlpha(optimized.Content));
+    }
+
+    public ImageTintInfoDto AnalyseImage(string data)
+    {
+        if (string.IsNullOrEmpty(data) || data.Length > 10 * 1024 * 1024)
+            throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        var (content, _) = DecodeImage(data);
+        try
+        {
+            var (alpha, mask) = TintMask.Analyse(content);
+            return new ImageTintInfoDto(alpha, mask is null ? null : "data:image/png;base64," + Convert.ToBase64String(mask));
+        }
+        catch (Exception e) when (e is NotSupportedException or InvalidImageContentException or UnknownImageFormatException)
+        {
+            throw new BusinessRuleException("That picture couldn't be read.", "asset_invalid");
+        }
+    }
+
+    /// <summary>A picture held in a design: a data: URI of a PNG, JPEG, WebP or GIF, checked by its bytes.</summary>
+    private static (byte[] Content, string Type) DecodeImage(string data)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(data, "^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$");
+        if (!match.Success) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        byte[] content;
+        try { content = Convert.FromBase64String(match.Groups[2].Value); }
+        catch (FormatException) { throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid"); }
+        var type = ImageSniffer.Detect(content);
+        if (type is not ("image/png" or "image/jpeg" or "image/webp" or "image/gif")) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        return (content, type);
     }
 
     public string ImportDocument(string packagedHtml)
