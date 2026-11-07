@@ -30,6 +30,7 @@ public interface IDesignService
     DesignPreviewDto Preview(DesignPreviewRequest request);
     Task<DesignPreviewDto> CheckAsync(Guid id, CancellationToken ct = default);
     DesignAssetDto ImportAsset(byte[] content, string fileName, string contentType);
+    DesignAssetDto ShrinkAsset(ShrinkAssetRequest request);
     Task<DesignImportSourceDto> ImportSourceAsync(Guid templateId, CancellationToken ct = default);
     Task<PublishResultDto> PublishAsync(Guid id, PublishDesignRequest request, CancellationToken ct = default);
     Task<DesignDto> SetVisibilityAsync(Guid id, SetDesignVisibilityRequest request, CancellationToken ct = default);
@@ -238,6 +239,12 @@ public sealed class DesignService(
     {
         Me();
         return engine.ImportAsset(content, fileName, contentType);
+    }
+
+    public DesignAssetDto ShrinkAsset(ShrinkAssetRequest request)
+    {
+        Me();
+        return engine.ShrinkAsset(request);
     }
 
     public async Task<DesignImportSourceDto> ImportSourceAsync(Guid templateId, CancellationToken ct = default)

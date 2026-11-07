@@ -36,6 +36,12 @@ public sealed record DesignAssetDto(
     IReadOnlyList<string>? Colors, string Name, int Bytes);
 
 /// <summary>
+/// An asset to make smaller for the largest size it's shown at in the design (<paramref name="Width"/> x
+/// <paramref name="Height"/> CSS pixels, the picture's own box, after fit and scale).
+/// </summary>
+public sealed record ShrinkAssetRequest(string Id, string Kind, string Data, double Width, double Height, string? Name);
+
+/// <summary>
 /// The visual designer's compiler, validator and catalog, as the Application layer sees them. The
 /// scene crosses this boundary as JSON so no layer above Infrastructure depends on the compiler's
 /// model — the same arrangement <see cref="ITemplatePackager"/> has.
@@ -62,6 +68,13 @@ public interface IDesignEngine
 
     /// <summary>Sanitises an uploaded SVG, or shrinks a picture, into an asset the scene can embed.</summary>
     DesignAssetDto ImportAsset(byte[] content, string fileName, string contentType);
+
+    /// <summary>
+    /// The asset made as small as it can be without looking any different at the size it's shown: a picture
+    /// resized to twice that (sharp on a 2x screen) and re-encoded; an illustration's coordinates rounded to
+    /// what that size can show. Hands back the asset as it was when nothing would be gained.
+    /// </summary>
+    DesignAssetDto ShrinkAsset(ShrinkAssetRequest request);
 
     /// <summary>
     /// Prepares a hand-written template for conversion: bound with sample data and carrying the
