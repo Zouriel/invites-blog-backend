@@ -174,6 +174,8 @@ public class DesignAssistantServiceTests
         _db.SaveChanges();
         var status = (await Sut().GetAsync(_design)).Status;
         Assert.True(status.Allowed);
+        // No allowance to show a share of, so the panel's "% used" note stays hidden.
+        Assert.Equal(0m, status.AllowanceUsd);
 
         _model.Replies.Enqueue(Reply("ok"));
         await Sut().SendAsync(_design, Say("again"));
