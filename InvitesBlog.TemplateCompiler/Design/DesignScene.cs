@@ -452,6 +452,8 @@ public sealed class DesignSvg
     [JsonPropertyName("fills")] public Dictionary<string, string> Fills { get; set; } = new();
     /// <summary>One colour reference for the whole illustration (wins over <see cref="Fills"/>); null keeps its own colours.</summary>
     [JsonPropertyName("tint")] public string? Tint { get; set; }
+    /// <summary>Fill the element's box, out of proportion if need be; otherwise the art keeps its shape, centred.</summary>
+    [JsonPropertyName("stretch")] public bool? Stretch { get; set; }
 }
 
 public sealed class DesignImage
