@@ -30,9 +30,13 @@ public sealed record AssistantVocabulary(IReadOnlyList<AssistantOption> Moves, I
 
 public sealed record AssistantOption(string Id, string Label);
 
+/// <param name="Model">The Claude model for this account (see <see cref="AssistantOptions.ModelFor"/>).</param>
+/// <param name="Effort">low | medium | high.</param>
 public sealed record AssistantModelRequest(
     IReadOnlyList<AssistantTurnMessage> Messages,
-    AssistantVocabulary Vocabulary);
+    AssistantVocabulary Vocabulary,
+    string Model,
+    string Effort);
 
 public sealed record AssistantUsageCount(long InputTokens, long CacheWriteTokens, long CacheReadTokens, long OutputTokens);
 
@@ -46,30 +50,51 @@ public interface IAssistantModel
     Task<AssistantModelReply> CompleteAsync(AssistantModelRequest request, CancellationToken ct = default);
 }
 
-/// <summary>Settings: <c>Assistant__ApiKey</c> and friends.</summary>
+/// <summary>US dollars per million tokens for one model. Cache writes are the 5-minute kind (1.25× input).</summary>
+public sealed record AssistantPrice(decimal Input, decimal CacheWrite, decimal CacheRead, decimal Output);
+
+/// <summary>
+/// Settings: <c>Assistant__ApiKey</c> and friends. Every account gets <see cref="Model"/>; the accounts in
+/// <see cref="OwnerUserIds"/> (the owner) get <see cref="OwnerModel"/> and no monthly allowance.
+/// </summary>
 public sealed class AssistantOptions
 {
     public const string Section = "Assistant";
 
     public string? ApiKey { get; set; }
-    public string Model { get; set; } = "claude-sonnet-5-5";
+    public string Model { get; set; } = "claude-opus-5-5";
     /// <summary>low | medium | high.</summary>
-    public string Effort { get; set; } = "low";
-    public int MaxTokens { get; set; } = 4096;
+    public string Effort { get; set; } = "medium";
+    /// <summary>Comma-separated account ids that get <see cref="OwnerModel"/> and no allowance.</summary>
+    public string? OwnerUserIds { get; set; }
+    public string OwnerModel { get; set; } = "claude-fable-5-1";
+    public string OwnerEffort { get; set; } = "medium";
+    /// <summary>Per step, thinking included.</summary>
+    public int MaxTokens { get; set; } = 16000;
     /// <summary>Most model calls one message from the person may lead to.</summary>
     public int MaxStepsPerMessage { get; set; } = 16;
     /// <summary>How many earlier exchanges the model sees; the chat keeps all of them.</summary>
     public int HistoryTurns { get; set; } = 4;
-    /// <summary>The monthly allowance per account, US dollars.</summary>
+    /// <summary>The monthly allowance per account, US dollars (owners have none).</summary>
     public decimal MonthlyAllowanceUsd { get; set; } = 5m;
 
-    // US dollars per million tokens (Claude Sonnet 5.5 list prices).
-    public decimal InputPerMTok { get; set; } = 2m;
-    public decimal CacheWritePerMTok { get; set; } = 2.5m;
-    public decimal CacheReadPerMTok { get; set; } = 0.2m;
-    public decimal OutputPerMTok { get; set; } = 10m;
+    /// <summary>List prices. A model missing here is charged at the most expensive one, never at nothing.</summary>
+    public static readonly IReadOnlyDictionary<string, AssistantPrice> Prices = new Dictionary<string, AssistantPrice>
+    {
+        ["claude-sonnet-5-5"] = new(2m, 2.5m, 0.2m, 10m),
+        ["claude-opus-5-5"] = new(4m, 5m, 0.2m, 20m),
+        ["claude-fable-5-1"] = new(10m, 12.5m, 0.25m, 50m),
+    };
 
-    public long CostMicros(AssistantUsageCount u) => (long)Math.Ceiling(
-        u.InputTokens * InputPerMTok + u.CacheWriteTokens * CacheWritePerMTok
-        + u.CacheReadTokens * CacheReadPerMTok + u.OutputTokens * OutputPerMTok);
+    public bool IsOwner(Guid userId) =>
+        (OwnerUserIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(s => Guid.TryParse(s, out var id) && id == userId);
+
+    public (string Model, string Effort) ModelFor(Guid userId) => IsOwner(userId) ? (OwnerModel, OwnerEffort) : (Model, Effort);
+
+    public static long CostMicros(string model, AssistantUsageCount u)
+    {
+        var p = Prices.TryGetValue(model, out var known) ? known : Prices.Values.MaxBy(x => x.Output)!;
+        return (long)Math.Ceiling(u.InputTokens * p.Input + u.CacheWriteTokens * p.CacheWrite + u.CacheReadTokens * p.CacheRead + u.OutputTokens * p.Output);
+    }
 }

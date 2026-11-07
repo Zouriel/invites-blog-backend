@@ -157,7 +157,8 @@ public sealed partial class DesignAssistantService(
         AssistantModelReply reply;
         try
         {
-            reply = await model.CompleteAsync(new AssistantModelRequest(Window(rows), Clean(vocabulary)), ct);
+            var (modelId, effort) = Options.ModelFor(me);
+            reply = await model.CompleteAsync(new AssistantModelRequest(Window(rows), Clean(vocabulary), modelId, effort), ct);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -168,7 +169,7 @@ public sealed partial class DesignAssistantService(
             return new AssistantStepDto(Dtos(added), [], true, await StatusAsync(ct));
         }
 
-        await RecordUsageAsync(me, reply.Usage, ct);
+        await RecordUsageAsync(me, Options.ModelFor(me).Model, reply.Usage, ct);
 
         var blocks = reply.Blocks.ToList();
         if (reply.StopReason == "refusal")
@@ -248,7 +249,8 @@ public sealed partial class DesignAssistantService(
         string? reason = null;
         if (!await EligibleAsync(me, now, ct)) reason = "premium";
         else if (!model.Configured) reason = "unavailable";
-        else if (used >= (long)(Options.MonthlyAllowanceUsd * 1_000_000m)) reason = "allowance";
+        // The owner has no allowance; their use is still recorded.
+        else if (!Options.IsOwner(me) && used >= (long)(Options.MonthlyAllowanceUsd * 1_000_000m)) reason = "allowance";
         return new AssistantStatusDto(reason is null, reason, usedUsd, Options.MonthlyAllowanceUsd, resets);
     }
 
@@ -265,7 +267,7 @@ public sealed partial class DesignAssistantService(
         ? $"You've used this month's AI allowance. It resets on {status.ResetsAt.ToString("d MMMM", CultureInfo.InvariantCulture)}."
         : "The design assistant isn't available on this account.";
 
-    private async Task RecordUsageAsync(Guid me, AssistantUsageCount count, CancellationToken ct)
+    private async Task RecordUsageAsync(Guid me, string modelId, AssistantUsageCount count, CancellationToken ct)
     {
         var month = MonthOf(DateTimeOffset.UtcNow);
         var row = await usage.Query(tracking: true).FirstOrDefaultAsync(u => u.UserId == me && u.Month == month, ct);
@@ -278,7 +280,7 @@ public sealed partial class DesignAssistantService(
         row.CacheWriteTokens += count.CacheWriteTokens;
         row.CacheReadTokens += count.CacheReadTokens;
         row.OutputTokens += count.OutputTokens;
-        row.CostMicros += Options.CostMicros(count);
+        row.CostMicros += AssistantOptions.CostMicros(modelId, count);
         row.Requests++;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
