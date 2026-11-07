@@ -28,6 +28,8 @@ public static class DesignSampleData
         {
             ["title"] = DesignCatalog.FindVariable("event.title")!.Sample, // a title always exists
             ["subtitle"] = Sample("event.subtitle"),
+            ["celebrants"] = Sample("event.celebrants"),
+            ["initials"] = Sample("event.initials"),
             ["description"] = Sample("event.description"),
             ["date"] = Sample("event.date"),
             ["time"] = Sample("event.time"),

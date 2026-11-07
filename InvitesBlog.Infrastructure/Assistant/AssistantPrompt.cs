@@ -97,7 +97,7 @@ public static class AssistantPrompt
         "font": {"type": "string", "description": "Font id or theme:heading-font / theme:body-font."},
         "size": {"type": "number"}, "weight": {"type": "integer", "enum": [300, 400, 500, 600, 700, 800]},
         "italic": {"type": "boolean"}, "uppercase": {"type": "boolean"},
-        "color": {"type": "string", "description": "Hex or theme:key."},
+        "color": {"type": ["string", "null"], "description": "Hex or theme:key."},
         "align": {"type": "string", "enum": ["left", "center", "right"]},
         "valign": {"type": "string", "enum": ["top", "middle", "bottom"]},
         "line_height": {"type": "number"}, "letter_spacing": {"type": "number", "description": "In em, e.g. 0.1."}
@@ -139,7 +139,7 @@ public static class AssistantPrompt
            "link": {"type": "string", "description": "For kind link: a link target from the catalog."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["kind", "y"]}},
-        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label.",
+        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration, color tints the whole art in one colour (outlines and see-through parts keep their shape); color null brings back its own colours.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
            "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]}, "sides": {"type": "integer"},
@@ -175,6 +175,7 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["vector", "animated", "picture"]}}, "required": ["query"]}},
         {"name": "add_art", "description": "Adds a search_art result to the design.",
          "input_schema": {"type": "object", "properties": {"source": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"},
+           "color": {"type": "string", "description": "Hex or theme:key: a vector placed already tinted in one colour (pictures keep theirs)."},
            "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["source", "id"]}},
         {"name": "check_design", "description": "Runs Check: what would stop the template working, and what's worth a look.",
          "input_schema": {"type": "object", "properties": {}}},

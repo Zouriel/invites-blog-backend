@@ -82,6 +82,9 @@ public static partial class SvgSanitizer
     [GeneratedRegex(@"url\(\s*['""]?\s*#([A-Za-z0-9_.:-]+)\s*['""]?\s*\)")]
     private static partial Regex LocalUrlRegex();
 
+    [GeneratedRegex(@"^(?:var\(--cu,\s*(url\(#[A-Za-z0-9_.:-]+\))\)|(url\(#[A-Za-z0-9_.:-]+\)))$")]
+    private static partial Regex PaintUrlRegex();
+
     [GeneratedRegex(@"^var\(--c(\d{1,3}),\s*(#[0-9a-f]{6})\)$")]
     private static partial Regex PaintVarRegex();
 
@@ -241,6 +244,10 @@ public static partial class SvgSanitizer
             var rewritten = LocalUrlRegex().Replace(value, m => $"url(#{state.Prefix}{m.Groups[1].Value})");
             var withoutLocal = LocalUrlRegex().Replace(rewritten, string.Empty);
             if (withoutLocal.Contains("url(", StringComparison.OrdinalIgnoreCase)) return null;
+            // A gradient or pattern as paint goes through --cu, so a tint can paint it flat: a url()
+            // resolves to the original definition, out of reach of the colours a <use> passes down.
+            if (property is "fill" or "stroke" && PaintUrlRegex().Match(rewritten) is { Success: true } u)
+                return $"var(--cu, {(u.Groups[1].Success ? u.Groups[1].Value : u.Groups[2].Value)})";
             return rewritten;
         }
 

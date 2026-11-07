@@ -256,7 +256,11 @@ public static partial class DesignValidator
                 case "svg":
                     if (el.Svg is null || !scene.Assets.TryGetValue(el.Svg.Asset, out var svgAsset) || svgAsset.Kind != "svg")
                         Error("asset_missing", $"“{label}” points at an SVG that isn't in the design.", el.Id);
-                    else foreach (var reference in el.Svg.Fills.Values) CheckColor(reference, label, el.Id!, themeKeys, Error, Warn);
+                    else
+                    {
+                        foreach (var reference in el.Svg.Fills.Values) CheckColor(reference, label, el.Id!, themeKeys, Error, Warn);
+                        CheckColor(el.Svg.Tint, label, el.Id!, themeKeys, Error, Warn);
+                    }
                     break;
                 case "image":
                     if (el.Image is null || !scene.Assets.TryGetValue(el.Image.Asset, out var imageAsset) || imageAsset.Kind != "image")
