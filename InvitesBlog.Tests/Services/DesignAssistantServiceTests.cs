@@ -176,16 +176,17 @@ public class DesignAssistantServiceTests
         Assert.Equal("add_text", call.Name);
         Assert.Equal("{{event.title}}", call.Input.GetProperty("text").GetString());
 
-        var second = await Sut().ContinueAsync(_design, new([new("t1", true, "Added text e2")], null));
+        var second = await Sut().ContinueAsync(_design, new([new("t1", true, "Added text: e2 text \"Names\" x40 y120", "Added text “Names”")], null));
         Assert.True(second.Done);
-        Assert.Contains(second.Messages, m => m.Role == "results" && m.Lines.SequenceEqual(["Added text e2"]));
+        // The person sees the plain line; the model gets the details.
+        Assert.Contains(second.Messages, m => m.Role == "results" && m.Lines.SequenceEqual(["Added text “Names”"]));
         Assert.Contains(second.Messages, m => m.Text == "Added the names at the top.");
 
         // The second call carries the whole exchange: the message, the call (with its thinking) and the result.
         var sent = _model.Requests[1].Messages;
         Assert.Equal(["user", "assistant", "user"], sent.Select(m => m.Role));
         Assert.Contains(sent[1].Blocks, b => b.Type == "thinking" && b.Signature == "sig-t1");
-        Assert.Contains(sent[2].Blocks, b => b.Type == "tool_result" && b.Id == "t1" && b.Text == "Added text e2");
+        Assert.Contains(sent[2].Blocks, b => b.Type == "tool_result" && b.Id == "t1" && b.Text!.Contains("x40 y120"));
 
         // And the chat comes back the same way later.
         var chat = await Sut().GetAsync(_design);

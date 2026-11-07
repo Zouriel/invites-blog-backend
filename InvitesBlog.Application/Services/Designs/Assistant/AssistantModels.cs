@@ -10,6 +10,7 @@ namespace InvitesBlog.Application.Services.Designs.Assistant;
 /// <param name="Id">The tool call's id (tool_use), or the id it answers (tool_result).</param>
 /// <param name="Signature">A thinking block's signature, kept exactly.</param>
 /// <param name="Data">A redacted thinking block's data.</param>
+/// <param name="Summary">A tool result's plain line for the person; never sent to the model.</param>
 public sealed record AssistantBlock(
     string Type,
     string? Text = null,
@@ -18,7 +19,8 @@ public sealed record AssistantBlock(
     JsonElement? Input = null,
     string? Signature = null,
     string? Data = null,
-    bool? IsError = null);
+    bool? IsError = null,
+    string? Summary = null);
 
 /// <summary>A stored chat entry as the model sees it.</summary>
 public sealed record AssistantTurnMessage(string Role, IReadOnlyList<AssistantBlock> Blocks);

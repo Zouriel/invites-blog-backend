@@ -27,7 +27,8 @@ public sealed record AssistantStepDto(IReadOnlyList<AssistantMessageDto> Message
 
 public sealed record AssistantSendRequest(string Text, string Outline, AssistantVocabulary? Vocabulary);
 
-public sealed record AssistantToolResult(string Id, bool Ok, string Text);
+/// <param name="Summary">One plain line for the person ("Added text “Names”"); the model gets <paramref name="Text"/>.</param>
+public sealed record AssistantToolResult(string Id, bool Ok, string Text, string? Summary = null);
 
 public sealed record AssistantResultsRequest(IReadOnlyList<AssistantToolResult> Results, AssistantVocabulary? Vocabulary);
 
@@ -128,7 +129,8 @@ public sealed partial class DesignAssistantService(
 
         var given = (request.Results ?? []).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
         var blocks = open.Select(c => given.TryGetValue(c.Id, out var r)
-            ? new AssistantBlock("tool_result", Clip(r.Text, MaxResultLength), c.Id, IsError: r.Ok ? null : true)
+            ? new AssistantBlock("tool_result", Clip(r.Text ?? "", MaxResultLength), c.Id, IsError: r.Ok ? null : true,
+                Summary: r.Ok && !string.IsNullOrWhiteSpace(r.Summary) ? Clip(r.Summary.Trim(), 120) : null)
             : new AssistantBlock("tool_result", "Not run.", c.Id, IsError: true)).ToList();
         var added = new List<DesignAssistantMessage> { await AppendAsync(designId, me, rows, "results", blocks, false, ct) };
         await uow.SaveChangesAsync(ct);
@@ -319,12 +321,11 @@ public sealed partial class DesignAssistantService(
     {
         var blocks = Blocks(row);
         var text = string.Join("\n\n", blocks.Where(b => b.Type == "text").Select(b => b.Text?.Trim()).Where(t => !string.IsNullOrEmpty(t)));
-        var lines = row.Role == "results" ? blocks.Where(b => b.Type == "tool_result").Select(b => FirstLine(b.Text)).ToList() : [];
+        // The person sees the plain lines of what worked; the details are for the model.
+        var lines = row.Role == "results" ? blocks.Where(b => b.Type == "tool_result" && b.Summary is not null).Select(b => b.Summary!).ToList() : [];
         if (text.Length == 0 && lines.Count == 0) return null;
         return new AssistantMessageDto(row.Id, row.Role, text, lines, row.StartsTurn, row.CreatedAt);
     }
-
-    private static string FirstLine(string? s) => (s ?? "").Split('\n', 2)[0].Trim();
 
     private static string Clip(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
