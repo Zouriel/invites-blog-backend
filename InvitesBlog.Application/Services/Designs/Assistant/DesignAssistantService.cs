@@ -251,7 +251,9 @@ public sealed partial class DesignAssistantService(
         else if (!model.Configured) reason = "unavailable";
         // The owner has no allowance; their use is still recorded.
         else if (!Options.IsOwner(me) && used >= (long)(Options.MonthlyAllowanceUsd * 1_000_000m)) reason = "allowance";
-        return new AssistantStatusDto(reason is null, reason, usedUsd, Options.MonthlyAllowanceUsd, resets);
+        // No allowance (0) for the owner, so the panel never shows them a "% used" note.
+        var allowance = Options.IsOwner(me) ? 0m : Options.MonthlyAllowanceUsd;
+        return new AssistantStatusDto(reason is null, reason, usedUsd, allowance, resets);
     }
 
     /// <summary>Premium or Venue in force, or an admin (who supports both).</summary>
