@@ -141,12 +141,13 @@ public static class AssistantPrompt
            "link": {"type": "string", "description": "For kind link: a link target from the catalog."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["kind", "y"]}},
-        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted.",
+        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted. Resizing a group scales everything in it.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
            "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]}, "sides": {"type": "integer"},
            "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain"]}, "link": {"type": "string"}, "locked": {"type": "boolean"},
            "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"]},
+           "stretch": {"type": "boolean", "description": "Illustration: fill its box out of proportion (true) or keep its own shape (false)."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["id"]}},
         {"name": "delete_elements", "description": "Deletes elements.",

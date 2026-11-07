@@ -641,6 +641,18 @@ public class DesignCompilerTests
         Assert.Contains(issues, i => i.Severity == DesignIssue.Error && i.Code == "color" && i.ElementId == "art");
     }
 
+    [Theory]
+    [InlineData(true, "<svg class=\"s\" viewBox=\"0 0 120 40\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><use href=\"#s0\" width=\"120\" height=\"40\"/></svg>")]
+    [InlineData(false, "<svg class=\"s\" aria-hidden=\"true\"><use href=\"#s0\" width=\"100%\" height=\"100%\"/></svg>")]
+    [InlineData(null, "<svg class=\"s\" aria-hidden=\"true\"><use href=\"#s0\" width=\"100%\" height=\"100%\"/></svg>")]
+    public void A_stretched_illustration_fills_its_box_otherwise_it_keeps_its_shape(bool? stretch, string expected)
+    {
+        var scene = Minimal();
+        scene.Assets["art"] = new DesignAsset { Kind = "svg", Data = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40"><rect width="120" height="40" fill="#c0a060"/></svg>""", Width = 120, Height = 40 };
+        scene.Elements.Add(new DesignElement { Id = "art", Type = "svg", X = 20, Y = 200, W = 300, H = 200, Svg = new DesignSvg { Asset = "art", Stretch = stretch } });
+        Assert.Contains(expected, DesignCompiler.Compile(scene));
+    }
+
     private static DesignScene Minimal()
     {
         // The blank page as a scrolling page, with an RSVP button near the top and one line of text.

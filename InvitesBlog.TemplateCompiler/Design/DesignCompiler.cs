@@ -146,6 +146,8 @@ public static class DesignCompiler
         public Dictionary<string, int> SvgSymbols { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> ImageClasses { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, IReadOnlyList<string>> SvgColors { get; } = new(StringComparer.Ordinal);
+        /// <summary>Each illustration's own width and height (its viewBox), for drawing it stretched.</summary>
+        public Dictionary<string, (double W, double H)> SvgSizes { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImages { get; } = new(StringComparer.Ordinal);
         /// <summary>Pictures something tints: declared as <c>--im</c> so the tint can mask with the same bytes.</summary>
         public HashSet<string> VarImages { get; } = new(StringComparer.Ordinal);
@@ -229,6 +231,7 @@ public static class DesignCompiler
             try { clean = SvgSanitizer.Sanitize(asset.Data, $"s{index}-"); }
             catch (SvgRejectedException) { continue; }
             ctx.SvgColors[assetId] = clean.Colors;
+            ctx.SvgSizes[assetId] = (clean.Width, clean.Height);
             body.Append("<symbol id=\"s").Append(index).Append("\" viewBox=\"").Append(clean.ViewBox).Append("\">")
                 .Append(clean.InnerMarkup).Append("</symbol>");
         }
@@ -802,8 +805,14 @@ public static class DesignCompiler
     {
         if (el.Svg is null || !ctx.SvgSymbols.TryGetValue(el.Svg.Asset, out var index)) return;
         if (!ctx.SvgColors.TryGetValue(el.Svg.Asset, out var colors)) return;
-        inner.Append("<svg class=\"s\" aria-hidden=\"true\"><use href=\"#s").Append(index)
-            .Append("\" width=\"100%\" height=\"100%\"/></svg>");
+        // Stretched, the art fills its box whatever its own proportions; otherwise it keeps them, centred.
+        if (el.Svg.Stretch == true && ctx.SvgSizes.TryGetValue(el.Svg.Asset, out var size))
+            inner.Append("<svg class=\"s\" viewBox=\"0 0 ").Append(DesignCss.Num(size.W)).Append(' ').Append(DesignCss.Num(size.H))
+                .Append("\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><use href=\"#s").Append(index)
+                .Append("\" width=\"").Append(DesignCss.Num(size.W)).Append("\" height=\"").Append(DesignCss.Num(size.H)).Append("\"/></svg>");
+        else
+            inner.Append("<svg class=\"s\" aria-hidden=\"true\"><use href=\"#s").Append(index)
+                .Append("\" width=\"100%\" height=\"100%\"/></svg>");
 
         // A tint paints every colour the art has in one colour (gradient stops included, so a gradient
         // goes flat). Paint that is "none" was never a colour, so outlines and cut-outs keep their shape;
