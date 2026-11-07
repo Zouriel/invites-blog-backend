@@ -63,6 +63,8 @@ public class InviteServiceTests
     private readonly IRepository<EventPhoto> _photos = Substitute.For<IRepository<EventPhoto>>();
     private readonly IMediaBucketService _bucketService = Substitute.For<IMediaBucketService>();
 
+    private IRepository<CampaignCelebrant> _celebrants = TestData.Empty<CampaignCelebrant>();
+
     private InviteService Sut()
     {
         // The inbox shows each invitation's preview and counts its photos, so both need a queryable
@@ -72,7 +74,7 @@ public class InviteServiceTests
         return new(
             _invites, _guests, _campaigns, _templates, _inviters, _users, _rsvp, _contactLinks,
             _trustedIps, _photos, _otp, _bucketService, _uow, _currentUser, _config, _rsvpValidator,
-            TestData.FreePlans(), TestData.Empty<Venue>(), _push, TestData.ShareLinks());
+            TestData.FreePlans(), TestData.Empty<Venue>(), _push, TestData.ShareLinks(), _celebrants);
     }
 
     private readonly RecordingPushQueue _push = new();
@@ -97,6 +99,46 @@ public class InviteServiceTests
             },
             false,
             c.Status.ToString());
+
+    // ----- celebrants -----
+
+    [Theory]
+    [InlineData(new[] { "Hana" }, "Hana", "H")]
+    [InlineData(new[] { "hana ahmed", " Imran " }, "hana ahmed & Imran", "H & I")]
+    [InlineData(new[] { "Aisha", "Bilal", "Sara" }, "Aisha, Bilal & Sara", "A, B & S")]
+    [InlineData(new[] { " ", "Élodie" }, "Élodie", "É")]
+    public void Celebrant_names_and_initials_read_the_way_people_write_them(string[] names, string text, string initials)
+        => Assert.Equal((text, initials), InviteService.CelebrantText(names));
+
+    [Fact]
+    public void No_celebrants_means_no_value_so_the_text_hides()
+        => Assert.Equal((null, null), InviteService.CelebrantText([]));
+
+    [Fact]
+    public async Task An_invitation_carries_its_celebrants_unless_the_host_typed_them()
+    {
+        var c = TestData.Campaign();
+        c.OpenLinkCode = "Xk7mQ2p9Lz";
+        _campaigns.GetByIdAsync(c.Id, Arg.Any<CancellationToken>()).Returns(c);
+        _templates.GetByIdAsync(c.TemplateId, Arg.Any<CancellationToken>())
+            .Returns(new Template { Id = c.TemplateId, PackageUrl = "/assets/p/" });
+        var t0 = DateTimeOffset.UtcNow;
+        var rows = new[]
+        {
+            new CampaignCelebrant { Id = Guid.NewGuid(), CampaignId = c.Id, Name = "Imran", CreatedAt = t0.AddMinutes(1) },
+            new CampaignCelebrant { Id = Guid.NewGuid(), CampaignId = c.Id, Name = "Hana", CreatedAt = t0 },
+            new CampaignCelebrant { Id = Guid.NewGuid(), CampaignId = Guid.NewGuid(), Name = "Someone else", CreatedAt = t0 },
+        };
+        _celebrants = Substitute.For<IRepository<CampaignCelebrant>>();
+        _celebrants.Query(Arg.Any<bool>()).Returns(_ => rows.AsAsyncQueryable());
+
+        InviteRenderer typed = (cc, t, g, i, link, n, p, e, d) => new InviteRenderData(t.PackageUrl,
+            new JsonObject { ["event"] = new JsonObject { ["initials"] = "H ♥ I" } }, false, cc.Status.ToString());
+        var payload = await Sut().RenderOpenAsync(c.Id, "https://me.example.com/r/x", typed);
+
+        Assert.Equal("Hana & Imran", (string?)payload!.Data["event"]!["celebrants"]);
+        Assert.Equal("H ♥ I", (string?)payload.Data["event"]!["initials"]);
+    }
 
     // ----- the open link -----
 

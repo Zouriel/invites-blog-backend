@@ -46,7 +46,8 @@ public sealed class InviteService(
     IPlanService plans,
     IRepository<Venue> venues,
     IPushQueue push,
-    InviteShareLinks shareLinks) : IInviteService
+    InviteShareLinks shareLinks,
+    IRepository<CampaignCelebrant> celebrants) : IInviteService
 {
     /// <summary>Max concurrently-trusted IPs per personal invite link — see class doc on <see cref="InviteTrustedIp"/>.</summary>
     private const int MaxTrustedIps = 3;
@@ -91,6 +92,7 @@ public sealed class InviteService(
         var payload = render(campaign, template, guest, invite, link,
             inviter?.Name, inviter?.PhoneE164, inviter?.Email,
             await bucketService.WindowForCampaignAsync(campaign.Id, ct));
+        await AddCelebrantsAsync(campaign.Id, payload.Data, ct);
 
         return new InviteViewResponse(payload.PackageUrl, payload.Data, false, payload.CampaignStatus,
             RsvpQuestions.Parse(campaign.RsvpQuestionsJson), invite.Id);
@@ -120,6 +122,7 @@ public sealed class InviteService(
         var payload = render(campaign, template, guest, invite, inviteLink,
             inviter?.Name, inviter?.PhoneE164, inviter?.Email,
             await bucketService.WindowForCampaignAsync(campaign.Id, ct));
+        await AddCelebrantsAsync(campaign.Id, payload.Data, ct);
 
         return new InviteRenderData(
             payload.PackageUrl, payload.Data, payload.RequiresOtp, campaign.Status.ToString(),
@@ -167,6 +170,7 @@ public sealed class InviteService(
         var payload = render(campaign, template, guest, invite, inviteLink,
             inviter?.Name, inviter?.PhoneE164, inviter?.Email,
             await bucketService.WindowForCampaignAsync(campaign.Id, ct));
+        await AddCelebrantsAsync(campaign.Id, payload.Data, ct);
 
         Anonymize(payload.Data);
 
@@ -332,6 +336,35 @@ public sealed class InviteService(
     /// the renderer — the renderer is shared with the personal path and has no business knowing
     /// this door exists.
     /// </summary>
+    /// <summary>
+    /// <c>event.celebrants</c> ("Hana &amp; Imran") and <c>event.initials</c> ("H &amp; I") from the people the
+    /// event is for, in the order they were added. A value the host typed into the event (a builder field at
+    /// that path) wins.
+    /// </summary>
+    private async Task AddCelebrantsAsync(Guid campaignId, JsonObject data, CancellationToken ct)
+    {
+        if (data["event"] is not JsonObject ev) return;
+        var names = await celebrants.Query().Where(c => c.CampaignId == campaignId)
+            .OrderBy(c => c.CreatedAt).Select(c => c.Name).ToListAsync(ct);
+        var (text, initials) = CelebrantText(names);
+        if (Blank(ev["celebrants"])) ev["celebrants"] = text;
+        if (Blank(ev["initials"])) ev["initials"] = initials;
+
+        static bool Blank(JsonNode? n) => n is null || string.IsNullOrWhiteSpace(n.ToString());
+    }
+
+    /// <summary>Names joined the way people write them ("A", "A &amp; B", "A, B &amp; C"), and the same for each first name's first letter.</summary>
+    public static (string? Names, string? Initials) CelebrantText(IEnumerable<string?> names)
+    {
+        var clean = names.Select(n => (n ?? "").Trim()).Where(n => n.Length > 0).ToList();
+        if (clean.Count == 0) return (null, null);
+        var initials = clean.Select(n => System.Globalization.StringInfo.GetNextTextElement(n).ToUpperInvariant()).ToList();
+        return (Join(clean), Join(initials));
+
+        static string Join(List<string> parts) =>
+            parts.Count == 1 ? parts[0] : string.Join(", ", parts.Take(parts.Count - 1)) + " & " + parts[^1];
+    }
+
     private static void Anonymize(JsonObject data)
     {
         // RSVP: there is no invite row to record an answer against, and a reply from "somebody"

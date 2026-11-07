@@ -797,6 +797,18 @@ public static class DesignCompiler
         inner.Append("<svg class=\"s\" aria-hidden=\"true\"><use href=\"#s").Append(index)
             .Append("\" width=\"100%\" height=\"100%\"/></svg>");
 
+        // A tint paints every colour the art has in one colour (gradient stops included, so a gradient
+        // goes flat). Paint that is "none" was never a colour, so outlines and cut-outs keep their shape;
+        // fill/color cover parts left at the default black or drawn in currentColor.
+        var tint = DesignCss.Color(el.Svg.Tint, ctx.ThemeKeys);
+        if (tint is not null)
+        {
+            css.Append(cls).Append('{');
+            for (var i = 0; i < colors.Count; i++) css.Append("--c").Append(i).Append(':').Append(tint).Append(';');
+            css.Append("--cu:").Append(tint).Append(";color:").Append(tint).Append(";fill:").Append(tint).Append('}');
+            return;
+        }
+
         var vars = new StringBuilder();
         for (var i = 0; i < colors.Count; i++)
         {

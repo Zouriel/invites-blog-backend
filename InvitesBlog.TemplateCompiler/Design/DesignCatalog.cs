@@ -106,6 +106,9 @@ public static class DesignCatalog
 
         new("event.title", "Title", "Event", "text", "text", "Hana & Imran"),
         new("event.subtitle", "Subtitle", "Event", "text", "text", "are getting married"),
+        // From the event's celebrant list ("Who is it for?"): their names, and a monogram of initials.
+        new("event.celebrants", "Celebrant names", "Event", "text", "text", "Hana & Imran"),
+        new("event.initials", "Celebrant initials", "Event", "text", "text", "H & I"),
         new("event.description", "Description", "Event", "text", "textarea",
             "We would love for you to celebrate with us as we begin our life together."),
         new("event.date", "Date", "Event", "text", "date", "Saturday, 28 August 2027"),

@@ -446,6 +446,8 @@ public sealed class DesignSvg
     [JsonPropertyName("asset")] public string Asset { get; set; } = default!;
     /// <summary>Original colour (as listed on the asset) → colour reference to paint it with.</summary>
     [JsonPropertyName("fills")] public Dictionary<string, string> Fills { get; set; } = new();
+    /// <summary>One colour reference for the whole illustration (wins over <see cref="Fills"/>); null keeps its own colours.</summary>
+    [JsonPropertyName("tint")] public string? Tint { get; set; }
 }
 
 public sealed class DesignImage

@@ -546,6 +546,101 @@ public class DesignCompilerTests
         Assert.DoesNotContain("ib:scrolled", DesignCompiler.Compile(scene));
     }
 
+    // ----- Tinted illustrations -----
+
+    /// <summary>
+    /// Several fills, a stroke, an outline with fill="none", colours in a style attribute, a gradient, a part
+    /// in currentColor and one left at the default black: every one of them, and nothing else.
+    /// </summary>
+    private const string TintArt = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <defs><linearGradient id="g"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs>
+          <rect width="50" height="50" fill="#112233"/>
+          <circle cx="70" cy="70" r="10" fill="#445566" stroke="#778899"/>
+          <path d="M0 0L100 100" fill="none" stroke="#aabbcc"/>
+          <path d="M0 100L100 0" style="fill:#ddeeff;stroke:none"/>
+          <rect x="60" width="40" height="20" fill="url(#g)"/>
+          <path d="M10 90h5" fill="currentColor"/>
+          <path d="M20 90h5"/>
+        </svg>
+        """;
+
+    private static (DesignScene Scene, DesignElement Art) TintScene(string? tint, Dictionary<string, string>? fills = null)
+    {
+        var scene = Minimal();
+        scene.Assets["art"] = new DesignAsset { Kind = "svg", Data = TintArt, Width = 100, Height = 100 };
+        var el = new DesignElement
+        {
+            Id = "art", Type = "svg", X = 20, Y = 200, W = 100, H = 100,
+            Svg = new DesignSvg { Asset = "art", Fills = fills ?? new(), Tint = tint },
+            Keyframes = [new() { T = 0, Opacity = 0 }, new() { T = 0.15, Opacity = 1 }],
+            Loop = new DesignLoop { Repeat = 2, Frames = [new() { T = 0.5, Dy = -10 }] },
+        };
+        scene.Elements.Add(el);
+        return (scene, el);
+    }
+
+    private static string? TintRule(string html) =>
+        System.Text.RegularExpressions.Regex.Match(html, @"\{(--c\d+:[^;{}]+;)+--cu:[^;{}]+;color:[^;{}]+;fill:[^;{}]+\}") is { Success: true } m ? m.Value : null;
+
+    [Fact]
+    public void A_tint_paints_every_colour_of_the_art_and_leaves_none_alone()
+    {
+        var colours = SvgSanitizer.Sanitize(TintArt).Colors;
+        // Two gradient stops, two fills, two strokes and the style fill: seven colours to paint.
+        Assert.Equal(7, colours.Count);
+
+        var html = DesignCompiler.Compile(TintScene("#AA0000").Scene);
+        var rule = TintRule(html);
+        Assert.NotNull(rule);
+        Assert.Equal("{" + string.Concat(Enumerable.Range(0, 7).Select(i => $"--c{i}:#aa0000;")) + "--cu:#aa0000;color:#aa0000;fill:#aa0000}", rule);
+        // A gradient is painted through --cu, so the tint lays it flat.
+        Assert.Matches(@"fill:var\(--cu, url\(#s\d+-g\)\)", html);
+        // Outlines and cut-outs stay what they were: "none" is never a colour.
+        Assert.Contains("fill=\"none\"", html);
+        Assert.Contains("stroke:none", html);
+        // The art keeps its own colours underneath, so clearing the tint brings them back.
+        Assert.Contains("var(--c0, #ff0000)", html);
+        Assert.DoesNotContain(DesignValidator.Validate(TintScene("#AA0000").Scene), i => i.Severity == DesignIssue.Error);
+    }
+
+    [Fact]
+    public void A_theme_tint_follows_the_theme()
+    {
+        var html = DesignCompiler.Compile(TintScene("theme:accent").Scene);
+        Assert.StartsWith("{--c0:var(--ib-accent);", TintRule(html));
+        Assert.EndsWith("color:var(--ib-accent);fill:var(--ib-accent)}", TintRule(html));
+    }
+
+    [Fact]
+    public void Clearing_the_tint_brings_back_the_art_and_its_own_recolouring()
+    {
+        var html = DesignCompiler.Compile(TintScene(null, new() { ["#112233"] = "#00ff00" }).Scene);
+        Assert.Null(TintRule(html));
+        Assert.Contains("{--c2:#00ff00;}", html);
+
+        // A tint wins over the per-colour choices while it's set.
+        var tinted = DesignCompiler.Compile(TintScene("#000000", new() { ["#112233"] = "#00ff00" }).Scene);
+        Assert.DoesNotContain("--c2:#00ff00", tinted);
+    }
+
+    [Fact]
+    public void A_tint_changes_only_colour_so_motion_compiles_as_before()
+    {
+        string Motion(string html) => string.Join("\n", html.Split('}').Where(r => r.Contains("animation") || r.Contains("@keyframes")));
+        var plain = DesignCompiler.Compile(TintScene(null).Scene);
+        var tinted = DesignCompiler.Compile(TintScene("theme:accent").Scene);
+        Assert.NotEmpty(Motion(plain));
+        Assert.Equal(Motion(plain), Motion(tinted));
+    }
+
+    [Fact]
+    public void A_tint_that_is_not_a_colour_fails_check()
+    {
+        var issues = DesignValidator.Validate(TintScene("chartreuse-ish").Scene);
+        Assert.Contains(issues, i => i.Severity == DesignIssue.Error && i.Code == "color" && i.ElementId == "art");
+    }
+
     private static DesignScene Minimal()
     {
         // The blank page as a scrolling page, with an RSVP button near the top and one line of text.
