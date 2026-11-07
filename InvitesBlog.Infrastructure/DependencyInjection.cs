@@ -116,6 +116,10 @@ public static class DependencyInjection
         services.AddSingleton<Templates.Art.IArtSource, Templates.Art.OpenverseSource>();
         services.AddSingleton<Templates.Art.IArtSource, Templates.Art.OpenClipartSource>();
         services.AddSingleton<Templates.Art.IArtSource, Templates.Art.FreeSvgSource>();
+        // Pixabay's key rides in the query string: its own client, with request logging off so the key
+        // never reaches the logs.
+        Templates.Art.PixabaySource.AddClient(services).ConfigurePrimaryHttpMessageHandler(Templates.Art.ArtHttp.Handler);
+        services.AddSingleton<Templates.Art.IArtSource, Templates.Art.PixabaySource>();
         services.AddScoped<IArtLibrary, Templates.Art.ArtLibrary>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();

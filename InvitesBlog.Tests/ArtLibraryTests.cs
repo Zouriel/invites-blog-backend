@@ -31,7 +31,7 @@ public class ArtLibraryTests
         Config);
 
     private static ArtLibrary Library(IEnumerable<IArtSource>? sources = null) =>
-        new(sources ?? [], Engine(), NullLogger<ArtLibrary>.Instance);
+        new(sources ?? [], Engine(), Substitute.For<ICurrentUser>(), NullLogger<ArtLibrary>.Instance);
 
     /// <summary>
     /// Places an import the way the editor does — a group of full-box layers with keyframes on a track —
@@ -259,7 +259,7 @@ public class ArtFileProbe
         var engine = new DesignEngine(new RawTemplatePackager(Substitute.For<IStorageService>()),
             new ImageSharpOptimizer(NullLogger<ImageSharpOptimizer>.Instance),
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Urls:AssetsBase"] = "/assets" }).Build());
-        var library = new ArtLibrary([], engine, NullLogger<ArtLibrary>.Instance);
+        var library = new ArtLibrary([], engine, Substitute.For<ICurrentUser>(), NullLogger<ArtLibrary>.Instance);
         var log = new StringBuilder();
         foreach (var file in Directory.GetFiles(dir).Where(f => f.EndsWith(".svg") || f.EndsWith(".gif")).Order())
         {
