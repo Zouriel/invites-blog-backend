@@ -5,6 +5,7 @@ using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Exceptions;
 using InvitesBlog.TemplateCompiler;
 using InvitesBlog.TemplateCompiler.Design;
+using InvitesBlog.TemplateCompiler.Design.Art;
 using Microsoft.Extensions.Configuration;
 
 namespace InvitesBlog.Infrastructure.Templates;
@@ -144,6 +145,49 @@ public sealed class DesignEngine(
         }
         throw new BusinessRuleException(
             $"That picture is too big to embed even when shrunk — keep it under {DesignCatalog.MaxImageBytes / 1024}KB.", "image_too_large");
+    }
+
+    public DesignAssetDto ShrinkAsset(ShrinkAssetRequest request)
+    {
+        if (!double.IsFinite(request.Width) || !double.IsFinite(request.Height) || request.Width <= 0 || request.Height <= 0
+            || request.Width > 20000 || request.Height > 20000)
+            throw new BusinessRuleException("Give the size it's shown at.", "asset_size");
+        if (string.IsNullOrEmpty(request.Data) || request.Data.Length > 10 * 1024 * 1024)
+            throw new BusinessRuleException("That asset isn't one this design can hold.", "asset_invalid");
+        var name = request.Name ?? string.Empty;
+        var unchanged = new DesignAssetDto(request.Id, request.Kind, request.Data, 0, 0, null, name, Encoding.UTF8.GetByteCount(request.Data));
+
+        if (request.Kind == "svg")
+        {
+            SanitizedSvg before;
+            try { before = SvgSanitizer.Sanitize(request.Data); }
+            catch (SvgRejectedException e) { throw new BusinessRuleException(e.Message, "svg_invalid"); }
+            var original = before.Document;
+            SanitizedSvg after;
+            try { after = SvgSanitizer.Sanitize(SvgShrink.Shrink(original, before.Width, before.Height, request.Width, request.Height)); }
+            catch (Exception e) when (e is SvgRejectedException or System.Xml.XmlException) { return unchanged; }
+            var bytes = Encoding.UTF8.GetByteCount(after.Document);
+            return bytes < Encoding.UTF8.GetByteCount(request.Data)
+                ? new DesignAssetDto(request.Id, "svg", after.Document, after.Width, after.Height, after.Colors, name, bytes)
+                : unchanged;
+        }
+
+        if (request.Kind != "image") throw new BusinessRuleException("Only pictures and illustrations can be shrunk.", "asset_invalid");
+        var match = System.Text.RegularExpressions.Regex.Match(request.Data, "^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$");
+        if (!match.Success) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        byte[] content;
+        try { content = Convert.FromBase64String(match.Groups[2].Value); }
+        catch (FormatException) { throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid"); }
+        var type = ImageSniffer.Detect(content);
+        if (type is not ("image/png" or "image/jpeg" or "image/webp" or "image/gif")) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+
+        // Twice the size it's shown at: sharp on a 2x screen, which is most phones' and laptops' density.
+        // The format stays: turning a PNG into a JPEG would put smudges round lettering and flat colour.
+        var edge = (int)Math.Ceiling(2 * Math.Max(request.Width, request.Height));
+        var optimized = optimizer.Optimize(content, type, Math.Max(16, edge));
+        if (!optimized.Changed || optimized.Content.Length >= content.Length) return unchanged with { Bytes = content.Length };
+        return new DesignAssetDto(request.Id, "image", $"data:{optimized.ContentType};base64,{Convert.ToBase64String(optimized.Content)}",
+            optimized.Width, optimized.Height, null, name, optimized.Content.Length);
     }
 
     public string ImportDocument(string packagedHtml)

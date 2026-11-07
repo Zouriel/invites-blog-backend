@@ -72,6 +72,12 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art) :
         return Success(designs.ImportAsset(buffer.ToArray(), file.FileName, file.ContentType ?? string.Empty));
     }
 
+    /// <summary>An asset made smaller for the largest size the design shows it at.</summary>
+    [HttpPost("assets/shrink")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    [EnableRateLimiting("design-assets")]
+    public IActionResult ShrinkAsset([FromBody] ShrinkAssetRequest request) => Success(designs.ShrinkAsset(request));
+
     // ----- Art library ----------------------------------------------------------------------------
 
     [HttpGet("art/sources")]
