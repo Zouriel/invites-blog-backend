@@ -99,6 +99,11 @@ public static class DependencyInjection
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();
         services.AddScoped<IDesignEngine, DesignEngine>();
 
+        // The designer assistant (Claude). Without Assistant__ApiKey it reports itself unavailable.
+        services.AddSingleton(config.GetSection(Application.Services.Designs.Assistant.AssistantOptions.Section).Get<Application.Services.Designs.Assistant.AssistantOptions>()
+            ?? new Application.Services.Designs.Assistant.AssistantOptions());
+        services.AddSingleton<Application.Services.Designs.Assistant.IAssistantModel, Assistant.AnthropicAssistantModel>();
+
         // The designer's art library: searched and downloaded server-side through a client that only
         // connects to public addresses (library results link to hosts we don't control).
         services.AddHttpClient(Templates.Art.ArtHttp.ClientName, c =>

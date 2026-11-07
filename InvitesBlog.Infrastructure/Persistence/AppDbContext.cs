@@ -13,6 +13,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateType> TemplateTypes => Set<TemplateType>();
     public DbSet<TemplateDesign> TemplateDesigns => Set<TemplateDesign>();
     public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
+    public DbSet<DesignAssistantMessage> DesignAssistantMessages => Set<DesignAssistantMessage>();
+    public DbSet<AssistantUsage> AssistantUsages => Set<AssistantUsage>();
     public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
     public DbSet<ContentReport> ContentReports => Set<ContentReport>();
     public DbSet<UserBlock> UserBlocks => Set<UserBlock>();
@@ -108,6 +110,27 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => new { x.UserId, x.PublishedAt }).HasDatabaseName("idx_template_design_publishes_user_time");
             e.HasIndex(x => x.DesignId).HasDatabaseName("idx_template_design_publishes_design_id");
             e.HasOne<TemplateDesign>().WithMany().HasForeignKey(x => x.DesignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<DesignAssistantMessage>(e =>
+        {
+            e.ToTable("design_assistant_messages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Role).HasMaxLength(16);
+            // Plain text, not jsonb: thinking signatures must come back byte for byte, and jsonb rewrites.
+            e.Property(x => x.ContentJson).HasColumnType("text");
+            e.HasIndex(x => new { x.DesignId, x.Seq }).IsUnique().HasDatabaseName("idx_design_assistant_messages_design_seq");
+            e.HasOne<TemplateDesign>().WithMany().HasForeignKey(x => x.DesignId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AssistantUsage>(e =>
+        {
+            e.ToTable("assistant_usage");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Month).HasMaxLength(7);
+            e.HasIndex(x => new { x.UserId, x.Month }).IsUnique().HasDatabaseName("idx_assistant_usage_user_month");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<TemplateReport>(e =>

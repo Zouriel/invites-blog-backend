@@ -35,6 +35,16 @@ public static class RateLimitPolicies
                 $"address:{ClientAddress.PartitionKey(context)}", _ => Window(AnonymousCreatesPerWindow));
     }
 
+    /// <summary>The designer assistant: every step of an exchange is a request, so this is per account, not per address.</summary>
+    public const string DesignAssistant = "design-assistant";
+
+    public static RateLimitPartition<string> DesignAssistantPartition(HttpContext context)
+    {
+        var account = context.User.Identity?.IsAuthenticated == true ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) : null;
+        return RateLimitPartition.GetFixedWindowLimiter(account is not null ? $"account:{account}" : $"address:{ClientAddress.PartitionKey(context)}",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+    }
+
     private static FixedWindowRateLimiterOptions Window(int permits) =>
         new() { PermitLimit = permits, Window = CreateWindow, QueueLimit = 0 };
 }
