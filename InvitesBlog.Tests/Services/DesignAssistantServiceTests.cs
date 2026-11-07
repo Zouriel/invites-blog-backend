@@ -128,8 +128,8 @@ public class DesignAssistantServiceTests
         Assert.Equal(100, row.InputTokens);
         Assert.Equal(1000, row.CacheReadTokens);
         Assert.Equal(20, row.OutputTokens);
-        // 100 × $2 + 1000 × $0.20 + 20 × $10 per million tokens.
-        Assert.Equal(100 * 2 + 1000 * 0.2 + 20 * 10, row.CostMicros);
+        // Opus 5.5: 100 × $4 + 1000 × $0.20 + 20 × $20 per million tokens.
+        Assert.Equal(100 * 4 + 1000 * 0.2 + 20 * 20, row.CostMicros);
         Assert.True(step.Done);
     }
 
@@ -160,6 +160,33 @@ public class DesignAssistantServiceTests
         Assert.True(step.Done);
         Assert.Single(_model.Requests);
         Assert.Contains(step.Messages, m => m.Role == "assistant" && m.Text.Contains("allowance"));
+    }
+
+    [Fact]
+    public async Task Everyone_gets_opus_and_the_owner_gets_fable_with_no_allowance()
+    {
+        _model.Replies.Enqueue(Reply("ok"));
+        await Sut().SendAsync(_design, Say("hi"));
+        Assert.Equal(("claude-opus-5-5", "medium"), (_model.Requests[0].Model, _model.Requests[0].Effort));
+
+        _options.OwnerUserIds = $"{Guid.NewGuid()}, {_me}";
+        _db.AssistantUsages.Single().CostMicros = 50_000_000;
+        _db.SaveChanges();
+        var status = (await Sut().GetAsync(_design)).Status;
+        Assert.True(status.Allowed);
+
+        _model.Replies.Enqueue(Reply("ok"));
+        await Sut().SendAsync(_design, Say("again"));
+        Assert.Equal("claude-fable-5-1", _model.Requests[1].Model);
+        // Fable is charged at Fable's price: 100 × $10 + 1000 × $0.25 + 20 × $50.
+        Assert.Equal(50_000_000 + 100 * 10 + 1000 * 0.25 + 20 * 50, _db.AssistantUsages.Single().CostMicros);
+    }
+
+    [Fact]
+    public void A_model_without_a_price_is_charged_at_the_most_expensive_one()
+    {
+        var u = new AssistantUsageCount(1000, 0, 0, 1000);
+        Assert.Equal(AssistantOptions.CostMicros("claude-fable-5-1", u), AssistantOptions.CostMicros("claude-someday-9", u));
     }
 
     // ----- An exchange --------------------------------------------------------------------------

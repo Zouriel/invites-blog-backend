@@ -13,14 +13,14 @@ namespace InvitesBlog.Infrastructure.Assistant;
 /// tools run in the person's browser.
 ///
 /// <para>Cost: the tools and system prompt carry a cache breakpoint and never change, and the
-/// request-level cache marker caches the conversation as it grows within an exchange. Effort is low
-/// by default: these are short, concrete edits.</para>
+/// request-level cache marker caches the conversation as it grows within an exchange. The model and
+/// effort come per account (AssistantOptions.ModelFor).</para>
 /// </summary>
 public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<AnthropicAssistantModel> log) : IAssistantModel
 {
     private readonly AnthropicClient? client = string.IsNullOrWhiteSpace(options.ApiKey)
         ? null
-        : new AnthropicClient { ApiKey = options.ApiKey, Timeout = TimeSpan.FromSeconds(120) };
+        : new AnthropicClient { ApiKey = options.ApiKey, Timeout = TimeSpan.FromSeconds(280) };
 
     private static readonly List<ToolUnion> Tools = AssistantPrompt.Tools.Select((t, i) => (ToolUnion)new Tool
     {
@@ -39,12 +39,12 @@ public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<An
         var o = options;
         var parameters = new MessageCreateParams
         {
-            Model = o.Model,
+            Model = request.Model,
             MaxTokens = o.MaxTokens,
             System = new List<TextBlockParam> { new() { Text = AssistantPrompt.System(request.Vocabulary), CacheControl = new CacheControlEphemeral() } },
             Tools = Tools,
             Thinking = new ThinkingConfigAdaptive(),
-            OutputConfig = new OutputConfig { Effort = EffortOf(o.Effort) },
+            OutputConfig = new OutputConfig { Effort = EffortOf(request.Effort) },
             // Caches the conversation up to its last block, so the next step of an exchange reads it back.
             CacheControl = new CacheControlEphemeral(),
             Messages = request.Messages.Select(ToParam).ToList(),
@@ -67,8 +67,8 @@ public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<An
         }
 
         var usage = response.Usage;
-        log.LogInformation("Designer assistant step: stop {Stop}, in {In}, cache write {Write}, cache read {Read}, out {Out}",
-            response.StopReason?.ToString(), usage.InputTokens, usage.CacheCreationInputTokens ?? 0, usage.CacheReadInputTokens ?? 0, usage.OutputTokens);
+        log.LogInformation("Designer assistant step ({Model}): stop {Stop}, in {In}, cache write {Write}, cache read {Read}, out {Out}",
+            request.Model, response.StopReason?.ToString(), usage.InputTokens, usage.CacheCreationInputTokens ?? 0, usage.CacheReadInputTokens ?? 0, usage.OutputTokens);
 
         return new AssistantModelReply(
             response.Content.Select(FromBlock).OfType<AssistantBlock>().ToList(),
@@ -76,8 +76,10 @@ public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<An
             new AssistantUsageCount(usage.InputTokens, usage.CacheCreationInputTokens ?? 0, usage.CacheReadInputTokens ?? 0, usage.OutputTokens));
     }
 
-    private static string StopReasonOf(Message response) =>
-        response.StopReason is { } r ? JsonSerializer.Serialize(r).Trim('"') : "end_turn";
+    /// <summary>end_turn, tool_use, max_tokens, refusal… The SDK's enum wrapper prints its raw value
+    /// (quoted); serializing it gave "{}", which hid refusals and cut-off replies.</summary>
+    public static string StopReasonOf(Message response) =>
+        response.StopReason?.ToString()?.Trim('"') is { Length: > 0 } r ? r : "end_turn";
 
     private static Effort EffortOf(string effort) => effort switch
     {

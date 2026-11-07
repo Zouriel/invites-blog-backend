@@ -161,13 +161,13 @@ public sealed class DesignAssistantController(IDesignAssistantService assistant)
 
     [HttpPost("messages")]
     [RequestSizeLimit(256 * 1024)]
-    public async Task<IActionResult> Send(Guid id, [FromBody] AssistantSendRequest request, CancellationToken ct) =>
-        Success(await assistant.SendAsync(id, request, ct));
+    public IActionResult Send(Guid id, [FromBody] AssistantSendRequest request, CancellationToken ct) =>
+        new KeepAliveResult<AssistantStepDto>(assistant.SendAsync(id, request, ct));
 
     [HttpPost("results")]
     [RequestSizeLimit(256 * 1024)]
-    public async Task<IActionResult> Results(Guid id, [FromBody] AssistantResultsRequest request, CancellationToken ct) =>
-        Success(await assistant.ContinueAsync(id, request, ct));
+    public IActionResult Results(Guid id, [FromBody] AssistantResultsRequest request, CancellationToken ct) =>
+        new KeepAliveResult<AssistantStepDto>(assistant.ContinueAsync(id, request, ct));
 
     [HttpDelete]
     public async Task<IActionResult> Clear(Guid id, CancellationToken ct)
