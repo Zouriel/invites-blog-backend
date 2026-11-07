@@ -2,6 +2,7 @@ using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Dtos.Designs;
 using InvitesBlog.Application.Services.Designs;
+using InvitesBlog.Application.Services.Designs.Assistant;
 using InvitesBlog.Domain.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -145,6 +146,37 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art) :
 
 /// <summary>Reporting a gallery template, and the admin queue that handles reports.</summary>
 [Route("api")]
+/// <summary>
+/// The designer assistant: a chat per design in which Claude edits the design with the designer's own
+/// tools (run in the browser). Premium and Venue accounts (and admins); the service checks the plan
+/// and the monthly allowance on every call.
+/// </summary>
+[Route("api/designs/{id:guid}/assistant")]
+[HasPermission(Permissions.Designs.Manage)]
+[EnableRateLimiting(RateLimiting.RateLimitPolicies.DesignAssistant)]
+public sealed class DesignAssistantController(IDesignAssistantService assistant) : BaseApiController
+{
+    [HttpGet]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => Success(await assistant.GetAsync(id, ct));
+
+    [HttpPost("messages")]
+    [RequestSizeLimit(256 * 1024)]
+    public async Task<IActionResult> Send(Guid id, [FromBody] AssistantSendRequest request, CancellationToken ct) =>
+        Success(await assistant.SendAsync(id, request, ct));
+
+    [HttpPost("results")]
+    [RequestSizeLimit(256 * 1024)]
+    public async Task<IActionResult> Results(Guid id, [FromBody] AssistantResultsRequest request, CancellationToken ct) =>
+        Success(await assistant.ContinueAsync(id, request, ct));
+
+    [HttpDelete]
+    public async Task<IActionResult> Clear(Guid id, CancellationToken ct)
+    {
+        await assistant.ClearAsync(id, ct);
+        return SuccessMessage("Started a new chat.");
+    }
+}
+
 public sealed class TemplateReportsController(ITemplateReportService reports) : BaseApiController
 {
     /// <summary>Open to anyone browsing the gallery, signed in or not; rate limited per address.</summary>

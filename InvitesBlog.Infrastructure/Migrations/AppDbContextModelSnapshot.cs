@@ -263,6 +263,60 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.AssistantUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<long>("CacheReadTokens")
+                        .HasColumnType("bigint")
+                        .HasColumnName("cache_read_tokens");
+
+                    b.Property<long>("CacheWriteTokens")
+                        .HasColumnType("bigint")
+                        .HasColumnName("cache_write_tokens");
+
+                    b.Property<long>("CostMicros")
+                        .HasColumnType("bigint")
+                        .HasColumnName("cost_micros");
+
+                    b.Property<long>("InputTokens")
+                        .HasColumnType("bigint")
+                        .HasColumnName("input_tokens");
+
+                    b.Property<string>("Month")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("month");
+
+                    b.Property<long>("OutputTokens")
+                        .HasColumnType("bigint")
+                        .HasColumnName("output_tokens");
+
+                    b.Property<int>("Requests")
+                        .HasColumnType("integer")
+                        .HasColumnName("requests");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Month")
+                        .IsUnique()
+                        .HasDatabaseName("idx_assistant_usage_user_month");
+
+                    b.ToTable("assistant_usage", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -815,6 +869,55 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDatabaseName("idx_delivery_invite_id");
 
                     b.ToTable("delivery_attempts", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.DesignAssistantMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("content_json");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DesignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("design_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("role");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("integer")
+                        .HasColumnName("seq");
+
+                    b.Property<bool>("StartsTurn")
+                        .HasColumnType("boolean")
+                        .HasColumnName("starts_turn");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("DesignId", "Seq")
+                        .IsUnique()
+                        .HasDatabaseName("idx_design_assistant_messages_design_seq");
+
+                    b.ToTable("design_assistant_messages", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.DeviceToken", b =>
@@ -2861,6 +2964,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("video_trim_jobs", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.AssistantUsage", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Campaign", b =>
                 {
                     b.HasOne("InvitesBlog.Domain.Entities.Venue", null)
@@ -2898,6 +3010,21 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
                         .WithMany()
                         .HasForeignKey("ReporterUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.DesignAssistantMessage", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.TemplateDesign", null)
+                        .WithMany()
+                        .HasForeignKey("DesignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
