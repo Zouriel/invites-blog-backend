@@ -132,6 +132,8 @@ public static class DesignCompiler
                 if (el.Type != "image" || el.Image is null) continue;
                 if (!scene.Assets.TryGetValue(el.Image.Asset, out var asset) || asset.Kind != "image") continue;
                 if (!ImageClasses.ContainsKey(el.Image.Asset)) ImageClasses[el.Image.Asset] = imageIndex++;
+                // A tinted use needs the picture as a mask too: its url goes in a variable, written once.
+                if (TintOf(el.Image.Tint, ThemeKeys) is not null) VarImages.Add(el.Image.Asset);
             }
         }
 
@@ -145,6 +147,8 @@ public static class DesignCompiler
         public Dictionary<string, int> ImageClasses { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, IReadOnlyList<string>> SvgColors { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImages { get; } = new(StringComparer.Ordinal);
+        /// <summary>Pictures something tints: declared as <c>--im</c> so the tint can mask with the same bytes.</summary>
+        public HashSet<string> VarImages { get; } = new(StringComparer.Ordinal);
         public int Next;
         /// <summary>Custom properties already registered with @property.</summary>
         public HashSet<string> Properties { get; } = new(StringComparer.Ordinal);
@@ -790,6 +794,10 @@ public static class DesignCompiler
         static bool Finite(double x, double y) => double.IsFinite(x) && double.IsFinite(y);
     }
 
+    /// <summary>A tint's colour; "none" (transparent) is no tint, not an invisible picture.</summary>
+    private static string? TintOf(string? reference, ISet<string> themeKeys) =>
+        DesignCss.Color(reference, themeKeys) is { } c && c != "transparent" ? c : null;
+
     private static void EmitSvg(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)
     {
         if (el.Svg is null || !ctx.SvgSymbols.TryGetValue(el.Svg.Asset, out var index)) return;
@@ -800,7 +808,7 @@ public static class DesignCompiler
         // A tint paints every colour the art has in one colour (gradient stops included, so a gradient
         // goes flat). Paint that is "none" was never a colour, so outlines and cut-outs keep their shape;
         // fill/color cover parts left at the default black or drawn in currentColor.
-        var tint = DesignCss.Color(el.Svg.Tint, ctx.ThemeKeys);
+        var tint = TintOf(el.Svg.Tint, ctx.ThemeKeys);
         if (tint is not null)
         {
             css.Append(cls).Append('{');
@@ -829,12 +837,35 @@ public static class DesignCompiler
         // Declared once per asset however many elements use it — a repeated flourish costs its bytes once.
         var imageClass = $"i{index}";
         if (ctx.EmittedImages.Add(imageClass))
-            css.Append('.').Append(imageClass).Append("{background-image:url(\"").Append(uri).Append("\")}");
+            css.Append('.').Append(imageClass).Append(ctx.VarImages.Contains(el.Image.Asset)
+                ? $"{{--im:url(\"{uri}\");background-image:var(--im)}}"
+                : $"{{background-image:url(\"{uri}\")}}");
 
-        inner.Append("<div class=\"").Append(imageClass).Append("\" role=\"presentation\"></div>");
+        // A tint: a picture with see-through parts (or one we don't know is opaque) becomes a silhouette
+        // through its own alpha, so only what has colour is painted. An opaque one is a silhouette
+        // through its precomputed brightness mask, or keeps the photo with the colour multiplied over it
+        // (asked for, or no mask yet). The mask sits on the picture's own box, so motion on the element
+        // around it moves and scales it along with the picture.
+        var fit = el.Image.Fit == "contain" ? "contain" : "cover";
+        var tint = TintOf(el.Image.Tint, ctx.ThemeKeys);
+        var opaque = ctx.Scene.Assets[el.Image.Asset].Alpha == false;
+        var maskUri = opaque ? ImageDataUri(ctx.Scene.Assets[el.Image.Asset].Mask) : null;
+        var overlay = opaque && (el.Image.TintMode == "overlay" || maskUri is null);
+        var useMask = tint is not null && opaque && !overlay;
+        var maskClass = $"k{index}";
+        if (useMask && ctx.EmittedImages.Add(maskClass))
+            css.Append('.').Append(maskClass).Append("{--mk:url(\"").Append(maskUri).Append("\")}");
+
+        inner.Append("<div class=\"").Append(imageClass).Append(useMask ? " " + maskClass : "").Append("\" role=\"presentation\"></div>");
         css.Append(cls).Append(" .").Append(imageClass).Append("{width:100%;height:100%;background-repeat:no-repeat;background-position:center;background-size:")
-            .Append(el.Image.Fit == "contain" ? "contain" : "cover");
+            .Append(fit);
         if (el.Image.Radius > 0) css.Append(";border-radius:").Append(DesignCss.U(el.Image.Radius));
+        if (tint is not null)
+        {
+            var mask = $"var({(useMask ? "--mk" : "--im")}) center/{fit} no-repeat";
+            css.Append(overlay ? $";background-color:{tint};background-blend-mode:multiply" : $";background-image:none;background-color:{tint}")
+                .Append(";-webkit-mask:").Append(mask).Append(";mask:").Append(mask);
+        }
         css.Append('}');
     }
 

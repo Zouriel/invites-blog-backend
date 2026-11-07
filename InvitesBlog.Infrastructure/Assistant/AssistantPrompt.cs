@@ -127,7 +127,9 @@ public static class AssistantPrompt
         {"name": "add_picture", "description": "Places one of the design's assets (see the outline): a photo or illustration the person uploaded or that is already in the design.",
          "input_schema": {"type": "object", "properties": {"asset": {"type": "string"},
         """ + Box + """
-         , "fit": {"type": "string", "enum": ["cover", "contain"]}, "radius": {"type": "number"}}, "required": ["asset"]}},
+         , "fit": {"type": "string", "enum": ["cover", "contain"]}, "radius": {"type": "number"},
+           "color": {"type": "string", "description": "Hex or theme:key: placed already tinted in one colour."},
+           "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"], "description": "For an opaque photo with color."}}, "required": ["asset"]}},
         {"name": "add_photo_slot", "description": "Adds a place for the host's own photo(s), filled in per event.",
          "input_schema": {"type": "object", "properties": {"path": {"type": "string", "description": "A photo field; default event.coverImage."},
            "label": {"type": "string"}, "gallery": {"type": "boolean", "description": "Several photos in a grid."}, "columns": {"type": "integer"},
@@ -139,11 +141,12 @@ public static class AssistantPrompt
            "link": {"type": "string", "description": "For kind link: a link target from the catalog."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["kind", "y"]}},
-        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration, color tints the whole art in one colour (outlines and see-through parts keep their shape); color null brings back its own colours.",
+        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
            "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]}, "sides": {"type": "integer"},
            "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain"]}, "link": {"type": "string"}, "locked": {"type": "boolean"},
+           "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"]},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["id"]}},
         {"name": "delete_elements", "description": "Deletes elements.",
