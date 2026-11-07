@@ -14,7 +14,7 @@ namespace InvitesBlog.Infrastructure.Templates.Art;
 /// a flipbook by <see cref="GifFlipbook"/>, anything else is one still picture; then every layer goes
 /// through <see cref="IDesignEngine.ImportAsset"/>, the same sanitiser and size limits as any upload.
 /// </remarks>
-public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine engine, ILogger<ArtLibrary> logger) : IArtLibrary
+public sealed class ArtLibrary(IEnumerable<IArtSource> rawSources, IDesignEngine engine, ICurrentUser currentUser, ILogger<ArtLibrary> logger) : IArtLibrary
 {
     /// <summary>What one piece of art may add to a page; a published page's hard limit is 800 KB for everything.</summary>
     public const int BudgetBytes = 450 * 1024;
@@ -30,6 +30,9 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> sources, IDesignEngine en
     private const int MaxGifFrames = 12;
 
     private static readonly string[] Kinds = ["vector", "animated", "picture"];
+
+    /// <summary>The libraries this account may use: one waiting for approval (Pixabay) only shows to its allowed accounts.</summary>
+    private IEnumerable<IArtSource> sources => rawSources.Where(s => s is not PixabaySource p || p.VisibleTo(currentUser.UserId));
 
     public IReadOnlyList<ArtSourceDto> Sources() => sources.Select(s => s.Describe()).ToList();
 

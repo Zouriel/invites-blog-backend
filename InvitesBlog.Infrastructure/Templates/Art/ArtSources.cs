@@ -36,7 +36,10 @@ public abstract class CachedArtSource(IHttpClientFactory http, ILogger logger) :
     public const int MaxDownloadBytes = 12 * 1024 * 1024;
     private static readonly ConcurrentDictionary<string, (DateTimeOffset At, ArtSearchResultDto Result)> Cache = new();
 
-    protected HttpClient Http => http.CreateClient(ArtHttp.ClientName);
+    protected IHttpClientFactory Factory => http;
+    protected virtual HttpClient Http => http.CreateClient(ArtHttp.ClientName);
+    /// <summary>How long search results are kept; some libraries ask for longer.</summary>
+    protected virtual TimeSpan CacheFor => TimeSpan.FromMinutes(15);
     protected ILogger Logger => logger;
 
     public abstract string Id { get; }
@@ -49,7 +52,7 @@ public abstract class CachedArtSource(IHttpClientFactory http, ILogger logger) :
     public async Task<ArtSearchResultDto> SearchAsync(string query, string kind, int page, CancellationToken ct)
     {
         var key = $"{Id}|{kind}|{page}|{query.ToLowerInvariant()}";
-        if (Cache.TryGetValue(key, out var hit) && DateTimeOffset.UtcNow - hit.At < TimeSpan.FromMinutes(15)) return hit.Result;
+        if (Cache.TryGetValue(key, out var hit) && DateTimeOffset.UtcNow - hit.At < CacheFor) return hit.Result;
         ArtSearchResultDto result;
         try
         {
