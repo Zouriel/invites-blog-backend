@@ -255,6 +255,9 @@ public sealed class DesignElement
     /// <summary>On a stage (<see cref="DesignScene.Stage"/>), a top-level element that scrolls up with the page.</summary>
     [JsonPropertyName("scrolls")] public bool Scrolls { get; set; }
 
+    /// <summary>A pattern laid over what it draws (clouds, dots, stripes…), clipped to its outline; null is none.</summary>
+    [JsonPropertyName("pattern")] public DesignPattern? Pattern { get; set; }
+
     // ----- motion extras (2026-09-28) -----
 
     /// <summary>The point it turns and scales about, as fractions of its box; null is the centre.</summary>
@@ -443,6 +446,21 @@ public sealed class DesignXY
 {
     [JsonPropertyName("x")] public double X { get; set; }
     [JsonPropertyName("y")] public double Y { get; set; }
+}
+
+/// <summary>A pattern over an element: see <see cref="DesignPatterns"/>.</summary>
+public sealed class DesignPattern
+{
+    /// <summary>One of <see cref="DesignPatterns.Kinds"/>.</summary>
+    [JsonPropertyName("kind")] public string? Kind { get; set; }
+    /// <summary>How the marks apply: shade | shine | colour | emboss | engrave (default shade).</summary>
+    [JsonPropertyName("mode")] public string? Mode { get; set; }
+    /// <summary>How big the pattern is, 0.25 to 4 (1 is a 24-unit tile).</summary>
+    [JsonPropertyName("size")] public double Size { get; set; } = 1;
+    /// <summary>How strongly it shows, 0 to 1.</summary>
+    [JsonPropertyName("strength")] public double Strength { get; set; } = 0.5;
+    /// <summary>The marks' colour reference for the "colour" way (hex or theme:key).</summary>
+    [JsonPropertyName("color")] public string? Color { get; set; }
 }
 
 public sealed class DesignSvg

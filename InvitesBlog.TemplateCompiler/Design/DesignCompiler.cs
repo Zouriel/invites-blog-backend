@@ -56,7 +56,9 @@ public static class DesignCompiler
         foreach (var element in scene.Elements)
             EmitElement(ctx, element, body, css, topLevel: true);
         if (scene.Stage) body.Append("</div>");
-        body.Append("</main><div class=\"ib-tail\"></div>");
+        body.Append("</main>");
+        EmitFilters(ctx, body);
+        body.Append("<div class=\"ib-tail\"></div>");
 
         var html = new StringBuilder();
         html.Append("<!doctype html>\n<html lang=\"en\">\n<head>\n");
@@ -149,6 +151,8 @@ public static class DesignCompiler
         /// <summary>Each illustration's own width and height (its viewBox), for drawing it stretched.</summary>
         public Dictionary<string, (double W, double H)> SvgSizes { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImages { get; } = new(StringComparer.Ordinal);
+        /// <summary>Pattern filters, in the order elements first use them: markup (without its id) → index.</summary>
+        public Dictionary<string, int> Filters { get; } = new(StringComparer.Ordinal);
         /// <summary>Pictures something tints: declared as <c>--im</c> so the tint can mask with the same bytes.</summary>
         public HashSet<string> VarImages { get; } = new(StringComparer.Ordinal);
         public int Next;
@@ -238,6 +242,25 @@ public static class DesignCompiler
         body.Append("</svg>");
     }
 
+    /// <summary>The pattern filters, in a hidden SVG after the page (not display:none: filters there don't draw).</summary>
+    private static void EmitFilters(Context ctx, StringBuilder body)
+    {
+        if (ctx.Filters.Count == 0) return;
+        body.Append("<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\">");
+        foreach (var (markup, index) in ctx.Filters.OrderBy(p => p.Value))
+            body.Append("<filter id=\"f").Append(index).Append('"').Append(markup["<filter id=\"\"".Length..]);
+        body.Append("</svg>");
+    }
+
+    /// <summary><c>url(#fN)</c> for an element's pattern (shared with any element whose filter comes out the same), or null.</summary>
+    private static string? PatternRef(Context ctx, DesignElement el)
+    {
+        if (DesignPatterns.Resolve(el.Pattern) is not { } p) return null;
+        var markup = DesignPatterns.Filter("", p, el.W, el.H, p.Mode == "colour" ? TintOf(el.Pattern!.Color, ctx.ThemeKeys) : null);
+        if (!ctx.Filters.TryGetValue(markup, out var index)) ctx.Filters[markup] = index = ctx.Filters.Count;
+        return $"url(#f{index})";
+    }
+
     // ----- Elements ----------------------------------------------------------------------------------
 
     private static void EmitElement(Context ctx, DesignElement el, StringBuilder body, StringBuilder css, bool topLevel = false)
@@ -265,6 +288,10 @@ public static class DesignCompiler
         var looping = loopFrames.Count > 0 && track.End > track.Start;
         // A split text moves piece by piece instead of as one block.
         var split = moving && el.Type == "text" && el.Text?.Split is { } sp && sp.By is "word" or "letter" ? el.Text.Split : null;
+        // A pattern sits on the innermost layer that moves as one (the loop's, else the keyframes'), so it
+        // travels, turns and grows with the element.
+        var pattern = PatternRef(ctx, el);
+        var patternOnA = pattern is not null && !looping;
 
         if (uses.Draw && el.Type == "shape") Property(ctx, css, "--d", "'<number>'", "1");
         if (uses.Tracking && el.Type == "text") Property(ctx, css, "--ls", "'<length>'", "0px");
@@ -275,7 +302,8 @@ public static class DesignCompiler
             var s = new StringBuilder("transform:")
                 .Append(Transform(frame.X - el.X, frame.Y - el.Y, frame.Rotate, frame.Scale, frame.RotateX, frame.RotateY, frame.SkewX, frame.SkewY))
                 .Append(";opacity:").Append(DesignCss.Num(frame.Opacity)).Append(';');
-            if (uses.Blur) s.Append("filter:blur(").Append(DesignCss.U(frame.Blur)).Append(");");
+            if (uses.Blur)
+                s.Append("filter:").Append(patternOnA && split is null ? pattern + " " : "").Append("blur(").Append(DesignCss.U(frame.Blur)).Append(");");
             if (clipKind is not null) s.Append("clip-path:").Append(ClipCss(clipKind, frame.Clip)).Append(';');
             if (uses.Draw && el.Type == "shape") s.Append("--d:").Append(DesignCss.Num(frame.Draw)).Append(';');
             if (uses.Tracking && el.Type == "text") s.Append("--ls:").Append(DesignCss.Num(frame.Tracking)).Append("em;");
@@ -394,6 +422,7 @@ public static class DesignCompiler
         if (opacity < 1) rest.Append("opacity:").Append(DesignCss.Num(opacity)).Append(';');
         if (origin is not null) rest.Append("transform-origin:").Append(origin).Append(';');
         if (el.BackfaceHidden) rest.Append("backface-visibility:hidden;");
+        if (patternOnA) rest.Append("filter:").Append(pattern).Append(';');
 
         if (moving)
         {
@@ -432,6 +461,7 @@ public static class DesignCompiler
             var loop = el.Loop!;
             css.Append(cls).Append(">.a>.l{position:relative;width:100%;height:100%;");
             if (origin is not null) css.Append("transform-origin:").Append(origin).Append(';');
+            if (pattern is not null) css.Append("filter:").Append(pattern).Append(';');
             css.Append("animation:l").Append(n).Append(" 1s linear both;animation-iteration-count:")
                 .Append(Math.Clamp(loop.Repeat, 1, DesignCatalog.MaxLoopRepeat)).Append(';');
             if (loop.Alternate) css.Append("animation-direction:alternate;");
