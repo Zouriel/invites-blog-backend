@@ -87,6 +87,12 @@ public static class AssistantPrompt
           the place, a short message, and an RSVP button (add_button kind rsvp). A save the date has
           no RSVP button.
         - Make text readable: enough contrast with what's behind it, size 14 or more for body text.
+        - Making decorations: repeat_element copies one element around a circle (a petal or leaf drawn
+          with draw_shape becomes a flower, a wreath or a sun), in a grid or along a line, as one group;
+          generate makes a scatter (dots, stars, hearts, confetti), an organic blob or a curling vine with
+          leaves from a seed, in theme colours; combine_shapes merges shapes into one (add, cut out,
+          overlap, exclude), e.g. a circle cut out of a box for a frame. All make ordinary shapes that
+          can then be recoloured, patterned or moved. Look to check they sit where you meant.
 
         ## Motion
         - set_motion gives an element a way in (enter), a way out (exit), a loop that repeats while it
@@ -228,6 +234,31 @@ public static class AssistantPrompt
         {"name": "apply_effect_move", "description": "Plays an effect move on an element from a scroll position.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "move": {"type": "string"},
            "pace": {"type": "string", "enum": ["quick", "steady", "slow"]}, "at": {"type": "number"}}, "required": ["id", "move"]}},
+        {"name": "repeat_element", "description": "Repeats an element: copies of it laid out together, and the original and its copies made into one new group (returned with its pieces' ids). One undoable step. layout around: count copies round a circle; ring sets how far out: petals (their bases meet in the middle: a petal or leaf makes a flower), ring (a wreath round a gap), wide (rays round a wide middle: a sun); radius instead gives it exactly; face_out (default true) turns each copy to point away from the centre; start_angle is where the original sits on the circle, degrees clockwise from the top (default 0, the top). grid: columns x rows with gap (or gap_x, gap_y) between them. line: count copies across, down or diagonal (or angle in degrees, 0 across, 90 down) with gap between them. On a group that repeat_element made, lays its original out again (so asking again changes the repeat rather than repeating it).",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
+           "layout": {"type": "string", "enum": ["around", "grid", "line"]},
+           "count": {"type": "integer", "description": "around: 2-60 (default 8); line: 2-60 (default 5)."},
+           "ring": {"type": "string", "enum": ["petals", "ring", "wide"]}, "radius": {"type": "number"},
+           "face_out": {"type": "boolean"}, "start_angle": {"type": "number"},
+           "columns": {"type": "integer"}, "rows": {"type": "integer"},
+           "gap": {"type": "number", "description": "Units between copies (grid and line); default 12."}, "gap_x": {"type": "number"}, "gap_y": {"type": "number"},
+           "direction": {"type": "string", "enum": ["across", "down", "diagonal"]}, "angle": {"type": "number"},
+           "name": {"type": "string"}}, "required": ["id", "layout"]}},
+        {"name": "generate", "description": "Makes a decoration from a seed, in the theme's colours, on the screen at a scroll position (or with its top left at x, y), and selects it. The same seed and settings always make the same one; the person can Shuffle it. kind scatter: a group of shapes spread evenly over part of the screen (shape dots, stars, hearts or confetti; count 1-120, default 24; sizes small, medium or large, or min_size/max_size; area screen, top, bottom or edges (round the edge, the middle kept clear); colors: a list of colours, default the theme's). kind blob: one smooth organic drawn shape (style smooth, wavy or wild, or points 4-14 and wobble 0-0.6; w its size across, default 220; color its fill). kind vine: a group of a curving stem with leaves on alternate sides (leaves 0-40, default 10; curl straight, gentle or curly, or 0-1; length in units, default 420; direction up, across or down (hanging); leaf_size; color for the stem, leaf_color for the leaves).",
+         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["scatter", "blob", "vine"]},
+           "seed": {"type": "integer"}, "at": {"type": "number"}, "x": {"type": "number"}, "y": {"type": "number"}, "name": {"type": "string"},
+           "shape": {"type": "string", "enum": ["dots", "stars", "hearts", "confetti"]}, "count": {"type": "integer"},
+           "sizes": {"type": "string", "enum": ["small", "medium", "large"]}, "min_size": {"type": "number"}, "max_size": {"type": "number"},
+           "area": {"type": "string", "enum": ["screen", "top", "bottom", "edges"]},
+           "colors": {"type": "array", "items": {"type": "string"}, "description": "Hex or theme:key."},
+           "style": {"type": "string", "enum": ["smooth", "wavy", "wild"]}, "points": {"type": "integer"}, "wobble": {"type": "number"}, "w": {"type": "number"},
+           "color": {"type": "string", "description": "Hex or theme:key: a blob's fill, a vine's stem."},
+           "leaves": {"type": "integer"}, "curl": {"type": ["string", "number"], "description": "straight, gentle, curly, or 0 to 1."},
+           "length": {"type": "number"}, "direction": {"type": "string", "enum": ["up", "across", "down"]},
+           "leaf_size": {"type": "number"}, "leaf_color": {"type": "string"}}, "required": ["kind"]}},
+        {"name": "combine_shapes", "description": "Combines two or more shapes (boxes, ovals, polygons or drawn shapes; not lines, text or pictures; all in the same group) into one drawn shape, as the shape editor's merge does: op add (one shape covering all), cut (the bottom shape with the ones above cut out of it), intersect (only where they all overlap) or exclude (all but the overlaps). Bottom and top are paint order, whatever order the ids are in. The bottom shape is kept, with its colours, pattern, effects, motion and id; the others are removed. One undoable step.",
+         "input_schema": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}},
+           "op": {"type": "string", "enum": ["add", "cut", "intersect", "exclude"]}}, "required": ["ids", "op"]}},
         {"name": "add_sticker", "description": "Drops a moving sticker group onto the screen at a scroll position.",
          "input_schema": {"type": "object", "properties": {"sticker": {"type": "string"}, "at": {"type": "number"}}, "required": ["sticker"]}},
         {"name": "set_theme", "description": "Sets theme colours (hex) and theme fonts (font ids). Keys like bg, text, accent, heading-font, body-font; a new key adds it.",
