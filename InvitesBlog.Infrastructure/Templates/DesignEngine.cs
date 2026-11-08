@@ -178,12 +178,17 @@ public sealed class DesignEngine(
         var (content, type) = DecodeImage(request.Data);
 
         // Twice the size it's shown at: sharp on a 2x screen, which is most phones' and laptops' density.
-        // The format stays: turning a PNG into a JPEG would put smudges round lettering and flat colour.
         var edge = (int)Math.Ceiling(2 * Math.Max(request.Width, request.Height));
         var optimized = optimizer.Optimize(content, type, Math.Max(16, edge));
-        if (!optimized.Changed || optimized.Content.Length >= content.Length) return unchanged with { Bytes = content.Length };
-        return new DesignAssetDto(request.Id, "image", $"data:{optimized.ContentType};base64,{Convert.ToBase64String(optimized.Content)}",
-            optimized.Width, optimized.Height, null, name, optimized.Content.Length, TintMask.HasAlpha(optimized.Content));
+        var (best, bestType) = optimized.Changed && optimized.Content.Length < content.Length ? (optimized.Content, type) : (content, type);
+        // Then as WebP (see WebpShrink: high quality for painted pictures, lossless for flat graphics),
+        // when that's smaller. An animated GIF stays a GIF: re-encoding it would keep only its first frame.
+        if (type != "image/gif" && WebpShrink.Encode(best) is { } webp && webp.Content.Length < best.Length)
+            (best, bestType) = (webp.Content, "image/webp");
+        if (best.Length >= content.Length) return unchanged with { Bytes = content.Length };
+        var (w, h) = Dimensions(best);
+        return new DesignAssetDto(request.Id, "image", $"data:{bestType};base64,{Convert.ToBase64String(best)}",
+            w, h, null, name, best.Length, TintMask.HasAlpha(best));
     }
 
     public ImageTintInfoDto AnalyseImage(string data)
@@ -200,6 +205,12 @@ public sealed class DesignEngine(
         {
             throw new BusinessRuleException("That picture couldn't be read.", "asset_invalid");
         }
+    }
+
+    private static (int W, int H) Dimensions(byte[] content)
+    {
+        var info = Image.Identify(content);
+        return info is null ? (0, 0) : (info.Width, info.Height);
     }
 
     /// <summary>A picture held in a design: a data: URI of a PNG, JPEG, WebP or GIF, checked by its bytes.</summary>

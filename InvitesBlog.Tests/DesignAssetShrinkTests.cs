@@ -54,7 +54,8 @@ public class DesignAssetShrinkTests
         var data = Png(1600, 1200);
         var r = Engine().ShrinkAsset(new("a1", "image", data, 200, 150, "photo"));
         Assert.Equal((400, 300), (r.Width, r.Height));
-        Assert.Equal((400, 300, "image/png"), Decode(r.Data)); // same format: no JPEG smudges on flat colour
+        // A painted or photographed picture (many colours) is saved as high-quality WebP.
+        Assert.Equal((400, 300, "image/webp"), Decode(r.Data));
         Assert.True(r.Data.Length < data.Length / 5);
         Assert.Equal(("a1", "photo"), (r.Id, r.Name));
     }
@@ -63,7 +64,8 @@ public class DesignAssetShrinkTests
     public void A_picture_with_see_through_parts_keeps_them()
     {
         var r = Engine().ShrinkAsset(new("a1", "image", Png(1200, 800, transparent: true), 150, 100, null));
-        Assert.Equal((300, 200, "image/png"), Decode(r.Data));
+        Assert.Equal((300, 200, "image/webp"), Decode(r.Data));
+        Assert.True(r.Alpha);
         using var image = Image.Load<Rgba32>(Convert.FromBase64String(r.Data[(r.Data.IndexOf(',') + 1)..]));
         Assert.Equal(0, image[10, 100].A);
     }
@@ -73,7 +75,7 @@ public class DesignAssetShrinkTests
     {
         var data = Png(300, 200);
         var r = Engine().ShrinkAsset(new("a1", "image", data, 300, 200, null));
-        Assert.Equal((300, 200, "image/png"), Decode(r.Data));
+        Assert.Equal((300, 200), (Decode(r.Data).W, Decode(r.Data).H));
         Assert.True(r.Data.Length <= data.Length);
     }
 
@@ -82,7 +84,7 @@ public class DesignAssetShrinkTests
     {
         var data = Png(120, 80);
         var r = Engine().ShrinkAsset(new("a1", "image", data, 900, 600, null));
-        Assert.Equal((120, 80, "image/png"), Decode(r.Data));
+        Assert.Equal((120, 80), (Decode(r.Data).W, Decode(r.Data).H));
     }
 
     [Fact]
@@ -91,6 +93,60 @@ public class DesignAssetShrinkTests
         // GIF89a, 1x1: the optimizer never rewrites a GIF (it would lose its animation).
         var gif = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
         Assert.Equal(gif, Engine().ShrinkAsset(new("a1", "image", gif, 10, 10, null)).Data);
+    }
+
+    [Fact]
+    public void A_flat_graphic_is_saved_lossless_so_every_pixel_is_the_same()
+    {
+        // Lettering-like: three colours with hard edges, where lossy compression would smudge.
+        using var image = new Image<Rgba32>(600, 240, new Rgba32(0, 0, 0, 0));
+        image.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height; y++)
+            {
+                var row = rows.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                    if ((x / 24 + y / 24) % 3 == 0) row[x] = new Rgba32(140, 20, 60);
+                    else if (x is > 300 and < 560 && y is > 40 and < 200) row[x] = new Rgba32(250, 220, 120);
+            }
+        });
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        var data = "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+        Assert.True(WebpShrink.IsFlat(image));
+        var r = Engine().ShrinkAsset(new("a1", "image", data, 300, 120, null)); // shown half size: resized to 600 wide, i.e. kept
+        Assert.Equal("image/webp", Decode(r.Data).Type);
+        using var back = Image.Load<Rgba32>(Convert.FromBase64String(r.Data[(r.Data.IndexOf(',') + 1)..]));
+        for (var y = 0; y < 240; y++)
+            for (var x = 0; x < 600; x++)
+                if (image[x, y].A > 0 || back[x, y].A > 0) Assert.Equal(image[x, y], back[x, y]);
+    }
+
+    [Fact]
+    public void A_painted_picture_as_webp_looks_the_same_on_average()
+    {
+        // A smooth gradient with soft noise, like watercolour: lossy WebP at 90 changes it by very little.
+        using var image = new Image<Rgba32>(400, 300);
+        var rnd = new Random(3);
+        image.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height; y++)
+            {
+                var row = rows.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                    row[x] = new Rgba32((byte)(120 + x / 4 + rnd.Next(6)), (byte)(80 + y / 3 + rnd.Next(6)), (byte)(160 + rnd.Next(6)));
+            }
+        });
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        var r = Engine().ShrinkAsset(new("a1", "image", "data:image/png;base64," + Convert.ToBase64String(ms.ToArray()), 400, 300, null));
+        Assert.Equal("image/webp", Decode(r.Data).Type);
+        using var back = Image.Load<Rgba32>(Convert.FromBase64String(r.Data[(r.Data.IndexOf(',') + 1)..]));
+        double total = 0;
+        for (var y = 0; y < 300; y++)
+            for (var x = 0; x < 400; x++)
+                total += Math.Abs(image[x, y].R - back[x, y].R) + Math.Abs(image[x, y].G - back[x, y].G) + Math.Abs(image[x, y].B - back[x, y].B);
+        Assert.True(total / (400 * 300 * 3) < 3, $"average change {total / (400 * 300 * 3):F2}/255");
     }
 
     private const string Art = """
