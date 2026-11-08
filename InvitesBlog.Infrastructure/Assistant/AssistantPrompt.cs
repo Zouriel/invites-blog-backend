@@ -186,6 +186,8 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"source": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"},
            "color": {"type": "string", "description": "Hex or theme:key: a vector placed already tinted in one colour (pictures keep theirs)."},
            "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["source", "id"]}},
+        {"name": "shrink_to_fit", "description": "Makes pictures and illustrations take less room, as the panel's Shrink to fit: each file as small as it can be while still sharp at the biggest size the design shows it (pictures at twice that, same format; illustrations' coordinates to what that size can show). ids: pictures, illustrations or groups (everything inside); or all: true for the whole design. The outline's assets line shows each file's size. One undoable step.",
+         "input_schema": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}}, "all": {"type": "boolean"}}}},
         {"name": "check_design", "description": "Runs Check: what would stop the template working, and what's worth a look.",
          "input_schema": {"type": "object", "properties": {}}},
         {"name": "show", "description": "Selects elements and scrolls the editor to them, so the person sees what you mean.",
