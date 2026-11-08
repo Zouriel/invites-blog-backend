@@ -71,7 +71,8 @@ public sealed class DesignerAdminService(
             u.CreatedAt,
             u.SubscriptionTier == SubscriptionTier.Premium && PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now),
             u.SubscriptionTier == SubscriptionTier.Premium ? u.SubscriptionEndsAt : null,
-            forClients.GetValueOrDefault(u.Id))).ToList();
+            forClients.GetValueOrDefault(u.Id),
+            u.AiPicturesAllowed)).ToList();
 
         return PagedResult<DesignerAdminDto>.Create(items, total, filter);
     }
@@ -90,10 +91,24 @@ public sealed class DesignerAdminService(
         user.IsActive = !suspended;
         users.Update(user);
         await uow.SaveChangesAsync(ct);
+        return await RowAsync(user, ct);
+    }
 
-        // Re-read through the list path so the counts come back consistent with the list screen.
-        var page = await ListAsync(new DesignerFilter { Search = user.Email, PageSize = 1 }, ct);
-        return page.Items.FirstOrDefault()
-               ?? new DesignerAdminDto(user.Id, user.Email, user.DisplayName, user.IsActive, [], 0, user.CreatedAt);
+    public async Task<DesignerAdminDto> SetAiPicturesAsync(Guid designerUserId, bool allowed, CancellationToken ct = default)
+    {
+        var user = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == designerUserId, ct)
+                   ?? throw new NotFoundException("That designer doesn't exist.", "designer_not_found");
+        user.AiPicturesAllowed = allowed;
+        users.Update(user);
+        await uow.SaveChangesAsync(ct);
+        return await RowAsync(user, ct);
+    }
+
+    /// <summary>Re-read through the list path so the counts come back consistent with the list screen.</summary>
+    private async Task<DesignerAdminDto> RowAsync(AppUser user, CancellationToken ct)
+    {
+        var page = await ListAsync(new DesignerFilter { Search = user.Email ?? user.DisplayName, PageSize = 50 }, ct);
+        return page.Items.FirstOrDefault(d => d.UserId == user.Id)
+               ?? new DesignerAdminDto(user.Id, user.Email, user.DisplayName, user.IsActive, [], 0, user.CreatedAt, AiPicturesAllowed: user.AiPicturesAllowed);
     }
 }

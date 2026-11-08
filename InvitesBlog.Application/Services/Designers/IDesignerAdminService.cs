@@ -14,4 +14,7 @@ public interface IDesignerAdminService
     /// it deliberately leaves their already-published templates live, so no inviter's campaign breaks.
     /// </summary>
     Task<DesignerAdminDto> SetSuspendedAsync(Guid designerUserId, bool suspended, CancellationToken ct = default);
+
+    /// <summary>Turns "Create with AI" pictures on or off for an account.</summary>
+    Task<DesignerAdminDto> SetAiPicturesAsync(Guid designerUserId, bool allowed, CancellationToken ct = default);
 }

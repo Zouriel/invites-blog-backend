@@ -107,13 +107,13 @@ public sealed class ArtLibrary(IEnumerable<IArtSource> rawSources, IDesignEngine
         }
     }
 
-    public ArtImportDto ImportFile(byte[] content, string fileName, string contentType)
+    public ArtImportDto ImportFile(byte[] content, string fileName, string contentType, ArtCreditDto? credit = null)
     {
         if (content.Length == 0) throw new BusinessRuleException("That file is empty.", "asset_empty");
         var name = Path.GetFileNameWithoutExtension(fileName);
         if (name.Length > 60) name = name[..60];
         var type = fileName.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ? "image/svg+xml" : contentType;
-        return Build(content, type, name.Length > 0 ? name : "Picture", null);
+        return Build(content, type, name.Length > 0 ? name : "Picture", credit);
     }
 
     private ArtImportDto Build(byte[] content, string contentType, string title, ArtCreditDto? credit)

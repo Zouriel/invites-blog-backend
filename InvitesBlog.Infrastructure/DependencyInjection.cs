@@ -121,6 +121,11 @@ public static class DependencyInjection
         Templates.Art.PixabaySource.AddClient(services).ConfigurePrimaryHttpMessageHandler(Templates.Art.ArtHttp.Handler);
         services.AddSingleton<Templates.Art.IArtSource, Templates.Art.PixabaySource>();
         services.AddScoped<IArtLibrary, Templates.Art.ArtLibrary>();
+        // "Create with AI" pictures (Ideogram). Without AiPictures__ApiKey it reports itself unavailable.
+        services.AddSingleton(config.GetSection(Application.Services.Designs.AiPictures.AiPictureOptions.Section).Get<Application.Services.Designs.AiPictures.AiPictureOptions>()
+            ?? new Application.Services.Designs.AiPictures.AiPictureOptions());
+        Templates.Art.IdeogramPictureGenerator.AddClient(services);
+        services.AddSingleton<Application.Services.Designs.AiPictures.IPictureGenerator, Templates.Art.IdeogramPictureGenerator>();
         services.AddScoped<TemplateSeeder>();
         services.AddScoped<RawTemplateSeeder>();
         services.AddScoped<TemplateManifestRefresher>();

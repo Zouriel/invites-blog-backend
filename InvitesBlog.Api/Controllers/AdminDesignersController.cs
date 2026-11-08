@@ -22,4 +22,9 @@ public sealed class AdminDesignersController(IDesignerAdminService designers) : 
     [HttpPost("{id:guid}/suspend")]
     public async Task<IActionResult> Suspend(Guid id, [FromQuery] bool suspended, CancellationToken ct) =>
         Success(await designers.SetSuspendedAsync(id, suspended, ct));
+
+    /// <summary>Turns AI pictures on or off for the account. Each picture costs money, so it's off by default.</summary>
+    [HttpPost("{id:guid}/ai-pictures")]
+    public async Task<IActionResult> AiPictures(Guid id, [FromQuery] bool allowed, CancellationToken ct) =>
+        Success(await designers.SetAiPicturesAsync(id, allowed, ct));
 }

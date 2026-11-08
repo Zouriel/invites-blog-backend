@@ -15,6 +15,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TemplateDesignPublish> TemplateDesignPublishes => Set<TemplateDesignPublish>();
     public DbSet<DesignAssistantMessage> DesignAssistantMessages => Set<DesignAssistantMessage>();
     public DbSet<AssistantUsage> AssistantUsages => Set<AssistantUsage>();
+    public DbSet<AiPictureUsage> AiPictureUsages => Set<AiPictureUsage>();
     public DbSet<TemplateReport> TemplateReports => Set<TemplateReport>();
     public DbSet<ContentReport> ContentReports => Set<ContentReport>();
     public DbSet<UserBlock> UserBlocks => Set<UserBlock>();
@@ -130,6 +131,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => x.Id);
             e.Property(x => x.Month).HasMaxLength(7);
             e.HasIndex(x => new { x.UserId, x.Month }).IsUnique().HasDatabaseName("idx_assistant_usage_user_month");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AiPictureUsage>(e =>
+        {
+            e.ToTable("ai_picture_usage");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Month).HasMaxLength(7);
+            e.HasIndex(x => new { x.UserId, x.Month }).IsUnique().HasDatabaseName("idx_ai_picture_usage_user_month");
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
