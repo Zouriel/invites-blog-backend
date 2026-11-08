@@ -406,7 +406,7 @@ public class DesignAssistantServiceTests
     {
         string[] browser =
         [
-            "get_elements", "get_outline", "add_text", "add_shape", "add_picture", "add_photo_slot", "add_button", "update_element",
+            "get_elements", "get_outline", "add_text", "add_shape", "draw_shape", "add_picture", "add_photo_slot", "add_button", "update_element",
             "delete_elements", "duplicate_elements", "arrange", "group_elements", "ungroup", "set_motion", "apply_effect_move",
             "add_sticker", "set_theme", "set_page", "search_art", "add_art", "check_design", "show",
         ];
