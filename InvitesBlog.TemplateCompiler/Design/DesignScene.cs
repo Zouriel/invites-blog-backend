@@ -257,6 +257,14 @@ public sealed class DesignElement
 
     /// <summary>A pattern laid over what it draws (clouds, dots, stripes…), clipped to its outline; null is none.</summary>
     [JsonPropertyName("pattern")] public DesignPattern? Pattern { get; set; }
+    /// <summary>The edge lit from the top left, raised or pressed in (see <see cref="DesignEffects"/>).</summary>
+    [JsonPropertyName("bevel")] public DesignBevel? Bevel { get; set; }
+    /// <summary>A colour glowing in from the edges, laid over in a blend mode.</summary>
+    [JsonPropertyName("innerGlow")] public DesignGlow? InnerGlow { get; set; }
+    /// <summary>A colour glowing out around it, behind it.</summary>
+    [JsonPropertyName("outerGlow")] public DesignGlow? OuterGlow { get; set; }
+    /// <summary>How it mixes with what is under it: one of <see cref="DesignEffects.BlendModes"/>; null or normal covers it.</summary>
+    [JsonPropertyName("blend")] public string? Blend { get; set; }
 
     // ----- motion extras (2026-09-28) -----
 
@@ -446,6 +454,30 @@ public sealed class DesignXY
 {
     [JsonPropertyName("x")] public double X { get; set; }
     [JsonPropertyName("y")] public double Y { get; set; }
+}
+
+/// <summary>A bevel on an element: see <see cref="DesignEffects"/>.</summary>
+public sealed class DesignBevel
+{
+    /// <summary>raised | pressed (default raised).</summary>
+    [JsonPropertyName("style")] public string? Style { get; set; }
+    /// <summary>How far in from the edge the slope reaches, 1 to 30 canvas units.</summary>
+    [JsonPropertyName("size")] public double Size { get; set; } = 4;
+    /// <summary>How strongly it shows, 0 to 1.</summary>
+    [JsonPropertyName("strength")] public double Strength { get; set; } = 0.7;
+}
+
+/// <summary>An inner or outer glow on an element: see <see cref="DesignEffects"/>.</summary>
+public sealed class DesignGlow
+{
+    /// <summary>Hex or theme:key; white when unset.</summary>
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    /// <summary>How far it reaches, 1 to 60 canvas units.</summary>
+    [JsonPropertyName("size")] public double Size { get; set; } = 10;
+    /// <summary>How strongly it shows, 0 to 1.</summary>
+    [JsonPropertyName("strength")] public double Strength { get; set; } = 0.75;
+    /// <summary>An inner glow's blend mode over the colours under it; screen when unset.</summary>
+    [JsonPropertyName("blend")] public string? Blend { get; set; }
 }
 
 /// <summary>A pattern over an element: see <see cref="DesignPatterns"/>.</summary>

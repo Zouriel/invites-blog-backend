@@ -209,6 +209,24 @@ public static partial class DesignValidator
                     Error("pattern", $"“{label}” has a pattern size or strength that isn't a number.", el.Id);
                 if (pattern.Mode == "colour") CheckColor(pattern.Color, label, el.Id!, themeKeys, Error, Warn);
             }
+            if (el.Bevel is { } bevel)
+            {
+                if (bevel.Style is not null && !DesignEffects.BevelStyles.Contains(bevel.Style))
+                    Error("effect", $"“{label}” has a bevel style we don't know: {string.Join(", ", DesignEffects.BevelStyles)}.", el.Id);
+                if (!double.IsFinite(bevel.Size) || !double.IsFinite(bevel.Strength))
+                    Error("effect", $"“{label}” has a bevel size or strength that isn't a number.", el.Id);
+            }
+            foreach (var (glow, which) in new[] { (el.InnerGlow, "inner"), (el.OuterGlow, "outer") })
+            {
+                if (glow is null) continue;
+                if (glow.Blend is not null && !DesignEffects.IsBlendMode(glow.Blend))
+                    Error("effect", $"“{label}” has an {which} glow blend mode we don't know: {string.Join(", ", DesignEffects.BlendModes)}.", el.Id);
+                if (!double.IsFinite(glow.Size) || !double.IsFinite(glow.Strength))
+                    Error("effect", $"“{label}” has an {which} glow size or strength that isn't a number.", el.Id);
+                if (glow.Color is not null) CheckColor(glow.Color, label, el.Id!, themeKeys, Error, Warn);
+            }
+            if (el.Blend is not null && !DesignEffects.IsBlendMode(el.Blend))
+                Error("blend", $"“{label}” has a blend mode we don't know: {string.Join(", ", DesignEffects.BlendModes)}.", el.Id);
             if (el.Text?.Split is { } split)
             {
                 if (split.By is not ("word" or "letter")) Error("split", $"“{label}” splits its text in a way we don't know.", el.Id);

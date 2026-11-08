@@ -120,7 +120,11 @@ public static class DesignPatterns
     /// The page's filter for a pattern on an element of a size (canvas units). <paramref name="colour"/> is
     /// a CSS colour (hex or var()) for the "colour" way; the others pick their own.
     /// </summary>
-    public static string Filter(string id, Resolved p, double w, double h, string? colour)
+    public static string Filter(string id, Resolved p, double w, double h, string? colour) =>
+        $"<filter id=\"{id}\" x=\"-10%\" y=\"-25%\" width=\"120%\" height=\"150%\" color-interpolation-filters=\"sRGB\">{Primitives(p, w, h, colour)}</filter>";
+
+    /// <summary>The filter steps of a pattern over SourceGraphic, the last one being the patterned result.</summary>
+    public static string Primitives(Resolved p, double w, double h, string? colour)
     {
         string marks;
         if (IsTexture(p.Kind)) marks = TexturePrimitives(p.Kind, p.Size);
@@ -147,6 +151,6 @@ public static class DesignPatterns
             var c = p.Mode == "shine" ? "#ffffff" : p.Mode == "colour" && colour is not null ? colour : "#000000";
             apply = $"<feFlood style=\"flood-color:{c}\" flood-opacity=\"{N(p.Strength)}\"/><feComposite in2=\"m\" operator=\"in\"/><feComposite in2=\"SourceGraphic\" operator=\"atop\"/>";
         }
-        return $"<filter id=\"{id}\" x=\"-10%\" y=\"-25%\" width=\"120%\" height=\"150%\" color-interpolation-filters=\"sRGB\">{marks}{apply}</filter>";
+        return marks + apply;
     }
 }
