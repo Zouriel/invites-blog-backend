@@ -28,7 +28,8 @@ public sealed record AssistantStepDto(IReadOnlyList<AssistantMessageDto> Message
 public sealed record AssistantSendRequest(string Text, string Outline, AssistantVocabulary? Vocabulary);
 
 /// <param name="Summary">One plain line for the person ("Added text “Names”"); the model gets <paramref name="Text"/>.</param>
-public sealed record AssistantToolResult(string Id, bool Ok, string Text, string? Summary = null);
+/// <param name="Image">A picture the tool took (the `look` tool: a screen of the design), as a JPEG/PNG/WebP data: URI.</param>
+public sealed record AssistantToolResult(string Id, bool Ok, string Text, string? Summary = null, string? Image = null);
 
 public sealed record AssistantResultsRequest(IReadOnlyList<AssistantToolResult> Results, AssistantVocabulary? Vocabulary);
 
@@ -130,7 +131,8 @@ public sealed partial class DesignAssistantService(
         var given = (request.Results ?? []).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
         var blocks = open.Select(c => given.TryGetValue(c.Id, out var r)
             ? new AssistantBlock("tool_result", Clip(r.Text ?? "", MaxResultLength), c.Id, IsError: r.Ok ? null : true,
-                Summary: r.Ok && !string.IsNullOrWhiteSpace(r.Summary) ? Clip(r.Summary.Trim(), 120) : null)
+                Summary: r.Ok && !string.IsNullOrWhiteSpace(r.Summary) ? Clip(r.Summary.Trim(), 120) : null,
+                Data: r.Ok ? Picture(r.Image) : null)
             : new AssistantBlock("tool_result", "Not run.", c.Id, IsError: true)).ToList();
         var added = new List<DesignAssistantMessage> { await AppendAsync(designId, me, rows, "results", blocks, false, ct) };
         await uow.SaveChangesAsync(ct);
@@ -210,7 +212,10 @@ public sealed partial class DesignAssistantService(
             var old = i < current;
             var blocks = Blocks(rows[i])
                 .Where(b => !(old && b.Type is "thinking" or "redacted_thinking" or "context"))
-                .Select(b => old && b.Type == "tool_result" ? b with { Text = Clip(b.Text ?? "", OldResultLength) } : b)
+                // A picture is for the turn it was taken in; later turns keep only that one was shown.
+                .Select(b => old && b.Type == "tool_result"
+                    ? b with { Text = Clip(b.Text ?? "", OldResultLength) + (b.Data is null ? "" : " (a picture was shown)"), Data = null }
+                    : b)
                 .ToList();
             if (blocks.Count == 0) continue;
             var role = rows[i].Role == "assistant" ? "assistant" : "user";
@@ -330,6 +335,15 @@ public sealed partial class DesignAssistantService(
         if (text.Length == 0 && lines.Count == 0) return null;
         return new AssistantMessageDto(row.Id, row.Role, text, lines, row.StartsTurn, row.CreatedAt);
     }
+
+    /// <summary>The largest picture a tool may hand back (a screen at about half size is ~40 KB).</summary>
+    public const int MaxPictureChars = 400_000;
+
+    /// <summary>A tool's picture when it really is one (an image data: URI of a sensible size); null otherwise.</summary>
+    public static string? Picture(string? image) =>
+        image is { Length: > 30 and <= MaxPictureChars }
+        && System.Text.RegularExpressions.Regex.IsMatch(image, "^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$")
+            ? image : null;
 
     private static string Clip(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 

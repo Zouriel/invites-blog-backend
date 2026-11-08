@@ -88,7 +88,7 @@ public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<An
         _ => Effort.Low,
     };
 
-    private static MessageParam ToParam(AssistantTurnMessage m)
+    public static MessageParam ToParam(AssistantTurnMessage m)
     {
         var blocks = new List<ContentBlockParam>();
         foreach (var b in m.Blocks)
@@ -107,6 +107,22 @@ public sealed class AnthropicAssistantModel(AssistantOptions options, ILogger<An
                 case "tool_use":
                     blocks.Add(new ToolUseBlockParam { ID = b.Id!, Name = b.Name!, Input = InputOf(b.Input) });
                     break;
+                case "tool_result" when b.Data is { } picture && picture.StartsWith("data:image/", StringComparison.Ordinal):
+                {
+                    // A tool that looked at the design: its words and the picture it took.
+                    var comma = picture.IndexOf(',');
+                    var media = picture[5..picture.IndexOf(';')];
+                    var image = new ImageBlockParam
+                    {
+                        Source = new Base64ImageSource { Data = picture[(comma + 1)..], MediaType = media switch { "image/png" => MediaType.ImagePng, "image/webp" => MediaType.ImageWebP, _ => MediaType.ImageJpeg } },
+                    };
+                    blocks.Add(new ToolResultBlockParam
+                    {
+                        ToolUseID = b.Id!, IsError = b.IsError,
+                        Content = new List<Block> { new TextBlockParam { Text = string.IsNullOrEmpty(b.Text) ? "(no output)" : b.Text! }, image },
+                    });
+                    break;
+                }
                 case "tool_result":
                     blocks.Add(new ToolResultBlockParam { ToolUseID = b.Id!, Content = string.IsNullOrEmpty(b.Text) ? "(no output)" : b.Text, IsError = b.IsError });
                     break;
