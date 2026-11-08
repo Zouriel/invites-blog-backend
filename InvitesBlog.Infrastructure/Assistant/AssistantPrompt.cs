@@ -124,6 +124,11 @@ public static class AssistantPrompt
            "sides": {"type": "integer"},
         """ + Box + "," + ShapeStyle + """
          , "parent": {"type": "string"}}, "required": ["kind", "x", "y", "w", "h"]}},
+        {"name": "draw_shape", "description": "Draws a custom shape, as the shape editor does (arches, hearts, frames, banners, waves, leaves, cut-outs): d is SVG path data (M L H V C S Q T A Z, absolute or relative) in its own units, scaled to its box. Several subpaths make one shape and one inside another is a hole, whichever way it is drawn. Size: w and h as given (one keeps its proportions), else its own size up to 300 wide. With id, redraws that shape's outline in place (it keeps its size unless w/h are given).",
+         "input_schema": {"type": "object", "properties": {"d": {"type": "string"}, "id": {"type": "string"},
+           "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}, "h": {"type": "number"}, "name": {"type": "string"},
+        """ + ShapeStyle + """
+         , "parent": {"type": "string"}}, "required": ["d"]}},
         {"name": "add_picture", "description": "Places one of the design's assets (see the outline): a photo or illustration the person uploaded or that is already in the design.",
          "input_schema": {"type": "object", "properties": {"asset": {"type": "string"},
         """ + Box + """
