@@ -127,7 +127,7 @@ public static class AssistantPrompt
         {"name": "add_picture", "description": "Places one of the design's assets (see the outline): a photo or illustration the person uploaded or that is already in the design.",
          "input_schema": {"type": "object", "properties": {"asset": {"type": "string"},
         """ + Box + """
-         , "fit": {"type": "string", "enum": ["cover", "contain"]}, "radius": {"type": "number"},
+         , "fit": {"type": "string", "enum": ["cover", "contain", "stretch"]}, "radius": {"type": "number"},
            "color": {"type": "string", "description": "Hex or theme:key: placed already tinted in one colour."},
            "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"], "description": "For an opaque photo with color."}}, "required": ["asset"]}},
         {"name": "add_photo_slot", "description": "Adds a place for the host's own photo(s), filled in per event.",
@@ -145,7 +145,7 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
            "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]}, "sides": {"type": "integer"},
-           "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain"]}, "link": {"type": "string"}, "locked": {"type": "boolean"},
+           "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain", "stretch"], "description": "Pictures: contain keeps its shape, cover crops to fill, stretch fills out of proportion. Photo slots: cover or contain."}, "link": {"type": "string"}, "locked": {"type": "boolean"},
            "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"]},
            "stretch": {"type": "boolean", "description": "Illustration: fill its box out of proportion (true) or keep its own shape (false)."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """

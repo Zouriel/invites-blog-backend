@@ -855,7 +855,8 @@ public static class DesignCompiler
         // through its precomputed brightness mask, or keeps the photo with the colour multiplied over it
         // (asked for, or no mask yet). The mask sits on the picture's own box, so motion on the element
         // around it moves and scales it along with the picture.
-        var fit = el.Image.Fit == "contain" ? "contain" : "cover";
+        // Fit keeps its shape inside the box, Fill covers it (cropping), Stretch fills it out of proportion.
+        var fit = el.Image.Fit switch { "contain" => "contain", "stretch" => "100% 100%", _ => "cover" };
         var tint = TintOf(el.Image.Tint, ctx.ThemeKeys);
         var opaque = ctx.Scene.Assets[el.Image.Asset].Alpha == false;
         var maskUri = opaque ? ImageDataUri(ctx.Scene.Assets[el.Image.Asset].Mask) : null;

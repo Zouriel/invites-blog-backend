@@ -459,7 +459,7 @@ public sealed class DesignSvg
 public sealed class DesignImage
 {
     [JsonPropertyName("asset")] public string Asset { get; set; } = default!;
-    /// <summary>cover | contain.</summary>
+    /// <summary>cover | contain | stretch.</summary>
     [JsonPropertyName("fit")] public string Fit { get; set; } = "cover";
     [JsonPropertyName("radius")] public double Radius { get; set; }
     /// <summary>One colour reference to paint the picture in; null shows it as it is.</summary>
