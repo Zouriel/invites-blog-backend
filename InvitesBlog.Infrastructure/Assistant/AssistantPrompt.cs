@@ -73,6 +73,12 @@ public static class AssistantPrompt
           (clouds, marble, paper, linen, sand, watercolour, wood) or shapes (dots, stripes, pinstripe,
           gingham, grid, chevron, diamonds, waves, hearts, stars), applied as shade, shine, colour (a
           second colour), emboss or engrave. Keep them subtle on backgrounds and behind text; look to check.
+        - Effects (update_element): bevel (the edge lit from the top left, raised or pressed in), inner_glow
+          (a colour glowing in from the edges, with its own blend), outer_glow (a colour glowing out around
+          it) and blend (how the element mixes with everything under it, the page colour included:
+          multiply darkens, screen lightens, overlay adds contrast, soft-light tints gently). They work on
+          any element after its colours and tint, groups as a whole. A picture or illustration as a
+          background can blend too. Keep glows soft behind text; look to check.
         - Fonts: a font id from the catalog, or theme:heading-font / theme:body-font when the theme has them.
         - Text can include fields that the host fills in for each event: write {{event.title}},
           {{event.date}} and so on. Use fields for names, dates, places and times rather than typing
@@ -175,6 +181,20 @@ public static class AssistantPrompt
                "size": {"type": "number", "description": "0.25 to 4; 0.6 small, 1 medium, 1.8 large."},
                "strength": {"type": "number", "description": "0 to 1; 0.25 subtle, 0.5 medium, 0.8 strong."},
                "color": {"type": "string", "description": "For mode colour: hex or theme:key."}}},
+           "bevel": {"type": ["object", "null"], "description": "Bevel the edge of what it paints, lit from the top left; null removes it. Give only what changes.",
+             "properties": {"style": {"type": "string", "enum": ["raised", "pressed"]},
+               "size": {"type": "number", "description": "1 to 30 canvas units; 2 small, 4 medium, 8 large."},
+               "strength": {"type": "number", "description": "0 to 1; 0.4 subtle, 0.75 medium, 1 strong."}}},
+           "inner_glow": {"type": ["object", "null"], "description": "A colour glowing in from its edges; null removes it. Give only what changes.",
+             "properties": {"color": {"type": "string", "description": "Hex or theme:key (default white)."},
+               "size": {"type": "number", "description": "1 to 60; 6 small, 12 medium, 24 large."},
+               "strength": {"type": "number", "description": "0 to 1."},
+               "blend": {"type": "string", "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"], "description": "How the glow mixes with the colours under it (default screen)."}}},
+           "outer_glow": {"type": ["object", "null"], "description": "A colour glowing out around it, behind it; null removes it. Give only what changes.",
+             "properties": {"color": {"type": "string", "description": "Hex or theme:key (default white)."},
+               "size": {"type": "number", "description": "1 to 60; 6 small, 12 medium, 24 large."},
+               "strength": {"type": "number", "description": "0 to 1."}}},
+           "blend": {"type": "string", "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"], "description": "How the element mixes with everything under it; normal covers it."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["id"]}},
         {"name": "delete_elements", "description": "Deletes elements.",

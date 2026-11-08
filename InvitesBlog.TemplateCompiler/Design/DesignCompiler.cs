@@ -42,6 +42,7 @@ public static class DesignCompiler
         options ??= new DesignCompileOptions();
         var ctx = new Context(scene, options);
         ctx.Range = scene.ScrollRange();
+        ctx.Blends = scene.Walk().Any(w => BlendOf(w.Item1) is not null);
 
         var body = new StringBuilder();
         var css = new StringBuilder();
@@ -160,6 +161,8 @@ public static class DesignCompiler
         public HashSet<string> Properties { get; } = new(StringComparer.Ordinal);
         /// <summary>Some element scrolls the page when tapped: the page needs the tap script.</summary>
         public bool TapScroll;
+        /// <summary>Some element has a blend mode.</summary>
+        public bool Blends;
         /// <summary>The clip-visibility keyframes are in the stylesheet.</summary>
         public bool Windows;
         /// <summary>How far the page scrolls, worked out once.</summary>
@@ -212,6 +215,9 @@ public static class DesignCompiler
         if (ctx.Scene.Stage)
             css.Append(".ib-stage{position:fixed;top:0;bottom:0;left:50%;width:").Append(DesignCss.U(DesignCanvas.Width))
                 .Append(";margin-left:").Append(DesignCss.U(-DesignCanvas.Width / 2)).Append(";overflow:hidden}");
+        // Something blends with what is under it: the page's colour is painted where it can see it (the
+        // stage is a layer of its own, which would otherwise blend with nothing).
+        if (ctx.Blends) css.Append(".ib-page").Append(ctx.Scene.Stage ? ",.ib-stage" : "").Append("{background:").Append(bg).Append('}');
         css.Append(".e{position:absolute;margin:0}");
         css.Append(".a{position:relative;width:100%;height:100%;transform-origin:50% 50%}");
         css.Append(".t{margin:0;white-space:pre-wrap;overflow-wrap:break-word}");
@@ -252,14 +258,28 @@ public static class DesignCompiler
         body.Append("</svg>");
     }
 
-    /// <summary><c>url(#fN)</c> for an element's pattern (shared with any element whose filter comes out the same), or null.</summary>
-    private static string? PatternRef(Context ctx, DesignElement el)
+    /// <summary>
+    /// <c>url(#fN)</c> for an element's pattern and effects (shared with any element whose filter comes out
+    /// the same), or null when it has none.
+    /// </summary>
+    private static string? FilterRef(Context ctx, DesignElement el)
     {
-        if (DesignPatterns.Resolve(el.Pattern) is not { } p) return null;
-        var markup = DesignPatterns.Filter("", p, el.W, el.H, p.Mode == "colour" ? TintOf(el.Pattern!.Color, ctx.ThemeKeys) : null);
+        var p = DesignPatterns.Resolve(el.Pattern);
+        var inner = DesignEffects.ResolveGlow(el.InnerGlow, "screen");
+        var outer = DesignEffects.ResolveGlow(el.OuterGlow, "normal");
+        var markup = DesignEffects.Filter("",
+            p is null ? null : (p, p.Mode == "colour" ? TintOf(el.Pattern!.Color, ctx.ThemeKeys) : null),
+            DesignEffects.ResolveBevel(el.Bevel),
+            inner is null ? null : (inner, TintOf(el.InnerGlow!.Color, ctx.ThemeKeys) ?? "#ffffff"),
+            outer is null ? null : (outer, TintOf(el.OuterGlow!.Color, ctx.ThemeKeys) ?? "#ffffff"),
+            el.W, el.H);
+        if (markup is null) return null;
         if (!ctx.Filters.TryGetValue(markup, out var index)) ctx.Filters[markup] = index = ctx.Filters.Count;
         return $"url(#f{index})";
     }
+
+    /// <summary>The element's blend mode, or null when it simply covers what is under it.</summary>
+    private static string? BlendOf(DesignElement el) => DesignEffects.IsBlendMode(el.Blend) && el.Blend != "normal" ? el.Blend : null;
 
     // ----- Elements ----------------------------------------------------------------------------------
 
@@ -290,7 +310,7 @@ public static class DesignCompiler
         var split = moving && el.Type == "text" && el.Text?.Split is { } sp && sp.By is "word" or "letter" ? el.Text.Split : null;
         // A pattern sits on the innermost layer that moves as one (the loop's, else the keyframes'), so it
         // travels, turns and grows with the element.
-        var pattern = PatternRef(ctx, el);
+        var pattern = FilterRef(ctx, el);
         var patternOnA = pattern is not null && !looping;
 
         if (uses.Draw && el.Type == "shape") Property(ctx, css, "--d", "'<number>'", "1");
@@ -377,6 +397,7 @@ public static class DesignCompiler
         // 3D turns need depth from the box they turn inside.
         if (uses.ThreeD) css.Append("perspective:").Append(DesignCss.U(Math.Max(600, 3 * Math.Max(el.W, el.H)))).Append(';');
         if (el.TapScroll is { } t2 && double.IsFinite(t2)) css.Append("cursor:pointer;");
+        if (BlendOf(el) is { } blend) css.Append("mix-blend-mode:").Append(blend).Append(';');
         // Outside its bar a clip isn't there at all: hidden, and not in the way of taps.
         if (windowed) css.Append("opacity:0;pointer-events:none;");
         var trackRange = DesignCss.U(track.Start) + " " + DesignCss.U(track.End);
