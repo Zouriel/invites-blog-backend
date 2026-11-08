@@ -61,7 +61,14 @@ public class KeepAliveResultTests
         KeepAliveResult<Answer>.Grace = TimeSpan.FromMilliseconds(30);
         KeepAliveResult<Answer>.Beat = TimeSpan.FromMilliseconds(30);
         var (ctx, body) = Context();
-        await new KeepAliveResult<Answer>(Later(250, () => new Answer("done"))).ExecuteResultAsync(ctx);
+        // Held open until the response has kept the connection alive twice, then answered: a fixed delay
+        // raced the setup and, on a busy machine, finished first (the answer then goes out the quick way).
+        var answer = new TaskCompletionSource<Answer>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = new KeepAliveResult<Answer>(answer.Task).ExecuteResultAsync(ctx);
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (Encoding.UTF8.GetString(body.ToArray()).Count(c => c == ' ') < 2 && DateTime.UtcNow < deadline) await Task.Delay(10);
+        answer.SetResult(new Answer("done"));
+        await run;
         var text = Encoding.UTF8.GetString(body.ToArray());
         Assert.StartsWith(" ", text);
         Assert.True(text.TakeWhile(c => c == ' ').Count() >= 2, "it kept the connection alive more than once");
