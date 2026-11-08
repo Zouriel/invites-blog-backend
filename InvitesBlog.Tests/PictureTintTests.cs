@@ -162,6 +162,13 @@ public class PictureTintTests
     }
 
     [Fact]
+    public void A_stretched_picture_fills_its_box_tinted_or_not()
+    {
+        Assert.EndsWith("background-size:100% 100%}", Rule(DesignCompiler.Compile(Scene(Png(), new DesignImage { Asset = "pic", Fit = "stretch" }))));
+        Assert.Contains("mask:var(--im) center/100% 100% no-repeat", Rule(DesignCompiler.Compile(Scene(Png(), new DesignImage { Asset = "pic", Fit = "stretch", Tint = "#AA0000" }))));
+    }
+
+    [Fact]
     public void Check_refuses_a_tint_that_is_not_a_colour_or_a_mode_that_does_not_exist()
     {
         var issues = DesignValidator.Validate(Scene(Jpg(), new DesignImage { Asset = "pic", Tint = "pinkish", TintMode = "sepia" }));
