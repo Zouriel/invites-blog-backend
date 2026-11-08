@@ -135,8 +135,17 @@ public static class DesignCompiler
                 if (el.Type != "image" || el.Image is null) continue;
                 if (!scene.Assets.TryGetValue(el.Image.Asset, out var asset) || asset.Kind != "image") continue;
                 if (!ImageClasses.ContainsKey(el.Image.Asset)) ImageClasses[el.Image.Asset] = imageIndex++;
-                // A tinted use needs the picture as a mask too: its url goes in a variable, written once.
-                if (TintOf(el.Image.Tint, ThemeKeys) is not null) VarImages.Add(el.Image.Asset);
+                // A tinted (or gradient-painted) use needs the picture as a mask too: its url goes in a
+                // variable, written once.
+                if (TintOf(el.Image.Tint, ThemeKeys) is not null || DesignGradients.Resolve(el.Gradient, r => TintOf(r, ThemeKeys)) is not null)
+                    VarImages.Add(el.Image.Asset);
+            }
+            // Pictures shown inside letters, after the pictures themselves.
+            foreach (var (el, _, _) in scene.Walk())
+            {
+                if (el.Type != "text" || el.Text?.Image is not { } pic) continue;
+                if (!scene.Assets.TryGetValue(pic, out var asset) || asset.Kind != "image") continue;
+                if (!ImageClasses.ContainsKey(pic)) ImageClasses[pic] = imageIndex++;
             }
         }
 
@@ -151,6 +160,8 @@ public static class DesignCompiler
         public Dictionary<string, IReadOnlyList<string>> SvgColors { get; } = new(StringComparer.Ordinal);
         /// <summary>Each illustration's own width and height (its viewBox), for drawing it stretched.</summary>
         public Dictionary<string, (double W, double H)> SvgSizes { get; } = new(StringComparer.Ordinal);
+        /// <summary>Each illustration's cleaned drawing, for painting a gradient through it.</summary>
+        public Dictionary<string, (string ViewBox, string Inner)> SvgMarkup { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImages { get; } = new(StringComparer.Ordinal);
         /// <summary>Pattern filters, in the order elements first use them: markup (without its id) → index.</summary>
         public Dictionary<string, int> Filters { get; } = new(StringComparer.Ordinal);
@@ -242,6 +253,7 @@ public static class DesignCompiler
             catch (SvgRejectedException) { continue; }
             ctx.SvgColors[assetId] = clean.Colors;
             ctx.SvgSizes[assetId] = (clean.Width, clean.Height);
+            ctx.SvgMarkup[assetId] = (clean.ViewBox, clean.InnerMarkup);
             body.Append("<symbol id=\"s").Append(index).Append("\" viewBox=\"").Append(clean.ViewBox).Append("\">")
                 .Append(clean.InnerMarkup).Append("</symbol>");
         }
@@ -267,16 +279,73 @@ public static class DesignCompiler
         var p = DesignPatterns.Resolve(el.Pattern);
         var inner = DesignEffects.ResolveGlow(el.InnerGlow, "screen");
         var outer = DesignEffects.ResolveGlow(el.OuterGlow, "normal");
+        var adjust = AdjustOf(el);
         var markup = DesignEffects.Filter("",
             p is null ? null : (p, p.Mode == "colour" ? TintOf(el.Pattern!.Color, ctx.ThemeKeys) : null),
             DesignEffects.ResolveBevel(el.Bevel),
             inner is null ? null : (inner, TintOf(el.InnerGlow!.Color, ctx.ThemeKeys) ?? "#ffffff"),
             outer is null ? null : (outer, TintOf(el.OuterGlow!.Color, ctx.ThemeKeys) ?? "#ffffff"),
-            el.W, el.H);
+            el.W, el.H,
+            DuotoneOf(ctx, adjust),
+            adjust?.Grain ?? 0,
+            DesignEffects.ResolveShadow(el.Shadow, TintOf(el.Shadow?.Color, ctx.ThemeKeys) ?? "#000000"),
+            DesignPatterns.ResolveLight(el.Light, TintOf(el.Light?.Color, ctx.ThemeKeys)));
         if (markup is null) return null;
         if (!ctx.Filters.TryGetValue(markup, out var index)) ctx.Filters[markup] = index = ctx.Filters.Count;
         return $"url(#f{index})";
     }
+
+    /// <summary>A picture's or photo's adjustments (none for anything else).</summary>
+    private static DesignAdjust? AdjustOf(DesignElement el) => el.Type switch { "image" => el.Image?.Adjust, "slot" => el.Slot?.Adjust, _ => null };
+
+    private static (string Dark, string Light)? DuotoneOf(Context ctx, DesignAdjust? adjust)
+    {
+        var dark = TintOf(adjust?.Duotone?.Dark, ctx.ThemeKeys);
+        var light = TintOf(adjust?.Duotone?.Light, ctx.ThemeKeys);
+        return dark is not null && light is not null ? (dark, light) : null;
+    }
+
+    /// <summary>CSS filter functions for a picture's brightness, contrast, saturation and warmth, or "".</summary>
+    private static string AdjustCss(DesignAdjust? adjust)
+    {
+        if (adjust is null) return "";
+        var parts = new List<string>();
+        void Add(string name, double v, double neutral, double lo, double hi)
+        {
+            var c = double.IsFinite(v) ? DesignCss.Clamp(v, lo, hi) : neutral;
+            if (Math.Abs(c - neutral) > 0.0005) parts.Add($"{name}({DesignCss.Num(c)})");
+        }
+        Add("brightness", adjust.Brightness, 1, 0, 2);
+        Add("contrast", adjust.Contrast, 1, 0, 2);
+        Add("saturate", adjust.Saturation, 1, 0, 3);
+        Add("sepia", adjust.Sepia, 0, 0, 1);
+        return parts.Count > 0 ? ";filter:" + string.Join(' ', parts) : "";
+    }
+
+    /// <summary>The element's gradient, its colours resolved, or null.</summary>
+    private static DesignGradients.Resolved? GradientOf(Context ctx, DesignElement el) =>
+        DesignGradients.Resolve(el.Gradient, r => TintOf(r, ctx.ThemeKeys));
+
+    /// <summary>Whether a text element is drawn along an arc.</summary>
+    public static bool CurvedText(DesignElement el) =>
+        el.Type == "text" && el.Text is { } t && double.IsFinite(t.Curve) && Math.Abs(DesignCss.Clamp(t.Curve, -100, 100)) >= 0.5;
+
+    private static readonly string[] Maskable = ["image", "slot", "svg", "group"];
+
+    /// <summary>The CSS mask clipping an element to a shape outline, or null.</summary>
+    private static string? MaskCss(DesignElement el)
+    {
+        var m = el.Mask;
+        if (m is null || !DesignShapes.IsMaskKind(m.Kind) || !Maskable.Contains(el.Type)) return null;
+        double w = Math.Max(1, el.W), h = Math.Max(1, el.H);
+        if (DesignShapes.D(m.Kind!, w, h, m.Sides, m.Amount, 0) is not { } d) return null;
+        var svg = $"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {DesignCss.Num(w)} {DesignCss.Num(h)}\" preserveAspectRatio=\"none\"><path d=\"{d}\" fill-rule=\"evenodd\"/></svg>";
+        var v = $"url(\"data:image/svg+xml;base64,{Base64(svg)}\") 0 0/100% 100% no-repeat";
+        return $"-webkit-mask:{v};mask:{v}";
+    }
+
+    /// <summary>Base64 of a string's UTF-8 bytes.</summary>
+    private static string Base64(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
 
     /// <summary>The element's blend mode, or null when it simply covers what is under it.</summary>
     private static string? BlendOf(DesignElement el) => DesignEffects.IsBlendMode(el.Blend) && el.Blend != "normal" ? el.Blend : null;
@@ -307,7 +376,7 @@ public static class DesignCompiler
         var loopFrames = ResolveLoop(el);
         var looping = loopFrames.Count > 0 && track.End > track.Start;
         // A split text moves piece by piece instead of as one block.
-        var split = moving && el.Type == "text" && el.Text?.Split is { } sp && sp.By is "word" or "letter" ? el.Text.Split : null;
+        var split = moving && !CurvedText(el) && el.Type == "text" && el.Text?.Split is { } sp && sp.By is "word" or "letter" ? el.Text.Split : null;
         // A pattern sits on the innermost layer that moves as one (the loop's, else the keyframes'), so it
         // travels, turns and grows with the element.
         var pattern = FilterRef(ctx, el);
@@ -335,10 +404,12 @@ public static class DesignCompiler
         switch (el.Type)
         {
             case "text":
-                boundAnything = EmitText(ctx, el, inner, css, cls, uses.Tracking, looping, split, segments, track, n);
+                boundAnything = CurvedText(el)
+                    ? EmitCurvedText(ctx, el, inner, css, cls, n)
+                    : EmitText(ctx, el, inner, css, cls, uses.Tracking, looping, split, segments, track, n);
                 break;
             case "shape":
-                EmitShape(ctx, el, inner, uses.Draw);
+                EmitShape(ctx, el, inner, uses.Draw, n);
                 break;
             case "svg":
                 EmitSvg(ctx, el, inner, css, cls);
@@ -364,6 +435,11 @@ public static class DesignCompiler
         }
 
         var origin = OriginOf(el);
+        if (MaskCss(el) is { } maskCss)
+        {
+            inner.Insert(0, $"<div class=\"m m{n}\">").Append("</div>");
+            css.Append(".m").Append(n).Append("{position:relative;width:100%;height:100%;").Append(maskCss).Append('}');
+        }
 
         body.Append("<div class=\"e e").Append(n).Append('"');
         if (animated || pinned || looping || windowed || scrolling)
@@ -585,7 +661,9 @@ public static class DesignCompiler
             count++;
         }
 
-        inner.Append("<p class=\"t\">");
+        var fill = TextFill(ctx, el);
+        css.Append(fill.Rule);
+        inner.Append("<p class=\"t").Append(fill.Cls).Append("\">");
         foreach (var run in text.Runs)
         {
             var open = new StringBuilder();
@@ -670,6 +748,100 @@ public static class DesignCompiler
         if (tracking)
             css.Append("letter-spacing:calc(").Append(DesignCss.Num(DesignCss.Clamp(text.Style.LetterSpacing, -0.2, 2)))
                 .Append("em + var(--ls));");
+        css.Append(fill.Css).Append('}');
+        // Moving pieces are layers of their own: each carries the fill.
+        if (fill.Css.Length > 0 && pieces is not null && segments is not null)
+            css.Append(cls).Append(" .p{background:inherit;").Append(ClipText).Append('}');
+        return bound;
+    }
+
+    private const string ClipText = "-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent";
+
+    /// <summary>What paints a text's letters instead of its colour: a picture or a gradient; nothing otherwise.</summary>
+    private static (string Cls, string Rule, string Css) TextFill(Context ctx, DesignElement el)
+    {
+        if (el.Text?.Image is { } image && UseImage(ctx, image) is { } pic)
+            return (" " + pic.Cls, pic.Css, ";background-size:cover;background-position:center;" + ClipText);
+        if (GradientOf(ctx, el) is { } g)
+            return ("", "", ";background-image:" + DesignGradients.Css(g) + ";" + ClipText);
+        return ("", "", "");
+    }
+
+    /// <summary>
+    /// A picture asset's class (its data in the stylesheet once, as --im when something masks with it),
+    /// or null when it isn't a usable picture.
+    /// </summary>
+    private static (string Cls, string Css)? UseImage(Context ctx, string assetId)
+    {
+        if (!ctx.ImageClasses.TryGetValue(assetId, out var index)) return null;
+        if (!ctx.Scene.Assets.TryGetValue(assetId, out var asset) || ImageDataUri(asset.Data) is not { } uri) return null;
+        var cls = $"i{index}";
+        if (!ctx.EmittedImages.Add(cls)) return (cls, "");
+        return (cls, ctx.VarImages.Contains(assetId)
+            ? $".{cls}{{--im:url(\"{uri}\");background-image:var(--im)}}"
+            : $".{cls}{{background-image:url(\"{uri}\")}}");
+    }
+
+    /// <summary>
+    /// Text along an arc: an SVG line of text on a circle's arc as long as the box is wide, bent up
+    /// (positive) or down. Fields still fill in (their spans become tspans).
+    /// </summary>
+    private static bool EmitCurvedText(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls, int n)
+    {
+        var text = el.Text!;
+        var style = text.Style;
+        double w = Math.Max(1, el.W), h = Math.Max(1, el.H);
+        var size = DesignCss.Clamp(style.Size, 4, 400);
+        var bend = DesignCss.Clamp(text.Curve, -100, 100);
+        var theta = Math.Abs(bend) / 100 * 2 * Math.PI * 0.97;
+        var r = w / theta;
+        var up = bend > 0;
+        var my = h / 2 + (up ? size * 0.35 : -size * 0.35 + size * 0.7);
+        var cy = up ? my + r : my - r;
+        double x0 = w / 2 - r * Math.Sin(theta / 2), x1 = w / 2 + r * Math.Sin(theta / 2);
+        var y = up ? cy - r * Math.Cos(theta / 2) : cy + r * Math.Cos(theta / 2);
+        var N = (Func<double, string>)DesignCss.Num;
+        var d = $"M{N(x0)} {N(y)}A{N(r)} {N(r)} 0 {(theta > Math.PI ? 1 : 0)} {(up ? 1 : 0)} {N(x1)} {N(y)}";
+
+        var bound = false;
+        var runs = new StringBuilder();
+        foreach (var run in text.Runs)
+        {
+            var open = new StringBuilder();
+            var close = new StringBuilder();
+            if (run.Bold) { open.Append("<tspan style=\"font-weight:700\">"); close.Insert(0, "</tspan>"); }
+            if (run.Italic) { open.Append("<tspan style=\"font-style:italic\">"); close.Insert(0, "</tspan>"); }
+            if (!string.IsNullOrWhiteSpace(run.Var))
+            {
+                var span = VariableSpan(ctx, el, run.Var, "var", "tspan");
+                if (span is null) continue;
+                runs.Append(open).Append(span).Append(close);
+                bound = true;
+            }
+            else if (!string.IsNullOrEmpty(run.Text))
+            {
+                runs.Append(open).Append(WebUtility.HtmlEncode(Truncate(run.Text))).Append(close);
+            }
+        }
+        var g = GradientOf(ctx, el);
+        inner.Append("<svg class=\"s\" viewBox=\"0 0 ").Append(N(w)).Append(' ').Append(N(h)).Append("\" overflow=\"visible\"><defs><path id=\"c")
+            .Append(n).Append("\" d=\"").Append(d).Append("\"/>");
+        if (g is not null) inner.Append(DesignGradients.Svg($"g{n}", g, w, h));
+        inner.Append("</defs><text class=\"t\"><textPath href=\"#c").Append(n).Append("\" startOffset=\"50%\" text-anchor=\"middle\">")
+            .Append(runs).Append("</textPath></text></svg>");
+
+        css.Append(cls).Append(" text{");
+        var font = DesignCss.Font(style.Font, ctx.ThemeKeys);
+        if (font is not null) css.Append("font-family:").Append(font).Append(';');
+        css.Append("font-size:").Append(N(size)).Append("px;font-weight:").Append(Math.Clamp(style.Weight / 100 * 100, 100, 900)).Append(';');
+        if (style.Italic) css.Append("font-style:italic;");
+        css.Append("fill:").Append(g is not null ? $"url(#g{n})" : DesignCss.Color(style.Color, ctx.ThemeKeys) ?? "currentColor").Append(';');
+        if (style.LetterSpacing != 0) css.Append("letter-spacing:").Append(N(DesignCss.Clamp(style.LetterSpacing, -0.2, 2))).Append("em;");
+        if (style.Uppercase) css.Append("text-transform:uppercase;");
+        var stroke = DesignCss.Color(style.Stroke, ctx.ThemeKeys);
+        if (stroke is not null && style.StrokeWidth > 0)
+            css.Append("stroke:").Append(stroke).Append(";stroke-width:").Append(N(DesignCss.Clamp(style.StrokeWidth, 0, 20) * 2))
+                .Append(";paint-order:stroke fill;stroke-linejoin:round;");
         css.Append('}');
         return bound;
     }
@@ -689,7 +861,7 @@ public static class DesignCompiler
     }
 
     /// <summary>A <c>data-var</c>/<c>data-href</c> span for a scene path, or null when the path isn't allowed.</summary>
-    private static string? VariableSpan(Context ctx, DesignElement el, string path, string kind)
+    private static string? VariableSpan(Context ctx, DesignElement el, string path, string kind, string tag = "span")
     {
         path = path.Trim();
         var catalog = DesignCatalog.FindVariable(path);
@@ -697,7 +869,7 @@ public static class DesignCompiler
         if (catalog is null && custom is null) return null;
         if (catalog is { Kind: "image" }) return null;
 
-        var sb = new StringBuilder("<span data-var=\"").Append(Attr(path)).Append('"');
+        var sb = new StringBuilder("<").Append(tag).Append(" data-var=\"").Append(Attr(path)).Append('"');
         if (custom is not null)
         {
             sb.Append(" data-field-label=\"").Append(Attr(custom.Label)).Append('"');
@@ -716,20 +888,22 @@ public static class DesignCompiler
         if (scope is not null) sb.Append(" data-role-scope=\"").Append(Attr(scope)).Append('"');
 
         var sample = custom?.Sample ?? catalog?.Sample ?? custom?.Label ?? string.Empty;
-        sb.Append('>').Append(WebUtility.HtmlEncode(Truncate(sample))).Append("</span>");
+        sb.Append('>').Append(WebUtility.HtmlEncode(Truncate(sample))).Append("</").Append(tag).Append('>');
         return sb.ToString();
     }
 
-    private static void EmitShape(Context ctx, DesignElement el, StringBuilder inner, bool draw = false)
+    private static void EmitShape(Context ctx, DesignElement el, StringBuilder inner, bool draw = false, int n = 0)
     {
         var shape = el.Shape ?? new DesignShape();
         var w = Math.Max(1, el.W);
         var h = Math.Max(1, el.H);
-        var fill = DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "transparent";
+        var gradient = GradientOf(ctx, el);
+        var paint = gradient is not null ? $"url(#g{n})" : null;
+        var fill = paint ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "transparent";
         var stroke = DesignCss.Color(shape.Stroke, ctx.ThemeKeys);
         var sw = stroke is null ? 0 : DesignCss.Clamp(shape.StrokeWidth, 0, Math.Min(w, h) / 2);
         var style = new StringBuilder("fill:").Append(fill);
-        if (sw > 0) style.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(sw));
+        if (sw > 0) style.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(sw)).Append(draw ? "" : DashCss(shape.Dash, sw));
         // Drawing on: the outline is dashed as long as itself (pathLength 1) and the dash slides in with
         // --d; any fill comes up over the last fifth of the drawing.
         var len = draw ? " pathLength=\"1\"" : "";
@@ -740,7 +914,16 @@ public static class DesignCompiler
             .Append("\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
         if (shape.Kind == "path" && shape.Path is { } drawn)
         {
-            EmitPath(inner, drawn, fill, stroke, sw, DesignCss.Color(shape.Fill, ctx.ThemeKeys), draw);
+            double pw = DesignCss.Clamp(drawn.Width, 1, 10000), ph = DesignCss.Clamp(drawn.Height, 1, 10000);
+            var defs = gradient is not null ? $"<defs>{DesignGradients.Svg($"g{n}", gradient, pw, ph)}</defs>" : "";
+            EmitPath(inner, drawn, fill, stroke, sw, paint ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys), draw, defs, shape.Dash);
+            return;
+        }
+        if (gradient is not null) inner.Append("<defs>").Append(DesignGradients.Svg($"g{n}", gradient, w, h)).Append("</defs>");
+        if (DesignShapes.IsExtra(shape.Kind))
+        {
+            var d = DesignShapes.D(shape.Kind, w, h, shape.Sides, shape.Amount, DesignCss.Clamp(shape.Radius, 0, Math.Min(w, h) / 2), half);
+            inner.Append("<path").Append(len).Append(" d=\"").Append(d).Append("\" fill-rule=\"evenodd\" style=\"").Append(style).Append("\"/></svg>");
             return;
         }
         switch (shape.Kind)
@@ -751,11 +934,11 @@ public static class DesignCompiler
                     .Append(DesignCss.Num(Math.Max(0, h / 2 - half))).Append("\" style=\"").Append(style).Append("\"/>");
                 break;
             case "line":
-                var lineStroke = DesignCss.Color(shape.Stroke, ctx.ThemeKeys) ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "currentColor";
+                var lineStroke = paint ?? DesignCss.Color(shape.Stroke, ctx.ThemeKeys) ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "currentColor";
                 var lw = DesignCss.Clamp(shape.StrokeWidth <= 0 ? 2 : shape.StrokeWidth, 0.5, h);
                 inner.Append("<line").Append(len).Append(" x1=\"0\" y1=\"").Append(DesignCss.Num(h / 2)).Append("\" x2=\"").Append(DesignCss.Num(w))
                     .Append("\" y2=\"").Append(DesignCss.Num(h / 2)).Append("\" style=\"stroke:").Append(lineStroke)
-                    .Append(";stroke-width:").Append(DesignCss.Num(lw)).Append(draw ? DrawStyle : "").Append("\"/>");
+                    .Append(";stroke-width:").Append(DesignCss.Num(lw)).Append(draw ? DrawStyle : DashCss(shape.Dash, lw)).Append("\"/>");
                 break;
             case "polygon":
                 var sides = Math.Clamp(shape.Sides, 3, 12);
@@ -784,21 +967,29 @@ public static class DesignCompiler
     /// </summary>
     private const string DrawStyle = ";stroke-dasharray:1 1;stroke-dashoffset:calc(1 - var(--d));fill-opacity:calc((var(--d) - 0.8) * 5)";
 
-    private static void EmitPath(StringBuilder inner, DesignPath path, string fill, string? stroke, double strokeWidth, string? fillColor, bool draw = false)
+    /// <summary>A dashed or dotted outline, in steps of its own width.</summary>
+    private static string DashCss(string? dash, double width) => dash switch
+    {
+        "dashed" => $";stroke-dasharray:{DesignCss.Num(width * 3)} {DesignCss.Num(width * 2)}",
+        "dotted" => $";stroke-dasharray:0 {DesignCss.Num(width * 2)};stroke-linecap:round",
+        _ => "",
+    };
+
+    private static void EmitPath(StringBuilder inner, DesignPath path, string fill, string? stroke, double strokeWidth, string? fillColor, bool draw = false, string defs = "", string? dash = null)
     {
         var len = draw ? " pathLength=\"1\"" : "";
         var pw = DesignCss.Clamp(path.Width, 1, 10000);
         var ph = DesignCss.Clamp(path.Height, 1, 10000);
         // Nested in the element's own <svg>, in the path's space, so it stretches with the element's box.
         inner.Append("<svg viewBox=\"0 0 ").Append(DesignCss.Num(pw)).Append(' ').Append(DesignCss.Num(ph))
-            .Append("\" preserveAspectRatio=\"none\" width=\"100%\" height=\"100%\" overflow=\"visible\">");
+            .Append("\" preserveAspectRatio=\"none\" width=\"100%\" height=\"100%\" overflow=\"visible\">").Append(defs);
         var closed = PathD(path.Contours.Where(c => c.Closed));
         var open = PathD(path.Contours.Where(c => !c.Closed));
         if (closed.Length > 0)
         {
             inner.Append("<path").Append(len).Append(" d=\"").Append(closed).Append("\" fill-rule=\"nonzero\" style=\"fill:").Append(fill);
             if (strokeWidth > 0 && stroke is not null)
-                inner.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(strokeWidth)).Append(";stroke-linejoin:round");
+                inner.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(strokeWidth)).Append(";stroke-linejoin:round").Append(draw ? "" : DashCss(dash, strokeWidth));
             if (draw) inner.Append(DrawStyle);
             inner.Append("\"/>");
         }
@@ -808,7 +999,7 @@ public static class DesignCompiler
             var lineWidth = strokeWidth > 0 ? strokeWidth : 2;
             inner.Append("<path").Append(len).Append(" d=\"").Append(open).Append("\" style=\"fill:none;stroke:").Append(lineColor)
                 .Append(";stroke-width:").Append(DesignCss.Num(lineWidth)).Append(";stroke-linecap:round;stroke-linejoin:round")
-                .Append(draw ? DrawStyle : "").Append("\"/>");
+                .Append(draw ? DrawStyle : DashCss(dash, lineWidth)).Append("\"/>");
         }
         inner.Append("</svg></svg>");
     }
@@ -856,6 +1047,17 @@ public static class DesignCompiler
     {
         if (el.Svg is null || !ctx.SvgSymbols.TryGetValue(el.Svg.Asset, out var index)) return;
         if (!ctx.SvgColors.TryGetValue(el.Svg.Asset, out var colors)) return;
+        // A gradient paints the art's silhouette: the drawing itself becomes the mask.
+        if (GradientOf(ctx, el) is { } g && ctx.SvgMarkup.TryGetValue(el.Svg.Asset, out var markup))
+        {
+            var stretch = el.Svg.Stretch == true;
+            var doc = $"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"{markup.ViewBox}\"{(stretch ? " preserveAspectRatio=\"none\"" : "")}>{markup.Inner}</svg>";
+            var v = $"url(\"data:image/svg+xml;base64,{Base64(doc)}\") center/{(stretch ? "100% 100%" : "contain")} no-repeat";
+            inner.Append("<div class=\"gm\"></div>");
+            css.Append(cls).Append(" .gm{width:100%;height:100%;background-image:").Append(DesignGradients.Css(g))
+                .Append(";-webkit-mask:").Append(v).Append(";mask:").Append(v).Append('}');
+            return;
+        }
         // Stretched, the art fills its box whatever its own proportions; otherwise it keeps them, centred.
         if (el.Svg.Stretch == true && ctx.SvgSizes.TryGetValue(el.Svg.Asset, out var size))
             inner.Append("<svg class=\"s\" viewBox=\"0 0 ").Append(DesignCss.Num(size.W)).Append(' ').Append(DesignCss.Num(size.H))
@@ -890,16 +1092,10 @@ public static class DesignCompiler
     private static void EmitImage(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)
     {
         if (el.Image is null || !ctx.ImageClasses.TryGetValue(el.Image.Asset, out var index)) return;
-        var asset = ctx.Scene.Assets[el.Image.Asset];
-        var uri = ImageDataUri(asset.Data);
-        if (uri is null) return;
-
         // Declared once per asset however many elements use it — a repeated flourish costs its bytes once.
-        var imageClass = $"i{index}";
-        if (ctx.EmittedImages.Add(imageClass))
-            css.Append('.').Append(imageClass).Append(ctx.VarImages.Contains(el.Image.Asset)
-                ? $"{{--im:url(\"{uri}\");background-image:var(--im)}}"
-                : $"{{background-image:url(\"{uri}\")}}");
+        if (UseImage(ctx, el.Image.Asset) is not { } used) return;
+        var imageClass = used.Cls;
+        css.Append(used.Css);
 
         // A tint: a picture with see-through parts (or one we don't know is opaque) becomes a silhouette
         // through its own alpha, so only what has colour is painted. An opaque one is a silhouette
@@ -908,11 +1104,13 @@ public static class DesignCompiler
         // around it moves and scales it along with the picture.
         // Fit keeps its shape inside the box, Fill covers it (cropping), Stretch fills it out of proportion.
         var fit = el.Image.Fit switch { "contain" => "contain", "stretch" => "100% 100%", _ => "cover" };
-        var tint = TintOf(el.Image.Tint, ctx.ThemeKeys);
+        var gradient = GradientOf(ctx, el);
+        var tint = gradient is not null ? null : TintOf(el.Image.Tint, ctx.ThemeKeys);
+        var painted = gradient is not null || tint is not null;
         var opaque = ctx.Scene.Assets[el.Image.Asset].Alpha == false;
         var maskUri = opaque ? ImageDataUri(ctx.Scene.Assets[el.Image.Asset].Mask) : null;
         var overlay = opaque && (el.Image.TintMode == "overlay" || maskUri is null);
-        var useMask = tint is not null && opaque && !overlay;
+        var useMask = painted && opaque && !overlay;
         var maskClass = $"k{index}";
         if (useMask && ctx.EmittedImages.Add(maskClass))
             css.Append('.').Append(maskClass).Append("{--mk:url(\"").Append(maskUri).Append("\")}");
@@ -927,7 +1125,14 @@ public static class DesignCompiler
             css.Append(overlay ? $";background-color:{tint};background-blend-mode:multiply" : $";background-image:none;background-color:{tint}")
                 .Append(";-webkit-mask:").Append(mask).Append(";mask:").Append(mask);
         }
-        css.Append('}');
+        if (gradient is not null)
+        {
+            var mask = $"var({(useMask ? "--mk" : "--im")}) center/{fit} no-repeat";
+            var gc = DesignGradients.Css(gradient);
+            css.Append(overlay ? $";background-image:{gc},var(--im);background-size:100% 100%,{fit};background-blend-mode:multiply" : $";background-image:{gc};background-size:100% 100%")
+                .Append(";-webkit-mask:").Append(mask).Append(";mask:").Append(mask);
+        }
+        css.Append(AdjustCss(el.Image.Adjust)).Append('}');
     }
 
     private static void EmitSlot(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)
@@ -960,11 +1165,11 @@ public static class DesignCompiler
                 .Append(",minmax(0,1fr));gap:").Append(DesignCss.U(DesignCss.Clamp(slot.Gap, 0, 80)))
                 .Append(";align-content:start;overflow:hidden}");
             css.Append(cls).Append(" img{display:block;width:100%;aspect-ratio:")
-                .Append(DesignCss.Num(DesignCss.Clamp(slot.Aspect, 0.2, 5))).Append(";object-fit:").Append(fit).Append(radius).Append('}');
+                .Append(DesignCss.Num(DesignCss.Clamp(slot.Aspect, 0.2, 5))).Append(";object-fit:").Append(fit).Append(radius).Append(AdjustCss(slot.Adjust)).Append('}');
         }
         else
         {
-            css.Append(cls).Append(" img{display:block;width:100%;height:100%;object-fit:").Append(fit).Append(radius).Append('}');
+            css.Append(cls).Append(" img{display:block;width:100%;height:100%;object-fit:").Append(fit).Append(radius).Append(AdjustCss(slot.Adjust)).Append('}');
         }
     }
 
@@ -997,7 +1202,8 @@ public static class DesignCompiler
         inner.Append("</a>");
 
         css.Append(cls).Append(" .b{").Append(Typography(ctx, button.Style));
-        var fill = DesignCss.Color(button.Fill, ctx.ThemeKeys);
+        var gradient = GradientOf(ctx, el);
+        var fill = gradient is not null ? DesignGradients.Css(gradient) : DesignCss.Color(button.Fill, ctx.ThemeKeys);
         if (fill is not null) css.Append("background:").Append(fill).Append(';');
         var stroke = DesignCss.Color(button.Stroke, ctx.ThemeKeys);
         if (stroke is not null && button.StrokeWidth > 0)
@@ -1039,6 +1245,9 @@ public static class DesignCompiler
         if (style.LetterSpacing != 0)
             sb.Append("letter-spacing:").Append(DesignCss.Num(DesignCss.Clamp(style.LetterSpacing, -0.2, 2))).Append("em;");
         if (style.Uppercase) sb.Append("text-transform:uppercase;");
+        var stroke = DesignCss.Color(style.Stroke, ctx.ThemeKeys);
+        if (stroke is not null && style.StrokeWidth > 0)
+            sb.Append("-webkit-text-stroke:").Append(DesignCss.U(DesignCss.Clamp(style.StrokeWidth, 0, 20) * 2)).Append(' ').Append(stroke).Append(";paint-order:stroke fill;");
         return sb.ToString();
     }
 

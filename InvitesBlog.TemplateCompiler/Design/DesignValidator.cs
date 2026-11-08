@@ -227,6 +227,55 @@ public static partial class DesignValidator
             }
             if (el.Blend is not null && !DesignEffects.IsBlendMode(el.Blend))
                 Error("blend", $"“{label}” has a blend mode we don't know: {string.Join(", ", DesignEffects.BlendModes)}.", el.Id);
+            if (el.Gradient is { } gradient)
+            {
+                if (gradient.Type is not (null or "linear" or "radial"))
+                    Error("gradient", $"“{label}” has a gradient type we don't know: linear or radial.", el.Id);
+                if (gradient.Stops.Count is < 2 or > DesignGradients.MaxStops)
+                    Error("gradient", $"“{label}” needs a gradient of 2 to {DesignGradients.MaxStops} colours.", el.Id);
+                if (!double.IsFinite(gradient.Angle) || gradient.Stops.Any(t => t.At is { } at && !double.IsFinite(at)))
+                    Error("gradient", $"“{label}” has a gradient angle or position that isn't a number.", el.Id);
+                foreach (var stop in gradient.Stops) CheckColor(stop.Color, label, el.Id!, themeKeys, Error, Warn);
+                if (el.Type is "slot" or "dress" or "group")
+                    Warn("gradient", $"“{label}” can't show a gradient: only shapes, text, buttons, illustrations and pictures can.", el.Id);
+            }
+            if (el.Shadow is { } shadow)
+            {
+                if (!double.IsFinite(shadow.X) || !double.IsFinite(shadow.Y) || !double.IsFinite(shadow.Blur) || !double.IsFinite(shadow.Strength))
+                    Error("effect", $"“{label}” has a shadow setting that isn't a number.", el.Id);
+                CheckColor(shadow.Color, label, el.Id!, themeKeys, Error, Warn);
+            }
+            if (el.Light is { } light)
+            {
+                if (!double.IsFinite(light.Angle)) Error("effect", $"“{label}” has a light angle that isn't a number.", el.Id);
+                CheckColor(light.Color, label, el.Id!, themeKeys, Error, Warn);
+            }
+            if (el.Mask is { } mask)
+            {
+                if (!DesignShapes.IsMaskKind(mask.Kind))
+                    Error("mask", $"“{label}” is clipped to a shape we don't know: {string.Join(", ", DesignShapes.MaskKinds)}.", el.Id);
+                else if (el.Type is not ("image" or "slot" or "svg" or "group"))
+                    Warn("mask", $"“{label}” can't be clipped to a shape: only pictures, photos, illustrations and groups can.", el.Id);
+                if (mask.Amount is { } ma && !double.IsFinite(ma)) Error("mask", $"“{label}” has a clip shape setting that isn't a number.", el.Id);
+            }
+            if (el.Text is { } textEl)
+            {
+                if (!double.IsFinite(textEl.Curve)) Error("curve", $"“{label}” has a curve that isn't a number.", el.Id);
+                if (textEl.Image is { } pic && (!scene.Assets.TryGetValue(pic, out var picAsset) || picAsset.Kind != "image"))
+                    Error("asset_missing", $"“{label}” fills its letters with a picture that isn't in the design.", el.Id);
+            }
+            foreach (var adjust in new[] { el.Image?.Adjust, el.Slot?.Adjust })
+            {
+                if (adjust is null) continue;
+                if (!double.IsFinite(adjust.Brightness) || !double.IsFinite(adjust.Contrast) || !double.IsFinite(adjust.Saturation)
+                    || !double.IsFinite(adjust.Sepia) || !double.IsFinite(adjust.Grain))
+                    Error("adjust", $"“{label}” has a photo adjustment that isn't a number.", el.Id);
+                if (adjust.Duotone is { } duo)
+                {
+                    CheckColor(duo.Dark, label, el.Id!, themeKeys, Error, Warn);
+                    CheckColor(duo.Light, label, el.Id!, themeKeys, Error, Warn);
+                }
+            }
             if (el.Text?.Split is { } split)
             {
                 if (split.By is not ("word" or "letter")) Error("split", $"“{label}” splits its text in a way we don't know.", el.Id);
@@ -269,7 +318,9 @@ public static partial class DesignValidator
                     break;
                 case "shape":
                     var shape = el.Shape ?? new DesignShape();
-                    if (shape.Kind is not ("rect" or "ellipse" or "line" or "polygon" or "path")) Error("shape_kind", $"“{label}” is an unknown shape.", el.Id);
+                    if (shape.Kind is not ("rect" or "ellipse" or "line" or "polygon" or "path") && !DesignShapes.IsExtra(shape.Kind)) Error("shape_kind", $"“{label}” is an unknown shape.", el.Id);
+                    if (shape.Dash is not (null or "solid" or "dashed" or "dotted")) Error("shape_kind", $"“{label}” has an outline style that isn't solid, dashed or dotted.", el.Id);
+                    if (shape.Amount is { } amount && !double.IsFinite(amount)) Error("shape_kind", $"“{label}” has a shape setting that isn't a number.", el.Id);
                     if (shape.Kind == "path")
                     {
                         var contours = shape.Path?.Contours ?? [];
@@ -410,6 +461,8 @@ public static partial class DesignValidator
         if (style.Font is not null && DesignCss.Font(style.Font, themeKeys) is null)
             error("font", $"“{label}” uses a font that isn't available.", id);
         CheckColor(style.Color, label, id, themeKeys, error, warn);
+        CheckColor(style.Stroke, label, id, themeKeys, error, warn);
+        if (!double.IsFinite(style.StrokeWidth)) error("font_size", $"“{label}” has an outline width that isn't a number.", id);
         if (!double.IsFinite(style.Size) || style.Size <= 0) error("font_size", $"“{label}” has no text size.", id);
     }
 

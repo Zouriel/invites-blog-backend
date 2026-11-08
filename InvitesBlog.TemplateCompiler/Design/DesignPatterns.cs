@@ -120,11 +120,38 @@ public static class DesignPatterns
     /// The page's filter for a pattern on an element of a size (canvas units). <paramref name="colour"/> is
     /// a CSS colour (hex or var()) for the "colour" way; the others pick their own.
     /// </summary>
-    public static string Filter(string id, Resolved p, double w, double h, string? colour) =>
-        $"<filter id=\"{id}\" x=\"-10%\" y=\"-25%\" width=\"120%\" height=\"150%\" color-interpolation-filters=\"sRGB\">{Primitives(p, w, h, colour)}</filter>";
+    public static string Filter(string id, Resolved p, double w, double h, string? colour, Light? light = null) =>
+        $"<filter id=\"{id}\" x=\"-10%\" y=\"-25%\" width=\"120%\" height=\"150%\" color-interpolation-filters=\"sRGB\">{Primitives(p, w, h, colour, light)}</filter>";
+
+    /// <summary>An element's light: its SVG azimuth and colour (null: white).</summary>
+    public sealed record Light(double Azimuth, string? Colour);
+
+    /// <summary>A light as the compiler uses it: null when it is the default top-left white light.</summary>
+    public static Light? ResolveLight(DesignLight? l, string? colour)
+    {
+        if (l is null) return null;
+        var angle = double.IsFinite(l.Angle) ? l.Angle : 135;
+        var azimuth = ((360 - angle) % 360 + 360) % 360;
+        var c = colour is null or "#ffffff" or "#fff" ? null : colour;
+        return Math.Abs(azimuth - 225) < 0.0005 && c is null ? null : new Light(azimuth, c);
+    }
+
+    /// <summary>
+    /// Diffuse light on a height map (<paramref name="input"/>, or the previous step), its result named
+    /// <paramref name="result"/> (or unnamed). A coloured light tints what it lights.
+    /// </summary>
+    public static string Lighting(string? input, double depth, Light? light, string? result)
+    {
+        var az = light is null ? "225" : N(light.Azimuth);
+        string Into(string? name) => name is null ? "" : $" result=\"{name}\"";
+        var out_ = $"<feDiffuseLighting{(input is null ? "" : $" in=\"{input}\"")} surfaceScale=\"{N(depth)}\" diffuseConstant=\"0.7071\" lighting-color=\"#fff\"{Into(light?.Colour is not null ? "lw" : result)}><feDistantLight azimuth=\"{az}\" elevation=\"45\"/></feDiffuseLighting>";
+        if (light?.Colour is { } c)
+            out_ += $"<feFlood style=\"flood-color:{c}\"/><feComposite in=\"lw\" operator=\"arithmetic\" k1=\"1\" k2=\"0\" k3=\"-0.5\" k4=\"0.5\"{Into(result)}/>";
+        return out_;
+    }
 
     /// <summary>The filter steps of a pattern over SourceGraphic, the last one being the patterned result.</summary>
-    public static string Primitives(Resolved p, double w, double h, string? colour)
+    public static string Primitives(Resolved p, double w, double h, string? colour, Light? light = null)
     {
         string marks;
         if (IsTexture(p.Kind)) marks = TexturePrimitives(p.Kind, p.Size);
@@ -141,7 +168,7 @@ public static class DesignPatterns
         if (p.Mode is "emboss" or "engrave")
         {
             var depth = (IsTexture(p.Kind) ? 10 : 3) * (p.Mode == "emboss" ? 1 : -1);
-            apply = $"<feDiffuseLighting in=\"m\" surfaceScale=\"{N(depth)}\" diffuseConstant=\"0.7071\" lighting-color=\"#fff\" result=\"l\"><feDistantLight azimuth=\"225\" elevation=\"45\"/></feDiffuseLighting>"
+            apply = Lighting("m", depth, light, "l")
                 + "<feBlend in=\"l\" in2=\"SourceGraphic\" mode=\"hard-light\"/>"
                 + $"<feComposite in2=\"SourceGraphic\" operator=\"arithmetic\" k2=\"{N(p.Strength)}\" k3=\"{N(1 - p.Strength)}\"/>"
                 + "<feComposite in2=\"SourceAlpha\" operator=\"in\"/>";
