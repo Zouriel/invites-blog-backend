@@ -81,7 +81,7 @@ public class DesignEffectsTests
         el.OuterGlow = new DesignGlow { Color = "#FFCC00", Size = 20 };
         var f = Filter(DesignCompiler.Compile(Scene(false, el)), 0);
         Assert.Contains("<feFlood style=\"flood-color:#ffcc00\"", f);
-        Assert.EndsWith("<feMerge><feMergeNode/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter>", f);
+        Assert.EndsWith("result=\"og\"/><feMerge><feMergeNode in=\"og\"/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter>", f);
         // 30 units of reach: 30% of 100 across, 75% of 40 down.
         Assert.StartsWith("<filter id=\"f0\" x=\"-30%\" y=\"-75%\" width=\"160%\" height=\"250%\"", f);
     }

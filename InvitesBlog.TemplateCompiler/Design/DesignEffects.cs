@@ -8,7 +8,8 @@ namespace InvitesBlog.TemplateCompiler.Design;
 /// <b>blend</b> mode for how the whole element mixes with what is under it (CSS mix-blend-mode).
 ///
 /// <para>Bevel and glows are one SVG filter together with the element's pattern, applied in Photoshop's
-/// order: pattern, inner glow, bevel, then the outer glow underneath. Everything here is built from
+/// order: a picture's duotone and grain, pattern, inner glow, bevel, then the drop shadow and outer glow
+/// underneath. Everything here is built from
 /// validated numbers, fixed names and resolved colours: nothing from the scene is pasted in.</para>
 /// </summary>
 public static class DesignEffects
@@ -24,11 +25,14 @@ public static class DesignEffects
     public const double BevelMaxSize = 30;
     public const double GlowMinSize = 1;
     public const double GlowMaxSize = 60;
+    public const double ShadowMaxOffset = 60;
+    public const double ShadowMaxBlur = 60;
 
     public static bool IsBlendMode(string? mode) => mode is not null && BlendModes.Contains(mode);
 
     public sealed record Bevel(string Style, double Size, double Strength);
     public sealed record Glow(double Size, double Strength, string Blend);
+    public sealed record Shadow(double X, double Y, double Blur, double Strength, string Colour);
 
     private static string N(double v) => DesignCss.Num(v);
     private static double StrengthOf(double v, double fallback) => double.IsFinite(v) ? Math.Min(1, Math.Max(0, v)) : fallback;
@@ -52,6 +56,16 @@ public static class DesignEffects
         return new Glow(SizeOf(g.Size, GlowMinSize, GlowMaxSize, 10), strength, IsBlendMode(g.Blend) ? g.Blend! : defaultBlend);
     }
 
+    /// <summary>A shadow as the compiler uses it, or null when there is none to draw.</summary>
+    public static Shadow? ResolveShadow(DesignShadow? sh, string colour)
+    {
+        if (sh is null) return null;
+        var strength = StrengthOf(sh.Strength, 0.35);
+        if (strength <= 0) return null;
+        double Off(double v, double d) => double.IsFinite(v) ? Math.Min(ShadowMaxOffset, Math.Max(-ShadowMaxOffset, v)) : d;
+        return new Shadow(Off(sh.X, 0), Off(sh.Y, 4), SizeOf(sh.Blur, 0, ShadowMaxBlur, 8), strength, colour);
+    }
+
     /// <summary>A glow's spread: blurred alpha, doubled so the edge reads at full strength.</summary>
     private static string Spread(double size, string input, string result) =>
         $"<feGaussianBlur{(input.Length > 0 ? $" in=\"{input}\"" : "")} stdDeviation=\"{N(size / 2)}\"/><feComponentTransfer result=\"{result}\"><feFuncA type=\"linear\" slope=\"2\"/></feComponentTransfer>";
@@ -61,16 +75,37 @@ public static class DesignEffects
     /// has none. A pattern on its own is exactly the pattern's filter.
     /// </summary>
     public static string? Filter(string id, (DesignPatterns.Resolved P, string? Colour)? pattern, Bevel? bevel,
-        (Glow G, string Colour)? inner, (Glow G, string Colour)? outer, double w, double h)
+        (Glow G, string Colour)? inner, (Glow G, string Colour)? outer, double w, double h,
+        (string Dark, string Light)? duotone = null, double grain = 0, Shadow? shadow = null, DesignPatterns.Light? light = null)
     {
-        if (bevel is null && inner is null && outer is null)
-            return pattern is { } only ? DesignPatterns.Filter(id, only.P, w, h, only.Colour) : null;
+        grain = double.IsFinite(grain) ? Math.Min(1, Math.Max(0, grain)) : 0;
+        if (bevel is null && inner is null && outer is null && duotone is null && grain <= 0 && shadow is null)
+            return pattern is { } only ? DesignPatterns.Filter(id, only.P, w, h, only.Colour, light) : null;
 
         var body = new System.Text.StringBuilder();
         var cur = "SourceGraphic";
+        if (duotone is { } dt)
+        {
+            // Brightness becomes how much of the light colour shows over the dark one.
+            body.Append("<feColorMatrix in=\"SourceGraphic\" type=\"luminanceToAlpha\" result=\"dl\"/>")
+                .Append($"<feFlood style=\"flood-color:{dt.Dark}\"/><feComposite in2=\"SourceAlpha\" operator=\"in\" result=\"dd\"/>")
+                .Append($"<feFlood style=\"flood-color:{dt.Light}\"/><feComposite in2=\"dl\" operator=\"in\"/><feComposite in2=\"SourceAlpha\" operator=\"in\"/>")
+                .Append("<feComposite in2=\"dd\" operator=\"over\" result=\"dt\"/>");
+            cur = "dt";
+        }
+        if (grain > 0)
+        {
+            // Grey noise, soft-lit over the picture and kept to it.
+            body.Append("<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.9\" numOctaves=\"2\" seed=\"11\"/>")
+                .Append("<feColorMatrix values=\"0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0.33 0.33 0.33 0 0 0 0 0 0 1\"/>")
+                .Append($"<feBlend in2=\"{cur}\" mode=\"soft-light\"/>")
+                .Append($"<feComposite in2=\"{cur}\" operator=\"arithmetic\" k2=\"{N(grain)}\" k3=\"{N(1 - grain)}\"/>")
+                .Append($"<feComposite in2=\"{cur}\" operator=\"in\" result=\"gr\"/>");
+            cur = "gr";
+        }
         if (pattern is { } pt)
         {
-            var steps = DesignPatterns.Primitives(pt.P, w, h, pt.Colour);
+            var steps = DesignPatterns.Primitives(pt.P, w, h, pt.Colour, light).Replace("\"SourceGraphic\"", $"\"{cur}\"");
             body.Append(steps[..^2]).Append(" result=\"p\"/>");
             cur = "p";
         }
@@ -89,21 +124,31 @@ public static class DesignEffects
             // colour as it is under hard light, so only the edge changes.
             var depth = bevel.Size * 1.25 * (bevel.Style == "pressed" ? -1 : 1);
             body.Append($"<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"{N(bevel.Size / 2)}\"/>")
-                .Append($"<feDiffuseLighting surfaceScale=\"{N(depth)}\" diffuseConstant=\"0.7071\" lighting-color=\"#fff\"><feDistantLight azimuth=\"225\" elevation=\"45\"/></feDiffuseLighting>")
+                .Append(DesignPatterns.Lighting(null, depth, light, null))
                 .Append($"<feBlend in2=\"{cur}\" mode=\"hard-light\"/>")
                 .Append($"<feComposite in2=\"{cur}\" operator=\"arithmetic\" k2=\"{N(bevel.Strength)}\" k3=\"{N(1 - bevel.Strength)}\"/>")
                 .Append($"<feComposite in2=\"{cur}\" operator=\"in\" result=\"bv\"/>");
             cur = "bv";
         }
+        var under = new List<string>();
+        if (shadow is not null)
+        {
+            body.Append($"<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"{N(shadow.Blur / 2)}\"/><feOffset dx=\"{N(shadow.X)}\" dy=\"{N(shadow.Y)}\" result=\"sa\"/>")
+                .Append($"<feFlood style=\"flood-color:{shadow.Colour}\" flood-opacity=\"{N(shadow.Strength)}\"/><feComposite in2=\"sa\" operator=\"in\" result=\"sh\"/>");
+            under.Add("sh");
+        }
         if (outer is { } og)
         {
             body.Append(Spread(og.G.Size, "SourceAlpha", "oa"))
-                .Append($"<feFlood style=\"flood-color:{og.Colour}\" flood-opacity=\"{N(og.G.Strength)}\"/><feComposite in2=\"oa\" operator=\"in\"/>")
-                .Append($"<feMerge><feMergeNode/><feMergeNode in=\"{cur}\"/></feMerge>");
+                .Append($"<feFlood style=\"flood-color:{og.Colour}\" flood-opacity=\"{N(og.G.Strength)}\"/><feComposite in2=\"oa\" operator=\"in\" result=\"og\"/>");
+            under.Add("og");
         }
+        if (under.Count > 0)
+            body.Append("<feMerge>").Append(string.Concat(under.Select(r => $"<feMergeNode in=\"{r}\"/>"))).Append($"<feMergeNode in=\"{cur}\"/></feMerge>");
         // Room around the box for the glow (and for a blur that reaches past the edge), at least the
         // pattern's own margins.
-        var reach = Math.Max(outer is { } o ? o.G.Size * 1.5 : 0, Math.Max(inner is { } i ? i.G.Size : 0, bevel?.Size ?? 0));
+        var reach = Math.Max(Math.Max(outer is { } o ? o.G.Size * 1.5 : 0, Math.Max(inner is { } i ? i.G.Size : 0, bevel?.Size ?? 0)),
+            shadow is null ? 0 : Math.Max(Math.Abs(shadow.X), Math.Abs(shadow.Y)) + shadow.Blur * 1.5);
         var mx = Math.Max(10, 100 * reach / Math.Max(1, w));
         var my = Math.Max(25, 100 * reach / Math.Max(1, h));
         return $"<filter id=\"{id}\" x=\"{N(-mx)}%\" y=\"{N(-my)}%\" width=\"{N(100 + 2 * mx)}%\" height=\"{N(100 + 2 * my)}%\" color-interpolation-filters=\"sRGB\">{body}</filter>";

@@ -265,6 +265,13 @@ public sealed class DesignElement
     [JsonPropertyName("outerGlow")] public DesignGlow? OuterGlow { get; set; }
     /// <summary>How it mixes with what is under it: one of <see cref="DesignEffects.BlendModes"/>; null or normal covers it.</summary>
     [JsonPropertyName("blend")] public string? Blend { get; set; }
+    /// <summary>Paints what it draws in a gradient (shapes, text, buttons, illustrations, pictures).</summary>
+    [JsonPropertyName("gradient")] public DesignGradient? Gradient { get; set; }
+    [JsonPropertyName("shadow")] public DesignShadow? Shadow { get; set; }
+    /// <summary>Where its bevel's and embossed pattern's light comes from, and its colour.</summary>
+    [JsonPropertyName("light")] public DesignLight? Light { get; set; }
+    /// <summary>Clips it to a shape outline (pictures, photos, illustrations, groups).</summary>
+    [JsonPropertyName("mask")] public DesignMask? Mask { get; set; }
 
     // ----- motion extras (2026-09-28) -----
 
@@ -392,6 +399,10 @@ public sealed class DesignTypography
     /// <summary>In em.</summary>
     [JsonPropertyName("letterSpacing")] public double LetterSpacing { get; set; }
     [JsonPropertyName("uppercase")] public bool Uppercase { get; set; }
+    /// <summary>An outline around the letters: its colour (hex or theme:key).</summary>
+    [JsonPropertyName("stroke")] public string? Stroke { get; set; }
+    /// <summary>The outline's width in canvas units.</summary>
+    [JsonPropertyName("strokeWidth")] public double StrokeWidth { get; set; }
 }
 
 public sealed class DesignText
@@ -400,6 +411,10 @@ public sealed class DesignText
     [JsonPropertyName("style")] public DesignTypography Style { get; set; } = new();
     /// <summary>Animates the text word by word or letter by letter instead of as one block.</summary>
     [JsonPropertyName("split")] public DesignSplit? Split { get; set; }
+    /// <summary>Bends the line into an arc, -100 to 100 (negative curves down); 0 straight.</summary>
+    [JsonPropertyName("curve")] public double Curve { get; set; }
+    /// <summary>A picture (image asset id) shown inside the letters.</summary>
+    [JsonPropertyName("image")] public string? Image { get; set; }
 }
 
 public sealed class DesignSplit
@@ -412,11 +427,15 @@ public sealed class DesignSplit
 
 public sealed class DesignShape
 {
-    /// <summary>rect | ellipse | line | polygon | path.</summary>
+    /// <summary>rect | ellipse | line | polygon | path, or one of <see cref="DesignShapes.ExtraKinds"/>.</summary>
     [JsonPropertyName("kind")] public string Kind { get; set; } = "rect";
     /// <summary>The outline of a <c>path</c> shape, drawn in the shape editor.</summary>
     [JsonPropertyName("path")] public DesignPath? Path { get; set; }
     [JsonPropertyName("sides")] public int Sides { get; set; } = 6;
+    /// <summary>A ready-made shape's own setting, 0 to 1 (see <see cref="DesignShapes"/>); unset is its default.</summary>
+    [JsonPropertyName("amount")] public double? Amount { get; set; }
+    /// <summary>solid | dashed | dotted outline.</summary>
+    [JsonPropertyName("dash")] public string? Dash { get; set; }
     [JsonPropertyName("fill")] public string? Fill { get; set; }
     [JsonPropertyName("stroke")] public string? Stroke { get; set; }
     [JsonPropertyName("strokeWidth")] public double StrokeWidth { get; set; }
@@ -454,6 +473,65 @@ public sealed class DesignXY
 {
     [JsonPropertyName("x")] public double X { get; set; }
     [JsonPropertyName("y")] public double Y { get; set; }
+}
+
+/// <summary>A colour blend painting what an element draws: see <see cref="DesignGradients"/>.</summary>
+public sealed class DesignGradient
+{
+    /// <summary>linear (default) | radial.</summary>
+    [JsonPropertyName("type")] public string? Type { get; set; }
+    /// <summary>A linear one's direction in degrees, CSS-style (180 = down).</summary>
+    [JsonPropertyName("angle")] public double Angle { get; set; } = 180;
+    [JsonPropertyName("stops")] public List<DesignGradientStop> Stops { get; set; } = new();
+}
+
+public sealed class DesignGradientStop
+{
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    /// <summary>0 to 1 along the way; evenly spaced when unset.</summary>
+    [JsonPropertyName("at")] public double? At { get; set; }
+}
+
+/// <summary>An element's light: Photoshop's angle (counter-clockwise from the right; 135 is the top left) and colour.</summary>
+public sealed class DesignLight
+{
+    [JsonPropertyName("angle")] public double Angle { get; set; } = 135;
+    [JsonPropertyName("color")] public string? Color { get; set; }
+}
+
+/// <summary>A shadow cast by what an element paints.</summary>
+public sealed class DesignShadow
+{
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    [JsonPropertyName("x")] public double X { get; set; }
+    [JsonPropertyName("y")] public double Y { get; set; } = 4;
+    [JsonPropertyName("blur")] public double Blur { get; set; } = 8;
+    [JsonPropertyName("strength")] public double Strength { get; set; } = 0.35;
+}
+
+/// <summary>Clips an element to a shape outline: one of <see cref="DesignShapes.MaskKinds"/>.</summary>
+public sealed class DesignMask
+{
+    [JsonPropertyName("kind")] public string? Kind { get; set; }
+    [JsonPropertyName("sides")] public int Sides { get; set; } = 6;
+    [JsonPropertyName("amount")] public double? Amount { get; set; }
+}
+
+/// <summary>Photo adjustments for a picture or photo slot.</summary>
+public sealed class DesignAdjust
+{
+    [JsonPropertyName("brightness")] public double Brightness { get; set; } = 1;
+    [JsonPropertyName("contrast")] public double Contrast { get; set; } = 1;
+    [JsonPropertyName("saturation")] public double Saturation { get; set; } = 1;
+    [JsonPropertyName("sepia")] public double Sepia { get; set; }
+    [JsonPropertyName("grain")] public double Grain { get; set; }
+    [JsonPropertyName("duotone")] public DesignDuotone? Duotone { get; set; }
+}
+
+public sealed class DesignDuotone
+{
+    [JsonPropertyName("dark")] public string? Dark { get; set; }
+    [JsonPropertyName("light")] public string? Light { get; set; }
 }
 
 /// <summary>A bevel on an element: see <see cref="DesignEffects"/>.</summary>
@@ -516,6 +594,7 @@ public sealed class DesignImage
     [JsonPropertyName("tint")] public string? Tint { get; set; }
     /// <summary>For an opaque picture: silhouette (default; its brightness mask) | overlay (the colour multiplied over it).</summary>
     [JsonPropertyName("tintMode")] public string? TintMode { get; set; }
+    [JsonPropertyName("adjust")] public DesignAdjust? Adjust { get; set; }
 }
 
 /// <summary>An image the inviter uploads in the builder — a <c>data-src</c> slot.</summary>
@@ -539,6 +618,7 @@ public sealed class DesignSlot
     /// the photo at its place, and hides when the gallery has fewer.
     /// </summary>
     [JsonPropertyName("index")] public int? Index { get; set; }
+    [JsonPropertyName("adjust")] public DesignAdjust? Adjust { get; set; }
 }
 
 /// <summary>An RSVP button, or a link to a platform page (camera, photos, map) or a URL field.</summary>

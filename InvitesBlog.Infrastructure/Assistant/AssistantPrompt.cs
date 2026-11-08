@@ -78,7 +78,14 @@ public static class AssistantPrompt
           it) and blend (how the element mixes with everything under it, the page colour included:
           multiply darkens, screen lightens, overlay adds contrast, soft-light tints gently). They work on
           any element after its colours and tint, groups as a whole. A picture or illustration as a
-          background can blend too. Keep glows soft behind text; look to check.
+          background can blend too. Keep glows soft behind text; look to check. An element's light
+          (update_element light) sets where its bevel and embossed pattern are lit from, and the colour.
+        - Make things instead of looking for art: ready-made shapes (add_shape star, heart, arch, ribbon,
+          bubble, arrow, scallop, wave, zigzag, frame, ticket), gradients on shapes, text, buttons,
+          illustrations and pictures, dashed or dotted outlines, outlined letters, curved text (curve),
+          pictures clipped to a shape (mask: a photo in an arch or heart), a picture inside the letters
+          (text_image), drop shadows and photo adjustments (adjust). An arch photo frame, a wavy divider
+          or a gold gradient name usually beats an imported illustration.
         - Fonts: a font id from the catalog, or theme:heading-font / theme:body-font when the theme has them.
         - Text can include fields that the host fills in for each event: write {{event.title}},
           {{event.date}} and so on. Use fields for names, dates, places and times rather than typing
@@ -119,13 +126,17 @@ public static class AssistantPrompt
         "color": {"type": ["string", "null"], "description": "Hex or theme:key."},
         "align": {"type": "string", "enum": ["left", "center", "right"]},
         "valign": {"type": "string", "enum": ["top", "middle", "bottom"]},
-        "line_height": {"type": "number"}, "letter_spacing": {"type": "number", "description": "In em, e.g. 0.1."}
+        "line_height": {"type": "number"}, "letter_spacing": {"type": "number", "description": "In em, e.g. 0.1."},
+        "outline_color": {"type": ["string", "null"], "description": "An outline around the letters (hex or theme:key); null removes it."},
+        "outline_width": {"type": "number", "description": "The outline's width, 0.5 to 3 usually."}
         """;
 
     private const string ShapeStyle = """
         "fill": {"type": ["string", "null"], "description": "Hex, theme:key, or null for none."},
         "stroke": {"type": ["string", "null"]}, "stroke_width": {"type": "number"},
-        "radius": {"type": "number", "description": "Corner radius; 999 for a pill."}
+        "radius": {"type": "number", "description": "Corner radius; 999 for a pill."},
+        "amount": {"type": "number", "description": "A ready-made shape's own setting, 0 to 1 (see add_shape)."},
+        "dash": {"type": "string", "enum": ["solid", "dashed", "dotted"], "description": "How the outline (or a line) is drawn."}
         """;
 
     private const string ToolsJson = "[" +
@@ -138,8 +149,8 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"text": {"type": "string"},
         """ + Box + "," + TextStyle + """
          , "parent": {"type": "string", "description": "A group to add it to."}}, "required": ["text", "y"]}},
-        {"name": "add_shape", "description": "Adds a rectangle, ellipse, line or polygon.",
-         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]},
+        {"name": "add_shape", "description": "Adds a shape: rect, ellipse, line, polygon, or a ready-made one with its own setting (amount 0-1): star (points = sides, amount = point depth), heart, arch, ribbon banner (notch), speech bubble (tail position), arrow (shaft), scallop badge (scallops = sides, depth), wave and zigzag dividers that fill below their edge (count = sides, height), frame (thickness; radius rounds it), ticket (notch).",
+         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon", "star", "heart", "arch", "ribbon", "bubble", "arrow", "scallop", "wave", "zigzag", "frame", "ticket"]},
            "sides": {"type": "integer"},
         """ + Box + "," + ShapeStyle + """
          , "parent": {"type": "string"}}, "required": ["kind", "x", "y", "w", "h"]}},
@@ -168,7 +179,7 @@ public static class AssistantPrompt
         {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted. Resizing a group scales everything in it.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
-           "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon"]}, "sides": {"type": "integer"},
+           "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon", "star", "heart", "arch", "ribbon", "bubble", "arrow", "scallop", "wave", "zigzag", "frame", "ticket"]}, "sides": {"type": "integer"},
            "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain", "stretch"], "description": "Pictures: contain keeps its shape, cover crops to fill, stretch fills out of proportion. Photo slots: cover or contain."}, "link": {"type": "string"}, "locked": {"type": "boolean"},
            "bar_start": {"type": "number", "description": "Scroll position its bar starts at (on a stage it shows from here). Its motion moves with the bar."},
            "bar_end": {"type": "number", "description": "Scroll position its bar ends at."},
@@ -194,6 +205,21 @@ public static class AssistantPrompt
              "properties": {"color": {"type": "string", "description": "Hex or theme:key (default white)."},
                "size": {"type": "number", "description": "1 to 60; 6 small, 12 medium, 24 large."},
                "strength": {"type": "number", "description": "0 to 1."}}},
+           "gradient": {"type": ["object", "null"], "description": "Paints a shape, text, button, illustration or picture in a gradient instead of its colour; null removes it.",
+             "properties": {"type": {"type": "string", "enum": ["linear", "radial"]}, "angle": {"type": "number", "description": "Linear direction in degrees: 180 top to bottom (default), 90 left to right."},
+               "colors": {"type": "array", "items": {"type": "string"}, "description": "2 to 6 colours, hex or theme:key, evenly spaced."}}},
+           "shadow": {"type": ["object", "null"], "description": "A drop shadow; null removes it.",
+             "properties": {"color": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number", "description": "Offset, default 0, 4."}, "blur": {"type": "number", "description": "0 to 60, default 8."}, "strength": {"type": "number", "description": "0 to 1, default 0.35."}}},
+           "light": {"type": ["object", "null"], "description": "Where the bevel's and embossed pattern's light comes from and its colour; null is the top left, white.",
+             "properties": {"angle": {"type": "number", "description": "Degrees counter-clockwise from the right: 135 top left (default), 45 top right, 90 above."}, "color": {"type": "string"}}},
+           "mask": {"type": ["object", "null"], "description": "Clips a picture, photo slot, illustration or group to a shape; null removes it.",
+             "properties": {"kind": {"type": "string", "enum": ["ellipse", "rect", "polygon", "star", "heart", "arch", "scallop", "ticket", "bubble", "ribbon", "arrow"]}, "sides": {"type": "integer"}, "amount": {"type": "number"}}},
+           "curve": {"type": "number", "description": "Text: bends the line into an arc, -100 to 100 (positive arches up, negative curves down); 0 straight."},
+           "text_image": {"type": ["string", "null"], "description": "Text: a picture asset id shown inside the letters; null removes it."},
+           "adjust": {"type": ["object", "null"], "description": "Picture or photo slot: photo adjustments; null resets them.",
+             "properties": {"brightness": {"type": "number", "description": "0 to 2, 1 as it is."}, "contrast": {"type": "number"}, "saturation": {"type": "number", "description": "0 black and white, 1 as it is."},
+               "sepia": {"type": "number", "description": "0 to 1, a warm vintage tone."}, "grain": {"type": "number", "description": "0 to 1 film grain."},
+               "duotone": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Two colours, [dark, light]."}}},
            "blend": {"type": "string", "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"], "description": "How the element mixes with everything under it; normal covers it."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["id"]}},
