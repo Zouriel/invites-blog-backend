@@ -100,6 +100,11 @@ public static class AssistantPrompt
           leaves from a seed, in theme colours; combine_shapes merges shapes into one (add, cut out,
           overlap, exclude), e.g. a circle cut out of a box for a frame. All make ordinary shapes that
           can then be recoloured, patterned or moved. Look to check they sit where you meant.
+        - create_picture makes a realistic picture from a description with a see-through background
+          (lace, a floral spray, a wax seal, a ribbon bow, watercolour flowers): only when the outline's
+          "AI pictures" line says some are left, and only for what shapes, patterns and the art library
+          can't do well, since each one costs money. Describe one object, its style and colours, never
+          a background, text or a real person. One picture per request; look at it before making another.
 
         ## Motion
         - set_motion gives an element a way in (enter), a way out (exit), a loop that repeats while it
@@ -297,6 +302,10 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"source": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"},
            "color": {"type": "string", "description": "Hex or theme:key: a vector placed already tinted in one colour (pictures keep theirs)."},
            "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["source", "id"]}},
+        {"name": "create_picture", "description": "Makes a picture from a description with an AI image model (a PNG with a see-through background) and adds it to the design, like add_art. Only for accounts whose outline shows AI pictures left. shape: square (default), wide (2:1), strip (4:1, borders and dividers) or tall (1:2). Takes several seconds.",
+         "input_schema": {"type": "object", "properties": {"prompt": {"type": "string", "description": "One object: what it is, its style and colours, e.g. 'delicate white floral lace border, top-down, fine thread detail'."},
+           "shape": {"type": "string", "enum": ["square", "wide", "strip", "tall"]},
+           "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["prompt"]}},
         {"name": "shrink_to_fit", "description": "Makes pictures and illustrations take less room, as the panel's Shrink to fit: each file as small as it can be while still sharp at the biggest size the design shows it (pictures at twice that, saved as WebP: high quality for painted or photographed pictures, lossless for flat graphics, see-through parts kept, animated GIFs left as they are; illustrations' coordinates to what that size can show). ids: pictures, illustrations or groups (everything inside); or all: true for the whole design. The outline's assets line shows each file's size; the page's real size is its 'published page' line (only files something shows are published). One undoable step.",
          "input_schema": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}}, "all": {"type": "boolean"}}}},
         {"name": "remove_unused_files", "description": "Removes files nothing in the design shows any more (marked UNUSED in the outline's assets line: art that was deleted or replaced). They are never published, so the page doesn't change, but they make the design heavier to save. One undoable step.",

@@ -48,5 +48,5 @@ public interface IArtLibrary
     Task<ArtImportDto> ImportAsync(ArtImportRequest request, CancellationToken ct = default);
 
     /// <summary>A file the designer uploaded, through the same conversion (animations become scroll motion).</summary>
-    ArtImportDto ImportFile(byte[] content, string fileName, string contentType);
+    ArtImportDto ImportFile(byte[] content, string fileName, string contentType, ArtCreditDto? credit = null);
 }

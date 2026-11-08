@@ -1,5 +1,6 @@
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Services.Designs.AiPictures;
 using InvitesBlog.Application.Dtos.Designs;
 using InvitesBlog.Application.Services.Designs;
 using InvitesBlog.Application.Services.Designs.Assistant;
@@ -16,7 +17,7 @@ namespace InvitesBlog.Api.Controllers;
 /// </summary>
 [Route("api/designs")]
 [HasPermission(Permissions.Designs.Manage)]
-public sealed class DesignsController(IDesignService designs, IArtLibrary art) : BaseApiController
+public sealed class DesignsController(IDesignService designs, IArtLibrary art, IAiPictureService aiPictures) : BaseApiController
 {
     [HttpGet("catalog")]
     public IActionResult Catalog() => Success(designs.Catalog());
@@ -100,6 +101,16 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art) :
     [EnableRateLimiting("design-art-import")]
     public async Task<IActionResult> ArtImport([FromBody] ArtImportRequest request, CancellationToken ct) =>
         Success(await art.ImportAsync(request, ct));
+
+    /// <summary>Whether this account can create pictures with AI, and how many it has left this month.</summary>
+    [HttpGet("art/ai")]
+    public async Task<IActionResult> AiPictureStatus(CancellationToken ct) => Success(await aiPictures.StatusAsync(ct));
+
+    /// <summary>A picture made from a description, see-through around it, ready to place like library art.</summary>
+    [HttpPost("art/ai")]
+    [EnableRateLimiting("design-art-import")]
+    public async Task<IActionResult> AiPicture([FromBody] AiPictureRequest request, CancellationToken ct) =>
+        Success(await aiPictures.GenerateAsync(request, ct));
 
     /// <summary>An uploaded SVG or picture, the same way: an animated SVG or GIF comes back as scroll motion.</summary>
     [HttpPost("art/upload")]

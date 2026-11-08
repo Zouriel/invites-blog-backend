@@ -23,6 +23,40 @@ namespace InvitesBlog.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.AiPictureUsage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer")
+                        .HasColumnName("count");
+
+                    b.Property<string>("Month")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("month");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Month")
+                        .IsUnique()
+                        .HasDatabaseName("idx_ai_picture_usage_user_month");
+
+                    b.ToTable("ai_picture_usage", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.AppSetting", b =>
                 {
                     b.Property<string>("Key")
@@ -173,6 +207,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<bool>("AiPicturesAllowed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_pictures_allowed");
 
                     b.Property<int?>("AutoRenewKind")
                         .HasColumnType("integer")
@@ -2962,6 +3000,15 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDatabaseName("idx_video_trim_jobs_due");
 
                     b.ToTable("video_trim_jobs", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.AiPictureUsage", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.AssistantUsage", b =>

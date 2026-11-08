@@ -14,7 +14,9 @@ public sealed record DesignerAdminDto(
     bool PremiumActive = false,
     DateTimeOffset? PremiumEndsAt = null,
     /// <summary>Templates they published FOR someone: their clients.</summary>
-    int ClientTemplates = 0);
+    int ClientTemplates = 0,
+    /// <summary>Whether they may create pictures with AI (each costs us money, so an admin turns it on).</summary>
+    bool AiPicturesAllowed = false);
 
 /// <summary>One row of the templates table.</summary>
 public sealed record MyTemplateRowDto(

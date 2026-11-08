@@ -81,6 +81,12 @@ public sealed class AppUser
 
     /// <summary>The person's time zone (IANA id, e.g. "Europe/London"); new events default to it.</summary>
     public string? TimeZone { get; set; }
+
+    /// <summary>
+    /// Whether this account may make pictures with AI in the designer (Ideogram). Each picture costs us
+    /// money, so it's off until an admin turns it on for the account (Admin › Designers).
+    /// </summary>
+    public bool AiPicturesAllowed { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

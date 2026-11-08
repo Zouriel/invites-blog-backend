@@ -435,7 +435,7 @@ public class DesignAssistantServiceTests
             "delete_elements", "duplicate_elements", "arrange", "group_elements", "ungroup", "set_motion", "apply_effect_move",
             "add_sticker", "set_theme", "set_page", "search_art", "add_art", "shrink_to_fit", "remove_unused_files", "check_design", "show",
             "delete_keyframes", "copy_screen", "clear_screen", "look", "save",
-            "repeat_element", "generate", "combine_shapes",
+            "repeat_element", "generate", "combine_shapes", "create_picture",
         ];
         Assert.Equal(browser.Order(), AssistantPrompt.Tools.Select(t => t.Name).Order());
         foreach (var (name, description, schema) in AssistantPrompt.Tools)
