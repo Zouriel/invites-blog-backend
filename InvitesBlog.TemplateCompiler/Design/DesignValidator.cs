@@ -199,6 +199,16 @@ public static partial class DesignValidator
                 if (loop.Frames.Count > 0 && loop.Repeat > 0 && (span.End - span.Start) / loop.Repeat < 40)
                     Warn("loop_fast", $"“{label}” loops every {(span.End - span.Start) / loop.Repeat:0} units of scroll — too fast to see. Repeat it less or lengthen its bar.", el.Id);
             }
+            if (el.Pattern is { } pattern)
+            {
+                if (!DesignPatterns.IsKind(pattern.Kind))
+                    Error("pattern", $"“{label}” has a pattern we don't know: {string.Join(", ", DesignPatterns.Kinds)}.", el.Id);
+                if (pattern.Mode is not null && !DesignPatterns.Modes.Contains(pattern.Mode))
+                    Error("pattern", $"“{label}” applies its pattern in a way we don't know: {string.Join(", ", DesignPatterns.Modes)}.", el.Id);
+                if (!double.IsFinite(pattern.Size) || !double.IsFinite(pattern.Strength))
+                    Error("pattern", $"“{label}” has a pattern size or strength that isn't a number.", el.Id);
+                if (pattern.Mode == "colour") CheckColor(pattern.Color, label, el.Id!, themeKeys, Error, Warn);
+            }
             if (el.Text?.Split is { } split)
             {
                 if (split.By is not ("word" or "letter")) Error("split", $"“{label}” splits its text in a way we don't know.", el.Id);

@@ -69,6 +69,10 @@ public static class AssistantPrompt
           only on one screen in one go; duplicate_elements can put copies on another screen.
         - Colours: a hex like #b08d57, or a theme colour like theme:accent (theme keys are in the
           outline). Prefer theme colours so the person can recolour everything at once.
+        - Patterns: any element can carry a pattern over what it paints (update_element pattern): textures
+          (clouds, marble, paper, linen, sand, watercolour, wood) or shapes (dots, stripes, pinstripe,
+          gingham, grid, chevron, diamonds, waves, hearts, stars), applied as shade, shine, colour (a
+          second colour), emboss or engrave. Keep them subtle on backgrounds and behind text; look to check.
         - Fonts: a font id from the catalog, or theme:heading-font / theme:body-font when the theme has them.
         - Text can include fields that the host fills in for each event: write {{event.title}},
           {{event.date}} and so on. Use fields for names, dates, places and times rather than typing
@@ -165,6 +169,12 @@ public static class AssistantPrompt
            "whole_page": {"type": "boolean", "description": "true: no bar, it's there all along."},
            "tint_mode": {"type": "string", "enum": ["silhouette", "overlay"]},
            "stretch": {"type": "boolean", "description": "Illustration: fill its box out of proportion (true) or keep its own shape (false)."},
+           "pattern": {"type": ["object", "null"], "description": "A pattern over everything it paints (any element: text, shape, illustration, picture, button, group), clipped to its outline; null removes it. Give only what changes.",
+             "properties": {"kind": {"type": "string", "enum": ["clouds", "marble", "paper", "linen", "sand", "watercolour", "wood", "dots", "stripes", "pinstripe", "gingham", "grid", "chevron", "diamonds", "waves", "hearts", "stars"]},
+               "mode": {"type": "string", "enum": ["shade", "shine", "colour", "emboss", "engrave"], "description": "How it applies: shade darkens, shine lightens, colour paints the marks in color, emboss raises them, engrave presses them in."},
+               "size": {"type": "number", "description": "0.25 to 4; 0.6 small, 1 medium, 1.8 large."},
+               "strength": {"type": "number", "description": "0 to 1; 0.25 subtle, 0.5 medium, 0.8 strong."},
+               "color": {"type": "string", "description": "For mode colour: hex or theme:key."}}},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["id"]}},
         {"name": "delete_elements", "description": "Deletes elements.",
