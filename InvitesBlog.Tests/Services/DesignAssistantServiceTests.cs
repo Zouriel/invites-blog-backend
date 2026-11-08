@@ -194,6 +194,31 @@ public class DesignAssistantServiceTests
     // ----- An exchange --------------------------------------------------------------------------
 
     [Fact]
+    public async Task A_picture_from_look_goes_to_claude_in_its_turn_and_is_dropped_after()
+    {
+        const string pic = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD";
+        _model.Replies.Enqueue(Tool("t1", "look", """{"screen":2}"""));
+        _model.Replies.Enqueue(Reply("Screen 2 looks right."));
+        await Sut().SendAsync(_design, Say("check screen 2"));
+        await Sut().ContinueAsync(_design, new([new("t1", true, "Screen 2", null, pic)], null));
+        Assert.Contains(_model.Requests[1].Messages[2].Blocks, b => b.Type == "tool_result" && b.Data == pic);
+
+        // The next message: the picture was for that turn; now only that one was shown.
+        _model.Replies.Enqueue(Reply("ok"));
+        await Sut().SendAsync(_design, Say("thanks"));
+        var old = _model.Requests[2].Messages.SelectMany(m => m.Blocks).Single(b => b.Type == "tool_result");
+        Assert.Null(old.Data);
+        Assert.Contains("(a picture was shown)", old.Text);
+
+        // A failed tool's "picture", or anything that isn't one, is never kept.
+        _model.Replies.Enqueue(Tool("t2", "look"));
+        _model.Replies.Enqueue(Reply("ok"));
+        await Sut().SendAsync(_design, Say("look again"));
+        await Sut().ContinueAsync(_design, new([new("t2", true, "Screen 1", null, "data:text/html;base64,PGI+PGI+PGI+PGI+PGI+PGI+")], null));
+        Assert.DoesNotContain(_model.Requests[^1].Messages.SelectMany(m => m.Blocks), b => b.Type == "tool_result" && b.Id == "t2" && b.Data != null);
+    }
+
+    [Fact]
     public async Task Tool_calls_go_to_the_browser_and_its_results_go_back_to_claude()
     {
         _model.Replies.Enqueue(Tool("t1", "add_text", """{"text":"{{event.title}}","y":120}"""));
@@ -409,6 +434,7 @@ public class DesignAssistantServiceTests
             "get_elements", "get_outline", "add_text", "add_shape", "draw_shape", "add_picture", "add_photo_slot", "add_button", "update_element",
             "delete_elements", "duplicate_elements", "arrange", "group_elements", "ungroup", "set_motion", "apply_effect_move",
             "add_sticker", "set_theme", "set_page", "search_art", "add_art", "shrink_to_fit", "remove_unused_files", "check_design", "show",
+            "delete_keyframes", "copy_screen", "clear_screen", "look", "save",
         ];
         Assert.Equal(browser.Order(), AssistantPrompt.Tools.Select(t => t.Name).Order());
         foreach (var (name, description, schema) in AssistantPrompt.Tools)
