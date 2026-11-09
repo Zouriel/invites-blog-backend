@@ -334,6 +334,18 @@ public static partial class DesignValidator
                     }
                     CheckColor(shape.Fill, label, el.Id!, themeKeys, Error, Warn);
                     CheckColor(shape.Stroke, label, el.Id!, themeKeys, Error, Warn);
+                    if (shape.Particles is { } particles)
+                    {
+                        if (!DesignParticleKinds.All.Contains(particles.Kind))
+                            Error("particles", $"“{label}” has particles of a kind the designer doesn't have.", el.Id);
+                        else if (shape.Kind == "line")
+                            Warn("particles", $"“{label}” is a line, which has no area for particles; they won't show.", el.Id);
+                        if (particles.Pointer is { } pointer && !DesignParticleKinds.Pointers.Contains(pointer))
+                            Error("particles", $"“{label}” has a pointer effect that isn't move away, gather or swirl.", el.Id);
+                        if (new[] { particles.Amount, particles.Size, particles.Speed }.Any(v => v is { } x && (!double.IsFinite(x) || x < 0 || x > 1)))
+                            Error("particles", $"“{label}” has a particle setting outside 0 to 1.", el.Id);
+                        CheckColor(particles.Color, label, el.Id!, themeKeys, Error, Warn);
+                    }
                     break;
                 case "svg":
                     if (el.Svg is null || !scene.Assets.TryGetValue(el.Svg.Asset, out var svgAsset) || svgAsset.Kind != "svg")

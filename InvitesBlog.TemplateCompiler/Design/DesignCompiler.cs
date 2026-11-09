@@ -79,6 +79,7 @@ public static class DesignCompiler
         html.Append(body);
         html.Append("\n<script>").Append(FallbackScript).Append("</script>");
         if (ctx.TapScroll) html.Append("\n<script>").Append(TapScript).Append("</script>");
+        if (ctx.Particles) html.Append("\n<script>").Append(ParticlesScript).Append("</script>");
         if (options.EditorPreview)
         {
             html.Append("\n<script>")
@@ -172,6 +173,8 @@ public static class DesignCompiler
         public HashSet<string> Properties { get; } = new(StringComparer.Ordinal);
         /// <summary>Some element scrolls the page when tapped: the page needs the tap script.</summary>
         public bool TapScroll;
+        /// <summary>Some shape is filled with particles: the page needs the particle script.</summary>
+        public bool Particles;
         /// <summary>Some element has a blend mode.</summary>
         public bool Blends;
         /// <summary>The clip-visibility keyframes are in the stylesheet.</summary>
@@ -897,11 +900,14 @@ public static class DesignCompiler
         var shape = el.Shape ?? new DesignShape();
         var w = Math.Max(1, el.W);
         var h = Math.Max(1, el.H);
-        var gradient = GradientOf(ctx, el);
+        // Particles take the place of the fill: the shape's area is theirs, its outline still drawn over them.
+        var particles = ParticlesOf(shape);
+        var gradient = particles is null ? GradientOf(ctx, el) : null;
         var paint = gradient is not null ? $"url(#g{n})" : null;
-        var fill = paint ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "transparent";
+        var fill = particles is not null ? "transparent" : paint ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "transparent";
         var stroke = DesignCss.Color(shape.Stroke, ctx.ThemeKeys);
         var sw = stroke is null ? 0 : DesignCss.Clamp(shape.StrokeWidth, 0, Math.Min(w, h) / 2);
+        if (particles is not null) EmitParticles(ctx, shape, particles, w, h, inner);
         var style = new StringBuilder("fill:").Append(fill);
         if (sw > 0) style.Append(";stroke:").Append(stroke).Append(";stroke-width:").Append(DesignCss.Num(sw)).Append(draw ? "" : DashCss(shape.Dash, sw));
         // Drawing on: the outline is dashed as long as itself (pathLength 1) and the dash slides in with
@@ -959,6 +965,57 @@ public static class DesignCompiler
                 break;
         }
         inner.Append("</svg>");
+    }
+
+    /// <summary>The shape's particles when it has a known kind (never on a line), else null.</summary>
+    private static DesignParticles? ParticlesOf(DesignShape shape) =>
+        shape.Particles is { } p && shape.Kind != "line" && DesignParticleKinds.All.Contains(p.Kind) ? p : null;
+
+    /// <summary>
+    /// The canvas the particle script draws on: the element's whole box, under the outline, clipped to the
+    /// shape, its colour as CSS <c>color</c> (so theme colours resolve) and its settings in <c>data-pt</c>:
+    /// kind, amount, size, speed (0 to 1) and how it answers a pointer.
+    /// </summary>
+    private static void EmitParticles(Context ctx, DesignShape shape, DesignParticles p, double w, double h, StringBuilder inner)
+    {
+        ctx.Particles = true;
+        var color = DesignCss.Color(p.Color, ctx.ThemeKeys) ?? DesignCss.Color(shape.Fill, ctx.ThemeKeys) ?? "#ffffff";
+        var pointer = p.Pointer is { } ptr && DesignParticleKinds.Pointers.Contains(ptr) ? ptr : "none";
+        static string Unit(double? v) => DesignCss.Num(DesignCss.Clamp(v is { } x && double.IsFinite(x) ? x : 0.5, 0, 1));
+        inner.Append("<canvas class=\"pt\" data-pt=\"").Append(p.Kind).Append(' ').Append(Unit(p.Amount)).Append(' ').Append(Unit(p.Size))
+            .Append(' ').Append(Unit(p.Speed)).Append(' ').Append(pointer)
+            .Append("\" style=\"position:absolute;inset:0;width:100%;height:100%;pointer-events:none;color:").Append(color);
+        if (ParticleMask(shape, w, h) is { } mask) inner.Append(';').Append(mask);
+        inner.Append("\" aria-hidden=\"true\"></canvas>");
+    }
+
+    /// <summary>The CSS mask keeping particles inside the shape, or null for a plain box.</summary>
+    private static string? ParticleMask(DesignShape shape, double w, double h)
+    {
+        string? doc = null;
+        var r = DesignCss.Clamp(shape.Radius, 0, Math.Min(w, h) / 2);
+        if (shape.Kind == "path" && shape.Path is { } drawn)
+        {
+            var d = PathD(drawn.Contours.Where(c => c.Closed));
+            if (d.Length == 0) return null;
+            double pw = DesignCss.Clamp(drawn.Width, 1, 10000), ph = DesignCss.Clamp(drawn.Height, 1, 10000);
+            doc = $"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {DesignCss.Num(pw)} {DesignCss.Num(ph)}\" preserveAspectRatio=\"none\"><path d=\"{d}\"/></svg>";
+        }
+        else
+        {
+            string? d = shape.Kind switch
+            {
+                "rect" => r > 0 ? DesignShapes.D("rect", w, h, shape.Sides, r / (Math.Min(w, h) / 2), 0) : null,
+                "ellipse" or "polygon" => DesignShapes.D(shape.Kind, w, h, shape.Sides, shape.Amount, 0),
+                _ when DesignShapes.IsExtra(shape.Kind) => DesignShapes.D(shape.Kind, w, h, shape.Sides, shape.Amount, r),
+                _ => null,
+            };
+            if (d is null) return null;
+            doc = $"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {DesignCss.Num(w)} {DesignCss.Num(h)}\" preserveAspectRatio=\"none\"><path d=\"{d}\" fill-rule=\"evenodd\"/></svg>";
+        }
+        // Single quotes: this goes in the canvas's style attribute, which is double-quoted.
+        var v = $"url('data:image/svg+xml;base64,{Base64(doc)}') 0 0/100% 100% no-repeat";
+        return $"-webkit-mask:{v};mask:{v}";
     }
 
     /// <summary>
@@ -1472,6 +1529,56 @@ public static class DesignCompiler
     private const string TapScript = """
         (function(){function go(e){var t=e.target&&e.target.closest&&e.target.closest('[data-scroll-to]');if(!t)return;if(e.type==='keydown'&&e.key!=='Enter'&&e.key!==' ')return;e.preventDefault();var u=Math.min(window.innerWidth||390,480)/390;window.scrollTo({top:(+t.getAttribute('data-scroll-to')||0)*u,behavior:'smooth'});}
         document.addEventListener('click',go);document.addEventListener('keydown',go);})();
+        """;
+
+    /// <summary>
+    /// Pages with particle fields (a shape filled with dust, stars, glitter…): each <c>canvas.pt</c> gets
+    /// particles for its area that drift on their own, and, when asked, answer a pointer or finger (move
+    /// away, gather, swirl). Only fields on screen run; reduced motion draws them once, still.
+    /// Platform code: the page supplies only the numbers in <c>data-pt</c>.
+    /// </summary>
+    private const string ParticlesScript = """
+        (function(){var K={dust:[3,1.5,1],stars:[1.2,1.8,0.35],glitter:[2.2,1.5,0.5],snow:[1.6,2.4,1],confetti:[0.7,4.5,1.2],hearts:[0.35,6,0.8],bokeh:[0.14,16,0.5],fireflies:[0.35,2.6,0.8]};
+        var fs=[],P={x:-1e6,y:-1e6,t:-1e6},still=false,raf=0,last=0,R=Math.random;
+        try{still=matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){}
+        function u(){return Math.min(innerWidth||390,480)/390;}
+        function rgb(c){var m=/rgba?\(([^)]+)\)/.exec(c||'');return m?m[1].split(',').slice(0,3).map(function(x){return +x;}):[255,255,255];}
+        function mix(c,t,a){return 'rgba('+Math.round(c[0]+(t[0]-c[0])*a)+','+Math.round(c[1]+(t[1]-c[1])*a)+','+Math.round(c[2]+(t[2]-c[2])*a)+',';}
+        function make(f){var k=K[f.k],n=Math.round(f.w*f.h/(u()*u())/1000*k[0]*(0.25+f.n*1.75));n=Math.max(3,Math.min(f.k==='bokeh'?40:600,n));f.ps=[];for(var i=0;i<n;i++){var a=R()*6.283;f.ps.push({x:R()*f.w,y:R()*f.h,vx:Math.cos(a)*0.3,vy:Math.sin(a)*0.3,ox:0,oy:0,r:(0.5+R())*k[1]*(0.4+f.s*1.2)*u(),ph:R()*6.283,sp:0.5+R(),rot:R()*6.283,c:i%3});}}
+        function size(f){var b=f.c.getBoundingClientRect(),d=Math.min(2,devicePixelRatio||1),w=Math.round(b.width),h=Math.round(b.height);if(!w||!h||(w===f.w&&h===f.h))return;f.w=w;f.h=h;f.c.width=w*d;f.c.height=h*d;f.g.setTransform(d,0,0,d,0,0);var c=rgb(getComputedStyle(f.c).color);f.cs=[mix(c,c,0),mix(c,[255,255,255],0.55),mix(c,[0,0,0],0.3)];make(f);draw(f,last);}
+        function step(f,t,k){var sp=(0.15+f.v*1.7)*K[f.k][2]*u()*k,b=f.c.getBoundingClientRect(),mx=P.x-b.left,my=P.y-b.top,Rr=70*u(),near=f.p!=='none'&&t-P.t<2500,dk=Math.pow(0.94,k);
+        for(var i=0;i<f.ps.length;i++){var p=f.ps[i];switch(f.k){
+        case 'dust':case 'fireflies':p.vx+=(R()-0.5)*0.06*k;p.vy+=(R()-0.5)*0.06*k;p.vx*=Math.pow(0.98,k);p.vy*=Math.pow(0.98,k);p.x+=p.vx*sp;p.y+=p.vy*sp;break;
+        case 'stars':case 'glitter':p.x+=p.vx*sp*0.15;p.y+=p.vy*sp*0.15;break;
+        case 'snow':p.y+=sp*(0.4+0.6*p.sp)*0.6;p.x+=Math.sin(t/1000*p.sp+p.ph)*0.25*sp;break;
+        case 'confetti':p.y+=sp*(0.5+0.5*p.sp)*0.8;p.x+=Math.sin(t/700*p.sp+p.ph)*0.5*sp;p.rot+=0.05*k*p.sp;break;
+        case 'hearts':p.y-=sp*(0.3+0.4*p.sp)*0.6;p.x+=Math.sin(t/900*p.sp+p.ph)*0.3*sp;break;
+        default:p.x+=p.vx*sp*0.4;p.y+=p.vy*sp*0.4;}
+        if(near){var dx=p.x+p.ox-mx,dy=p.y+p.oy-my,d=Math.sqrt(dx*dx+dy*dy);if(d<Rr&&d>0.1){var s=(1-d/Rr)*k;if(f.p==='avoid'){p.ox+=dx/d*s*4;p.oy+=dy/d*s*4;}else if(f.p==='gather'){p.ox-=dx/d*s*Math.min(3,d*0.2);p.oy-=dy/d*s*Math.min(3,d*0.2);}else{p.ox+=-dy/d*s*4;p.oy+=dx/d*s*4;}}}
+        p.ox*=dk;p.oy*=dk;
+        if(p.x<-20)p.x+=f.w+40;else if(p.x>f.w+20)p.x-=f.w+40;if(p.y<-20)p.y+=f.h+40;else if(p.y>f.h+20)p.y-=f.h+40;}}
+        function heart(g,x,y,r){g.beginPath();g.moveTo(x,y+r*0.35);g.bezierCurveTo(x,y-r*0.2,x-r,y-r*0.2,x-r,y+r*0.25);g.bezierCurveTo(x-r,y+r*0.7,x,y+r,x,y+r*1.15);g.bezierCurveTo(x,y+r,x+r,y+r*0.7,x+r,y+r*0.25);g.bezierCurveTo(x+r,y-r*0.2,x,y-r*0.2,x,y+r*0.35);g.fill();}
+        function draw(f,t){var g=f.g;g.clearRect(0,0,f.w,f.h);for(var i=0;i<f.ps.length;i++){var p=f.ps[i],x=p.x+p.ox,y=p.y+p.oy,r=p.r,a;switch(f.k){
+        case 'dust':a=0.5+0.3*Math.sin(t/1500*p.sp+p.ph);g.fillStyle=f.cs[0]+a+')';g.beginPath();g.arc(x,y,r,0,6.283);g.fill();break;
+        case 'stars':a=0.25+0.75*Math.abs(Math.sin(t/1200*p.sp+p.ph));g.fillStyle=g.strokeStyle=f.cs[0]+a+')';g.beginPath();g.arc(x,y,r*0.6,0,6.283);g.fill();if(r>2*u()){g.lineWidth=Math.max(0.6,r*0.25);g.beginPath();g.moveTo(x-r*1.8,y);g.lineTo(x+r*1.8,y);g.moveTo(x,y-r*1.8);g.lineTo(x,y+r*1.8);g.stroke();}break;
+        case 'glitter':a=Math.pow(Math.max(0,Math.sin(t/450*p.sp+p.ph)),6);g.fillStyle=f.cs[p.c===1?1:0]+(0.25+0.75*a)+')';g.beginPath();g.arc(x,y,r*0.6,0,6.283);g.fill();if(a>0.2){g.strokeStyle=f.cs[1]+a+')';g.lineWidth=Math.max(0.5,r*0.3);g.beginPath();g.moveTo(x-r*3*a,y);g.lineTo(x+r*3*a,y);g.moveTo(x,y-r*3*a);g.lineTo(x,y+r*3*a);g.stroke();}break;
+        case 'snow':g.fillStyle=f.cs[0]+'0.85)';g.beginPath();g.arc(x,y,r,0,6.283);g.fill();break;
+        case 'confetti':g.save();g.translate(x,y);g.rotate(p.rot);g.scale(1,Math.cos(p.rot*1.7+p.ph));g.fillStyle=f.cs[p.c]+'0.95)';g.fillRect(-r/2,-r/4,r,r/2);g.restore();break;
+        case 'hearts':g.fillStyle=f.cs[p.c===2?2:0]+'0.8)';heart(g,x,y,r/2);break;
+        case 'bokeh':var bg=g.createRadialGradient(x,y,0,x,y,r);bg.addColorStop(0,f.cs[1]+'0.28)');bg.addColorStop(1,f.cs[0]+'0)');g.fillStyle=bg;g.beginPath();g.arc(x,y,r,0,6.283);g.fill();break;
+        default:a=0.5+0.5*Math.sin(t/800*p.sp+p.ph);var fg=g.createRadialGradient(x,y,0,x,y,r*3);fg.addColorStop(0,f.cs[1]+(0.9*a)+')');fg.addColorStop(1,f.cs[0]+'0)');g.fillStyle=fg;g.beginPath();g.arc(x,y,r*3,0,6.283);g.fill();}}}
+        function frame(t){raf=0;var k=last?Math.min(4,(t-last)/16.667):1;last=t;var any=false;for(var i=0;i<fs.length;i++){var f=fs[i];if(!f.on||!f.w)continue;any=true;step(f,t,k);draw(f,t);}if(any&&!document.hidden)raf=requestAnimationFrame(frame);}
+        function go(){if(!raf&&!still)raf=requestAnimationFrame(frame);}
+        function aim(x,y){P.x=x;P.y=y;P.t=last||0;}
+        var cs=document.querySelectorAll('canvas.pt');for(var i=0;i<cs.length;i++){var c=cs[i],a=(c.getAttribute('data-pt')||'').split(' ');if(!K[a[0]]||!c.getContext)continue;fs.push({c:c,g:c.getContext('2d'),k:a[0],n:+a[1]||0,s:+a[2]||0,v:+a[3]||0,p:a[4]||'none',w:0,h:0,on:true,ps:[],cs:[]});}
+        if(!fs.length)return;
+        fs.forEach(function(f){size(f);});
+        if(window.ResizeObserver){var ro=new ResizeObserver(function(){fs.forEach(size);});fs.forEach(function(f){ro.observe(f.c);});}else addEventListener('resize',function(){fs.forEach(size);});
+        if(window.IntersectionObserver){var io=new IntersectionObserver(function(es){es.forEach(function(e){for(var i=0;i<fs.length;i++)if(fs[i].c===e.target)fs[i].on=e.isIntersecting;});go();});fs.forEach(function(f){f.on=false;io.observe(f.c);});}
+        addEventListener('pointermove',function(e){aim(e.clientX,e.clientY);},{passive:true});addEventListener('pointerdown',function(e){aim(e.clientX,e.clientY);},{passive:true});
+        addEventListener('touchmove',function(e){var t=e.touches[0];if(t)aim(t.clientX,t.clientY);},{passive:true});
+        document.addEventListener('visibilitychange',function(){last=0;go();});
+        go();})();
         """;
 
     /// <summary>
