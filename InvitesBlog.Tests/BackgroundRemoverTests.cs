@@ -91,4 +91,29 @@ public class BackgroundRemoverTests
             Console.WriteLine($"{Path.GetFileName(file)}: {(DateTime.UtcNow - started).TotalMilliseconds:0} ms");
         }
     }
+
+    [ModelFact]
+    public async Task The_model_and_its_memory_are_let_go_after_a_job()
+    {
+        static long Mb() { using var me = System.Diagnostics.Process.GetCurrentProcess(); me.Refresh(); return me.WorkingSet64 / (1024 * 1024); }
+        var remover = new BackgroundRemover(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["BackgroundRemoval:ModelPath"] = Model, ["BackgroundRemoval:IdleSeconds"] = "1" }).Build(),
+            NullLogger<BackgroundRemover>.Instance);
+        var before = Mb();
+        using var picture = new Image<Rgba32>(1200, 900, new Rgba32(240, 240, 240));
+        await remover.CutOutAsync(Png(picture), CancellationToken.None);
+        var during = Mb();
+        Assert.True(remover.Loaded);
+        // Released by its own timer a second after the job.
+        for (var i = 0; i < 50 && remover.Loaded; i++) await Task.Delay(100);
+        Assert.False(remover.Loaded);
+        var after = Mb();
+        Console.WriteLine($"memory: before {before} MB, right after the job {during} MB, after release {after} MB");
+        Assert.True(after - before < 600, $"still {after - before} MB above where it started ({before} -> {during} -> {after})");
+        // And it loads again for the next picture.
+        await remover.CutOutAsync(Png(picture), CancellationToken.None);
+        Assert.True(remover.Loaded);
+        remover.Release();
+        Assert.False(remover.Loaded);
+    }
 }
