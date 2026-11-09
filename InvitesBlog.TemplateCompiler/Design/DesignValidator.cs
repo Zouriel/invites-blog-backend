@@ -395,9 +395,15 @@ public static partial class DesignValidator
         }
         else
         {
-            // Not every card asks for a reply (a thank-you, an announcement), so it's a nudge, not a rule.
-            if (rsvp == 0)
-                Warn("rsvp_missing", "There's no RSVP button, so guests can't reply from this design. Add one if the event needs replies.");
+            // Not every card asks for a reply (a thank-you, an announcement), so it's a nudge, not a rule,
+            // and a designer who says the design takes no replies isn't asked again.
+            if (scene.NoReplies)
+            {
+                if (rsvp > 0)
+                    Warn("rsvp_with_no_replies", "This design is set to take no replies, but it still has an RSVP button. Remove the button, or switch Replies back on in Page.");
+            }
+            else if (rsvp == 0)
+                Warn("rsvp_missing", "There's no RSVP button, so guests can't reply from this design. Add one, or set Replies to “No replies” in Page if it doesn't need them.");
             if (dress == 0)
                 Warn("dress_missing", "There's no spot for dress colours, so the platform will add its own section at the end.");
         }

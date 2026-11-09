@@ -522,6 +522,30 @@ public class DesignCompilerTests
     }
 
     [Fact]
+    public void A_design_set_to_take_no_replies_is_not_asked_for_an_rsvp_button()
+    {
+        var scene = Minimal();
+        scene.Elements.RemoveAll(e => e.Type == "rsvp");
+        scene.NoReplies = true;
+        var issues = DesignValidator.Validate(scene);
+        Assert.DoesNotContain(issues, i => i.Code.StartsWith("rsvp"));
+
+        // Saying "no replies" but keeping a button is pointed out.
+        var kept = Minimal();
+        kept.NoReplies = true;
+        Assert.Contains(DesignValidator.Validate(kept), i => i.Code == "rsvp_with_no_replies" && i.Severity == "warning");
+    }
+
+    [Fact]
+    public void No_replies_round_trips_and_is_left_out_when_off()
+    {
+        var on = System.Text.Json.JsonSerializer.Deserialize<DesignScene>("{\"noReplies\":true}")!;
+        Assert.True(on.NoReplies);
+        Assert.Contains("\"noReplies\":true", System.Text.Json.JsonSerializer.Serialize(on));
+        Assert.DoesNotContain("noReplies", System.Text.Json.JsonSerializer.Serialize(new DesignScene()));
+    }
+
+    [Fact]
     public void Check_rejects_a_dropdown_with_no_options()
     {
         var scene = Minimal();
