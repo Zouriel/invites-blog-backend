@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Exceptions;
 using Microsoft.Extensions.Configuration;
@@ -21,6 +22,11 @@ namespace InvitesBlog.Infrastructure.Images;
 /// values, is resized back to the picture and becomes its alpha. Pictures are capped at
 /// <see cref="MaxEdge"/> first; one cut-out runs at a time (each takes about a second and ~1 GB).</para>
 ///
+/// <para><b>Memory.</b> A cut-out needs a few GB while it runs, and ONNX Runtime keeps what it used by
+/// default (its memory arena), which left the API at ~7 GB after a single picture. So the arena and the
+/// memory-pattern cache are off, the model is loaded for a job and released <see cref="IdleRelease"/> after
+/// the last one, and freed memory is handed back to the system (glibc keeps it otherwise).</para>
+///
 /// <para>Settings: <c>BackgroundRemoval:ModelPath</c> (default <c>models/isnet-general-use.onnx</c> next
 /// to the app). Without the file the feature reports itself unavailable.</para>
 /// </summary>
@@ -34,6 +40,13 @@ public sealed class BackgroundRemover(IConfiguration config, ILogger<BackgroundR
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly object loading = new();
     private InferenceSession? session;
+    private Timer? releaseTimer;
+
+    /// <summary>How long the model stays loaded after the last cut-out (<c>BackgroundRemoval:IdleSeconds</c>, default 60).</summary>
+    private TimeSpan IdleRelease => TimeSpan.FromSeconds(int.TryParse(config["BackgroundRemoval:IdleSeconds"], out var s) && s >= 0 ? s : 60);
+
+    /// <summary>Whether the model is in memory now (for tests and logs).</summary>
+    public bool Loaded => session is not null;
 
     private string ModelPath => config["BackgroundRemoval:ModelPath"] is { Length: > 0 } p
         ? p
@@ -53,7 +66,14 @@ public sealed class BackgroundRemover(IConfiguration config, ILogger<BackgroundR
         lock (loading)
         {
             if (session is not null) return session;
-            var options = new SessionOptions { GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL, IntraOpNumThreads = Math.Max(1, Math.Min(4, Environment.ProcessorCount / 2)) };
+            var options = new SessionOptions
+            {
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                IntraOpNumThreads = Math.Max(1, Math.Min(4, Environment.ProcessorCount / 2)),
+                // Give memory back after each run instead of keeping a pool of the largest run's size.
+                EnableCpuMemArena = false,
+                EnableMemoryPattern = false,
+            };
             session = new InferenceSession(ModelPath, options);
             log.LogInformation("Background removal model loaded from {Path}", ModelPath);
             return session;
@@ -83,10 +103,14 @@ public sealed class BackgroundRemover(IConfiguration config, ILogger<BackgroundR
             float[] mask;
             try
             {
+                releaseTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                 mask = await Task.Run(() => Predict(image), ct);
             }
             finally
             {
+                // Keep it loaded a moment for the next picture; then let it go.
+                releaseTimer ??= new Timer(_ => Release(), null, Timeout.Infinite, Timeout.Infinite);
+                releaseTimer.Change(IdleRelease, Timeout.InfiniteTimeSpan);
                 gate.Release();
             }
 
@@ -169,8 +193,46 @@ public sealed class BackgroundRemover(IConfiguration config, ILogger<BackgroundR
         return img;
     }
 
+    /// <summary>Unloads the model (unless a cut-out is running) and returns the freed memory to the system.</summary>
+    public void Release()
+    {
+        if (!gate.Wait(0)) return; // A job started meanwhile: its own timer releases it later.
+        try
+        {
+            lock (loading)
+            {
+                if (session is null) return;
+                session.Dispose();
+                session = null;
+            }
+            // ImageSharp pools the big buffers a cut-out used; let those go too.
+            Configuration.Default.MemoryAllocator.ReleaseRetainedResources();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            TrimNativeHeap();
+            log.LogInformation("Background removal model released");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    [DllImport("libc", EntryPoint = "malloc_trim")]
+    private static extern int MallocTrim(UIntPtr pad);
+
+    /// <summary>glibc keeps freed memory for reuse; ask it to give it back (Linux only; elsewhere a no-op).</summary>
+    private static void TrimNativeHeap()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        try { MallocTrim(UIntPtr.Zero); }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
+    }
+
     public void Dispose()
     {
+        releaseTimer?.Dispose();
         session?.Dispose();
         gate.Dispose();
     }
