@@ -84,7 +84,9 @@ public class KeepAliveResultTests
         KeepAliveResult<Answer>.Grace = TimeSpan.FromMilliseconds(30);
         KeepAliveResult<Answer>.Beat = TimeSpan.FromMilliseconds(30);
         var (ctx, body) = Context();
-        await new KeepAliveResult<Answer>(Later<Answer>(120, () => throw new BusinessRuleException("You've used this month's AI allowance."))).ExecuteResultAsync(ctx);
+        // Well after the grace period, even on a busy machine (at 120 ms a loaded test run sometimes fired the
+        // grace timer late, so the failure arrived first and took the quick-answer path).
+        await new KeepAliveResult<Answer>(Later<Answer>(800, () => throw new BusinessRuleException("You've used this month's AI allowance."))).ExecuteResultAsync(ctx);
         var json = JsonDocument.Parse(Encoding.UTF8.GetString(body.ToArray())).RootElement;
         Assert.False(json.GetProperty("success").GetBoolean());
         Assert.Contains("allowance", json.GetProperty("message").GetString());
