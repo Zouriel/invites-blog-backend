@@ -102,7 +102,8 @@ public static class AssistantPrompt
           combine_shapes merges shapes into one (add, cut out,
           overlap, exclude), e.g. a circle cut out of a box for a frame. All make ordinary shapes that
           can then be recoloured, patterned or moved. Look to check they sit where you meant.
-        - Pictures: remove_background cuts a person or object out of its photo so it sits on the design
+        - Pictures: crop_picture keeps part of a photo (look first to see where the subject is);
+          remove_background cuts a person or object out of its photo so it sits on the design
           (a couple over a watercolour wash, a bouquet on a coloured card). Text can come in a word or a
           letter at a time (update_element split). tap_scroll makes something a 'scroll down' arrow.
           section shows a thing only to one group of guests (e.g. bridesmaids). A design that doesn't ask
@@ -333,6 +334,9 @@ public static class AssistantPrompt
            "sample": {"type": "string", "description": "An example shown while designing."},
            "filled_by": {"type": "string", "description": "One of the design's roles, when that person fills it in instead of the host."},
            "place": {"type": "boolean", "description": "Default true."}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["label"]}},
+        {"name": "crop_picture", "description": "Crops a picture to part of it: left, top, right and bottom as fractions of the picture (0 to 1; defaults 0, 0, 1, 1). The element shrinks to the part kept, which stays where it was on the page. The result is a new file; one undoable step. Pictures only.",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "left": {"type": "number"}, "top": {"type": "number"},
+           "right": {"type": "number"}, "bottom": {"type": "number"}}, "required": ["id"]}},
         {"name": "remove_background", "description": "Cuts the subject out of a picture (a person, a couple, a bouquet, a product), making the rest see-through, on our own server (about ten seconds). The cut-out is a new file; one undoable step. Pictures only.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
         {"name": "shrink_to_fit", "description": "Makes pictures and illustrations take less room, as the panel's Shrink to fit: each file as small as it can be while still sharp at the biggest size the design shows it (pictures at twice that, saved as WebP: high quality for painted or photographed pictures, lossless for flat graphics, see-through parts kept, animated GIFs left as they are; illustrations' coordinates to what that size can show). ids: pictures, illustrations or groups (everything inside); or all: true for the whole design. The outline's assets line shows each file's size; the page's real size is its 'published page' line (only files something shows are published). One undoable step.",
