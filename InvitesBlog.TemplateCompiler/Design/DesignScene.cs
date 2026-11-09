@@ -448,6 +448,37 @@ public sealed class DesignShape
     [JsonPropertyName("stroke")] public string? Stroke { get; set; }
     [JsonPropertyName("strokeWidth")] public double StrokeWidth { get; set; }
     [JsonPropertyName("radius")] public double Radius { get; set; }
+    /// <summary>
+    /// The shape's area as a field of moving particles (dust, stars, glitter…) instead of its fill. Null:
+    /// a plain fill. Not on a line.
+    /// </summary>
+    [JsonPropertyName("particles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DesignParticles? Particles { get; set; }
+}
+
+/// <summary>
+/// Particles filling a shape: what they are, their colour, and how many, how big and how fast (each 0 to 1;
+/// unset is the kind's own feel). They always drift on their own; <see cref="Pointer"/> adds how they answer
+/// a pointer or finger. Drawn by the page's particle script on a canvas clipped to the shape.
+/// </summary>
+public sealed class DesignParticles
+{
+    /// <summary>One of <see cref="DesignParticleKinds.All"/>.</summary>
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "dust";
+    /// <summary>Hex or theme:key; null takes the shape's fill colour.</summary>
+    [JsonPropertyName("color")] public string? Color { get; set; }
+    [JsonPropertyName("amount")] public double? Amount { get; set; }
+    [JsonPropertyName("size")] public double? Size { get; set; }
+    [JsonPropertyName("speed")] public double? Speed { get; set; }
+    /// <summary>none | avoid | gather | swirl.</summary>
+    [JsonPropertyName("pointer")] public string? Pointer { get; set; }
+}
+
+public static class DesignParticleKinds
+{
+    public static readonly string[] All = ["dust", "stars", "glitter", "snow", "confetti", "hearts", "bokeh", "fireflies"];
+    public static readonly string[] Pointers = ["none", "avoid", "gather", "swirl"];
 }
 
 /// <summary>

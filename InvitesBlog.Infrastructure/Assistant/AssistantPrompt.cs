@@ -96,10 +96,15 @@ public static class AssistantPrompt
         - Make text readable: enough contrast with what's behind it, size 14 or more for body text.
         - Making decorations: repeat_element copies one element around a circle (a petal or leaf drawn
           with draw_shape becomes a flower, a wreath or a sun), in a grid or along a line, as one group;
-          generate makes a scatter (dots, stars, hearts, confetti), an organic blob or a curling vine with
-          leaves from a seed, in theme colours; combine_shapes merges shapes into one (add, cut out,
+          generate makes an organic blob or a curling vine with leaves from a seed, in theme colours;
+          combine_shapes merges shapes into one (add, cut out,
           overlap, exclude), e.g. a circle cut out of a box for a frame. All make ordinary shapes that
           can then be recoloured, patterned or moved. Look to check they sit where you meant.
+        - Particles (dust, stars, glitter, snow, confetti, hearts, bokeh soft lights, fireflies): set a
+          shape's particles and its whole area becomes them, drifting on their own, clipped to the shape
+          (a starry sky in a big box behind everything, glitter in a heart, snow in an arch). pointer
+          avoid, gather or swirl makes them answer the guest's finger. A shape with particles and no
+          outline shows only the particles. Use them for sparkle, dust and confetti rather than many shapes.
         - create_picture makes a realistic picture from a description with a see-through background
           (lace, a floral spray, a wax seal, a ribbon bow, watercolour flowers): only when the outline's
           "AI pictures" line says some are left, and only for what shapes, patterns and the art library
@@ -147,7 +152,14 @@ public static class AssistantPrompt
         "stroke": {"type": ["string", "null"]}, "stroke_width": {"type": "number"},
         "radius": {"type": "number", "description": "Corner radius; 999 for a pill."},
         "amount": {"type": "number", "description": "A ready-made shape's own setting, 0 to 1 (see add_shape)."},
-        "dash": {"type": "string", "enum": ["solid", "dashed", "dotted"], "description": "How the outline (or a line) is drawn."}
+        "dash": {"type": "string", "enum": ["solid", "dashed", "dotted"], "description": "How the outline (or a line) is drawn."},
+        "particles": {"type": ["object", "null"], "description": "Fills the shape's area with moving particles instead of its fill (not on a line); null removes them. They always drift on their own; pointer adds how they answer the guest's finger or mouse.",
+          "properties": {"kind": {"type": "string", "enum": ["dust", "stars", "glitter", "snow", "confetti", "hearts", "bokeh", "fireflies"]},
+            "color": {"type": ["string", "null"], "description": "Hex or theme:key; null: the shape's fill."},
+            "amount": {"type": "number", "description": "0 to 1: few 0.2, some 0.5, lots 0.85."}, "size": {"type": "number", "description": "0 to 1."},
+            "speed": {"type": "number", "description": "0 to 1: calm 0.15, gentle 0.4, lively 0.8."},
+            "pointer": {"type": "string", "enum": ["none", "avoid", "gather", "swirl"], "description": "avoid: they move away from the finger; gather: they come to it; swirl: they circle it."}},
+          "required": ["kind"]}
         """;
 
     private const string ToolsJson = "[" +
@@ -275,13 +287,9 @@ public static class AssistantPrompt
            "gap": {"type": "number", "description": "Units between copies (grid and line); default 12."}, "gap_x": {"type": "number"}, "gap_y": {"type": "number"},
            "direction": {"type": "string", "enum": ["across", "down", "diagonal"]}, "angle": {"type": "number"},
            "name": {"type": "string"}}, "required": ["id", "layout"]}},
-        {"name": "generate", "description": "Makes a decoration from a seed, in the theme's colours, on the screen at a scroll position (or with its top left at x, y), and selects it. The same seed and settings always make the same one; the person can Shuffle it. kind scatter: a group of shapes spread evenly over part of the screen (shape dots, stars, hearts or confetti; count 1-120, default 24; sizes small, medium or large, or min_size/max_size; area screen, top, bottom or edges (round the edge, the middle kept clear); colors: a list of colours, default the theme's). kind blob: one smooth organic drawn shape (style smooth, wavy or wild, or points 4-14 and wobble 0-0.6; w its size across, default 220; color its fill). kind vine: a group of a curving stem with leaves on alternate sides (leaves 0-40, default 10; curl straight, gentle or curly, or 0-1; length in units, default 420; direction up, across or down (hanging); leaf_size; color for the stem, leaf_color for the leaves).",
-         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["scatter", "blob", "vine"]},
+        {"name": "generate", "description": "Makes a decoration from a seed, in the theme's colours, on the screen at a scroll position (or with its top left at x, y), and selects it. The same seed and settings always make the same one; the person can Shuffle it. (For dust, stars, glitter or confetti, give a shape particles instead.) kind blob: one smooth organic drawn shape (style smooth, wavy or wild, or points 4-14 and wobble 0-0.6; w its size across, default 220; color its fill). kind vine: a group of a curving stem with leaves on alternate sides (leaves 0-40, default 10; curl straight, gentle or curly, or 0-1; length in units, default 420; direction up, across or down (hanging); leaf_size; color for the stem, leaf_color for the leaves).",
+         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["blob", "vine"]},
            "seed": {"type": "integer"}, "at": {"type": "number"}, "x": {"type": "number"}, "y": {"type": "number"}, "name": {"type": "string"},
-           "shape": {"type": "string", "enum": ["dots", "stars", "hearts", "confetti"]}, "count": {"type": "integer"},
-           "sizes": {"type": "string", "enum": ["small", "medium", "large"]}, "min_size": {"type": "number"}, "max_size": {"type": "number"},
-           "area": {"type": "string", "enum": ["screen", "top", "bottom", "edges"]},
-           "colors": {"type": "array", "items": {"type": "string"}, "description": "Hex or theme:key."},
            "style": {"type": "string", "enum": ["smooth", "wavy", "wild"]}, "points": {"type": "integer"}, "wobble": {"type": "number"}, "w": {"type": "number"},
            "color": {"type": "string", "description": "Hex or theme:key: a blob's fill, a vine's stem."},
            "leaves": {"type": "integer"}, "curl": {"type": ["string", "number"], "description": "straight, gentle, curly, or 0 to 1."},
