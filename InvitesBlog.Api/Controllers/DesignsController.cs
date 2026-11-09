@@ -85,6 +85,13 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art, I
     [EnableRateLimiting("design-assets")]
     public IActionResult AnalyseImage([FromBody] AnalyseImageRequest request) => Success(designs.AnalyseImage(request.Data));
 
+    /// <summary>A picture with its background cut away (on this server), returned as a new asset to swap in.</summary>
+    [HttpPost("assets/remove-background")]
+    [RequestSizeLimit(20 * 1024 * 1024)]
+    [EnableRateLimiting("design-art-import")]
+    public async Task<IActionResult> RemoveBackground([FromBody] RemoveBackgroundRequest request, CancellationToken ct) =>
+        Success(await designs.RemoveBackgroundAsync(request, ct));
+
     // ----- Art library ----------------------------------------------------------------------------
 
     [HttpGet("art/sources")]
