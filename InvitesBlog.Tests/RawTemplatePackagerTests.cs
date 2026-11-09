@@ -399,4 +399,26 @@ public class RawTemplatePackagerTests
         Assert.Contains("clone.setAttribute('data-gallery-clone', gid);", TemplateInjector.Js);
         Assert.Contains("removeChild(stale[x])", TemplateInjector.Js);
     }
+
+    [Fact]
+    public void A_designs_own_field_on_the_page_becomes_a_wizard_question_with_its_label_type_and_choices()
+    {
+        // The designer's custom field, placed as text: the compiled page carries what the wizard asks.
+        var scene = InvitesBlog.TemplateCompiler.Design.DesignStarters.Create("blank")!;
+        scene.Fields.Add(new InvitesBlog.TemplateCompiler.Design.DesignCustomField { Path = "event.mealChoice", Label = "Meal choice", Type = "select", Options = ["Fish", "Vegetarian"] });
+        scene.Fields.Add(new InvitesBlog.TemplateCompiler.Design.DesignCustomField { Path = "event.unused", Label = "Not placed", Type = "text" });
+        scene.Elements.Add(new InvitesBlog.TemplateCompiler.Design.DesignElement
+        {
+            Id = "t", Type = "text", X = 20, Y = 40, W = 300, H = 40,
+            Text = new InvitesBlog.TemplateCompiler.Design.DesignText { Runs = [new() { Var = "event.mealChoice" }] },
+        });
+        var html = InvitesBlog.TemplateCompiler.Design.DesignCompiler.Compile(scene);
+        var m = Packager().BuildManifest("slug", "1.0.0", html);
+        var field = Assert.Single(m.Fields, f => f.Key == "event.mealChoice");
+        Assert.Equal("Meal choice", field.Label);
+        Assert.Equal("select", field.Type);
+        Assert.Equal(["Fish", "Vegetarian"], field.Options);
+        // A field nothing on the page shows isn't asked for.
+        Assert.DoesNotContain(m.Fields, f => f.Key == "event.unused");
+    }
 }
