@@ -87,6 +87,8 @@ public static class AssistantPrompt
           (text_image), drop shadows and photo adjustments (adjust). An arch photo frame, a wavy divider
           or a gold gradient name usually beats an imported illustration.
         - Fonts: a font id from the catalog, or theme:heading-font / theme:body-font when the theme has them.
+        - Something the host should fill in that no catalog field covers (a gift note, a meal choice):
+          add_field makes it and puts it on the page; the event wizard then asks the host for it.
         - Text can include fields that the host fills in for each event: write {{event.title}},
           {{event.date}} and so on. Use fields for names, dates, places and times rather than typing
           made-up facts, unless the person gives you the exact words.
@@ -324,6 +326,13 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"prompt": {"type": "string", "description": "One object: what it is, its style and colours, e.g. 'delicate white floral lace border, top-down, fine thread detail'."},
            "shape": {"type": "string", "enum": ["square", "wide", "strip", "tall"]},
            "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["prompt"]}},
+        {"name": "add_field", "description": "Adds the design's own field: something the host fills in that the catalog has no field for (a gift note, a meal choice, a dress-code line, a livestream link). The event wizard asks the host for every field the page uses, so it is put on the page (text, or a button for a link) unless place is false; write {{path}} in any text to show it there too. Returns its path.",
+         "input_schema": {"type": "object", "properties": {"label": {"type": "string"},
+           "type": {"type": "string", "enum": ["text", "textarea", "date", "time", "url", "color", "select"], "description": "textarea: a longer note; select: one of options; url: a link."},
+           "options": {"type": "array", "items": {"type": "string"}, "description": "For select: 2 to 20 choices."},
+           "sample": {"type": "string", "description": "An example shown while designing."},
+           "filled_by": {"type": "string", "description": "One of the design's roles, when that person fills it in instead of the host."},
+           "place": {"type": "boolean", "description": "Default true."}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["label"]}},
         {"name": "remove_background", "description": "Cuts the subject out of a picture (a person, a couple, a bouquet, a product), making the rest see-through, on our own server (about ten seconds). The cut-out is a new file; one undoable step. Pictures only.",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
         {"name": "shrink_to_fit", "description": "Makes pictures and illustrations take less room, as the panel's Shrink to fit: each file as small as it can be while still sharp at the biggest size the design shows it (pictures at twice that, saved as WebP: high quality for painted or photographed pictures, lossless for flat graphics, see-through parts kept, animated GIFs left as they are; illustrations' coordinates to what that size can show). ids: pictures, illustrations or groups (everything inside); or all: true for the whole design. The outline's assets line shows each file's size; the page's real size is its 'published page' line (only files something shows are published). One undoable step.",
