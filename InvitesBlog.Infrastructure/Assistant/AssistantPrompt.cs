@@ -100,6 +100,11 @@ public static class AssistantPrompt
           combine_shapes merges shapes into one (add, cut out,
           overlap, exclude), e.g. a circle cut out of a box for a frame. All make ordinary shapes that
           can then be recoloured, patterned or moved. Look to check they sit where you meant.
+        - Pictures: remove_background cuts a person or object out of its photo so it sits on the design
+          (a couple over a watercolour wash, a bouquet on a coloured card). Text can come in a word or a
+          letter at a time (update_element split). tap_scroll makes something a 'scroll down' arrow.
+          section shows a thing only to one group of guests (e.g. bridesmaids). A design that doesn't ask
+          for replies (thank-you, announcement) gets set_page no_replies instead of an RSVP button.
         - Particles (dust, stars, glitter, snow, confetti, hearts, bokeh soft lights, fireflies): set a
           shape's particles and its whole area becomes them, drifting on their own, clipped to the shape
           (a starry sky in a big box behind everything, glitter in a heart, snow in an arch). pointer
@@ -194,8 +199,8 @@ public static class AssistantPrompt
            "fit": {"type": "string", "enum": ["cover", "contain"]}, "radius": {"type": "number"},
         """ + Box + """
          }, "required": ["y"]}},
-        {"name": "add_button", "description": "Adds the RSVP (reply) button or a link button.",
-         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["rsvp", "link"]}, "label": {"type": "string"},
+        {"name": "add_button", "description": "Adds the RSVP (reply) button, a link button, or the dress colours (kind dress: the swatches the host picks for guests to wear, with its heading in the text style given).",
+         "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["rsvp", "link", "dress"]}, "label": {"type": "string"},
            "link": {"type": "string", "description": "For kind link: a link target from the catalog."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["kind", "y"]}},
@@ -204,6 +209,11 @@ public static class AssistantPrompt
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
            "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon", "star", "heart", "arch", "ribbon", "bubble", "arrow", "scallop", "wave", "zigzag", "frame", "ticket"]}, "sides": {"type": "integer"},
            "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain", "stretch"], "description": "Pictures: contain keeps its shape, cover crops to fill, stretch fills out of proportion. Photo slots: cover or contain."}, "link": {"type": "string"}, "locked": {"type": "boolean"},
+           "tap_scroll": {"type": ["number", "null"], "description": "Tapping it scrolls the page smoothly to this position (a 'see the details' arrow); null: it doesn't."},
+           "section": {"type": ["string", "null"], "description": "Who sees it: only guests in this named section (matched to guest roles when the invitation is set up, e.g. bridesmaids); null: everyone."},
+           "filled_by": {"type": ["string", "null"], "description": "Which of the design's roles fills its fields in (outline's roles); null: the host."},
+           "split": {"type": ["string", "null"], "enum": ["word", "letter", "none", null], "description": "Text: its way in plays a word or a letter at a time; none or null: all at once."},
+           "split_spread": {"type": "number", "description": "0 to 0.9: how spread out the pieces start (default 0.4)."},
            "bar_start": {"type": "number", "description": "Scroll position its bar starts at (on a stage it shows from here). Its motion moves with the bar."},
            "bar_end": {"type": "number", "description": "Scroll position its bar ends at."},
            "whole_page": {"type": "boolean", "description": "true: no bar, it's there all along."},
@@ -302,8 +312,8 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"sticker": {"type": "string"}, "at": {"type": "number"}}, "required": ["sticker"]}},
         {"name": "set_theme", "description": "Sets theme colours (hex) and theme fonts (font ids). Keys like bg, text, accent, heading-font, body-font; a new key adds it.",
          "input_schema": {"type": "object", "properties": {"entries": {"type": "object", "additionalProperties": {"type": "string"}}}, "required": ["entries"]}},
-        {"name": "set_page", "description": "Turns stage mode on or off, or sets how far the page scrolls (null: to its content).",
-         "input_schema": {"type": "object", "properties": {"stage": {"type": "boolean"}, "length": {"type": ["number", "null"]}}}},
+        {"name": "set_page", "description": "Turns stage mode on or off, sets how far the page scrolls (null: to its content), or says the design takes no replies (a thank-you card, an announcement: no RSVP button needed, and Check stops asking for one).",
+         "input_schema": {"type": "object", "properties": {"stage": {"type": "boolean"}, "length": {"type": ["number", "null"]}, "no_replies": {"type": "boolean"}}}},
         {"name": "search_art", "description": "Searches free illustration libraries. Returns up to 8 results with source and id.",
          "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["vector", "animated", "picture"]}}, "required": ["query"]}},
         {"name": "add_art", "description": "Adds a search_art result to the design.",
@@ -314,6 +324,8 @@ public static class AssistantPrompt
          "input_schema": {"type": "object", "properties": {"prompt": {"type": "string", "description": "One object: what it is, its style and colours, e.g. 'delicate white floral lace border, top-down, fine thread detail'."},
            "shape": {"type": "string", "enum": ["square", "wide", "strip", "tall"]},
            "x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}}, "required": ["prompt"]}},
+        {"name": "remove_background", "description": "Cuts the subject out of a picture (a person, a couple, a bouquet, a product), making the rest see-through, on our own server (about ten seconds). The cut-out is a new file; one undoable step. Pictures only.",
+         "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
         {"name": "shrink_to_fit", "description": "Makes pictures and illustrations take less room, as the panel's Shrink to fit: each file as small as it can be while still sharp at the biggest size the design shows it (pictures at twice that, saved as WebP: high quality for painted or photographed pictures, lossless for flat graphics, see-through parts kept, animated GIFs left as they are; illustrations' coordinates to what that size can show). ids: pictures, illustrations or groups (everything inside); or all: true for the whole design. The outline's assets line shows each file's size; the page's real size is its 'published page' line (only files something shows are published). One undoable step.",
          "input_schema": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}}, "all": {"type": "boolean"}}}},
         {"name": "remove_unused_files", "description": "Removes files nothing in the design shows any more (marked UNUSED in the outline's assets line: art that was deleted or replaced). They are never published, so the page doesn't change, but they make the design heavier to save. One undoable step.",

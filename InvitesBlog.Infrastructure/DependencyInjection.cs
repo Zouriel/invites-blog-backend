@@ -98,6 +98,8 @@ public static class DependencyInjection
         services.AddScoped<RawTemplatePackager>();
         services.AddScoped<ITemplatePackager, TemplatePackagerAdapter>();
         services.AddScoped<IDesignEngine, DesignEngine>();
+        // "Remove background" for pictures in the designer: ISNet on our own CPU (the model file ships in the image).
+        services.AddSingleton<IBackgroundRemover, Images.BackgroundRemover>();
 
         // The designer assistant (Claude). Without Assistant__ApiKey it reports itself unavailable.
         services.AddSingleton(config.GetSection(Application.Services.Designs.Assistant.AssistantOptions.Section).Get<Application.Services.Designs.Assistant.AssistantOptions>()

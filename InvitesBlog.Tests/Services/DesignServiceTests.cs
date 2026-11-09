@@ -58,11 +58,11 @@ public class DesignServiceTests
         _db.SaveChanges();
     }
 
-    private DesignService Sut()
+    private DesignService Sut(IImageOptimizer? optimizer = null)
     {
         var engine = new DesignEngine(
             new RawTemplatePackager(Substitute.For<IStorageService>()),
-            Substitute.For<IImageOptimizer>(),
+            optimizer ?? Substitute.For<IImageOptimizer>(),
             new ConfigurationBuilder().Build());
         return new DesignService(
             _currentUser,
@@ -79,8 +79,11 @@ public class DesignServiceTests
             _storage,
             _email,
             new ConfigurationBuilder().Build(),
-            new UnitOfWork(_db));
+            new UnitOfWork(_db),
+            _backgrounds);
     }
+
+    private readonly IBackgroundRemover _backgrounds = Substitute.For<IBackgroundRemover>();
 
     private static PublishDesignRequest Publish(int revision, string visibility = "Private", string? description = null,
         string category = "Wedding", byte[]? poster = null, string? assignedEmail = null) =>
@@ -361,4 +364,42 @@ public class DesignServiceTests
         Category = "Wedding", Description = "d", PreviewImageUrl = "p", SceneJson = "{}", ManifestJson = "{}",
         PackageUrl = "/assets/x/", IsActive = true, Visibility = TemplateVisibility.Public, DesignerUserId = designer,
     };
+
+    // ----- Remove background -----------------------------------------------------------------------
+
+    private static string DataUrl(byte[] png) => "data:image/png;base64," + Convert.ToBase64String(png);
+
+    private static byte[] Png(byte alpha)
+    {
+        using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(40, 30, new SixLabors.ImageSharp.PixelFormats.Rgba32(200, 100, 50, alpha));
+        using var ms = new MemoryStream();
+        SixLabors.ImageSharp.ImageExtensions.SaveAsPng(image, ms);
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public async Task Remove_background_returns_the_cut_out_as_a_new_see_through_picture()
+    {
+        _backgrounds.Available.Returns(true);
+        _backgrounds.CutOutAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>()).Returns(Png(0));
+        var asset = await Sut(new InvitesBlog.Infrastructure.Images.ImageSharpOptimizer(Microsoft.Extensions.Logging.Abstractions.NullLogger<InvitesBlog.Infrastructure.Images.ImageSharpOptimizer>.Instance))
+            .RemoveBackgroundAsync(new RemoveBackgroundRequest(DataUrl(Png(255)), "couple.jpg"));
+        Assert.Equal("image", asset.Kind);
+        Assert.True(asset.Alpha);
+        Assert.StartsWith("couple cut out", asset.Name);
+        Assert.StartsWith("data:image/png;base64,", asset.Data);
+        await _backgrounds.Received(1).CutOutAsync(Arg.Is<byte[]>(b => b.Length > 0), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Remove_background_says_so_when_the_model_isnt_there_and_refuses_what_isnt_a_picture()
+    {
+        _backgrounds.Available.Returns(false);
+        await Assert.ThrowsAsync<InvalidStateException>(() => Sut().RemoveBackgroundAsync(new RemoveBackgroundRequest(DataUrl(Png(255)), null)));
+        _backgrounds.Available.Returns(true);
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().RemoveBackgroundAsync(new RemoveBackgroundRequest("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", null)));
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().RemoveBackgroundAsync(new RemoveBackgroundRequest("not a picture", null)));
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().RemoveBackgroundAsync(new RemoveBackgroundRequest("data:image/png;base64," + Convert.ToBase64String("hello"u8.ToArray()), null)));
+        await _backgrounds.DidNotReceive().CutOutAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+    }
 }

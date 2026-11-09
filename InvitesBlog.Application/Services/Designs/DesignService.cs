@@ -32,6 +32,9 @@ public interface IDesignService
     DesignAssetDto ImportAsset(byte[] content, string fileName, string contentType);
     DesignAssetDto ShrinkAsset(ShrinkAssetRequest request);
     ImageTintInfoDto AnalyseImage(string data);
+
+    /// <summary>A picture with its background cut away, as a new asset ready to swap in.</summary>
+    Task<DesignAssetDto> RemoveBackgroundAsync(RemoveBackgroundRequest request, CancellationToken ct = default);
     Task<DesignImportSourceDto> ImportSourceAsync(Guid templateId, CancellationToken ct = default);
     Task<PublishResultDto> PublishAsync(Guid id, PublishDesignRequest request, CancellationToken ct = default);
     Task<DesignDto> SetVisibilityAsync(Guid id, SetDesignVisibilityRequest request, CancellationToken ct = default);
@@ -66,7 +69,8 @@ public sealed class DesignService(
     IStorageService storage,
     IEmailSender email,
     IConfiguration config,
-    IUnitOfWork uow) : IDesignService
+    IUnitOfWork uow,
+    IBackgroundRemover backgrounds) : IDesignService
 {
     public const int PublicPublishesPerDay = 5;
     public const int MaxDesignsPerAccount = 200;
@@ -252,6 +256,33 @@ public sealed class DesignService(
     {
         Me();
         return engine.AnalyseImage(data);
+    }
+
+    public async Task<DesignAssetDto> RemoveBackgroundAsync(RemoveBackgroundRequest request, CancellationToken ct = default)
+    {
+        Me();
+        if (!backgrounds.Available)
+            throw new InvalidStateException("Removing backgrounds isn't available right now.", "background_unavailable");
+        var content = DecodePicture(request.Data);
+        var cut = await backgrounds.CutOutAsync(content, ct);
+        var name = string.IsNullOrWhiteSpace(request.Name) ? "Picture" : System.IO.Path.GetFileNameWithoutExtension(request.Name.Trim());
+        if (name.Length > 48) name = name[..48];
+        return engine.ImportAsset(cut, $"{name} cut out.png", "image/png");
+    }
+
+    /// <summary>A picture asset's bytes from its data: URL; only the picture types a design holds.</summary>
+    private static byte[] DecodePicture(string? data)
+    {
+        if (string.IsNullOrEmpty(data) || data.Length > 16 * 1024 * 1024 || !data.StartsWith("data:image/", StringComparison.Ordinal))
+            throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        var comma = data.IndexOf(";base64,", StringComparison.Ordinal);
+        if (comma < 0) throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(data[(comma + 8)..]); }
+        catch (FormatException) { throw new BusinessRuleException("That picture isn't one this design can hold.", "asset_invalid"); }
+        if (ImageSniffer.Detect(bytes) is not ("image/png" or "image/jpeg" or "image/webp"))
+            throw new BusinessRuleException("Backgrounds can be removed from PNG, JPEG or WebP pictures.", "asset_invalid");
+        return bytes;
     }
 
     public async Task<DesignImportSourceDto> ImportSourceAsync(Guid templateId, CancellationToken ct = default)
