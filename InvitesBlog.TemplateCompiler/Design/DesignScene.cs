@@ -54,6 +54,14 @@ public sealed class DesignScene
     /// </summary>
     [JsonPropertyName("length")] public double? Length { get; set; }
 
+    /// <summary>
+    /// The designer says this design deliberately has no RSVP button (a thank-you card, an announcement,
+    /// an event that takes no replies), so Check stops asking for one. Off: Check nudges for one.
+    /// </summary>
+    [JsonPropertyName("noReplies")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool NoReplies { get; set; }
+
     /// <summary>Theme keys, each becoming <c>--ib-{key}</c>. <c>accent</c>, <c>bg</c> and <c>text</c> are required.</summary>
     [JsonPropertyName("theme")] public List<DesignThemeEntry> Theme { get; set; } = new();
 
