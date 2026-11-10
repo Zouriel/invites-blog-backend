@@ -314,6 +314,15 @@ public sealed class AccountDeletionService(
         await PassOtherAlbumsOnAsync(me.Id, now, ct);
         await RemoveFeedActivityAsync(me.Id, ct);
 
+        // Designer assistant chats are personal data; the usage counters have no other reader. (These FKs
+        // also cascade; deleting them here keeps the handling explicit and tested.)
+        await db.DesignAssistantMessages.Where(m => m.UserId == me.Id).ExecuteDeleteAsync(ct);
+        await db.AssistantUsages.Where(u => u.UserId == me.Id).ExecuteDeleteAsync(ct);
+        await db.AiPictureUsages.Where(u => u.UserId == me.Id).ExecuteDeleteAsync(ct);
+        // Audit field on albums that stay (plain Guid, no FK): the person who confirmed face grouping.
+        await db.MediaBuckets.Where(b => b.FaceGroupingConfirmedBy == me.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(b => b.FaceGroupingConfirmedBy, (Guid?)null), ct);
+
         await db.CampaignCelebrants
             .Where(c => (c.Email != null && scope.Emails.Contains(c.Email)) || (c.PhoneE164 != null && scope.Phones.Contains(c.PhoneE164)))
             .ExecuteDeleteAsync(ct);
