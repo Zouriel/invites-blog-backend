@@ -30,6 +30,9 @@ public interface IEventPhotoService
     /// <summary>Names a face group in a box the caller hosts (a campaign's, or an album by id).</summary>
     Task<FacePersonDto> NamePersonAsync(Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, string? name, CancellationToken ct = default);
 
+    /// <summary>"Same person as…": the host merges one face group into another.</summary>
+    Task<FacePersonDto> MergePersonAsync(Guid? campaignId, Guid? bucketId, Guid personId, Guid intoId, CancellationToken ct = default);
+
     /// <summary>"Ignore my face" for a group the caller can see in their box.</summary>
     Task IgnorePersonAsync(Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, CancellationToken ct = default);
 
@@ -493,6 +496,17 @@ public sealed class EventPhotoService(
         if (!await InBoxAsync(box, personId, ct)) throw new NotFoundException("That group is no longer there.");
         var shown = await photos.Query().Where(p => box.Photos.Select(x => x.Id).Contains(p.Id)).ToListAsync(ct);
         return await faceGrouping!.NameAsync(personId, name, shown, ct);
+    }
+
+    public async Task<FacePersonDto> MergePersonAsync(
+        Guid? campaignId, Guid? bucketId, Guid personId, Guid intoId, CancellationToken ct = default)
+    {
+        var box = await BoxForPeopleAsync(campaignId, bucketId, null, ct);
+        if (box.Faces is not { CanName: true }) throw new ForbiddenException("Only the host can name people.");
+        if (!await InBoxAsync(box, personId, ct) || !await InBoxAsync(box, intoId, ct))
+            throw new NotFoundException("That group is no longer there.");
+        var shown = await photos.Query().Where(p => box.Photos.Select(x => x.Id).Contains(p.Id)).ToListAsync(ct);
+        return await faceGrouping!.MergeAsync(personId, intoId, shown, ct);
     }
 
     public async Task IgnorePersonAsync(

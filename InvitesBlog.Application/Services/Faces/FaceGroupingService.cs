@@ -39,6 +39,9 @@ public interface IFaceGroupingService
     /// <summary>"Ignore my face": deletes the group's faces and keeps it out of grouping.</summary>
     Task IgnoreAsync(Guid personId, CancellationToken ct);
 
+    /// <summary>"Same person as…": moves one group's faces into another of the same album; the first goes.</summary>
+    Task<FacePersonDto> MergeAsync(Guid personId, Guid intoId, IReadOnlyList<EventPhoto> photos, CancellationToken ct);
+
     /// <summary>Whether this album groups faces: what the camera's notice asks.</summary>
     Task<bool> OnForBucketAsync(Guid bucketId, CancellationToken ct);
 
@@ -55,8 +58,6 @@ public sealed class FaceGroupingService(
     IUnitOfWork uow,
     IFaceAnalyzer? analyzer = null) : IFaceGroupingService
 {
-    /// <summary>Groups in fewer photos than this aren't offered as a filter unless the host named them: a crowd shot would otherwise add a row per stranger.</summary>
-    public const int MinPhotosToShow = 2;
 
     public bool Available => analyzer?.Available ?? false;
 
@@ -151,7 +152,8 @@ public sealed class FaceGroupingService(
             .Select(f => new { f.PhotoId, f.PersonId, f.X, f.Y, f.W, f.H, f.Score }).ToListAsync(ct);
 
         var byId = shown.ToDictionary(p => p.Id);
-        rows = rows.Where(r => byId.ContainsKey(r.PhotoId)).ToList();
+        var live = groups.Select(g => g.Id).ToHashSet();
+        rows = rows.Where(r => byId.ContainsKey(r.PhotoId) && live.Contains(r.PersonId)).ToList();
         var peopleByPhoto = rows.GroupBy(r => r.PhotoId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<Guid>)g.Select(r => r.PersonId).Distinct().ToList());
 
@@ -160,7 +162,9 @@ public sealed class FaceGroupingService(
         {
             var mine = rows.Where(r => r.PersonId == g.Id).ToList();
             var count = mine.Select(r => r.PhotoId).Distinct().Count();
-            if (count == 0 || (count < MinPhotosToShow && g.Name is null)) continue;
+            // Every group, even one seen once: the People tab is where the host names them. Clients offer only
+            // named people as filters.
+            if (count == 0) continue;
             // The clearest look at them: the biggest face the detector was sure of.
             var cover = mine.OrderByDescending(r => r.W * r.H * r.Score).First();
             list.Add(new FacePersonDto(g.Id, g.Name, count, byId[cover.PhotoId].ThumbUrl, cover.X, cover.Y, cover.W, cover.H));
@@ -175,6 +179,14 @@ public sealed class FaceGroupingService(
                      ?? throw new NotFoundException("That group is no longer there.");
         var clean = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
         if (clean is { Length: > FacePerson.MaxNameLength }) clean = clean[..FacePerson.MaxNameLength].TrimEnd();
+        // A name the album already has is the same person: one group, not two with the same name.
+        if (clean is not null)
+        {
+            var same = await people.Query().Where(p => p.BucketId == person.BucketId && p.Id != personId && !p.Ignored && p.Name != null)
+                .Select(p => new { p.Id, p.Name }).ToListAsync(ct);
+            var match = same.FirstOrDefault(p => string.Equals(p.Name, clean, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return await MergeAsync(personId, match.Id, shown, ct);
+        }
         person.Name = clean;
         person.UpdatedAt = DateTimeOffset.UtcNow;
         people.Update(person);
@@ -182,6 +194,40 @@ public sealed class FaceGroupingService(
         var (dto, _) = await ForBoxAsync([person.BucketId], shown, true, ct);
         return dto?.People.FirstOrDefault(p => p.Id == personId)
                ?? throw new NotFoundException("That group is no longer there.");
+    }
+
+    public async Task<FacePersonDto> MergeAsync(Guid personId, Guid intoId, IReadOnlyList<EventPhoto> shown, CancellationToken ct)
+    {
+        if (personId == intoId) throw new BusinessRuleException("That's already the same person.", "faces_same_person");
+        var from = await people.Query(tracking: true).FirstOrDefaultAsync(p => p.Id == personId && !p.Ignored, ct)
+                   ?? throw new NotFoundException("That group is no longer there.");
+        var into = await people.Query(tracking: true).FirstOrDefaultAsync(p => p.Id == intoId && !p.Ignored, ct)
+                   ?? throw new NotFoundException("That person is no longer there.");
+        if (from.BucketId != into.BucketId) throw new NotFoundException("That person is no longer there.");
+
+        foreach (var face in await faces.Query(tracking: true).Where(f => f.PersonId == personId).ToListAsync(ct))
+        {
+            face.PersonId = intoId;
+            faces.Update(face);
+        }
+        // The average of all their faces: the two averages, weighted by how many faces made each.
+        var total = Math.Max(1, into.FaceCount + from.FaceCount);
+        var c = new float[Math.Max(into.Centroid.Length, from.Centroid.Length)];
+        for (var i = 0; i < c.Length; i++)
+            c[i] = ((i < into.Centroid.Length ? into.Centroid[i] * into.FaceCount : 0)
+                    + (i < from.Centroid.Length ? from.Centroid[i] * from.FaceCount : 0)) / total;
+        into.Centroid = c;
+        into.FaceCount += from.FaceCount;
+        into.Name ??= from.Name;
+        into.UpdatedAt = DateTimeOffset.UtcNow;
+        people.Update(into);
+        await uow.SaveChangesAsync(ct);
+        people.Remove(from);
+        await uow.SaveChangesAsync(ct);
+
+        var (dto, _) = await ForBoxAsync([into.BucketId], shown, true, ct);
+        return dto?.People.FirstOrDefault(p => p.Id == intoId)
+               ?? throw new NotFoundException("That person is no longer there.");
     }
 
     public Task<bool> OnForBucketAsync(Guid bucketId, CancellationToken ct) =>
@@ -217,12 +263,20 @@ public static class FaceClustering
     /// </summary>
     public const float DefaultThreshold = 0.45f;
 
+    /// <summary>Dot product: the cosine for two fingerprints, which are unit length.</summary>
     public static float Similarity(float[] a, float[] b)
     {
         var n = Math.Min(a.Length, b.Length);
         var s = 0f;
         for (var i = 0; i < n; i++) s += a[i] * b[i];
         return s;
+    }
+
+    /// <summary>Cosine between a fingerprint and a group's average (which is shorter than unit length).</summary>
+    public static float Cosine(float[] face, float[] average)
+    {
+        var norm = MathF.Sqrt(average.Sum(x => x * x));
+        return norm > 0 ? Similarity(face, average) / norm : 0;
     }
 
     /// <summary>The closest group at or above the threshold, ignored groups included (the caller drops those faces).</summary>
@@ -232,7 +286,7 @@ public static class FaceClustering
         var bestScore = threshold;
         foreach (var g in groups)
         {
-            var s = Similarity(embedding, g.Centroid);
+            var s = Cosine(embedding, g.Centroid);
             if (s >= bestScore)
             {
                 best = g;
@@ -242,14 +296,15 @@ public static class FaceClustering
         return best;
     }
 
-    /// <summary>Adds a face to a group's average (kept unit length).</summary>
+    /// <summary>
+    /// Adds a face to a group's average: the true mean of its fingerprints (not re-normalised, so merging two
+    /// groups can weight them exactly; <see cref="Cosine"/> compares against it).
+    /// </summary>
     public static void Add(FacePerson group, float[] embedding)
     {
         var n = group.FaceCount;
         var c = group.Centroid.Length == embedding.Length ? group.Centroid.ToArray() : new float[embedding.Length];
-        for (var i = 0; i < c.Length; i++) c[i] = c[i] * n + embedding[i];
-        var norm = MathF.Sqrt(c.Sum(x => x * x));
-        if (norm > 0) for (var i = 0; i < c.Length; i++) c[i] /= norm;
+        for (var i = 0; i < c.Length; i++) c[i] = (c[i] * n + embedding[i]) / (n + 1);
         group.Centroid = c;
         group.FaceCount = n + 1;
     }

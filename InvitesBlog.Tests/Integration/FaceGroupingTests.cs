@@ -56,16 +56,18 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         var faces = asHost.GetProperty("faces");
         Assert.True(faces.GetProperty("canName").GetBoolean());
         var people = faces.GetProperty("people").EnumerateArray().ToList();
-        // Person 2 is in one photo and unnamed: not offered as a filter yet.
-        var one = Assert.Single(people);
+        // Both groups are listed (the People tab names them); the one in two photos first.
+        Assert.Equal(2, people.Count);
+        var one = people[0];
         Assert.Equal(2, one.GetProperty("photoCount").GetInt32());
+        Assert.Equal(1, people[1].GetProperty("photoCount").GetInt32());
         var personId = one.GetProperty("id").GetGuid();
         foreach (var id in new[] { p1, p2 })
             Assert.Contains(personId, Tile(asHost, id).GetProperty("people").EnumerateArray().Select(x => x.GetGuid()));
 
         var asGuest = await DataAsync(await api.Client(guest.Token).GetAsync($"/api/me/invitations/{ev}/photos"));
         Assert.False(asGuest.GetProperty("faces").GetProperty("canName").GetBoolean());
-        Assert.Single(asGuest.GetProperty("faces").GetProperty("people").EnumerateArray());
+        Assert.Equal(2, asGuest.GetProperty("faces").GetProperty("people").GetArrayLength());
 
         // A QR code onto the album says so too (the app's camera shows the notice from this).
         var qr = await DataAsync(await api.Client(host.Token).PostAsJsonAsync($"/api/media-buckets/{bucket}/qr", new { label = "Table", allowAnonymous = true }));
@@ -117,6 +119,48 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         var kept = await api.ReadAsync(db => db.PhotoFaces.Where(f => f.PhotoId == later).ToListAsync());
         Assert.Single(kept);
         Assert.NotEqual(personId, kept[0].PersonId);
+    }
+
+    [PostgresFact]
+    public async Task The_host_says_two_groups_are_one_person_by_picking_or_by_typing_the_same_name()
+    {
+        var (host, guest, ev, bucket) = await SetUpAsync();
+        for (var i = 0; i < 3; i++) await PhotoAsync(ev, bucket);
+        await SwitchOnAsync(host, bucket);
+        // The same person, seen three times but too differently to be grouped at first (three groups).
+        api.Faces.Next = [FakeFaceAnalyzer.Face(10)];
+        await RunWorkerAsync();
+        api.Faces.Next = [FakeFaceAnalyzer.Face(20)];
+        await RunWorkerAsync();
+        api.Faces.Next = [FakeFaceAnalyzer.Face(30)];
+        await RunWorkerAsync();
+        var groups = await api.ReadAsync(db => db.FacePeople.Where(p => p.BucketId == bucket).OrderBy(p => p.CreatedAt).Select(p => p.Id).ToListAsync());
+        Assert.Equal(3, groups.Count);
+
+        await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/people/{groups[0]}", new { name = "Shanna" }));
+        // A guest can't merge.
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Client(guest.Token).PostAsJsonAsync(
+            $"/api/campaigns/{ev}/photos/people/{groups[1]}/merge", new { into = groups[0] })).StatusCode);
+        // Picking "Shanna" for the second group.
+        var merged = await DataAsync(await api.Client(host.Token).PostAsJsonAsync(
+            $"/api/media-buckets/{bucket}/people/{groups[1]}/merge", new { into = groups[0] }));
+        Assert.Equal(groups[0], merged.GetProperty("id").GetGuid());
+        Assert.Equal(2, merged.GetProperty("photoCount").GetInt32());
+        // Typing "shanna" for the third merges it too.
+        var typed = await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/campaigns/{ev}/photos/people/{groups[2]}", new { name = "shanna" }));
+        Assert.Equal(groups[0], typed.GetProperty("id").GetGuid());
+        Assert.Equal("Shanna", typed.GetProperty("name").GetString());
+        Assert.Equal(3, typed.GetProperty("photoCount").GetInt32());
+
+        var left = await api.ReadAsync(db => db.FacePeople.Where(p => p.BucketId == bucket).ToListAsync());
+        var shanna = Assert.Single(left);
+        Assert.Equal(3, shanna.FaceCount);
+        // The average now sits between the three, so a new photo like any of them joins Shanna.
+        Assert.All(new[] { 10, 20, 30 }, a => Assert.True(
+            InvitesBlog.Application.Services.Faces.FaceClustering.Cosine(FakeFaceAnalyzer.Person(a), shanna.Centroid)
+            >= InvitesBlog.Application.Services.Faces.FaceClustering.DefaultThreshold));
+        var box = await DataAsync(await api.Client(host.Token).GetAsync($"/api/media-buckets/{bucket}/media"));
+        Assert.All(box.GetProperty("photos").EnumerateArray(), p => Assert.Equal(groups[0], p.GetProperty("people")[0].GetGuid()));
     }
 
     [PostgresFact]

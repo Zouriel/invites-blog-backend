@@ -90,6 +90,12 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
         Guid campaignId, Guid personId, [FromBody] Application.Dtos.Photos.NameFacePersonRequest req, CancellationToken ct) =>
         Success(await photos.NamePersonAsync(campaignId, null, null, personId, req.Name, ct));
 
+    [HttpPost("/api/campaigns/{campaignId:guid}/photos/people/{personId:guid}/merge")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> MergePersonAsHost(
+        Guid campaignId, Guid personId, [FromBody] Application.Dtos.Photos.MergeFacePersonRequest req, CancellationToken ct) =>
+        Success(await photos.MergePersonAsync(campaignId, null, personId, req.Into, ct));
+
     [HttpPost("/api/campaigns/{campaignId:guid}/photos/people/{personId:guid}/ignore")]
     [HasPermission(Permissions.Photos.Read)]
     public async Task<IActionResult> IgnorePersonAsHost(Guid campaignId, Guid personId, CancellationToken ct)
