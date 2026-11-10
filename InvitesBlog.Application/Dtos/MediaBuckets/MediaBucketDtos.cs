@@ -66,7 +66,11 @@ public sealed record MediaBucketDto(
     /// <summary>About how many bytes that removes, as of the last check.</summary>
     long? TrimBytes = null,
     /// <summary>What a free event keeps for good.</summary>
-    long FreeBytes = 0);
+    long FreeBytes = 0,
+    /// <summary>Whether photos in this album are grouped by face (the People filter). Off unless the host switched it on.</summary>
+    bool FaceGrouping = false,
+    /// <summary>Whether this server can group faces at all (the models are installed).</summary>
+    bool FaceGroupingAvailable = false);
 
 /// <summary>
 /// The space a venue's events share: how much there is and how much is used. For anyone who isn't a
@@ -104,6 +108,12 @@ public sealed record RenameMediaBucketRequest(string Name);
 
 /// <param name="Days">How many days it collects for, 1 to the plan's most.</param>
 public sealed record SetBucketWindowRequest(int Days);
+
+/// <summary>
+/// Switching face grouping on or off for an album. Switching it on needs <c>GuestsTold</c>: the host confirms
+/// their guests are being told (the invitation and album carry the notice). Off deletes all its face data.
+/// </summary>
+public sealed record SetFaceGroupingRequest(bool On, bool GuestsTold);
 /// <summary>
 /// A QR code as the dashboard shows it.
 ///

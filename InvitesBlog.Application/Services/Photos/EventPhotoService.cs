@@ -27,6 +27,12 @@ public interface IEventPhotoService
     /// </summary>
     Task<EventPhotoBoxDto> GetAsync(Guid campaignId, Guid? viewerGuestId, CancellationToken ct = default);
 
+    /// <summary>Names a face group in a box the caller hosts (a campaign's, or an album by id).</summary>
+    Task<FacePersonDto> NamePersonAsync(Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, string? name, CancellationToken ct = default);
+
+    /// <summary>"Ignore my face" for a group the caller can see in their box.</summary>
+    Task IgnorePersonAsync(Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, CancellationToken ct = default);
+
     /// <summary>
     /// Adds one photo, or one video. <paramref name="guestId"/> is the guest who took it — null when
     /// the host adds one themselves.
@@ -155,7 +161,8 @@ public sealed class EventPhotoService(
     IRepository<VideoTrimJob>? trimJobs = null,
     IModerationViewService? moderation = null,
     IRepository<AppUser>? users = null,
-    IRepository<Favourite>? favourites = null) : IEventPhotoService
+    IRepository<Favourite>? favourites = null,
+    Faces.IFaceGroupingService? faceGrouping = null) : IEventPhotoService
 {
     /// <summary>
     /// Hearts on these photos: how many active accounts hearted each, and which the caller did. One
@@ -227,6 +234,7 @@ public sealed class EventPhotoService(
             .ToList();
         var owners = await UploadersAsync(live, ct);
         var (hearts, mine) = await HeartsAsync(live.Select(p => p.Id).ToList(), ct);
+        var (faces, peopleIn) = await FacesAsync(live, moderates, ct);
 
         // The same three questions StoreAsync asks, asked in the same order — cancelled, then the
         // night. This used to report only the cancellation, so an event six months past still offered
@@ -269,11 +277,13 @@ public sealed class EventPhotoService(
                 owners.GetValueOrDefault(p.Id),
                 p.SizeBytes,
                 hearts.GetValueOrDefault(p.Id),
-                mine.Contains(p.Id))).ToList(),
+                mine.Contains(p.Id),
+                faces is null ? null : peopleIn.GetValueOrDefault(p.Id) ?? [])).ToList(),
             closed,
             venue?.Name,
             venue?.LogoUrl,
-            campaign.Kind == CampaignKind.SaveTheDate);
+            campaign.Kind == CampaignKind.SaveTheDate,
+            faces);
     }
 
     public async Task<EventPhotoDto> AddAsync(
@@ -426,6 +436,7 @@ public sealed class EventPhotoService(
             .ToList();
         var owners = await UploadersAsync(live, ct);
         var (hearts, hearted) = await HeartsAsync(live.Select(p => p.Id).ToList(), ct);
+        var (faces, peopleIn) = await FacesAsync(live, mine, ct, bucketId);
 
         return new EventPhotoBoxDto(
             bucket.CampaignId ?? Guid.Empty,
@@ -445,7 +456,8 @@ public sealed class EventPhotoService(
                 owners.GetValueOrDefault(p.Id),
                 p.SizeBytes,
                 hearts.GetValueOrDefault(p.Id),
-                hearted.Contains(p.Id))).ToList(),
+                hearted.Contains(p.Id),
+                faces is null ? null : peopleIn.GetValueOrDefault(p.Id) ?? [])).ToList(),
             // Same sentence the writer would have given, and in the order that matters: "this closed
             // a week ago" is more useful than "this is full" when both are true.
             !bucket.IsOpen
@@ -458,8 +470,51 @@ public sealed class EventPhotoService(
                         ? "This event is out of space. See the plans for more."
                         : null,
             bucket.VenueName,
-            bucket.VenueLogoUrl);
+            bucket.VenueLogoUrl,
+            Faces: faces);
     }
+
+    /// <summary>Face grouping for the photos a box shows: the groups, and who is in each photo. Null when it's off.</summary>
+    private async Task<(FaceGroupingDto? Dto, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> PeopleIn)> FacesAsync(
+        IReadOnlyList<EventPhoto> live, bool canName, CancellationToken ct, Guid? bucketId = null)
+    {
+        var none = (IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>)new Dictionary<Guid, IReadOnlyList<Guid>>();
+        if (faceGrouping is null) return (null, none);
+        var ids = live.Select(p => p.BucketId).OfType<Guid>().ToHashSet();
+        if (bucketId is { } b) ids.Add(b);
+        return await faceGrouping.ForBoxAsync(ids, live, canName, ct);
+    }
+
+    public async Task<FacePersonDto> NamePersonAsync(
+        Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, string? name, CancellationToken ct = default)
+    {
+        var box = await BoxForPeopleAsync(campaignId, bucketId, viewerGuestId, ct);
+        if (box.Faces is not { CanName: true } faces) throw new ForbiddenException("Only the host can name people.");
+        if (!await InBoxAsync(box, personId, ct)) throw new NotFoundException("That group is no longer there.");
+        var shown = await photos.Query().Where(p => box.Photos.Select(x => x.Id).Contains(p.Id)).ToListAsync(ct);
+        return await faceGrouping!.NameAsync(personId, name, shown, ct);
+    }
+
+    public async Task IgnorePersonAsync(
+        Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, Guid personId, CancellationToken ct = default)
+    {
+        var box = await BoxForPeopleAsync(campaignId, bucketId, viewerGuestId, ct);
+        if (box.Faces is null || !await InBoxAsync(box, personId, ct)) throw new NotFoundException("That group is no longer there.");
+        await faceGrouping!.IgnoreAsync(personId, ct);
+    }
+
+    /// <summary>
+    /// The box as this caller sees it: whoever can see a group in their box may opt it out ("that's me"), and
+    /// only someone who could name them (the host) may name it. The same doors as viewing, so no new rule.
+    /// </summary>
+    private Task<EventPhotoBoxDto> BoxForPeopleAsync(Guid? campaignId, Guid? bucketId, Guid? viewerGuestId, CancellationToken ct) =>
+        bucketId is { } b ? GetBucketAsync(b, ct)
+        : campaignId is { } c ? GetAsync(c, viewerGuestId, ct)
+        : throw new NotFoundException("That album no longer exists.");
+
+    /// <summary>Whether the group is one this box shows, or has a face in a photo it shows (a group not yet in the filter).</summary>
+    private static Task<bool> InBoxAsync(EventPhotoBoxDto box, Guid personId, CancellationToken ct) =>
+        Task.FromResult(box.Faces!.People.Any(p => p.Id == personId) || box.Photos.Any(p => p.People?.Contains(personId) == true));
 
     public async Task DeleteFromBucketAsync(
         Guid bucketId, Guid photoId, CancellationToken ct = default)
@@ -661,6 +716,8 @@ public sealed class EventPhotoService(
             await photos.AddAsync(photo, ct);
             // The old route's file has its camera metadata until this job has run.
             if (isVideo) await QueueTrimAsync(photo.Id, content.Length, metadataClean: false, ct);
+            // Grouped by face when its album has that on (pictures only).
+            if (faceGrouping is not null) await faceGrouping.QueueAsync(photo, ct);
             await uow.SaveChangesAsync(ct);
         }
         catch
@@ -775,6 +832,9 @@ public sealed class EventPhotoService(
 
         if (photo.BucketId is { } bucketId)
             await bucketService.CountUsageAsync(bucketId, -photo.SizeBytes, CancellationToken.None);
+
+        // Its faces (biometric data) go with it.
+        if (faceGrouping is not null) await faceGrouping.ForgetPhotosAsync([photo.Id], CancellationToken.None);
 
         // A video's view and original are the same object, so each key is removed once.
         foreach (var key in new[] { photo.OriginalUrl, photo.Url, photo.ThumbUrl }

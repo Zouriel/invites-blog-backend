@@ -88,6 +88,12 @@ public interface IMediaBucketService
         Guid bucketId, RenameMediaBucketRequest req, CancellationToken ct = default);
 
     /// <summary>
+    /// Switches face grouping on (the host confirms their guests are told) or off (every face, group and
+    /// queued photo of the album is deleted). Owner only.
+    /// </summary>
+    Task<MediaBucketDto> SetFaceGroupingAsync(Guid bucketId, SetFaceGroupingRequest req, CancellationToken ct = default);
+
+    /// <summary>
     /// Changes how many days a bucket collects for. Up to what the event's plan allows now — so a
     /// bucket made on the free night can be stretched after buying a pass — or up to
     /// what it already has, since a window already given is never taken away by a plan ending.
@@ -259,7 +265,8 @@ public sealed class MediaBucketService(
     IPlanService plans,
     IRepository<Venue> venues,
     IRepository<VenueStaff> venueStaff,
-    IMediaBucketUsageRepository usage) : IMediaBucketService
+    IMediaBucketUsageRepository usage,
+    Faces.IFaceGroupingService? faceGrouping = null) : IMediaBucketService
 {
     /// <summary>Said by every door a draft doesn't open yet.</summary>
     private const string NotLiveMessage = "Finish setting up this event first. Its album, codes and camera open once it's done.";
@@ -655,6 +662,14 @@ public sealed class MediaBucketService(
         if (proved.Count == 0) return null;
         var guests = await guestRepository.ListByCampaignAsync(campaignId, includeOptedOut: false, ct);
         return guests.FirstOrDefault(g => Matches(g, proved));
+    }
+
+    public async Task<MediaBucketDto> SetFaceGroupingAsync(Guid bucketId, SetFaceGroupingRequest req, CancellationToken ct = default)
+    {
+        var bucket = await OwnedAsync(bucketId, ct, tracking: true);
+        if (faceGrouping is null) throw new InvalidStateException("Face grouping isn't available right now.", "faces_unavailable");
+        await faceGrouping.SetAsync(bucket, req.On, req.GuestsTold, currentUser.UserId, ct);
+        return (await DescribeAsync([bucket], ct))[0];
     }
 
     public async Task<MediaBucketDto> RenameAsync(
@@ -1281,7 +1296,9 @@ public sealed class MediaBucketService(
                 // Back to Free after a pass: when anything above Free's space goes, and how much.
                 plan.Phase == MediaPhase.UploadsClosed ? face?.TrimAt : null,
                 plan.Phase == MediaPhase.UploadsClosed ? face?.TrimBytes : null,
-                PlanCatalog.FreeEventBytes);
+                PlanCatalog.FreeEventBytes,
+                b.FaceGroupingOn,
+                faceGrouping?.Available ?? false);
         }).ToList();
     }
 

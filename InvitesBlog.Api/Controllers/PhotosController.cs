@@ -84,12 +84,35 @@ public sealed class PhotosController(IEventPhotoService photos, IInviteService i
     public async Task<IActionResult> DownloadLinkAsHost(Guid campaignId, [FromBody] ArchiveLinkRequest? req, CancellationToken ct) =>
         ArchiveLink(await photos.PlanArchiveAsync(campaignId, viewerGuestId: null, req?.Ids, ct));
 
+    [HttpPut("/api/campaigns/{campaignId:guid}/photos/people/{personId:guid}")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> NamePersonAsHost(
+        Guid campaignId, Guid personId, [FromBody] Application.Dtos.Photos.NameFacePersonRequest req, CancellationToken ct) =>
+        Success(await photos.NamePersonAsync(campaignId, null, null, personId, req.Name, ct));
+
+    [HttpPost("/api/campaigns/{campaignId:guid}/photos/people/{personId:guid}/ignore")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> IgnorePersonAsHost(Guid campaignId, Guid personId, CancellationToken ct)
+    {
+        await photos.IgnorePersonAsync(campaignId, null, null, personId, ct);
+        return NoContent();
+    }
+
     // ---------- a guest, from an invitation open in the app ----------
 
     [HttpGet("/api/me/invitations/{campaignId:guid}/photos")]
     [HasPermission(Permissions.Photos.Read)]
     public async Task<IActionResult> ForGuest(Guid campaignId, CancellationToken ct) =>
         Success(await photos.GetAsync(campaignId, await GuestAsync(campaignId, ct), ct));
+
+    /// <summary>"That's me, ignore my face", from a guest's view of the album (no account needed).</summary>
+    [HttpPost("/api/me/invitations/{campaignId:guid}/photos/people/{personId:guid}/ignore")]
+    [HasPermission(Permissions.Photos.Read)]
+    public async Task<IActionResult> IgnorePersonAsGuest(Guid campaignId, Guid personId, CancellationToken ct)
+    {
+        await photos.IgnorePersonAsync(campaignId, null, await GuestAsync(campaignId, ct), personId, ct);
+        return NoContent();
+    }
 
     [HttpPost("/api/me/invitations/{campaignId:guid}/photos")]
     [HasPermission(Permissions.Photos.Upload)]

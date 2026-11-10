@@ -106,6 +106,32 @@ public sealed class MediaBucketsController(
         Guid bucketId, [FromBody] RenameMediaBucketRequest req, CancellationToken ct) =>
         Success(await buckets.RenameAsync(bucketId, req, ct));
 
+    /// <summary>
+    /// Face grouping for this album: on (with "my guests are being told" ticked) or off, which deletes every
+    /// face and group in it. The host only.
+    /// </summary>
+    [HttpPut("{bucketId:guid}/face-grouping")]
+    [HasPermission(Permissions.Buckets.Manage)]
+    public async Task<IActionResult> SetFaceGrouping(
+        Guid bucketId, [FromBody] SetFaceGroupingRequest req, CancellationToken ct) =>
+        Success(await buckets.SetFaceGroupingAsync(bucketId, req, ct));
+
+    /// <summary>Names a face group (the host only; blank clears it).</summary>
+    [HttpPut("{bucketId:guid}/people/{personId:guid}")]
+    [HasPermission(Permissions.Buckets.Read)]
+    public async Task<IActionResult> NamePerson(
+        Guid bucketId, Guid personId, [FromBody] Application.Dtos.Photos.NameFacePersonRequest req, CancellationToken ct) =>
+        Success(await photos.NamePersonAsync(null, bucketId, null, personId, req.Name, ct));
+
+    /// <summary>"That's me, ignore my face": anyone who can see the album.</summary>
+    [HttpPost("{bucketId:guid}/people/{personId:guid}/ignore")]
+    [HasPermission(Permissions.Buckets.Read)]
+    public async Task<IActionResult> IgnorePerson(Guid bucketId, Guid personId, CancellationToken ct)
+    {
+        await photos.IgnorePersonAsync(null, bucketId, null, personId, ct);
+        return NoContent();
+    }
+
     // ---------- what is in it ----------
 
     /// <summary>

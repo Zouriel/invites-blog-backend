@@ -159,6 +159,20 @@ public sealed class MediaBucket
     /// </summary>
     public long UsedBytes { get; set; }
 
+    /// <summary>
+    /// Face grouping: photos in this album are grouped by the faces in them (the People filter). Off by default.
+    /// The host switches it on per album and confirms that their guests are being told
+    /// (<see cref="FaceGroupingConfirmedAt"/>); guests see a notice and can opt out. Switching it off deletes
+    /// every face and group of this album (see <see cref="PhotoFace"/>).
+    /// </summary>
+    public bool FaceGroupingOn { get; set; }
+
+    /// <summary>When the host last switched face grouping on, having ticked "my guests are being told".</summary>
+    public DateTimeOffset? FaceGroupingConfirmedAt { get; set; }
+
+    /// <summary>Who switched it on (the host's account).</summary>
+    public Guid? FaceGroupingConfirmedBy { get; set; }
+
     /// <summary>When the current term began. Null on the free tier, which has no term.</summary>
     public DateTimeOffset? TermStartAt { get; set; }
 
