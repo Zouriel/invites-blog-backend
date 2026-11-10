@@ -260,8 +260,8 @@ public static class GuestCameraPage
         <div class="faces" id="faces" role="dialog" aria-modal="true" aria-labelledby="facestitle">
           <div class="facesbox">
             <h1 id="facestitle">Photos here are grouped by face</h1>
-            <p>The host turned on face grouping for this album, so people can find the photos they're in. Face data stays inside this album and is deleted with it.</p>
-            <p>Anyone can opt out in the album: open People and tap "That's me".</p>
+            <p>The host turned this on. We make a numeric template of each face in the photos, only to put photos of the same person together in this album. Templates stay on our own server, are never shared or sold, and are deleted with the photo or album, or when the host turns this off.</p>
+            <p>Anyone can opt out in the album: tap "That's me" on your face. Opting out changes nothing else. <a href="https://invites.blog/privacy#faces" style="color:inherit;">Privacy</a></p>
             <button class="btn primary" id="facesok" type="button">OK, open the camera</button>
             <a class="btn" href="{{E(backPath)}}">Not now</a>
           </div>

@@ -109,6 +109,21 @@ public sealed class MediaRetentionService(
             }
         }
 
+        // Face data's own limit (the Privacy Policy's written retention policy): albums idle for 24 months lose it.
+        if (!DryRun && scope.ServiceProvider.GetService<Application.Services.Faces.IFaceGroupingService>() is { } faces)
+        {
+            try
+            {
+                var idleDays = int.TryParse(config["Faces:IdleAlbumDays"], out var d) && d > 0 ? d : 730;
+                var expired = await faces.ExpireIdleAsync(TimeSpan.FromDays(idleDays), ct);
+                if (expired > 0) logger.LogInformation("Face grouping switched off in {Count} idle albums (face data deleted).", expired);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Expiring idle face data failed.");
+            }
+        }
+
         var report = new SweepReport(ids.Count, _warned, _trimmed, _files, _bytes);
         logger.LogInformation(
             "Media retention sweep{Dry}: {Events} events with photos, {Warned} warned, {Trimmed} cut down to Free, {Files} files and {Bytes} bytes removed.",

@@ -265,21 +265,30 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
     private List<Box> DetectWindow(InferenceSession det, Image<Rgb24> scaled, int ox, int oy)
     {
         // BGR, 0-255, unnormalised: what FaceDetectorYN feeds it. The padding stays black.
-        var input = new DenseTensor<float>([1, 3, DetectSize, DetectSize]);
+        // One flat planar buffer written row by row: DenseTensor's 4-index setter costs more than the model.
+        const int plane = DetectSize * DetectSize;
+        var buffer = new float[3 * plane];
         scaled.ProcessPixelRows(rows =>
         {
-            for (var y = 0; y < DetectSize && oy + y < rows.Height; y++)
+            var h = Math.Min(DetectSize, rows.Height - oy);
+            for (var y = 0; y < h; y++)
             {
                 var row = rows.GetRowSpan(oy + y);
-                for (var x = 0; x < DetectSize && ox + x < row.Length; x++)
+                var w = Math.Min(DetectSize, row.Length - ox);
+                var bPlane = buffer.AsSpan(y * DetectSize, w);
+                var gPlane = buffer.AsSpan(plane + y * DetectSize, w);
+                var rPlane = buffer.AsSpan(2 * plane + y * DetectSize, w);
+                var src = row.Slice(ox, w);
+                for (var x = 0; x < w; x++)
                 {
-                    var px = row[ox + x];
-                    input[0, 0, y, x] = px.B;
-                    input[0, 1, y, x] = px.G;
-                    input[0, 2, y, x] = px.R;
+                    var px = src[x];
+                    bPlane[x] = px.B;
+                    gPlane[x] = px.G;
+                    rPlane[x] = px.R;
                 }
             }
         });
+        var input = new DenseTensor<float>(buffer, [1, 3, DetectSize, DetectSize]);
 
         using var results = det.Run([NamedOnnxValue.CreateFromTensor(det.InputMetadata.Keys.First(), input)]);
         var outputs = results.ToDictionary(r => r.Name, r => r.AsTensor<float>().ToArray());
@@ -347,7 +356,8 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
         // Inverse: source = R⁻¹ (dest - t), where R = [a -b; b a].
         var n = a * a + b * b;
         float ia = a / n, ib = b / n;
-        var input = new DenseTensor<float>([1, 3, FaceSize, FaceSize]);
+        const int plane = FaceSize * FaceSize;
+        var buffer = new float[3 * plane];
         for (var v = 0; v < FaceSize; v++)
         for (var u = 0; u < FaceSize; u++)
         {
@@ -356,10 +366,12 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
             var sy = -ib * dx + ia * dy;
             Sample(rgb, width, height, sx, sy, out var r, out var g, out var bl);
             // RGB, 0-255: FaceRecognizerSF swaps OpenCV's BGR to RGB before the model.
-            input[0, 0, v, u] = r;
-            input[0, 1, v, u] = g;
-            input[0, 2, v, u] = bl;
+            var i = v * FaceSize + u;
+            buffer[i] = r;
+            buffer[plane + i] = g;
+            buffer[2 * plane + i] = bl;
         }
+        var input = new DenseTensor<float>(buffer, [1, 3, FaceSize, FaceSize]);
 
         using var results = rec.Run([NamedOnnxValue.CreateFromTensor(rec.InputMetadata.Keys.First(), input)]);
         var e = results.First().AsTensor<float>().ToArray();

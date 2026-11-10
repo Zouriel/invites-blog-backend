@@ -514,7 +514,9 @@ public sealed class EventPhotoService(
     {
         var box = await BoxForPeopleAsync(campaignId, bucketId, viewerGuestId, ct);
         if (box.Faces is null || !await InBoxAsync(box, personId, ct)) throw new NotFoundException("That group is no longer there.");
-        await faceGrouping!.IgnoreAsync(personId, ct);
+        // Who asked, for the record: an account, a guest of the event, or a viewer of the album.
+        var actor = currentUser.UserId?.ToString() ?? (viewerGuestId is { } g ? $"guest:{g}" : null);
+        await faceGrouping!.IgnoreAsync(personId, ct, actor);
     }
 
     /// <summary>

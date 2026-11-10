@@ -41,6 +41,14 @@ public sealed class FaceIndexService(
         await Task.Delay(TimeSpan.FromSeconds(25), stoppingToken);
         await ReleaseInterruptedAsync(stoppingToken);
 
+        // Two by default: while one photo is on the GPU the next is downloading and decoding. The model itself is
+        // used one picture at a time (FaceAnalyzer's gate) and saving locks the album's row, so groups stay right.
+        var workers = int.TryParse(config["Faces:Workers"], out var w) ? Math.Clamp(w, 1, 4) : 2;
+        await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => LoopAsync(stoppingToken)));
+    }
+
+    private async Task LoopAsync(CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
             var worked = false;
@@ -142,14 +150,21 @@ public sealed class FaceIndexService(
             return;
         }
 
+        var started = System.Diagnostics.Stopwatch.StartNew();
         // The viewing copy (upright, at most 2048 px): plenty for faces, and much smaller than the original.
         var key = storage.KeyFor(photo.Url) ?? throw new InvalidOperationException("The photo has no stored file.");
         var bytes = await storage.GetAsync(key, ct) ?? throw new InvalidOperationException("The photo's file is missing.");
+        var download = started.Elapsed;
         var found = await analyzer.AnalyzeAsync(bytes, ct);
+        var analysed = started.Elapsed - download;
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        // Again, inside the transaction: grouping switched off or the photo removed meanwhile leaves nothing.
-        var stillOn = await db.MediaBuckets.AnyAsync(b => b.Id == job.BucketId && b.FaceGroupingOn, ct);
+        // The album's row, locked: another worker saving a photo of the same album waits, so it sees the groups
+        // this one makes (two new groups for one new person otherwise). Read again here: grouping switched off or
+        // the photo removed meanwhile leaves nothing.
+        var album = (await db.MediaBuckets.FromSqlInterpolated($"SELECT * FROM media_buckets WHERE id = {job.BucketId} FOR UPDATE")
+            .AsNoTracking().ToListAsync(ct)).FirstOrDefault();
+        var stillOn = album is { FaceGroupingOn: true };
         var stillThere = await db.EventPhotos.AnyAsync(p => p.Id == job.Id && p.DeletedAt == null, ct);
         if (stillOn && stillThere)
         {
@@ -201,6 +216,7 @@ public sealed class FaceIndexService(
                      db.EventPhotos.Any(p => p.Id == f.PhotoId && p.DeletedAt != null)))
                 .ExecuteDeleteAsync(CancellationToken.None);
         }
-        logger.LogInformation("Found {Count} faces in photo {PhotoId}", found.Count, job.Id);
+        logger.LogInformation("Found {Count} faces in photo {PhotoId} (download {Download} ms, faces {Analyse} ms, total {Total} ms)",
+            found.Count, job.Id, (int)download.TotalMilliseconds, (int)analysed.TotalMilliseconds, (int)started.Elapsed.TotalMilliseconds);
     }
 }
