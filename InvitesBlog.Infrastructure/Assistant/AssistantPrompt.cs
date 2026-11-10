@@ -155,6 +155,12 @@ public static class AssistantPrompt
         "outline_width": {"type": "number", "description": "The outline's width, 0.5 to 3 usually."}
         """;
 
+    private const string CountdownBox = """
+        "fill": {"type": ["string", "null"], "description": "Hex, theme:key, or null for none."},
+        "stroke": {"type": ["string", "null"]}, "stroke_width": {"type": "number"},
+        "radius": {"type": "number", "description": "Corner radius of the boxes."}
+        """;
+
     private const string ShapeStyle = """
         "fill": {"type": ["string", "null"], "description": "Hex, theme:key, or null for none."},
         "stroke": {"type": ["string", "null"]}, "stroke_width": {"type": "number"},
@@ -207,10 +213,18 @@ public static class AssistantPrompt
            "link": {"type": "string", "description": "For kind link: a link target from the catalog."},
         """ + Box + "," + TextStyle + "," + ShapeStyle + """
          }, "required": ["kind", "y"]}},
-        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted. Resizing a group scales everything in it.",
+        {"name": "add_countdown", "description": "Adds a countdown to the event: the days (and hours, minutes, seconds) left, ticking live on the guest's page. It always counts to the event's own date and time, which each host sets when making their event, so there is no date to give. On the event's day it shows done_text; the day after, it hides.",
+         "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["days", "hours", "minutes", "seconds"], "description": "The smallest unit shown (days always comes first); default seconds."},
+           "look": {"type": "string", "enum": ["tiles", "line"], "description": "tiles: each number over its word, in its own box (fill/stroke/radius style the boxes); line: one line of text. Default tiles."},
+           "gap": {"type": "number", "description": "Space between tiles."}, "done_text": {"type": ["string", "null"], "description": "What it says on the event's day (default \"Today's the day\"); null or empty hides it that day."},
+        """ + Box + "," + TextStyle + "," + CountdownBox + """
+         }, "required": ["y"]}},
+        {"name": "update_element", "description": "Changes an element. Give only the fields to change. Moving an animated element moves its motion with it. text replaces the text (fields as {{path}}); label changes a button's or photo slot's label. On an illustration or picture, color tints it in one colour (see-through parts stay see-through); color null shows it as it was. tint_mode, for an opaque photo: silhouette (default: what stands out from its background takes the colour) or overlay (the photo with the colour multiplied over it). Photo slots can't be tinted. Resizing a group scales everything in it. On a countdown, units, look, gap and done_text change it (fill/stroke/radius style its boxes).",
          "input_schema": {"type": "object", "properties": {"id": {"type": "string"},
            "rotate": {"type": "number"}, "scale": {"type": "number"}, "opacity": {"type": "number"},
-           "text": {"type": "string"}, "label": {"type": "string"}, "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon", "star", "heart", "arch", "ribbon", "bubble", "arrow", "scallop", "wave", "zigzag", "frame", "ticket"]}, "sides": {"type": "integer"},
+           "text": {"type": "string"}, "label": {"type": "string"},
+           "units": {"type": "string", "enum": ["days", "hours", "minutes", "seconds"]}, "look": {"type": "string", "enum": ["tiles", "line"]}, "gap": {"type": "number"}, "done_text": {"type": ["string", "null"]},
+           "kind": {"type": "string", "enum": ["rect", "ellipse", "line", "polygon", "star", "heart", "arch", "ribbon", "bubble", "arrow", "scallop", "wave", "zigzag", "frame", "ticket"]}, "sides": {"type": "integer"},
            "asset": {"type": "string"}, "fit": {"type": "string", "enum": ["cover", "contain", "stretch"], "description": "Pictures: contain keeps its shape, cover crops to fill, stretch fills out of proportion. Photo slots: cover or contain."}, "link": {"type": "string"}, "locked": {"type": "boolean"},
            "tap_scroll": {"type": ["number", "null"], "description": "Tapping it scrolls the page smoothly to this position (a 'see the details' arrow); null: it doesn't."},
            "section": {"type": ["string", "null"], "description": "Who sees it: only guests in this named section (matched to guest roles when the invitation is set up, e.g. bridesmaids); null: everyone."},

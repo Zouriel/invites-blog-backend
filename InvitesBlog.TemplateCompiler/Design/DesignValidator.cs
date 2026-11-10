@@ -236,7 +236,7 @@ public static partial class DesignValidator
                 if (!double.IsFinite(gradient.Angle) || gradient.Stops.Any(t => t.At is { } at && !double.IsFinite(at)))
                     Error("gradient", $"“{label}” has a gradient angle or position that isn't a number.", el.Id);
                 foreach (var stop in gradient.Stops) CheckColor(stop.Color, label, el.Id!, themeKeys, Error, Warn);
-                if (el.Type is "slot" or "dress" or "group")
+                if (el.Type is "slot" or "dress" or "countdown" or "group")
                     Warn("gradient", $"“{label}” can't show a gradient: only shapes, text, buttons, illustrations and pictures can.", el.Id);
             }
             if (el.Shadow is { } shadow)
@@ -392,6 +392,16 @@ public static partial class DesignValidator
                 case "dress":
                     dress++;
                     CheckTypography(el.Dress?.Style, label, el.Id!, themeKeys, Error, Warn);
+                    break;
+                case "countdown":
+                    var cd = el.Countdown ?? new DesignCountdown();
+                    if (cd.Units is not ("days" or "hours" or "minutes" or "seconds"))
+                        Error("countdown", $"“{label}” counts in units we don't know: days, hours, minutes or seconds.", el.Id);
+                    if (cd.Look is not ("tiles" or "line"))
+                        Error("countdown", $"“{label}” has a look we don't know: tiles or line.", el.Id);
+                    CheckColor(cd.Fill, label, el.Id!, themeKeys, Error, Warn);
+                    CheckColor(cd.Stroke, label, el.Id!, themeKeys, Error, Warn);
+                    CheckTypography(cd.Style, label, el.Id!, themeKeys, Error, Warn);
                     break;
                 case "group":
                     if (el.Children is null || el.Children.Count == 0) Warn("group_empty", $"“{label}” is an empty group.", el.Id);

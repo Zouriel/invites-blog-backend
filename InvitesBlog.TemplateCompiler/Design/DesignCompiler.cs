@@ -117,7 +117,7 @@ public static class DesignCompiler
                 if (t.IsFont && DesignCatalog.FindFont(t.Value) is { } f && !OfferedFonts.Contains(f)) OfferedFonts.Add(f);
             foreach (var (el, _, _) in scene.Walk())
             {
-                var font = el.Text?.Style.Font ?? el.Button?.Style.Font ?? el.Dress?.Style.Font;
+                var font = el.Text?.Style.Font ?? el.Button?.Style.Font ?? el.Dress?.Style.Font ?? el.Countdown?.Style.Font;
                 if (font is not null && !font.StartsWith("theme:", StringComparison.Ordinal) && DesignCatalog.FindFont(font) is not null)
                     ids.Add(font);
             }
@@ -430,6 +430,11 @@ public static class DesignCompiler
                 break;
             case "dress":
                 EmitDress(ctx, el, inner, css, cls);
+                break;
+            case "countdown":
+                // Not data-optional: nothing inside is a field, so the empty-field rule would hide it. The
+                // binder hides it instead when the event has no start (ApplyCountdowns).
+                EmitCountdown(ctx, el, inner, css, cls);
                 break;
             case "group":
                 foreach (var child in el.Children ?? [])
@@ -1283,6 +1288,63 @@ public static class DesignCompiler
         css.Append(cls).Append(" .ib-dress__swatch{display:block;width:").Append(size).Append(";height:").Append(size)
             .Append(";border-radius:").Append(dress.Shape == "square" ? DesignCss.U(6) : "50%")
             .Append(";box-shadow:0 0 0 1px color-mix(in srgb, currentColor 25%, transparent)}");
+    }
+
+    /// <summary>Countdown units, largest first: the key the page's script fills, the word, and what shows before it runs.</summary>
+    private static readonly (char Key, string Word, string Zero)[] CountdownUnits =
+        [('d', "days", "0"), ('h', "hours", "00"), ('m', "minutes", "00"), ('s', "seconds", "00")];
+
+    /// <summary>
+    /// A countdown to the event: one span per unit, which the platform's runtime fills every second from
+    /// the event's start (<c>event.startsAt</c>), plus the wording for the day itself. The page carries no
+    /// date of its own, so the same design counts down to whichever event uses it.
+    /// </summary>
+    private static void EmitCountdown(Context ctx, DesignElement el, StringBuilder inner, StringBuilder css, string cls)
+    {
+        var cd = el.Countdown ?? new DesignCountdown();
+        var count = cd.Units switch { "days" => 1, "hours" => 2, "minutes" => 3, _ => 4 };
+        var line = cd.Look == "line";
+        inner.Append("<div class=\"cd\" data-countdown=\"").Append(CountdownUnits[count - 1].Key).Append("\">");
+        for (var i = 0; i < count; i++)
+        {
+            var (key, word, zero) = CountdownUnits[i];
+            inner.Append("<span class=\"cu\" data-u=\"").Append(key).Append("\"><b>").Append(zero).Append("</b><i>")
+                .Append(word).Append("</i></span>");
+        }
+        inner.Append("<span class=\"cx\">").Append(WebUtility.HtmlEncode(Truncate(cd.Done ?? string.Empty, 80))).Append("</span></div>");
+
+        var style = cd.Style;
+        var fill = DesignCss.Color(cd.Fill, ctx.ThemeKeys);
+        var stroke = DesignCss.Color(cd.Stroke, ctx.ThemeKeys);
+        var box = new StringBuilder();
+        if (fill is not null) box.Append("background:").Append(fill).Append(';');
+        if (stroke is not null && cd.StrokeWidth > 0)
+            box.Append("border:").Append(DesignCss.U(DesignCss.Clamp(cd.StrokeWidth, 0, 20))).Append(" solid ").Append(stroke).Append(';');
+        if (box.Length > 0) box.Append("border-radius:").Append(DesignCss.U(DesignCss.Clamp(cd.Radius, 0, 999))).Append(';');
+
+        css.Append(cls).Append(" .cd{width:100%;height:100%;box-sizing:border-box;display:flex;").Append(Typography(ctx, style));
+        if (line)
+        {
+            css.Append("flex-wrap:wrap;align-items:center;column-gap:0.4em;justify-content:")
+                .Append(style.Align switch { "left" => "flex-start", "right" => "flex-end", _ => "center" }).Append(';');
+            if (box.Length > 0) css.Append(box).Append("padding:0 ").Append(DesignCss.U(12)).Append(';');
+            css.Append('}');
+            css.Append(cls).Append(" .cu{white-space:nowrap}");
+            css.Append(cls).Append(" .cu i{font-style:inherit;margin-left:0.25em}");
+        }
+        else
+        {
+            css.Append("align-items:stretch;justify-content:center;gap:").Append(DesignCss.U(DesignCss.Clamp(cd.Gap, 0, 60))).Append('}');
+            css.Append(cls).Append(" .cu{flex:1 1 0;min-width:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;")
+                .Append(box).Append('}');
+            css.Append(cls).Append(" .cu b{line-height:1}");
+            css.Append(cls).Append(" .cu i{font-style:inherit;font-size:").Append(DesignCss.U(DesignCss.Clamp(DesignCss.Clamp(style.Size, 4, 400) * 0.3, 8, 120)))
+                .Append(";letter-spacing:0.08em;margin-top:").Append(DesignCss.U(4)).Append(";opacity:0.8}");
+        }
+        css.Append(cls).Append(" .cu b{font-weight:inherit;font-variant-numeric:tabular-nums}");
+        css.Append(cls).Append(" .cx{display:none;align-self:center;flex:1 1 auto}");
+        css.Append(cls).Append(" .cd[data-done] .cu{display:none}");
+        css.Append(cls).Append(" .cd[data-done] .cx{display:block}");
     }
 
     // ----- Helpers -----------------------------------------------------------------------------------

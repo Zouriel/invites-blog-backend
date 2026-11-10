@@ -307,7 +307,7 @@ public static class DesignCatalog
 
     // ----- Element types -----
 
-    public static readonly string[] ElementTypes = ["text", "shape", "svg", "image", "slot", "rsvp", "link", "dress", "group"];
+    public static readonly string[] ElementTypes = ["text", "shape", "svg", "image", "slot", "rsvp", "link", "dress", "countdown", "group"];
 
     /// <summary>The paths a link element may point at, besides <c>event.*</c> url fields.</summary>
     public static readonly string[] LinkPaths = ["camera.link", "photos.link", "event.venue.mapLink"];

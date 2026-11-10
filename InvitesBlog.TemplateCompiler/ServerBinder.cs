@@ -52,6 +52,7 @@ public static class ServerBinder
         HideEmptyOptionals(doc);
         ApplyBlocks(doc, data["resolvedBlocks"] as JsonArray);
         ApplyDressColors(doc, data["dressColors"] as JsonArray);
+        ApplyCountdowns(doc, data);
         StripReducedMotion(doc);
         SwapRuntime(doc, data);
 
@@ -364,6 +365,16 @@ public static class ServerBinder
             sb.Append("</div></div>");
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// A countdown counts to <c>event.startsAt</c>, which the runtime reads from the payload; with no start
+    /// to count to it hides, as any element whose value is missing does.
+    /// </summary>
+    private static void ApplyCountdowns(IHtmlDocument doc, JsonObject data)
+    {
+        if (Resolve(data, "event.startsAt") is not null) return;
+        foreach (var el in doc.QuerySelectorAll("[data-countdown]")) Hide(el);
     }
 
     private static void Hide(IElement el)

@@ -221,7 +221,7 @@ public sealed class DesignAsset
 public sealed class DesignElement
 {
     [JsonPropertyName("id")] public string Id { get; set; } = default!;
-    /// <summary>text | shape | svg | image | slot | rsvp | link | dress | group.</summary>
+    /// <summary>text | shape | svg | image | slot | rsvp | link | dress | countdown | group.</summary>
     [JsonPropertyName("type")] public string Type { get; set; } = default!;
     [JsonPropertyName("name")] public string? Name { get; set; }
 
@@ -255,6 +255,7 @@ public sealed class DesignElement
     [JsonPropertyName("slot")] public DesignSlot? Slot { get; set; }
     [JsonPropertyName("button")] public DesignButton? Button { get; set; }
     [JsonPropertyName("dress")] public DesignDress? Dress { get; set; }
+    [JsonPropertyName("countdown")] public DesignCountdown? Countdown { get; set; }
     [JsonPropertyName("children")] public List<DesignElement>? Children { get; set; }
 
     /// <summary>Editor-only: not emitted, never affects output.</summary>
@@ -680,5 +681,29 @@ public sealed class DesignDress
     /// <summary>circle | square.</summary>
     [JsonPropertyName("shape")] public string Shape { get; set; } = "circle";
     [JsonPropertyName("gap")] public double Gap { get; set; } = 10;
+    [JsonPropertyName("style")] public DesignTypography Style { get; set; } = new();
+}
+
+/// <summary>
+/// The time left until the event starts, counting down live on the guest's page. The moment comes from
+/// the event itself (its date, time and time zone), never from the design, so a template counts down to
+/// whichever event uses it. On the event's day it shows <see cref="Done"/>; after that day it hides.
+/// </summary>
+public sealed class DesignCountdown
+{
+    /// <summary>days | hours | minutes | seconds: the smallest unit shown (days always comes first).</summary>
+    [JsonPropertyName("units")] public string Units { get; set; } = "seconds";
+    /// <summary>tiles (each number over its word, in its own box) | line (one line of text).</summary>
+    [JsonPropertyName("look")] public string Look { get; set; } = "tiles";
+    /// <summary>The box behind each tile (or behind the line).</summary>
+    [JsonPropertyName("fill")] public string? Fill { get; set; }
+    [JsonPropertyName("stroke")] public string? Stroke { get; set; }
+    [JsonPropertyName("strokeWidth")] public double StrokeWidth { get; set; }
+    [JsonPropertyName("radius")] public double Radius { get; set; } = 12;
+    /// <summary>Space between tiles.</summary>
+    [JsonPropertyName("gap")] public double Gap { get; set; } = 10;
+    /// <summary>What it says on the event's day; empty hides it that day.</summary>
+    [JsonPropertyName("done")] public string? Done { get; set; } = "Today's the day";
+    /// <summary>The numbers; the words under them are a smaller size of the same type.</summary>
     [JsonPropertyName("style")] public DesignTypography Style { get; set; } = new();
 }
