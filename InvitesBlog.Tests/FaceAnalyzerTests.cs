@@ -32,12 +32,13 @@ public class FaceAnalyzerTests
     private static readonly string? Models = Environment.GetEnvironmentVariable("FACE_MODELS");
     private static readonly string? Samples = Environment.GetEnvironmentVariable("FACE_SAMPLES");
 
-    private static FaceAnalyzer Analyzer(string? dir, string device = "cpu", int idle = 60) => new(
+    private static FaceAnalyzer Analyzer(string? dir, string device = "cpu", int idle = 60, int tile = 0) => new(
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Faces:ModelDir"] = dir,
             ["Faces:Device"] = device,
             ["Faces:IdleSeconds"] = idle.ToString(),
+            ["Faces:TileEdge"] = tile.ToString(),
         }).Build(),
         NullLogger<FaceAnalyzer>.Instance);
 
@@ -114,6 +115,25 @@ public class FaceAnalyzerTests
         var family = mine["family"];
         var fathers = family.Count(f => FaceClustering.Similarity(f.Embedding, mine["obama1"][0].Embedding) > FaceClustering.DefaultThreshold);
         Assert.Equal(1, fathers);
+    }
+
+    [FaceModelFact]
+    public async Task Tiles_find_more_of_a_crowd_and_lose_no_face()
+    {
+        var bytes = await File.ReadAllBytesAsync(Path.Combine(Samples!, "cabinet.jpg"));
+        var plain = await Analyzer(Models).AnalyzeAsync(bytes, CancellationToken.None);
+        var tiled = await Analyzer(Models, tile: 1280).AnalyzeAsync(bytes, CancellationToken.None);
+        Console.WriteLine($"cabinet: {plain.Count} faces at 640, {tiled.Count} with tiles");
+        Assert.True(tiled.Count >= plain.Count);
+        foreach (var f in plain)
+            Assert.Contains(tiled, t => Iou([f.X, f.Y, f.W, f.H], t) > 0.5);
+        // No face twice: no two tiled boxes overlap much.
+        for (var i = 0; i < tiled.Count; i++)
+        for (var j = i + 1; j < tiled.Count; j++)
+            Assert.True(Iou([tiled[i].X, tiled[i].Y, tiled[i].W, tiled[i].H], tiled[j]) < 0.3);
+        // And the portraits come out the same as without tiles: one face each.
+        var one = await Analyzer(Models, tile: 1280).AnalyzeAsync(await File.ReadAllBytesAsync(Path.Combine(Samples!, "obama2.jpg")), CancellationToken.None);
+        Assert.Single(one);
     }
 
     [FaceModelFact]

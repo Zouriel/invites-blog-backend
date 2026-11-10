@@ -104,21 +104,20 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
         var pixels = new byte[image.Width * image.Height * 3];
         image.CopyPixelDataTo(pixels);
 
-        var scale = (float)DetectSize / Math.Max(image.Width, image.Height);
-        var found = Detect(det, image, scale);
+        var found = Detect(det, image);
         var faces = new List<DetectedFace>();
         foreach (var f in found)
         {
-            var w = f.W / scale;
+            var w = f.W;
             if (w < MinFacePixels) continue;
             var landmarks = new float[5, 2];
             for (var i = 0; i < 5; i++)
             {
-                landmarks[i, 0] = f.Landmarks[i * 2] / scale;
-                landmarks[i, 1] = f.Landmarks[i * 2 + 1] / scale;
+                landmarks[i, 0] = f.Landmarks[i * 2];
+                landmarks[i, 1] = f.Landmarks[i * 2 + 1];
             }
             var embedding = Fingerprint(rec, pixels, image.Width, image.Height, landmarks);
-            float x = f.X / scale, y = f.Y / scale, h = f.H / scale;
+            float x = f.X, y = f.Y, h = f.H;
             x = Math.Max(0, x);
             y = Math.Max(0, y);
             faces.Add(new DetectedFace(
@@ -190,24 +189,91 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
 
     private sealed record Box(float X, float Y, float W, float H, float Score, float[] Landmarks);
 
-    /// <summary>YuNet on the 640×640 padded picture; boxes and landmarks in that picture's pixels.</summary>
-    private List<Box> Detect(InferenceSession det, Image<Rgb24> image, float scale)
+    /// <summary>
+    /// How large the picture is scanned in tiles as well, for small faces in crowd shots (<c>Faces:TileEdge</c>;
+    /// 0 = off). By default 1280 on the GPU, where the four extra passes cost little, and off on the CPU.
+    /// </summary>
+    private int TileEdge => int.TryParse(config["Faces:TileEdge"], out var v) ? v : Device == "gpu" ? 1280 : 0;
+
+    /// <summary>
+    /// The faces in the picture, in its own pixels: the whole picture at 640, and, when <see cref="TileEdge"/>
+    /// is on and the picture is big enough, overlapping 640×640 tiles of it scaled to that size. A face seen
+    /// twice is kept once (the surer box).
+    /// </summary>
+    private List<Box> Detect(InferenceSession det, Image<Rgb24> image)
+    {
+        var longest = Math.Max(image.Width, image.Height);
+        var boxes = DetectAt(det, image, (float)DetectSize / longest, whole: true);
+        var tile = TileEdge;
+        if (tile > DetectSize && longest > DetectSize * 1.25f)
+            boxes.AddRange(DetectAt(det, image, (float)Math.Min(tile, longest) / longest, whole: false));
+        return Suppress(boxes, 0.3f);
+    }
+
+    /// <summary>Overlap between tiles, so a face on a seam is whole in one of them.</summary>
+    private const int TileOverlap = 160;
+
+    private List<Box> DetectAt(InferenceSession det, Image<Rgb24> image, float scale, bool whole)
     {
         var w = Math.Max(1, (int)MathF.Round(image.Width * scale));
         var h = Math.Max(1, (int)MathF.Round(image.Height * scale));
-        using var small = image.Clone(x => x.Resize(w, h, scale < 1 ? KnownResamplers.Box : KnownResamplers.Triangle));
+        using var scaled = image.Clone(x => x.Resize(w, h, scale < 1 ? KnownResamplers.Box : KnownResamplers.Triangle));
+        var boxes = new List<Box>();
+        foreach (var oy in whole ? [0] : Starts(h))
+        foreach (var ox in whole ? [0] : Starts(w))
+        {
+            foreach (var b in DetectWindow(det, scaled, ox, oy))
+            {
+                // A face cut by a tile's inner edge is found whole in the next tile (they overlap): skip the half.
+                if (!whole && ((ox > 0 && b.X < 4) || (oy > 0 && b.Y < 4)
+                               || (ox + DetectSize < w && b.X + b.W > DetectSize - 4)
+                               || (oy + DetectSize < h && b.Y + b.H > DetectSize - 4)))
+                    continue;
+                var lm = new float[10];
+                for (var i = 0; i < 5; i++)
+                {
+                    lm[i * 2] = (b.Landmarks[i * 2] + ox) / scale;
+                    lm[i * 2 + 1] = (b.Landmarks[i * 2 + 1] + oy) / scale;
+                }
+                boxes.Add(new Box((b.X + ox) / scale, (b.Y + oy) / scale, b.W / scale, b.H / scale, b.Score, lm));
+            }
+        }
+        return boxes;
+    }
+
+    /// <summary>Where tiles start along one side so they cover it with <see cref="TileOverlap"/>.</summary>
+    private static int[] Starts(int length)
+    {
+        if (length <= DetectSize) return [0];
+        var starts = new List<int>();
+        for (var s = 0; ; s += DetectSize - TileOverlap)
+        {
+            if (s + DetectSize >= length)
+            {
+                starts.Add(length - DetectSize);
+                break;
+            }
+            starts.Add(s);
+        }
+        return starts.Distinct().ToArray();
+    }
+
+    /// <summary>YuNet on one 640×640 window of the picture (padded black past its edge); boxes in that window's pixels.</summary>
+    private List<Box> DetectWindow(InferenceSession det, Image<Rgb24> scaled, int ox, int oy)
+    {
         // BGR, 0-255, unnormalised: what FaceDetectorYN feeds it. The padding stays black.
         var input = new DenseTensor<float>([1, 3, DetectSize, DetectSize]);
-        small.ProcessPixelRows(rows =>
+        scaled.ProcessPixelRows(rows =>
         {
-            for (var y = 0; y < rows.Height; y++)
+            for (var y = 0; y < DetectSize && oy + y < rows.Height; y++)
             {
-                var row = rows.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++)
+                var row = rows.GetRowSpan(oy + y);
+                for (var x = 0; x < DetectSize && ox + x < row.Length; x++)
                 {
-                    input[0, 0, y, x] = row[x].B;
-                    input[0, 1, y, x] = row[x].G;
-                    input[0, 2, y, x] = row[x].R;
+                    var px = row[ox + x];
+                    input[0, 0, y, x] = px.B;
+                    input[0, 1, y, x] = px.G;
+                    input[0, 2, y, x] = px.R;
                 }
             }
         });
@@ -243,7 +309,7 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
                 boxes.Add(new Box(cx - bw / 2, cy - bh / 2, bw, bh, score, landmarks));
             }
         }
-        return Suppress(boxes, 0.3f);
+        return boxes;
     }
 
     /// <summary>Keeps the surest of boxes that overlap by more than <paramref name="iou"/>.</summary>
