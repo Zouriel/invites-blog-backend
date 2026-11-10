@@ -61,6 +61,7 @@ public class PostgresApiFixture : IAsyncLifetime
     public ApnsStub Apns { get; } = new();
     public FcmStub Fcm { get; } = new();
     public AppleIdStub Apple { get; } = new();
+    public FakeFaceAnalyzer Faces { get; } = new();
     public IServiceProvider Services => _factory!.Services;
     public string StorageRoot => _storageRoot;
 
@@ -265,6 +266,11 @@ public class PostgresApiFixture : IAsyncLifetime
                 services.RemoveAll<IEmailSender>();
                 services.AddSingleton<IEmailSender>(fixture.Mail);
 
+                // Face grouping without the models: a stand-in that returns the faces a test sets.
+                services.RemoveAll<IFaceAnalyzer>();
+                services.AddSingleton<IFaceAnalyzer>(fixture.Faces);
+                services.AddSingleton<InvitesBlog.Infrastructure.Faces.FaceIndexService>();
+
                 services.AddSingleton<IStartupFilter, TestAddressFilter>();
 
                 // Apple's push service: the stand-in answers instead, behind the client's real pipeline.
@@ -383,4 +389,26 @@ public sealed class PostgresTheoryAttribute : TheoryAttribute
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PostgresApiFixture.ServerVariable)))
             Skip = $"Set {PostgresApiFixture.ServerVariable} to run against real Postgres.";
     }
+}
+
+/// <summary>Faces for the face-grouping tests: whatever <see cref="Next"/> says, for any picture.</summary>
+public sealed class FakeFaceAnalyzer : IFaceAnalyzer
+{
+    public bool Available { get; set; } = true;
+    public List<DetectedFace> Next { get; set; } = [];
+
+    public Task<IReadOnlyList<DetectedFace>> AnalyzeAsync(byte[] image, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<DetectedFace>>(Next.ToList());
+
+    /// <summary>A unit-length fingerprint pointing mostly along <paramref name="axis"/>: one axis per person.</summary>
+    public static float[] Person(int axis, float wobble = 0f)
+    {
+        var e = new float[128];
+        e[axis] = 1f;
+        e[(axis + 1) % 128] = wobble;
+        var n = MathF.Sqrt(e.Sum(x => x * x));
+        return e.Select(x => x / n).ToArray();
+    }
+
+    public static DetectedFace Face(int person, float x = 0.4f, float wobble = 0f) => new(x, 0.3f, 0.1f, 0.1f, 0.95f, Person(person, wobble));
 }

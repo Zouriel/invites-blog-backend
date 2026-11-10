@@ -38,6 +38,12 @@ public interface IFaceGroupingService
 
     /// <summary>"Ignore my face": deletes the group's faces and keeps it out of grouping.</summary>
     Task IgnoreAsync(Guid personId, CancellationToken ct);
+
+    /// <summary>Whether this album groups faces: what the camera's notice asks.</summary>
+    Task<bool> OnForBucketAsync(Guid bucketId, CancellationToken ct);
+
+    /// <summary>Whether any album of this event groups faces.</summary>
+    Task<bool> OnForCampaignAsync(Guid campaignId, CancellationToken ct);
 }
 
 public sealed class FaceGroupingService(
@@ -177,6 +183,12 @@ public sealed class FaceGroupingService(
         return dto?.People.FirstOrDefault(p => p.Id == personId)
                ?? throw new NotFoundException("That group is no longer there.");
     }
+
+    public Task<bool> OnForBucketAsync(Guid bucketId, CancellationToken ct) =>
+        buckets.Query().AnyAsync(b => b.Id == bucketId && b.FaceGroupingOn, ct);
+
+    public Task<bool> OnForCampaignAsync(Guid campaignId, CancellationToken ct) =>
+        buckets.Query().AnyAsync(b => b.CampaignId == campaignId && b.FaceGroupingOn, ct);
 
     public async Task IgnoreAsync(Guid personId, CancellationToken ct)
     {
