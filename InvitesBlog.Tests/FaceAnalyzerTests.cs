@@ -131,6 +131,13 @@ public class FaceAnalyzerTests
         for (var i = 0; i < tiled.Count; i++)
         for (var j = i + 1; j < tiled.Count; j++)
             Assert.True(Iou([tiled[i].X, tiled[i].Y, tiled[i].W, tiled[i].H], tiled[j]) < 0.3);
+        // A film contact sheet (a wide strip of five frames): its faces are tiny at 640, so tiles must find more.
+        var strip = await File.ReadAllBytesAsync(Path.Combine(Samples!, "crowd.jpg"));
+        var stripPlain = await Analyzer(Models).AnalyzeAsync(strip, CancellationToken.None);
+        var stripTiled = await Analyzer(Models, tile: 1280).AnalyzeAsync(strip, CancellationToken.None);
+        Console.WriteLine($"crowd: {stripPlain.Count} faces at 640, {stripTiled.Count} with tiles");
+        Assert.True(stripTiled.Count >= stripPlain.Count + 5, $"tiles found {stripTiled.Count}, plain {stripPlain.Count}");
+
         // And the portraits come out the same as without tiles: one face each.
         var one = await Analyzer(Models, tile: 1280).AnalyzeAsync(await File.ReadAllBytesAsync(Path.Combine(Samples!, "obama2.jpg")), CancellationToken.None);
         Assert.Single(one);
