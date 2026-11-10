@@ -77,6 +77,55 @@ public static class TemplateRuntime
             } catch (e) {}
           }
 
+          // Countdowns ([data-countdown], from the designer) count to the event's start. Days-only counts
+          // calendar days on the event's clock, so the day before reads "1 day" whatever the hour; the
+          // smaller units count the exact time left. On the event's day each shows its own wording
+          // ([data-done]); after that day it hides, since there is nothing left to count to.
+          function countdowns() {
+            var nodes = Array.prototype.slice.call(document.querySelectorAll('[data-countdown]'));
+            var ev = data && data.event;
+            if (!nodes.length || !ev || !ev.startsAt) return;
+            var at = Date.parse(ev.startsAt);
+            if (isNaN(at)) return;
+            var days = null;
+            try {
+              days = new Intl.DateTimeFormat('en-US', { timeZone: ev.timeZone || undefined, year: 'numeric', month: 'numeric', day: 'numeric' });
+            } catch (e) { days = null; }
+            function dayOf(ms) {
+              if (!days) return Math.floor(ms / 86400000);
+              var p = {};
+              days.formatToParts(new Date(ms)).forEach(function (x) { if (x.type !== 'literal') p[x.type] = +x.value; });
+              return Math.round(Date.UTC(p.year, p.month - 1, p.day) / 86400000);
+            }
+            var eventDay = dayOf(at);
+            var words = { d: ['day', 'days'], h: ['hour', 'hours'], m: ['minute', 'minutes'], s: ['second', 'seconds'] };
+            function two(n) { return n < 10 ? '0' + n : '' + n; }
+            function tick() {
+              var now = Date.now(), today = dayOf(now), left = Math.max(0, at - now);
+              nodes.forEach(function (n) {
+                var smallest = n.getAttribute('data-countdown');
+                if (today > eventDay) { n.style.display = 'none'; return; }
+                var done = smallest === 'd' ? today >= eventDay : left <= 0;
+                if (done) {
+                  n.setAttribute('data-done', '');
+                  if (!(n.querySelector('.cx') || {}).textContent) n.style.visibility = 'hidden';
+                  return;
+                }
+                var v = smallest === 'd'
+                  ? { d: eventDay - today }
+                  : { d: Math.floor(left / 86400000), h: Math.floor(left / 3600000) % 24, m: Math.floor(left / 60000) % 60, s: Math.floor(left / 1000) % 60 };
+                Array.prototype.forEach.call(n.querySelectorAll('[data-u]'), function (u) {
+                  var k = u.getAttribute('data-u'), x = v[k] || 0;
+                  var b = u.querySelector('b'), i = u.querySelector('i');
+                  if (b) b.textContent = k === 'd' ? '' + x : two(x);
+                  if (i && words[k]) i.textContent = words[k][x === 1 ? 0 : 1];
+                });
+              });
+            }
+            tick();
+            setInterval(tick, 1000);
+          }
+
           var sections = [];
           var envelope = null;
 
@@ -109,6 +158,7 @@ public static class TemplateRuntime
               document.querySelectorAll('.ib-section, [data-reveal]'));
             envelope = document.querySelector('.ib-envelope, [data-envelope]');
             localiseWhen();
+            countdowns();
             revealInView(); // whatever is already on screen
             publish(0);
             window.addEventListener('scroll', function () {

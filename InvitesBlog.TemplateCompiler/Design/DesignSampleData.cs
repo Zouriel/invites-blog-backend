@@ -13,6 +13,9 @@ public static class DesignSampleData
     public const string Filled = "filled";
     public const string Empty = "empty";
     public const string TwoRoles = "roles";
+    /// <summary>The sample date and time (Saturday 28 August 2027, 6:30 PM in the Maldives) as the payload's instant.</summary>
+    public const string SampleStartsAt = "2027-08-28T13:30:00Z";
+    public const string SampleTimeZone = "Indian/Maldives";
 
     /// <param name="mode">filled | empty (only what's always present) | roles (a guest holding two roles).</param>
     /// <param name="blocks">Blocks to show; null shows every block the scene uses.</param>
@@ -33,6 +36,9 @@ public static class DesignSampleData
             ["description"] = Sample("event.description"),
             ["date"] = Sample("event.date"),
             ["time"] = Sample("event.time"),
+            // Every event has a start, so even the "empty" preview has one: it's what a countdown counts to.
+            ["startsAt"] = SampleStartsAt,
+            ["timeZone"] = SampleTimeZone,
             ["schedule"] = Sample("event.schedule"),
             ["dressCode"] = Sample("event.dressCode"),
             ["hashtag"] = Sample("event.hashtag"),
