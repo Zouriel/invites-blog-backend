@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
 using InvitesBlog.Api.Rendering;
 using InvitesBlog.Application.Dtos.Invites;
@@ -582,7 +583,8 @@ public sealed class GuestController(
             $"/r/{renderId}/photos",
             box.EventTitle,
             await PaletteAsync(inviteId.Value, ct),
-            nonce);
+            nonce,
+            facesNotice: box.Faces is not null);
 
         return CameraHtml(html, nonce);
     }
@@ -751,7 +753,9 @@ public sealed class GuestController(
             nonce,
             backLabel: "Invitation",
             gateNote: "Your phone didn't let us open the camera. Check that this site is allowed to use it, then try again.",
-            gateAction: "Back to the invitation");
+            gateAction: "Back to the invitation",
+            facesNotice: HttpContext.RequestServices.GetService<Application.Services.Faces.IFaceGroupingService>() is { } faces
+                         && await faces.OnForBucketAsync(camera.BucketId, ct));
         return CameraHtml(html, nonce);
     }
 

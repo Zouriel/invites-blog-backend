@@ -100,6 +100,8 @@ public static class DependencyInjection
         services.AddScoped<IDesignEngine, DesignEngine>();
         // "Remove background" for pictures in the designer: ISNet on our own CPU (the model file ships in the image).
         services.AddSingleton<IBackgroundRemover, Images.BackgroundRemover>();
+        // Face grouping: our own models, on the GPU when there is one; loaded for work, released after a minute idle.
+        services.AddSingleton<IFaceAnalyzer, Faces.FaceAnalyzer>();
 
         // The designer assistant (Claude). Without Assistant__ApiKey it reports itself unavailable.
         services.AddSingleton(config.GetSection(Application.Services.Designs.Assistant.AssistantOptions.Section).Get<Application.Services.Designs.Assistant.AssistantOptions>()

@@ -41,6 +41,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CampaignAsset> CampaignAssets => Set<CampaignAsset>();
     public DbSet<EventPhoto> EventPhotos => Set<EventPhoto>();
     public DbSet<VideoTrimJob> VideoTrimJobs => Set<VideoTrimJob>();
+    public DbSet<PhotoFace> PhotoFaces => Set<PhotoFace>();
+    public DbSet<FacePerson> FacePeople => Set<FacePerson>();
+    public DbSet<FaceJob> FaceJobs => Set<FaceJob>();
     public DbSet<MediaBucket> MediaBuckets => Set<MediaBucket>();
     public DbSet<MediaBucketQr> MediaBucketQrs => Set<MediaBucketQr>();
     public DbSet<MediaBucketMember> MediaBucketMembers => Set<MediaBucketMember>();
@@ -446,6 +449,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => new { x.Status, x.NextAttemptAt }).HasDatabaseName("idx_video_trim_jobs_due");
             // A photo's row can be removed outright (a deleted account); nothing about the job outlives it.
             e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.Id).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Face grouping (biometric data): everything cascades from the album, and faces and jobs from the photo too,
+        // so no hard delete of either can leave a face behind. Soft deletes are handled in FaceGroupingService.
+        b.Entity<FacePerson>(e =>
+        {
+            e.ToTable("face_people");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(FacePerson.MaxNameLength);
+            e.HasIndex(x => x.BucketId).HasDatabaseName("idx_face_people_bucket");
+            e.HasOne<MediaBucket>().WithMany().HasForeignKey(x => x.BucketId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PhotoFace>(e =>
+        {
+            e.ToTable("photo_faces");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.PhotoId).HasDatabaseName("idx_photo_faces_photo");
+            e.HasIndex(x => new { x.BucketId, x.PersonId }).HasDatabaseName("idx_photo_faces_bucket_person");
+            e.HasOne<MediaBucket>().WithMany().HasForeignKey(x => x.BucketId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.PhotoId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<FacePerson>().WithMany().HasForeignKey(x => x.PersonId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<FaceJob>(e =>
+        {
+            e.ToTable("face_jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(200);
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt }).HasDatabaseName("idx_face_jobs_due");
+            e.HasIndex(x => x.BucketId).HasDatabaseName("idx_face_jobs_bucket");
+            e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.Id).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<MediaBucket>().WithMany().HasForeignKey(x => x.BucketId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<MediaBucket>(e =>

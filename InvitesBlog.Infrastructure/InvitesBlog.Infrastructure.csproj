@@ -7,7 +7,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
+    <!-- GPU build (it includes the CPU one). 1.26 is the newest whose GPU build uses CUDA 12; 1.27+ use CUDA 13, which no longer supports the server's Pascal card (GTX 1050 Ti). -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Linux" Version="1.26.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="AWSSDK.S3" Version="4.0.2.6" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />

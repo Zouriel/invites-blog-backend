@@ -290,6 +290,10 @@ public sealed class MediaRetentionService(
         campaign.MediaTrimBytes = 0;
         await db.SaveChangesAsync(ct);
 
+        // Their faces (biometric data) go with them.
+        await db.PhotoFaces.Where(f => ids.Contains(f.PhotoId)).ExecuteDeleteAsync(ct);
+        await db.FaceJobs.Where(j => ids.Contains(j.Id)).ExecuteDeleteAsync(ct);
+
         // Space back, in the database directly (UsedBytes is ignored on a tracked save; see AppDbContext).
         foreach (var group in photos.Where(p => p.BucketId != null).GroupBy(p => p.BucketId!.Value))
         {
@@ -338,6 +342,13 @@ public sealed class MediaRetentionService(
             .Where(p => p.CampaignId == campaignId || (p.BucketId != null && bucketIds.Contains(p.BucketId.Value)))
             .ToListAsync(ct);
         foreach (var photo in photos) photo.DeletedAt ??= now;
+
+        // The event is gone: so is all its face data (faces, groups, queued photos).
+        await db.PhotoFaces.Where(f => bucketIds.Contains(f.BucketId)).ExecuteDeleteAsync(ct);
+        await db.FacePeople.Where(f => bucketIds.Contains(f.BucketId)).ExecuteDeleteAsync(ct);
+        await db.FaceJobs.Where(f => bucketIds.Contains(f.BucketId)).ExecuteDeleteAsync(ct);
+        await db.MediaBuckets.Where(b => bucketIds.Contains(b.Id) && b.FaceGroupingOn)
+            .ExecuteUpdateAsync(s => s.SetProperty(b => b.FaceGroupingOn, false), ct);
 
         if (_storage is { } storage)
         {

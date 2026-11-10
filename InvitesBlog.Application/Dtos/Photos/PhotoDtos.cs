@@ -34,7 +34,9 @@ public sealed record EventPhotoDto(
     /// <summary>How many people hearted this (accounts still active). Shown in a corner of the tile.</summary>
     int FavouriteCount = 0,
     /// <summary>Whether the signed-in caller hearted it. Always false for a guest without an account.</summary>
-    bool Favourited = false);
+    bool Favourited = false,
+    /// <summary>The face groups (People) seen in it, when its album has face grouping on. Null otherwise.</summary>
+    IReadOnlyList<Guid>? People = null);
 
 /// <summary>An event's photo box as a guest or host sees it.</summary>
 public sealed record EventPhotoBoxDto(
@@ -58,4 +60,25 @@ public sealed record EventPhotoBoxDto(
     string? VenueName = null,
     string? VenueLogoUrl = null,
     /// <summary>A save the date: no album, so no photos to show and nothing to add.</summary>
-    bool SaveTheDate = false);
+    bool SaveTheDate = false,
+    /// <summary>
+    /// Face grouping, when any album in the box has it on: the notice to show, the People filter's groups, and
+    /// whether this caller may name them. Null when it's off everywhere.
+    /// </summary>
+    FaceGroupingDto? Faces = null);
+
+/// <summary>
+/// Face grouping in a box. <c>People</c> are the groups worth filtering by (named, or in more than one photo),
+/// most photos first. <c>Waiting</c> is how many photos are still to be looked at.
+/// </summary>
+public sealed record FaceGroupingDto(bool On, bool CanName, int Waiting, IReadOnlyList<FacePersonDto> People);
+
+/// <summary>
+/// One face group. The cover is a photo's thumbnail plus where the face is in it (fractions, 0-1), so a client
+/// crops it on screen and no face picture is ever stored.
+/// </summary>
+public sealed record FacePersonDto(
+    Guid Id, string? Name, int PhotoCount, string CoverUrl, float CoverX, float CoverY, float CoverW, float CoverH);
+
+/// <summary>Naming a face group. Blank clears the name.</summary>
+public sealed record NameFacePersonRequest(string? Name);

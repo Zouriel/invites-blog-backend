@@ -28,6 +28,7 @@ builder.Services.AddHostedService<MediaRetentionService>();
 builder.Services.AddHostedService<PassReminderSweeper>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Photos.DirectUploadProcessor>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Video.VideoTrimService>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Faces.FaceIndexService>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.PaymentSweeper>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.GooglePlay.GooglePlaySweeper>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Payments.AppStore.AppStoreSweeper>();

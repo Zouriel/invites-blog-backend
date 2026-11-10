@@ -1092,6 +1092,97 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("event_photos", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.FaceJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid>("BucketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("bucket_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("note");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BucketId")
+                        .HasDatabaseName("idx_face_jobs_bucket");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("idx_face_jobs_due");
+
+                    b.ToTable("face_jobs", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.FacePerson", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BucketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("bucket_id");
+
+                    b.PrimitiveCollection<float[]>("Centroid")
+                        .IsRequired()
+                        .HasColumnType("real[]")
+                        .HasColumnName("centroid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FaceCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("face_count");
+
+                    b.Property<bool>("Ignored")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ignored");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BucketId")
+                        .HasDatabaseName("idx_face_people_bucket");
+
+                    b.ToTable("face_people", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Favourite", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1529,6 +1620,18 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("EventDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("event_date");
+
+                    b.Property<DateTimeOffset?>("FaceGroupingConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("face_grouping_confirmed_at");
+
+                    b.Property<Guid?>("FaceGroupingConfirmedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("face_grouping_confirmed_by");
+
+                    b.Property<bool>("FaceGroupingOn")
+                        .HasColumnType("boolean")
+                        .HasColumnName("face_grouping_on");
 
                     b.Property<DateTimeOffset?>("FavouritesNotifiedAt")
                         .HasColumnType("timestamp with time zone")
@@ -2061,6 +2164,67 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDatabaseName("idx_permissions_name");
 
                     b.ToTable("permissions", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PhotoFace", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BucketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("bucket_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.PrimitiveCollection<float[]>("Embedding")
+                        .IsRequired()
+                        .HasColumnType("real[]")
+                        .HasColumnName("embedding");
+
+                    b.Property<float>("H")
+                        .HasColumnType("real")
+                        .HasColumnName("h");
+
+                    b.Property<Guid>("PersonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("person_id");
+
+                    b.Property<Guid>("PhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("photo_id");
+
+                    b.Property<float>("Score")
+                        .HasColumnType("real")
+                        .HasColumnName("score");
+
+                    b.Property<float>("W")
+                        .HasColumnType("real")
+                        .HasColumnName("w");
+
+                    b.Property<float>("X")
+                        .HasColumnType("real")
+                        .HasColumnName("x");
+
+                    b.Property<float>("Y")
+                        .HasColumnType("real")
+                        .HasColumnName("y");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PersonId");
+
+                    b.HasIndex("PhotoId")
+                        .HasDatabaseName("idx_photo_faces_photo");
+
+                    b.HasIndex("BucketId", "PersonId")
+                        .HasDatabaseName("idx_photo_faces_bucket_person");
+
+                    b.ToTable("photo_faces", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.PostComment", b =>
@@ -3085,6 +3249,30 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.FaceJob", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.MediaBucket", null)
+                        .WithMany()
+                        .HasForeignKey("BucketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
+                        .WithMany()
+                        .HasForeignKey("Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.FacePerson", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.MediaBucket", null)
+                        .WithMany()
+                        .HasForeignKey("BucketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.Favourite", b =>
                 {
                     b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
@@ -3129,6 +3317,27 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("UsedOnCampaignId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PhotoFace", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.MediaBucket", null)
+                        .WithMany()
+                        .HasForeignKey("BucketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.FacePerson", null)
+                        .WithMany()
+                        .HasForeignKey("PersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
+                        .WithMany()
+                        .HasForeignKey("PhotoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.PostComment", b =>

@@ -252,13 +252,51 @@ public static class GuestCameraPage
     /// consolations — a guest can go and look at the night, a contributor can only add.
     /// </param>
     /// <param name="gateAction">The label on the gate's one button.</param>
+    /// <summary>
+    /// Shown over the camera, before the first photo, when the album groups photos by face: the person taking
+    /// photos is told, and agrees, before they add any. Once per album page on this phone (localStorage).
+    /// </summary>
+    private static string FacesNotice(string backPath) => $$"""
+        <div class="faces" id="faces" role="dialog" aria-modal="true" aria-labelledby="facestitle">
+          <div class="facesbox">
+            <h1 id="facestitle">Photos here are grouped by face</h1>
+            <p>The host turned on face grouping for this album, so people can find the photos they're in. Face data stays inside this album and is deleted with it.</p>
+            <p>Anyone can opt out in the album: open People and tap "That's me".</p>
+            <button class="btn primary" id="facesok" type="button">OK, open the camera</button>
+            <a class="btn" href="{{E(backPath)}}">Not now</a>
+          </div>
+        </div>
+        <style>
+        .faces{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.88);color:#fff;}
+        .facesbox{max-width:420px;display:flex;flex-direction:column;gap:12px;}
+        .facesbox h1{margin:0;font:600 1.3rem/1.3 Georgia,serif;}
+        .facesbox p{margin:0;line-height:1.5;opacity:.9;}
+        .facesbox .btn{text-align:center;}
+        .faces[hidden]{display:none;}
+        </style>
+        """;
+
+    private const string FacesScript = """
+        (function () {
+          var box = document.getElementById('faces');
+          if (!box) return;
+          var key = 'ib-faces-ok:' + location.pathname;
+          try { if (localStorage.getItem(key)) { box.hidden = true; return; } } catch (e) {}
+          document.getElementById('facesok').addEventListener('click', function () {
+            try { localStorage.setItem(key, '1'); } catch (e) {}
+            box.hidden = true;
+          });
+        })();
+        """;
+
     public static string Render(
         string uploadPath, string backPath, string eventTitle, GuestPalette palette, string nonce,
         string backLabel = "Gallery",
         string gateNote = "You can still look at the event's photos, and add some from this phone's "
                           + "library there instead.",
         string gateAction = "See the photos",
-        IReadOnlyDictionary<string, string>? fields = null) => $$"""
+        IReadOnlyDictionary<string, string>? fields = null,
+        bool facesNotice = false) => $$"""
         <!doctype html>
         <html lang="en"><head>
         <meta charset="utf-8">
@@ -294,6 +332,8 @@ public static class GuestCameraPage
             <a class="btn" href="{{E(backPath)}}">{{E(gateAction)}}</a>
           </div>
 
+          {{(facesNotice ? FacesNotice(backPath) : "")}}
+
           <div class="rec"><span><i></i><b id="rectime">0:00</b></span></div>
 
           <!-- Slide the held shutter onto this to leave the recording running. Hidden entirely
@@ -325,7 +365,8 @@ public static class GuestCameraPage
         </div>
 
         <script nonce="{{nonce}}">
-        window.__ibCamera = { upload: "{{E(uploadPath)}}", fields: {{Fields(fields)}} };
+        window.__ibCamera = { upload: "{{E(uploadPath)}}", fields: {{Fields(fields)}}, faces: {{(facesNotice ? "true" : "false")}} };
+        {{(facesNotice ? FacesScript : "")}}
         {{Script}}
         </script>
         </body></html>

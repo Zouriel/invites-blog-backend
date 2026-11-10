@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
 using InvitesBlog.Api.Authorization;
 using InvitesBlog.Api.Rendering;
@@ -84,6 +85,9 @@ public sealed class BucketContributionController(
             // When adding opens and closes, so the page can say so rather than guess from the date.
             opensAt = admission.OpensAt,
             closesAt = admission.ClosesAt,
+            // Photos here are grouped by face: the page and the app's camera say so before the first photo.
+            faces = HttpContext.RequestServices.GetService<Application.Services.Faces.IFaceGroupingService>() is { } faces
+                    && await faces.OnForBucketAsync(admission.BucketId, ct),
         });
     }
 
@@ -379,7 +383,9 @@ public sealed class BucketContributionController(
             // The upload carries the ticket in the field it always has. The cookie got it this far,
             // but the writer's own door is the form field and there is no reason for the camera to
             // knock on a different one.
-            fields: new Dictionary<string, string> { [ContributorTickets.FieldName] = ticket });
+            fields: new Dictionary<string, string> { [ContributorTickets.FieldName] = ticket },
+            facesNotice: HttpContext.RequestServices.GetService<Application.Services.Faces.IFaceGroupingService>() is { } faces
+                         && await faces.OnForBucketAsync(admission.BucketId, ct));
 
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
