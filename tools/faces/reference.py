@@ -12,7 +12,9 @@ for p in sorted(glob.glob(sys.argv[2] + "/*.jpg")):
     _, faces = det.detect(canvas)
     res = []
     for f in (faces if faces is not None else []):
-        crop = rec.alignCrop(canvas, f)
+        # Aligned from the full-size photo (landmarks scaled back), as FaceAnalyzer does: sharper for small faces.
+        full = f.copy(); full[:14] = f[:14] / sc
+        crop = rec.alignCrop(img, full)
         e = rec.feature(crop).flatten(); e = e / np.linalg.norm(e)
         res.append({"box": [float(v) / sc for v in f[:4]], "score": float(f[14]), "emb": e.tolist()})
     out[k] = res

@@ -93,8 +93,15 @@ public class FaceAnalyzerTests
             foreach (var e in big)
             {
                 var ex = new[] { e.box[0] / size.Width, e.box[1] / size.Height, e.box[2] / size.Width, e.box[3] / size.Height };
-                var best = found.Max(f => Iou(ex, f));
+                var match = found.MaxBy(f => Iou(ex, f))!;
+                var best = Iou(ex, match);
                 Assert.True(best > 0.8, $"{name}: a face OpenCV found at {string.Join(",", e.box)} overlaps only {best:0.00}");
+                // And its fingerprint is OpenCV's, near enough: a crop that's off (wrong landmarks, alignment,
+                // colour order) moves this well below the same-person scores.
+                var agree = FaceClustering.Similarity(match.Embedding, e.emb);
+                // Small faces (crowd shots) differ more, from tiny landmark shifts between the two scalers.
+                var need = e.box[2] >= 150 ? 0.95 : 0.8;
+                Assert.True(agree > need, $"{name}: a {e.box[2]:0}px face's fingerprint agrees with OpenCV's only {agree:0.000}");
             }
         }
 
