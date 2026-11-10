@@ -85,6 +85,9 @@ public sealed class BucketContributionController(
             // When adding opens and closes, so the page can say so rather than guess from the date.
             opensAt = admission.OpensAt,
             closesAt = admission.ClosesAt,
+            // Photos here are grouped by face: the page and the app's camera say so before the first photo.
+            faces = HttpContext.RequestServices.GetService<Application.Services.Faces.IFaceGroupingService>() is { } faces
+                    && await faces.OnForBucketAsync(admission.BucketId, ct),
         });
     }
 

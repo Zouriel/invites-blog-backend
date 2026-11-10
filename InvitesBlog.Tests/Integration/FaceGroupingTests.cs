@@ -67,6 +67,11 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         Assert.False(asGuest.GetProperty("faces").GetProperty("canName").GetBoolean());
         Assert.Single(asGuest.GetProperty("faces").GetProperty("people").EnumerateArray());
 
+        // A QR code onto the album says so too (the app's camera shows the notice from this).
+        var qr = await DataAsync(await api.Client(host.Token).PostAsJsonAsync($"/api/media-buckets/{bucket}/qr", new { label = "Table", allowAnonymous = true }));
+        var token = qr.GetProperty("url").GetString()!.Split("/q/")[1];
+        Assert.True((await DataAsync(await api.Client().GetAsync($"/api/q/{token}"))).GetProperty("faces").GetBoolean());
+
         // The camera says so before the first photo.
         var camera = await api.ReadAsync(db => db.MediaBuckets.SingleAsync(b => b.Id == bucket));
         Assert.True(camera.FaceGroupingOn);
