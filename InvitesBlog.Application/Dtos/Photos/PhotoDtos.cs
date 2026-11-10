@@ -80,5 +80,8 @@ public sealed record FaceGroupingDto(bool On, bool CanName, int Waiting, IReadOn
 public sealed record FacePersonDto(
     Guid Id, string? Name, int PhotoCount, string CoverUrl, float CoverX, float CoverY, float CoverW, float CoverH);
 
-/// <summary>Naming a face group. Blank clears the name.</summary>
+/// <summary>Naming a face group. Blank clears the name; a name another group already has merges the two.</summary>
 public sealed record NameFacePersonRequest(string? Name);
+
+/// <summary>"Same person as…": the group to move this one's faces into.</summary>
+public sealed record MergeFacePersonRequest(Guid Into);

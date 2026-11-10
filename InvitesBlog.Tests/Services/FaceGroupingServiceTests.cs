@@ -117,7 +117,7 @@ public sealed class FaceGroupingServiceTests : IDisposable
     }
 
     [Fact]
-    public void Add_increments_the_count_and_keeps_the_centroid_unit_length()
+    public void Add_increments_the_count_and_keeps_the_true_mean()
     {
         var group = Person(Bucket());
         var original = group.Centroid.ToArray();
@@ -130,7 +130,11 @@ public sealed class FaceGroupingServiceTests : IDisposable
         FaceClustering.Add(group, [0f, 1f]);
 
         Assert.Equal(3, group.FaceCount);
-        Assert.Equal(1f, MathF.Sqrt(group.Centroid.Sum(x => x * x)), 5);
+        // Two faces of [1,0] (the starting count is 1) and one of [0,1]: the mean is [2/3, 1/3].
+        Assert.Equal(2f / 3, group.Centroid[0], 5);
+        Assert.Equal(1f / 3, group.Centroid[1], 5);
+        // And a face like either look still matches it.
+        Assert.True(FaceClustering.Cosine([0f, 1f], group.Centroid) > 0.4f);
     }
 
     [Fact]
@@ -297,15 +301,16 @@ public sealed class FaceGroupingServiceTests : IDisposable
         Assert.True(dto.On);
         Assert.False(dto.CanName);
         Assert.Equal(2, dto.Waiting);
-        Assert.Equal([namedMany.Id, namedOne.Id, unnamedMany.Id], dto.People.Select(p => p.Id).ToArray());
-        Assert.DoesNotContain(dto.People, p => p.Id == unnamedOne.Id || p.Id == ignored.Id);
+        // Every group (the People tab names them), named first, then by photos; never an opted-out one.
+        Assert.Equal([namedMany.Id, namedOne.Id, unnamedMany.Id, unnamedOne.Id], dto.People.Select(p => p.Id).ToArray());
+        Assert.DoesNotContain(dto.People, p => p.Id == ignored.Id);
         var cover = dto.People.Single(p => p.Id == namedMany.Id);
         Assert.Equal(2, cover.PhotoCount);
         Assert.Equal(photos[1].ThumbUrl, cover.CoverUrl);
         Assert.Equal((.3f, .2f, .4f, .4f), (cover.CoverX, cover.CoverY, cover.CoverW, cover.CoverH));
         Assert.Equal(3, peopleByPhoto.Count);
-        Assert.Equal([namedMany.Id, namedOne.Id, unnamedMany.Id, ignored.Id], peopleByPhoto[photos[0].Id]);
-        Assert.Equal([namedMany.Id, unnamedMany.Id, ignored.Id], peopleByPhoto[photos[1].Id]);
+        Assert.Equal([namedMany.Id, namedOne.Id, unnamedMany.Id], peopleByPhoto[photos[0].Id]);
+        Assert.Equal([namedMany.Id, unnamedMany.Id], peopleByPhoto[photos[1].Id]);
         Assert.Equal([unnamedMany.Id, unnamedOne.Id], peopleByPhoto[photos[2].Id]);
     }
 

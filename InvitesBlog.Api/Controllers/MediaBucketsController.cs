@@ -123,6 +123,13 @@ public sealed class MediaBucketsController(
         Guid bucketId, Guid personId, [FromBody] Application.Dtos.Photos.NameFacePersonRequest req, CancellationToken ct) =>
         Success(await photos.NamePersonAsync(null, bucketId, null, personId, req.Name, ct));
 
+    /// <summary>"Same person as…" (the host only): this group's faces join <c>Into</c>.</summary>
+    [HttpPost("{bucketId:guid}/people/{personId:guid}/merge")]
+    [HasPermission(Permissions.Buckets.Read)]
+    public async Task<IActionResult> MergePerson(
+        Guid bucketId, Guid personId, [FromBody] Application.Dtos.Photos.MergeFacePersonRequest req, CancellationToken ct) =>
+        Success(await photos.MergePersonAsync(null, bucketId, personId, req.Into, ct));
+
     /// <summary>"That's me, ignore my face": anyone who can see the album.</summary>
     [HttpPost("{bucketId:guid}/people/{personId:guid}/ignore")]
     [HasPermission(Permissions.Buckets.Read)]
