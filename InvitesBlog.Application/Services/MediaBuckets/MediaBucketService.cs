@@ -668,7 +668,7 @@ public sealed class MediaBucketService(
     {
         var bucket = await OwnedAsync(bucketId, ct, tracking: true);
         if (faceGrouping is null) throw new InvalidStateException("Face grouping isn't available right now.", "faces_unavailable");
-        await faceGrouping.SetAsync(bucket, req.On, req.GuestsTold, currentUser.UserId, ct);
+        await faceGrouping.SetAsync(bucket, req.On, req.GuestsTold, currentUser.UserId, ct, req.OutsideRestrictedRegions);
         return (await DescribeAsync([bucket], ct))[0];
     }
 

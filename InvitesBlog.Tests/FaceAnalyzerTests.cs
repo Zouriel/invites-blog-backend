@@ -158,6 +158,21 @@ public class FaceAnalyzerTests
         Assert.Single(one);
     }
 
+    /// <summary>Not a check: prints how long each sample takes (warm), to compare speed-ups.</summary>
+    [FaceModelFact]
+    public async Task Timing()
+    {
+        foreach (var tile in new[] { 0, 1280 })
+        {
+            var analyzer = Analyzer(Models, tile: tile);
+            var files = Directory.GetFiles(Samples!, "*.jpg").OrderBy(f => f).ToList();
+            await analyzer.AnalyzeAsync(await File.ReadAllBytesAsync(files[0]), CancellationToken.None);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var f in files) await analyzer.AnalyzeAsync(await File.ReadAllBytesAsync(f), CancellationToken.None);
+            Console.WriteLine($"TIMING tile={tile}: {sw.ElapsedMilliseconds / files.Count} ms per photo over {files.Count}");
+        }
+    }
+
     [FaceModelFact]
     public async Task Lets_the_models_go_after_the_idle_time()
     {

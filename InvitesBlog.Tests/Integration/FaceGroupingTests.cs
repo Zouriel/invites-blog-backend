@@ -38,9 +38,17 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         Assert.Contains("Tick the box", await refused.Content.ReadAsStringAsync());
         // Only the host switches it.
         Assert.Equal(HttpStatusCode.Forbidden, (await api.Client(guest.Token).PutAsJsonAsync(
-            $"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true })).StatusCode);
+            $"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true, outsideRestrictedRegions = true })).StatusCode);
 
-        var on = await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true }));
+        // Not for events in Illinois, Texas or Washington: the host must say this one isn't.
+        var region = await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true });
+        Assert.Equal(HttpStatusCode.BadRequest, region.StatusCode);
+        Assert.Contains("Illinois", await region.Content.ReadAsStringAsync());
+
+        var on = await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true, outsideRestrictedRegions = true }));
+        // Recorded, with no face data.
+        var record = (await api.ReadAsync(db => db.AuditLogs.Where(a => a.Action == "faces.on").ToListAsync())).Single(a => a.DataJson.Contains(bucket.ToString()));
+        Assert.Equal(host.Id.ToString(), record.Actor);
         Assert.True(on.GetProperty("faceGrouping").GetBoolean());
         Assert.Equal(2, await api.ReadAsync(db => db.FaceJobs.CountAsync(j => j.BucketId == bucket)));
         Assert.False(await api.ReadAsync(db => db.FaceJobs.AnyAsync(j => j.Id == video)));
@@ -105,6 +113,9 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
 
         Assert.Equal(HttpStatusCode.NoContent, (await api.Client(guest.Token).PostAsync(
             $"/api/me/invitations/{ev}/photos/people/{personId}/ignore", null)).StatusCode);
+        var optOut = (await api.ReadAsync(db => db.AuditLogs.Where(a => a.Action == "faces.opt_out").ToListAsync())).Single(a => a.DataJson.Contains(bucket.ToString()));
+        Assert.Equal(guest.Id.ToString(), optOut.Actor);
+        Assert.DoesNotContain("embedding", optOut.DataJson, StringComparison.OrdinalIgnoreCase);
         var ignored = await api.ReadAsync(db => db.FacePeople.SingleAsync(p => p.Id == personId));
         Assert.True(ignored.Ignored);
         Assert.Null(ignored.Name);
@@ -203,6 +214,40 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
+    public async Task Albums_idle_for_the_retention_limit_lose_their_face_data_and_busy_ones_keep_it()
+    {
+        var (host, _, ev, idle) = await SetUpAsync();
+        await PhotoAsync(ev, idle);
+        await SwitchOnAsync(host, idle);
+        api.Faces.Next = [FakeFaceAnalyzer.Face(7)];
+        await RunWorkerAsync();
+        var (host2, _, ev2, busy) = await SetUpAsync();
+        await PhotoAsync(ev2, busy);
+        await SwitchOnAsync(host2, busy);
+        api.Faces.Next = [FakeFaceAnalyzer.Face(8)];
+        await RunWorkerAsync();
+
+        // The first album: nothing new for 25 months. The second: a photo last week.
+        var old = DateTimeOffset.UtcNow.AddDays(-760);
+        await api.WriteAsync(async db =>
+        {
+            await db.MediaBuckets.Where(b => b.Id == idle || b.Id == busy).ExecuteUpdateAsync(x => x.SetProperty(b => b.UpdatedAt, old));
+            await db.EventPhotos.Where(p => p.BucketId == idle).ExecuteUpdateAsync(x => x.SetProperty(p => p.CreatedAt, old));
+            await db.EventPhotos.Where(p => p.BucketId == busy).ExecuteUpdateAsync(x => x.SetProperty(p => p.CreatedAt, DateTimeOffset.UtcNow.AddDays(-7)));
+        });
+
+        var faces = api.Services.CreateScope().ServiceProvider.GetRequiredService<InvitesBlog.Application.Services.Faces.IFaceGroupingService>();
+        Assert.True(await faces.ExpireIdleAsync(TimeSpan.FromDays(730), CancellationToken.None) >= 1);
+
+        Assert.False(await api.ReadAsync(db => db.MediaBuckets.Where(b => b.Id == idle).Select(b => b.FaceGroupingOn).SingleAsync()));
+        Assert.False(await api.ReadAsync(db => db.PhotoFaces.AnyAsync(f => f.BucketId == idle)));
+        Assert.False(await api.ReadAsync(db => db.FacePeople.AnyAsync(f => f.BucketId == idle)));
+        Assert.Contains(await api.ReadAsync(db => db.AuditLogs.Where(a => a.Action == "faces.expired").ToListAsync()), a => a.DataJson.Contains(idle.ToString()));
+        Assert.True(await api.ReadAsync(db => db.MediaBuckets.Where(b => b.Id == busy).Select(b => b.FaceGroupingOn).SingleAsync()));
+        Assert.True(await api.ReadAsync(db => db.PhotoFaces.AnyAsync(f => f.BucketId == busy)));
+    }
+
+    [PostgresFact]
     public async Task A_photo_removed_while_it_is_being_read_leaves_no_faces()
     {
         var (host, _, ev, bucket) = await SetUpAsync();
@@ -224,7 +269,7 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         await api.Services.GetRequiredService<FaceIndexService>().RunOnceAsync(CancellationToken.None);
 
     private async Task SwitchOnAsync(Person host, Guid bucket) =>
-        await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true }));
+        await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true, outsideRestrictedRegions = true }));
 
     private async Task<(Person Host, Person Guest, Guid Event, Guid Bucket)> SetUpAsync()
     {

@@ -21,7 +21,7 @@ public interface IFaceGroupingService
     bool Available { get; }
 
     /// <summary>Switches it on (queueing every photo already there) or off (deleting every face, group and job). The caller has checked the host owns the album.</summary>
-    Task SetAsync(MediaBucket bucket, bool on, bool guestsTold, Guid? by, CancellationToken ct);
+    Task SetAsync(MediaBucket bucket, bool on, bool guestsTold, Guid? by, CancellationToken ct, bool outsideRestrictedRegions = true);
 
     /// <summary>Queues a new photo when its album has grouping on. Added to the caller's unit of work; the caller saves.</summary>
     Task QueueAsync(EventPhoto photo, CancellationToken ct);
@@ -37,7 +37,13 @@ public interface IFaceGroupingService
     Task<FacePersonDto> NameAsync(Guid personId, string? name, IReadOnlyList<EventPhoto> photos, CancellationToken ct);
 
     /// <summary>"Ignore my face": deletes the group's faces and keeps it out of grouping.</summary>
-    Task IgnoreAsync(Guid personId, CancellationToken ct);
+    Task IgnoreAsync(Guid personId, CancellationToken ct, string? actor = null);
+
+    /// <summary>
+    /// Switches grouping off (deleting all face data) in albums with no new photos or changes for
+    /// <paramref name="idle"/>: the written retention policy's inactivity limit. Returns how many.
+    /// </summary>
+    Task<int> ExpireIdleAsync(TimeSpan idle, CancellationToken ct);
 
     /// <summary>"Same person as…": moves one group's faces into another of the same album; the first goes.</summary>
     Task<FacePersonDto> MergeAsync(Guid personId, Guid intoId, IReadOnlyList<EventPhoto> photos, CancellationToken ct);
@@ -56,14 +62,36 @@ public sealed class FaceGroupingService(
     IRepository<FaceJob> jobs,
     IRepository<EventPhoto> photos,
     IUnitOfWork uow,
-    IFaceAnalyzer? analyzer = null) : IFaceGroupingService
+    IFaceAnalyzer? analyzer = null,
+    IRepository<AuditLog>? audit = null) : IFaceGroupingService
 {
 
     public bool Available => analyzer?.Available ?? false;
 
     public static bool IsPicture(EventPhoto p) => p.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
 
-    public async Task SetAsync(MediaBucket bucket, bool on, bool guestsTold, Guid? by, CancellationToken ct)
+    /// <summary>
+    /// A record of every switch and opt-out (who, when, which album, which notice), never any face data: what we
+    /// show if anyone asks how consent and opt-outs were handled.
+    /// </summary>
+    private async Task AuditAsync(string action, MediaBucket? bucket, Guid bucketId, string? actor, object data, CancellationToken ct)
+    {
+        if (audit is null) return;
+        await audit.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            Action = action,
+            Actor = actor,
+            CampaignId = bucket?.CampaignId,
+            DataJson = System.Text.Json.JsonSerializer.Serialize(new { bucketId, notice = NoticeVersion, details = data }),
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, ct);
+    }
+
+    /// <summary>Which wording of the notices and confirmations was in force (bump when they change).</summary>
+    public const string NoticeVersion = "2026-11-11";
+
+    public async Task SetAsync(MediaBucket bucket, bool on, bool guestsTold, Guid? by, CancellationToken ct, bool outsideRestrictedRegions = true)
     {
         var now = DateTimeOffset.UtcNow;
         if (on)
@@ -71,6 +99,10 @@ public sealed class FaceGroupingService(
             if (!Available) throw new InvalidStateException("Face grouping isn't available right now.", "faces_unavailable");
             if (!guestsTold)
                 throw new BusinessRuleException("Tick the box to confirm your guests are told photos are grouped by face.", "faces_guests_not_told");
+            if (!outsideRestrictedRegions)
+                throw new BusinessRuleException(
+                    "Face grouping isn't available for events in Illinois, Texas or Washington (USA). Tick the box if this event isn't there.",
+                    "faces_restricted_region");
             if (bucket.FaceGroupingOn) return;
             // Start clean: no face or group from an earlier time it was on (or a sweep that hadn't finished)
             // carries over. Jobs still queued are kept and the missing ones added below.
@@ -88,14 +120,17 @@ public sealed class FaceGroupingService(
                 .Select(p => p.Id).ToListAsync(ct);
             foreach (var id in pictures.Except(queued))
                 await jobs.AddAsync(NewJob(id, bucket.Id, now), ct);
+            await AuditAsync("faces.on", bucket, bucket.Id, by?.ToString(), new { guestsTold, outsideRestrictedRegions }, ct);
             await uow.SaveChangesAsync(ct);
             return;
         }
 
+        var wasOn = bucket.FaceGroupingOn;
         bucket.FaceGroupingOn = false;
         bucket.UpdatedAt = now;
         buckets.Update(bucket);
         await ClearAsync(bucket.Id, ct);
+        if (wasOn) await AuditAsync("faces.off", bucket, bucket.Id, by?.ToString(), new { }, ct);
         await uow.SaveChangesAsync(ct);
     }
 
@@ -236,7 +271,26 @@ public sealed class FaceGroupingService(
     public Task<bool> OnForCampaignAsync(Guid campaignId, CancellationToken ct) =>
         buckets.Query().AnyAsync(b => b.CampaignId == campaignId && b.FaceGroupingOn, ct);
 
-    public async Task IgnoreAsync(Guid personId, CancellationToken ct)
+    public async Task<int> ExpireIdleAsync(TimeSpan idle, CancellationToken ct)
+    {
+        var cutoff = DateTimeOffset.UtcNow - idle;
+        var on = await buckets.Query(tracking: true).Where(b => b.FaceGroupingOn && b.UpdatedAt < cutoff).ToListAsync(ct);
+        var expired = 0;
+        foreach (var bucket in on)
+        {
+            var recent = await photos.Query().AnyAsync(p => p.BucketId == bucket.Id && p.CreatedAt >= cutoff, ct);
+            if (recent) continue;
+            bucket.FaceGroupingOn = false;
+            buckets.Update(bucket);
+            await ClearAsync(bucket.Id, ct);
+            await AuditAsync("faces.expired", bucket, bucket.Id, "retention", new { idleDays = (int)idle.TotalDays }, ct);
+            await uow.SaveChangesAsync(ct);
+            expired++;
+        }
+        return expired;
+    }
+
+    public async Task IgnoreAsync(Guid personId, CancellationToken ct, string? actor = null)
     {
         var person = await people.Query(tracking: true).FirstOrDefaultAsync(p => p.Id == personId, ct)
                      ?? throw new NotFoundException("That group is no longer there.");
@@ -247,6 +301,7 @@ public sealed class FaceGroupingService(
         person.UpdatedAt = DateTimeOffset.UtcNow;
         people.Update(person);
         faces.RemoveRange(await faces.Query(tracking: true).Where(f => f.PersonId == personId).ToListAsync(ct));
+        await AuditAsync("faces.opt_out", null, person.BucketId, actor, new { }, ct);
         await uow.SaveChangesAsync(ct);
     }
 }

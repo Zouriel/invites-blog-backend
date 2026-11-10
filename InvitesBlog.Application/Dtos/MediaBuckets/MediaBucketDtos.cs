@@ -110,10 +110,11 @@ public sealed record RenameMediaBucketRequest(string Name);
 public sealed record SetBucketWindowRequest(int Days);
 
 /// <summary>
-/// Switching face grouping on or off for an album. Switching it on needs <c>GuestsTold</c>: the host confirms
-/// their guests are being told (the invitation and album carry the notice). Off deletes all its face data.
+/// Switching face grouping on or off for an album. Switching it on needs <c>GuestsTold</c> (the host confirms their
+/// guests are being told; the album and camera carry the notice) and <c>OutsideRestrictedRegions</c> (the event isn't
+/// in Illinois, Texas or Washington, USA, whose biometric laws need consent we can't collect). Off deletes all its face data.
 /// </summary>
-public sealed record SetFaceGroupingRequest(bool On, bool GuestsTold);
+public sealed record SetFaceGroupingRequest(bool On, bool GuestsTold, bool OutsideRestrictedRegions = false);
 /// <summary>
 /// A QR code as the dashboard shows it.
 ///
