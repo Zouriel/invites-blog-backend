@@ -52,6 +52,21 @@ public class FaceAnalyzerTests
         await Assert.ThrowsAsync<InvalidStateException>(() => analyzer.AnalyzeAsync([1, 2, 3], CancellationToken.None));
     }
 
+    /// <summary>
+    /// Asking for the GPU must get as far as looking for CUDA. Production fell back to the CPU because the CUDA
+    /// options were made before the runtime's logger existed; on a machine without CUDA the reason must now be
+    /// the missing CUDA, never the logger.
+    /// </summary>
+    [FaceModelFact]
+    public async Task Asking_for_the_GPU_gets_as_far_as_CUDA()
+    {
+        var analyzer = Analyzer(Models, device: "gpu");
+        var e = await Record.ExceptionAsync(() => analyzer.AnalyzeAsync(
+            File.ReadAllBytes(Path.Combine(Samples!, "kelly.jpg")), CancellationToken.None));
+        if (e is null) { Assert.Equal("gpu", analyzer.Device); return; }
+        Assert.DoesNotContain("DefaultLogger", e.ToString());
+    }
+
     [Fact]
     public void The_alignment_maps_the_reference_landmarks_onto_themselves()
     {

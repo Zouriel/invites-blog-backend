@@ -172,6 +172,9 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
 
     private static SessionOptions GpuOptions()
     {
+        // The runtime's environment (and its logger) must exist before CUDA options are made, or creating them
+        // fails with "Attempt to use DefaultLogger but none has been registered" and faces fall back to the CPU.
+        _ = OrtEnv.Instance();
         using var cuda = new OrtCUDAProviderOptions();
         cuda.UpdateOptions(new Dictionary<string, string>
         {
