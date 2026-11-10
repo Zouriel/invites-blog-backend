@@ -300,7 +300,7 @@ public sealed class FaceAnalyzer(IConfiguration config, ILogger<FaceAnalyzer> lo
     }
 
     /// <summary>Least-squares similarity transform from the landmarks to <see cref="Reference"/>: dest = [a -b; b a]·src + t.</summary>
-    internal static (float A, float B, float Tx, float Ty) Similarity(float[,] src)
+    public static (float A, float B, float Tx, float Ty) Similarity(float[,] src)
     {
         float msx = 0, msy = 0, mdx = 0, mdy = 0;
         for (var i = 0; i < 5; i++)
