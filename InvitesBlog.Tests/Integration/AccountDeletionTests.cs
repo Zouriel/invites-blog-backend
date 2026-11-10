@@ -808,9 +808,54 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             while (await r.ReadAsync()) rows.Add(r.GetString(0));
             return rows;
         });
+        // ai_picture_usage, assistant_usage and design_assistant_messages are deleted explicitly by the service
+        // (and cascade); the rest are handled as described in DeleteEverythingAsync.
         Assert.Equal(
-            new[] { "comment_likes.user_id", "content_reports.reporter_user_id", "device_tokens.user_id", "favourites.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_blocks.blocked_user_id", "user_blocks.blocker_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
+            new[] { "ai_picture_usage.user_id", "assistant_usage.user_id", "comment_likes.user_id", "content_reports.reporter_user_id", "design_assistant_messages.user_id", "device_tokens.user_id", "favourites.user_id", "pass_credits.owner_user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_blocks.blocked_user_id", "user_blocks.blocker_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
             found.Order(StringComparer.Ordinal));
+    }
+
+    [PostgresFact]
+    public async Task Assistant_chats_usage_counters_and_the_face_grouping_confirmation_go_with_the_account()
+    {
+        var person = await UserAsync(subscription: SubscriptionTier.Premium);
+        var other = await UserAsync();
+        var ev = await EventAsync(other);
+        var album = await AlbumAsync(ev, other.Id);
+        var design = Guid.NewGuid();
+        var otherDesign = Guid.NewGuid();
+        var month = DateTimeOffset.UtcNow.ToString("yyyy-MM");
+        await api.WriteAsync(async db =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            db.TemplateDesigns.Add(new TemplateDesign { Id = design, OwnerUserId = person.Id, Name = "D", SceneJson = "{}", Revision = 1, CreatedAt = now, UpdatedAt = now });
+            db.TemplateDesigns.Add(new TemplateDesign { Id = otherDesign, OwnerUserId = other.Id, Name = "O", SceneJson = "{}", Revision = 1, CreatedAt = now, UpdatedAt = now });
+            db.DesignAssistantMessages.Add(new DesignAssistantMessage { Id = Guid.NewGuid(), DesignId = design, UserId = person.Id, Seq = 1, Role = "user", ContentJson = "[]", StartsTurn = true, CreatedAt = now });
+            db.DesignAssistantMessages.Add(new DesignAssistantMessage { Id = Guid.NewGuid(), DesignId = otherDesign, UserId = other.Id, Seq = 1, Role = "user", ContentJson = "[]", StartsTurn = true, CreatedAt = now });
+            db.AssistantUsages.Add(new AssistantUsage { Id = Guid.NewGuid(), UserId = person.Id, Month = month, Requests = 3, UpdatedAt = now });
+            db.AssistantUsages.Add(new AssistantUsage { Id = Guid.NewGuid(), UserId = other.Id, Month = month, Requests = 1, UpdatedAt = now });
+            db.AiPictureUsages.Add(new AiPictureUsage { Id = Guid.NewGuid(), UserId = person.Id, Month = month, Count = 2, UpdatedAt = now });
+            db.AiPictureUsages.Add(new AiPictureUsage { Id = Guid.NewGuid(), UserId = other.Id, Month = month, Count = 1, UpdatedAt = now });
+            await Task.CompletedTask;
+        });
+        // The person confirmed face grouping on someone else's album, which stays.
+        await api.WriteAsync(db => db.MediaBuckets.Where(b => b.Id == album)
+            .ExecuteUpdateAsync(s => s.SetProperty(b => b.FaceGroupingConfirmedBy, (Guid?)person.Id)));
+
+        await DeleteThroughApiAsync(api.Client(person.Token), person.Email!);
+
+        await api.ReadAsync(async db =>
+        {
+            Assert.False(await db.DesignAssistantMessages.AnyAsync(m => m.UserId == person.Id));
+            Assert.False(await db.AssistantUsages.AnyAsync(u => u.UserId == person.Id));
+            Assert.False(await db.AiPictureUsages.AnyAsync(u => u.UserId == person.Id));
+            Assert.True(await db.DesignAssistantMessages.AnyAsync(m => m.UserId == other.Id), "someone else's chat stays");
+            Assert.True(await db.AssistantUsages.AnyAsync(u => u.UserId == other.Id));
+            Assert.True(await db.AiPictureUsages.AnyAsync(u => u.UserId == other.Id));
+            var bucket = await db.MediaBuckets.SingleAsync(b => b.Id == album);
+            Assert.Null(bucket.FaceGroupingConfirmedBy);
+            return true;
+        });
     }
 
     [PostgresFact]
