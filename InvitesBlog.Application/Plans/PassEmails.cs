@@ -32,8 +32,8 @@ public static class PassEmails
             $"<div style=\"font-family:{Sans};max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             "<p style=\"font-size:16px;line-height:1.6\">Hello,</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\">{bodyHtml}</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{href}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">{E(cta)}</a></p>" +
-            $"<p style=\"font-size:12px;color:#5a6b75;line-height:1.6\">Or paste this into your browser:<br><a href=\"{href}\" style=\"color:#1b3d59\">{href}</a><br>Sent via invites.blog</p></div>";
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{href}\" style=\"display:inline-block;background:#7A0C1E;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">{E(cta)}</a></p>" +
+            $"<p style=\"font-size:12px;color:#5a6b75;line-height:1.6\">Or paste this into your browser:<br><a href=\"{href}\" style=\"color:#7A0C1E\">{href}</a><br>Sent via invites.blog</p></div>";
         return new EmailMessage(To: to, Subject: subject, Html: html, Stream: EmailStream.System);
     }
 
