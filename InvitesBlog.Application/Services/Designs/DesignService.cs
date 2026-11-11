@@ -667,8 +667,8 @@ public sealed class DesignService(
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             "<p style=\"font-size:16px;line-height:1.6\">Hello,</p>" +
             $"<p style=\"font-size:16px;line-height:1.6\"><strong>{safeDesigner}</strong> designed an invitation template just for you: <strong>{safeTpl}</strong>. Only you can use it.</p>" +
-            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See your template</a></p>" +
-            $"<p style=\"font-size:12px;color:#5a6b75;line-height:1.6\">Sign in with this email address to use it. Or paste this into your browser:<br><a href=\"{link}\" style=\"color:#1b3d59\">{link}</a><br>Sent via invites.blog</p></div>";
+            $"<p style=\"text-align:center;margin:28px 0\"><a href=\"{link}\" style=\"display:inline-block;background:#7A0C1E;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">See your template</a></p>" +
+            $"<p style=\"font-size:12px;color:#5a6b75;line-height:1.6\">Sign in with this email address to use it. Or paste this into your browser:<br><a href=\"{link}\" style=\"color:#7A0C1E\">{link}</a><br>Sent via invites.blog</p></div>";
         return new EmailMessage(To: to, Subject: $"{designerName} made an invitation for you", Html: html, Stream: EmailStream.System);
     }
 

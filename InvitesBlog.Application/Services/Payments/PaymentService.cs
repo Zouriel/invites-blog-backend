@@ -157,7 +157,7 @@ public sealed class PaymentService(
             <!doctype html><html><head><meta charset="utf-8"><title>Demo checkout</title>
             <style>body{font-family:system-ui;max-width:420px;margin:12vh auto;text-align:center}
             a.btn{display:block;padding:14px;border-radius:10px;text-decoration:none;margin:10px 0}
-            .pay{background:#1b3d59;color:#fff}.cancel{background:#eee;color:#333}</style></head>
+            .pay{background:#7A0C1E;color:#fff}.cancel{background:#eee;color:#333}</style></head>
             <body><h2>invites.blog demo checkout</h2>
             <p>Amount due: <strong>{{PlanCatalog.Currency}} {{due}}</strong></p>
             <a class="btn pay" href="{{pay}}">Simulate successful payment</a>

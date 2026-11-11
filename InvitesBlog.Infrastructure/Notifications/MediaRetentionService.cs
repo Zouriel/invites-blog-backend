@@ -464,8 +464,8 @@ public sealed class MediaRetentionService(
         var html =
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">{lines}</p>" +
-            $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#1b3d59;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Download everything</a></p>" +
-            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{dashboard}\" style=\"color:#1b3d59\">{(pass is null ? "Get Premium again" : "Extend the pass")}</a></p>" +
+            $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#7A0C1E;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Download everything</a></p>" +
+            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{dashboard}\" style=\"color:#7A0C1E\">{(pass is null ? "Get Premium again" : "Extend the pass")}</a></p>" +
             "<p style=\"font-size:12px;color:#4a6378;line-height:1.6\">Sent via invites.blog</p></div>";
 
         return (subject, html);
