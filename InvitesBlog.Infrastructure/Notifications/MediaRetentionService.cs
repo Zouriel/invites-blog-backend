@@ -117,6 +117,8 @@ public sealed class MediaRetentionService(
                 var idleDays = int.TryParse(config["Faces:IdleAlbumDays"], out var d) && d > 0 ? d : 730;
                 var expired = await faces.ExpireIdleAsync(TimeSpan.FromDays(idleDays), ct);
                 if (expired > 0) logger.LogInformation("Face grouping switched off in {Count} idle albums (face data deleted).", expired);
+                var unpaid = await faces.ExpireUnpaidAsync(ct);
+                if (unpaid > 0) logger.LogInformation("Face grouping switched off in {Count} albums without a plan that includes it (face data deleted).", unpaid);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -248,6 +248,37 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
+    public async Task Free_events_cannot_switch_it_on_and_an_event_whose_pass_ends_loses_it_and_its_face_data()
+    {
+        var (freeHost, _, _, freeBucket) = await SetUpAsync(paid: false);
+        var refused = await api.Client(freeHost.Token).PutAsJsonAsync($"/api/media-buckets/{freeBucket}/face-grouping", new { on = true, guestsTold = true, outsideRestrictedRegions = true });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("any pass or Premium", await refused.Content.ReadAsStringAsync());
+        var free = await DataAsync(await api.Client(freeHost.Token).GetAsync($"/api/media-buckets/{freeBucket}"));
+        Assert.False(free.GetProperty("faceGroupingIncluded").GetBoolean());
+
+        var (host, _, ev, bucket) = await SetUpAsync();
+        Assert.True((await DataAsync(await api.Client(host.Token).GetAsync($"/api/media-buckets/{bucket}"))).GetProperty("faceGroupingIncluded").GetBoolean());
+        await PhotoAsync(ev, bucket);
+        await SwitchOnAsync(host, bucket);
+        api.Faces.Next = [FakeFaceAnalyzer.Face(11)];
+        await RunWorkerAsync();
+        Assert.True(await api.ReadAsync(db => db.PhotoFaces.AnyAsync(f => f.BucketId == bucket)));
+
+        // The pass ends: the next sweep switches grouping off and deletes the faces.
+        await api.WriteAsync(async db =>
+        {
+            await db.Campaigns.Where(c => c.Id == ev).ExecuteUpdateAsync(x => x.SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddDays(-1)));
+        });
+        var faces = api.Services.CreateScope().ServiceProvider.GetRequiredService<InvitesBlog.Application.Services.Faces.IFaceGroupingService>();
+        Assert.True(await faces.ExpireUnpaidAsync(CancellationToken.None) >= 1);
+        Assert.False(await api.ReadAsync(db => db.MediaBuckets.Where(b => b.Id == bucket).Select(b => b.FaceGroupingOn).SingleAsync()));
+        Assert.False(await api.ReadAsync(db => db.PhotoFaces.AnyAsync(f => f.BucketId == bucket)));
+        Assert.False(await api.ReadAsync(db => db.FacePeople.AnyAsync(f => f.BucketId == bucket)));
+        Assert.Contains(await api.ReadAsync(db => db.AuditLogs.Where(a => a.Action == "faces.plan_ended").ToListAsync()), a => a.DataJson.Contains(bucket.ToString()));
+    }
+
+    [PostgresFact]
     public async Task A_photo_removed_while_it_is_being_read_leaves_no_faces()
     {
         var (host, _, ev, bucket) = await SetUpAsync();
@@ -271,12 +302,12 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
     private async Task SwitchOnAsync(Person host, Guid bucket) =>
         await DataAsync(await api.Client(host.Token).PutAsJsonAsync($"/api/media-buckets/{bucket}/face-grouping", new { on = true, guestsTold = true, outsideRestrictedRegions = true }));
 
-    private async Task<(Person Host, Person Guest, Guid Event, Guid Bucket)> SetUpAsync()
+    private async Task<(Person Host, Person Guest, Guid Event, Guid Bucket)> SetUpAsync(bool paid = true)
     {
         api.Faces.Next = [];
         var host = await UserAsync("Host");
         var guest = await UserAsync("Guest");
-        var ev = await EventAsync(host);
+        var ev = await EventAsync(host, paid);
         await InviteAsync(ev, await GuestAsync(ev, "Guest", guest.Email));
         var bucket = Guid.NewGuid();
         await api.WriteAsync(async db =>
@@ -338,7 +369,7 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
         return new Person(id, mail, name, api.TokenFor(id, "email", mail, role));
     }
 
-    private async Task<Guid> EventAsync(Person creator)
+    private async Task<Guid> EventAsync(Person creator, bool paid = true)
     {
         var id = Guid.NewGuid();
         var templateId = Guid.NewGuid();
@@ -356,6 +387,9 @@ public sealed class FaceGroupingTests(PostgresApiFixture api)
                 CreatedByUserId = creator.Id, AccessTokenHash = Guid.NewGuid().ToString("N"),
                 Title = "Faces", Slug = $"e-{id:N}", Status = CampaignStatus.Dispatched,
                 EventStartAt = DateTimeOffset.UtcNow.AddDays(10), CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                // Face grouping comes with any pass or Premium: these events have a Gold pass unless a test says otherwise.
+                EventPass = paid ? EventPassKind.Gold : EventPassKind.None,
+                EventPassUntil = paid ? DateTimeOffset.UtcNow.AddMonths(12) : null,
             });
             await Task.CompletedTask;
         });

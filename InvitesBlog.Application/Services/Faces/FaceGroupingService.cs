@@ -45,6 +45,12 @@ public interface IFaceGroupingService
     /// </summary>
     Task<int> ExpireIdleAsync(TimeSpan idle, CancellationToken ct);
 
+    /// <summary>
+    /// Switches grouping off (deleting all face data) in albums whose event no longer has a plan that includes it
+    /// (Free, or a pass that ended). Returns how many.
+    /// </summary>
+    Task<int> ExpireUnpaidAsync(CancellationToken ct);
+
     /// <summary>"Same person as…": moves one group's faces into another of the same album; the first goes.</summary>
     Task<FacePersonDto> MergeAsync(Guid personId, Guid intoId, IReadOnlyList<EventPhoto> photos, CancellationToken ct);
 
@@ -63,7 +69,8 @@ public sealed class FaceGroupingService(
     IRepository<EventPhoto> photos,
     IUnitOfWork uow,
     IFaceAnalyzer? analyzer = null,
-    IRepository<AuditLog>? audit = null) : IFaceGroupingService
+    IRepository<AuditLog>? audit = null,
+    Plans.IPlanService? plans = null) : IFaceGroupingService
 {
 
     public bool Available => analyzer?.Available ?? false;
@@ -99,6 +106,8 @@ public sealed class FaceGroupingService(
             if (!Available) throw new InvalidStateException("Face grouping isn't available right now.", "faces_unavailable");
             if (!guestsTold)
                 throw new BusinessRuleException("Tick the box to confirm your guests are told photos are grouped by face.", "faces_guests_not_told");
+            if (plans is not null && !Plans.PlanRules.IncludesFaceGrouping(await plans.ForCampaignAsync(bucket.CampaignId, ct)))
+                throw new BusinessRuleException("Grouping photos by face comes with any pass or Premium.", "faces_needs_plan");
             if (!outsideRestrictedRegions)
                 throw new BusinessRuleException(
                     "Face grouping isn't available for events in Illinois, Texas or Washington (USA). Tick the box if this event isn't there.",
@@ -284,6 +293,26 @@ public sealed class FaceGroupingService(
             buckets.Update(bucket);
             await ClearAsync(bucket.Id, ct);
             await AuditAsync("faces.expired", bucket, bucket.Id, "retention", new { idleDays = (int)idle.TotalDays }, ct);
+            await uow.SaveChangesAsync(ct);
+            expired++;
+        }
+        return expired;
+    }
+
+    public async Task<int> ExpireUnpaidAsync(CancellationToken ct)
+    {
+        if (plans is null) return 0;
+        var on = await buckets.Query(tracking: true).Where(b => b.FaceGroupingOn).ToListAsync(ct);
+        var expired = 0;
+        foreach (var bucket in on)
+        {
+            var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
+            if (Plans.PlanRules.IncludesFaceGrouping(plan)) continue;
+            bucket.FaceGroupingOn = false;
+            bucket.UpdatedAt = DateTimeOffset.UtcNow;
+            buckets.Update(bucket);
+            await ClearAsync(bucket.Id, ct);
+            await AuditAsync("faces.plan_ended", bucket, bucket.Id, "plan", new { plan = plan.Kind.ToString() }, ct);
             await uow.SaveChangesAsync(ct);
             expired++;
         }
