@@ -205,6 +205,12 @@ public sealed record EventPlan(
 /// <summary>The rules, with no database in them, so every branch can be tested directly.</summary>
 public static class PlanRules
 {
+    /// <summary>
+    /// "Group photos by face" comes with every paid plan: a Gold or Platinum pass, Premium, or a venue (owner,
+    /// 2026-11-11). A Free event doesn't get it, and an event whose pass has ended loses it (FaceGroupingService).
+    /// </summary>
+    public static bool IncludesFaceGrouping(EventPlan plan) => plan.Kind != PlanKind.Free;
+
     public static bool IsActive(SubscriptionTier tier, DateTimeOffset? endsAt, DateTimeOffset now) =>
         tier != SubscriptionTier.None && (endsAt is null || endsAt > now);
 

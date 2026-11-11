@@ -1298,7 +1298,8 @@ public sealed class MediaBucketService(
                 plan.Phase == MediaPhase.UploadsClosed ? face?.TrimBytes : null,
                 PlanCatalog.FreeEventBytes,
                 b.FaceGroupingOn,
-                faceGrouping?.Available ?? false);
+                faceGrouping?.Available ?? false,
+                PlanRules.IncludesFaceGrouping(plan));
         }).ToList();
     }
 

@@ -70,7 +70,9 @@ public sealed record MediaBucketDto(
     /// <summary>Whether photos in this album are grouped by face (the People filter). Off unless the host switched it on.</summary>
     bool FaceGrouping = false,
     /// <summary>Whether this server can group faces at all (the models are installed).</summary>
-    bool FaceGroupingAvailable = false);
+    bool FaceGroupingAvailable = false,
+    /// <summary>Whether the event's plan includes face grouping (any pass, Premium or a venue; not Free).</summary>
+    bool FaceGroupingIncluded = false);
 
 /// <summary>
 /// The space a venue's events share: how much there is and how much is used. For anyone who isn't a
