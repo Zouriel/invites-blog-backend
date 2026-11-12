@@ -676,7 +676,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.ValueJson).HasColumnType("jsonb");
         });
 
-        // Venues, their staff, and the passes a Studio account holds for its clients.
+        // Legacy tables kept rather than dropped (owner, 2026-11-12): the old venue page's venues and staff, and the
+        // retired passes held for clients when Premium was called Studio. Nothing reads venues or staff any more.
         b.Entity<Venue>(e =>
         {
             e.ToTable("venues");

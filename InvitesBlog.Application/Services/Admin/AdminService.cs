@@ -229,7 +229,7 @@ public sealed class AdminService(
         Guid userId, SetSubscriptionRequest req, CancellationToken ct = default)
     {
         if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier) || !Enum.IsDefined(tier))
-            throw new BusinessRuleException("Choose None, Premium or Venue.", "tier_unknown");
+            throw new BusinessRuleException("Choose None, Premium or Venue (Studio).", "tier_unknown");
 
         var now = DateTimeOffset.UtcNow;
         if (tier != SubscriptionTier.None && req.EndsAt is { } requested && requested <= now)

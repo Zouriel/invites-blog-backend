@@ -1278,7 +1278,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     }
 
     [Fact]
-    public void Every_product_is_a_billing_item_and_venue_is_sold_on_play_only()
+    public void Every_product_is_a_billing_item_and_studio_is_sold_on_both_stores()
     {
         Assert.Equal(8, GooglePlayCatalog.All.Count);
         foreach (var p in GooglePlayCatalog.All)
@@ -1286,9 +1286,10 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
         Assert.Equal(["premium_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
         Assert.Equal(PaymentKind.VenueMonthly, GooglePlayCatalog.Find("venue_monthly")!.Kind);
-        // Not on the iPhone.
-        Assert.Null(AppStoreCatalog.Find("venue_monthly"));
-        Assert.Equal(7, AppStoreCatalog.All.Count);
+        // On the iPhone too (owner, 2026-11-12), in Premium's subscription group.
+        Assert.Equal(PaymentKind.VenueMonthly, AppStoreCatalog.Find("venue_monthly")!.Kind);
+        Assert.Equal(8, AppStoreCatalog.All.Count);
+        Assert.Equal(["premium_monthly", "venue_monthly"], AppStoreCatalog.Subscriptions);
     }
 
     // ----- Account deletion ----------------------------------------------------------------------

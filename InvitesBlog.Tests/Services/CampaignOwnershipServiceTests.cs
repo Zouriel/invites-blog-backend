@@ -21,10 +21,7 @@ public class CampaignOwnershipServiceTests
 
     private readonly IRepository<CampaignCelebrant> _celebrants = TestData.NoCelebrants();
 
-    private IRepository<Venue> _venues = TestData.Empty<Venue>();
-    private IRepository<VenueStaff> _staff = TestData.Empty<VenueStaff>();
-
-    private CampaignOwnershipService Sut() => new(_currentUser, _users, _campaigns, _inviters, _celebrants, _venues, _staff);
+    private CampaignOwnershipService Sut() => new(_currentUser, _users, _campaigns, _inviters, _celebrants);
 
     private static AppUser Account(string? email = "host@test.com", string? phone = null) => new()
     {
@@ -229,50 +226,26 @@ public class CampaignOwnershipServiceTests
         Assert.Equal(CampaignAccess.Organiser, await Sut().AccessAsync(campaign.Id));
     }
 
-    // ---------- a venue runs its events ----------
+    // ---------- venues and their staff are gone (owner, 2026-11-12) ----------
 
-    private (AppUser Me, Campaign Event) AtVenue(Guid venueOwner, string? staffEmail)
+    /// <summary>
+    /// Staff once ran a venue's events (and could buy passes for them). There are no staff any more: an event
+    /// linked to an old venue row gives nobody but its organiser and celebrants any access.
+    /// </summary>
+    [Fact]
+    public async Task An_old_venue_link_gives_its_owner_or_staff_no_access()
     {
         var me = Account(email: "staff@resort.test");
         _currentUser.CampaignId.Returns((Guid?)null);
         _currentUser.UserId.Returns(me.Id);
         _users.GetByIdAsync(me.Id, Arg.Any<CancellationToken>()).Returns(me);
 
-        var venue = new Venue { Id = Guid.NewGuid(), OwnerUserId = venueOwner, Name = "Resort" };
-        _venues = Substitute.For<IRepository<Venue>>();
-        _venues.Query(Arg.Any<bool>()).Returns(new[] { venue }.AsAsyncQueryable());
-        _staff = Substitute.For<IRepository<VenueStaff>>();
-        _staff.Query(Arg.Any<bool>()).Returns((staffEmail is null
-            ? Array.Empty<VenueStaff>()
-            : [new VenueStaff { Id = Guid.NewGuid(), VenueId = venue.Id, Email = staffEmail }]).AsAsyncQueryable());
-
         var campaign = TestData.Campaign();
         campaign.InviterId = null;
         campaign.CreatedByUserId = Guid.NewGuid();
-        campaign.VenueId = venue.Id;
+        campaign.VenueId = Guid.NewGuid();
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
-        return (me, campaign);
-    }
 
-    [Fact]
-    public async Task A_venues_staff_run_its_events()
-    {
-        var (_, campaign) = AtVenue(Guid.NewGuid(), "staff@resort.test");
-        Assert.Equal(CampaignAccess.Manager, await Sut().AccessAsync(campaign.Id));
-    }
-
-    [Fact]
-    public async Task A_venues_owner_runs_its_events()
-    {
-        var (me, campaign) = AtVenue(Guid.Empty, null);
-        _venues.Query(Arg.Any<bool>()).Returns(new[] { new Venue { Id = campaign.VenueId!.Value, OwnerUserId = me.Id, Name = "Resort" } }.AsAsyncQueryable());
-        Assert.Equal(CampaignAccess.Manager, await Sut().AccessAsync(campaign.Id));
-    }
-
-    [Fact]
-    public async Task Someone_not_on_the_staff_gets_nothing_from_a_venue()
-    {
-        var (_, campaign) = AtVenue(Guid.NewGuid(), "someone.else@resort.test");
         Assert.Equal(CampaignAccess.None, await Sut().AccessAsync(campaign.Id));
     }
 }

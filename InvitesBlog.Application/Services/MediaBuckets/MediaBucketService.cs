@@ -239,7 +239,7 @@ public sealed record GuestBucketView(IReadOnlySet<Guid> BucketIds, bool SeesUnbu
 /// </param>
 /// <param name="IsOpen">Whether it is the night, separately, so the page can say WHICH reason.</param>
 /// <param name="Branded">A Free event: the page carries a small "Made with invites.blog".</param>
-/// <param name="VenueName">The venue the event is at, whose name and logo the page carries.</param>
+/// <param name="VenueName">The organiser's name, while their Studio plan (tier Venue) covers the event; with their picture (VenueLogoUrl), the page carries it.</param>
 public sealed record MediaBucketQrAdmission(
     Guid QrId, Guid BucketId, string BucketTitle, bool AllowAnonymous, bool CanUpload,
     bool IsOpen, DateTimeOffset EventDate, bool Branded = true, string? VenueName = null, string? VenueLogoUrl = null,
@@ -263,8 +263,6 @@ public sealed class MediaBucketService(
     IConfiguration config,
     IUnitOfWork uow,
     IPlanService plans,
-    IRepository<Venue> venues,
-    IRepository<VenueStaff> venueStaff,
     IMediaBucketUsageRepository usage,
     Faces.IFaceGroupingService? faceGrouping = null) : IMediaBucketService
 {
@@ -895,13 +893,6 @@ public sealed class MediaBucketService(
                         ? $"This event's {Size(plan.EventBytes)} is full. A Platinum pass gives it more room."
                         : $"This event's {Size(plan.EventBytes)} is full. A Gold or Platinum pass gives it more room.",
                 "bucket_full");
-
-        // And a venue's limit across all of its events.
-        if (plan.AccountBytes is { } cap && plan.VenueId is { } venue
-            && await plans.VenueUsedBytesAsync(venue, ct) + incomingBytes > cap)
-            throw new BusinessRuleException(
-                $"This venue's {Size(cap)} across all its events is full. Remove some photos or talk to us about a bigger plan.",
-                "account_full");
     }
 
     public async Task ReserveRoomAsync(Guid bucketId, long bytes, CancellationToken ct = default)
@@ -910,11 +901,8 @@ public sealed class MediaBucketService(
                      ?? throw new NotFoundException("That album no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        // The lock is on whatever the check sums across: the event's space, shared by its albums. Only a
-        // limit across a whole venue (none today: a venue's events each have their own) would queue on the venue.
-        await usage.ReserveAsync(
-            plan.AccountBytes is not null && plan.VenueId is { } venueId ? venueId : bucket.CampaignId, bucketId, bytes,
-            c => EnsureRoomAsync(bucketId, bytes, c), ct);
+        // The lock is on whatever the check sums across: the event's space, shared by its albums.
+        await usage.ReserveAsync(bucket.CampaignId, bucketId, bytes, c => EnsureRoomAsync(bucketId, bytes, c), ct);
     }
 
     /// <summary>
@@ -937,32 +925,22 @@ public sealed class MediaBucketService(
     private static readonly EventPlan OrphanPlan = PlanRules.Evaluate(
         DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, EventPassKind.None, null, null, null, null, null, null);
 
+    /// <summary>
+    /// The account's Studio plan (tier Venue) at a glance: whether it is in force, and the space its events
+    /// use between them. Each event's space is its own plan's (10 GB while Studio covers it), so there is
+    /// no account-wide limit. Kept for pages and app builds that read it.
+    /// </summary>
     public async Task<StorageSummaryDto> StorageSummaryAsync(CancellationToken ct = default)
     {
         var me = RequireUser();
-        var venue = await MyVenueAsync(me, ct);
-        if (venue is null) return new StorageSummaryDto("None", null, 0, null);
+        var user = await users.GetByIdAsync(me, ct);
+        if (user is not { SubscriptionTier: SubscriptionTier.Venue }
+            || !PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow))
+            return new StorageSummaryDto("None", null, 0, null);
 
-        var owner = await users.GetByIdAsync(venue.OwnerUserId, ct);
-        var active = owner is { SubscriptionTier: SubscriptionTier.Venue }
-                     && PlanRules.IsActive(owner.SubscriptionTier, owner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
-        return new StorageSummaryDto(
-            active ? SubscriptionTier.Venue.ToString() : "None",
-            // No venue-wide space: each event's space is its own plan's (10 GB while the venue's plan is in force).
-            null,
-            await plans.VenueUsedBytesAsync(venue.Id, ct),
-            venue.Name);
-    }
-
-    /// <summary>The venue this account owns, or works at.</summary>
-    private async Task<Venue?> MyVenueAsync(Guid me, CancellationToken ct)
-    {
-        var owned = await venues.Query().FirstOrDefaultAsync(v => v.OwnerUserId == me, ct);
-        if (owned is not null) return owned;
-        var email = (await users.GetByIdAsync(me, ct))?.Email?.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(email)) return null;
-        var staffAt = await venueStaff.Query().Where(s => s.Email == email).Select(s => s.VenueId).FirstOrDefaultAsync(ct);
-        return staffAt == Guid.Empty ? null : await venues.GetByIdAsync(staffAt, ct);
+        var mine = campaigns.Query().Where(c => c.CreatedByUserId == me).Select(c => c.Id);
+        var used = await buckets.Query().Where(b => mine.Contains(b.CampaignId)).SumAsync(b => b.UsedBytes, ct);
+        return new StorageSummaryDto(SubscriptionTier.Venue.ToString(), null, used, user.DisplayName);
     }
 
     private static string Size(long bytes) =>
@@ -1117,11 +1095,12 @@ public sealed class MediaBucketService(
         // somebody standing at a party reads to know they are adding to the right night.
         var title = campaign?.Title ?? "Album";
 
-        var venue = plan?.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
+        // While the organiser's Studio plan covers the event, the page carries their name and picture.
+        var venue = plan?.VenueAccountId is { } organiserId ? await users.GetByIdAsync(organiserId, ct) : null;
         var (opensAt, closesAt) = EventDayWindow.Bounds(night, bucket.UploadWindowDays, campaign?.TimeZone);
         return new MediaBucketQrAdmission(
             code.Id, bucket.Id, title, code.AllowAnonymous, room && open, open, night,
-            plan?.Branded ?? true, venue?.Name, venue?.LogoUrl, opensAt, closesAt);
+            plan?.Branded ?? true, venue?.DisplayName, venue?.AvatarUrl, opensAt, closesAt);
     }
 
     public async Task<MediaBucket?> GetBucketForContributionAsync(
@@ -1219,7 +1198,7 @@ public sealed class MediaBucketService(
             ? []
             : await campaigns.Query()
                 .Where(c => campaignIds.Contains(c.Id))
-                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.VenueId, c.CardThemeJson, c.MediaTrimAt, c.MediaTrimBytes, c.TimeZone))
+                .Select(c => new EventFace(c.Id, c.Title, c.CustomContentJson, c.EventStartAt, c.CardThemeJson, c.MediaTrimAt, c.MediaTrimBytes, c.TimeZone))
                 .ToDictionaryAsync(x => x.Id, x => x, ct);
 
         // Which bucket each event posts to by default — the oldest, matching ForCampaignAsync. Read
@@ -1244,11 +1223,13 @@ public sealed class MediaBucketService(
             .GroupBy(x => x.CampaignId)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.UsedBytes));
 
-        // The venue each event is held at, for the name and logo its albums carry.
-        var venueIds = events.Values.Select(e => e.VenueId).OfType<Guid>().Distinct().ToList();
-        var venueFaces = venueIds.Count == 0
-            ? new Dictionary<Guid, Venue>()
-            : await venues.Query().Where(v => venueIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
+        // The organisers whose Studio plan (tier Venue) covers their event: their name and picture go on its albums.
+        var organiserIds = eventPlans.Values.Select(p => p.VenueAccountId).OfType<Guid>().Distinct().ToList();
+        var venueFaces = organiserIds.Count == 0
+            ? new Dictionary<Guid, (string Name, string? LogoUrl)>()
+            : (await users.Query().Where(u => organiserIds.Contains(u.Id))
+                    .Select(u => new { u.Id, u.DisplayName, u.AvatarUrl }).ToListAsync(ct))
+                .ToDictionary(u => u.Id, u => (u.DisplayName, u.AvatarUrl));
 
         var now = DateTimeOffset.UtcNow;
         return rows.Select(b =>
@@ -1257,9 +1238,8 @@ public sealed class MediaBucketService(
             // The space is the event's, shared by all of its albums.
             var capacity = plan.EventBytes;
             var eventUsed = usedByEvent.GetValueOrDefault(b.CampaignId);
-            var venue = events.TryGetValue(b.CampaignId, out var face) && face.VenueId is { } v
-                ? venueFaces.GetValueOrDefault(v)
-                : null;
+            events.TryGetValue(b.CampaignId, out var face);
+            (string Name, string? LogoUrl)? venue = plan.VenueAccountId is { } v && venueFaces.TryGetValue(v, out var vf) ? vf : null;
             return new MediaBucketDto(
                 b.Id,
                 b.Name,
@@ -1309,9 +1289,9 @@ public sealed class MediaBucketService(
     private string SealSecret => config["Jwt:SigningKey"] ?? "change-this-in-production-please-use-a-long-random-value";
     private const string SealPurpose = "qr-token-v1";
 
-    /// <summary>How an event presents itself: the things a bucket used to duplicate, and where it is held.</summary>
+    /// <summary>How an event presents itself: the things a bucket used to duplicate.</summary>
     private sealed record EventFace(
-        Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt, Guid? VenueId,
+        Guid Id, string Title, string? CustomContentJson, DateTimeOffset EventStartAt,
         string? CardThemeJson = null, DateTimeOffset? TrimAt = null, long? TrimBytes = null, string? TimeZone = null);
 
     /// <summary>

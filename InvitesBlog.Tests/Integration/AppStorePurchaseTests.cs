@@ -123,20 +123,21 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         return (api.AppStore.Chain.Sign(t), id);
     }
 
-    private (string Jws, string Original) Subscribed(Guid? token, DateTimeOffset expiry, int status = 1, bool autoRenew = true, string env = "Production")
+    private (string Jws, string Original) Subscribed(Guid? token, DateTimeOffset expiry, int status = 1, bool autoRenew = true, string env = "Production",
+        string product = "premium_monthly")
     {
         var id = NextId();
-        var t = Tx(id, id, "premium_monthly", token, env, "Auto-Renewable Subscription", 15990, expires: expiry);
+        var t = Tx(id, id, product, token, env, "Auto-Renewable Subscription", 15990, expires: expiry);
         api.AppStore.Transactions[id] = t;
-        api.AppStore.Subscriptions[id] = (status, id, Renewal(id, autoRenew));
+        api.AppStore.Subscriptions[id] = (status, id, Renewal(id, autoRenew, product: product));
         return (api.AppStore.Chain.Sign(t), id);
     }
 
-    private static Dictionary<string, object?> Renewal(string original, bool autoRenew, DateTimeOffset? grace = null) => new()
+    private static Dictionary<string, object?> Renewal(string original, bool autoRenew, DateTimeOffset? grace = null, string product = "premium_monthly") => new()
     {
         ["originalTransactionId"] = original,
-        ["autoRenewProductId"] = "premium_monthly",
-        ["productId"] = "premium_monthly",
+        ["autoRenewProductId"] = product,
+        ["productId"] = product,
         ["autoRenewStatus"] = autoRenew ? 1 : 0,
         ["signedDate"] = Ms(DateTimeOffset.UtcNow),
         ["environment"] = "Production",
@@ -144,14 +145,15 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     };
 
     /// <summary>Apple renewed: a new transaction under the same original id.</summary>
-    private string Renewed(string original, DateTimeOffset expiry, int status = 1, bool autoRenew = true)
+    private string Renewed(string original, DateTimeOffset expiry, int status = 1, bool autoRenew = true, string product = "premium_monthly",
+        Guid? token = null)
     {
         var id = NextId();
         var first = api.AppStore.Transactions[original];
-        var t = Tx(id, original, "premium_monthly", Guid.TryParse((string?)first["appAccountToken"], out var g) ? g : null,
-            (string)first["environment"]!, "Auto-Renewable Subscription", 15990, expires: expiry);
+        var t = Tx(id, original, product, token ?? (Guid.TryParse((string?)first["appAccountToken"], out var g) ? g : null),
+            (string)first["environment"]!, "Auto-Renewable Subscription", product == "venue_monthly" ? 49990 : 15990, expires: expiry);
         api.AppStore.Transactions[id] = t;
-        api.AppStore.Subscriptions[original] = (status, id, Renewal(original, autoRenew));
+        api.AppStore.Subscriptions[original] = (status, id, Renewal(original, autoRenew, product: product));
         return id;
     }
 
@@ -502,8 +504,8 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
             var apple = (await api.Client(host.Token).GetFromJsonAsync<Envelope<Offers>>($"/api/billing/app-store/offers{q}", Web))!.Data!;
             var play = (await api.Client(host.Token).GetFromJsonAsync<Envelope<Offers>>($"/api/billing/google-play/offers{q}", Web))!.Data!;
             Assert.True(apple.Available);
-            // The same, except Venue: sold on Google Play only (owner, 2026-11-12).
-            Assert.Equal(play.Products.Where(p => p != "venue_monthly"), apple.Products);
+            // The same, Studio included: sold on the iPhone too (owner, 2026-11-12).
+            Assert.Equal(play.Products, apple.Products);
         }
     }
 
@@ -745,6 +747,106 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
 
         Assert.True((await AccountAsync(user.Id)).SubscriptionEndsAt <= DateTimeOffset.UtcNow);
         Assert.Equal(PaymentStatus.Refunded, Assert.Single(await PaymentsAsync(user.Id)).Status);
+    }
+
+    // ----- Studio on the iPhone (owner, 2026-11-12) ---------------------------------------------
+
+    private async Task<List<string>> AppleOffersAsync(Person who) =>
+        (await api.Client(who.Token).GetFromJsonAsync<Envelope<Offers>>("/api/billing/app-store/offers", Web))!.Data!.Products;
+
+    [PostgresFact]
+    public async Task An_account_with_no_plan_is_offered_premium_and_studio_and_a_studio_subscription_gives_studio()
+    {
+        var user = await UserAsync();
+        Assert.Equal(["premium_monthly", "venue_monthly"], await AppleOffersAsync(user));
+
+        var expiry = DateTimeOffset.UtcNow.AddDays(30);
+        var (jws, original) = Subscribed(await TokenAsync(user, "venue_monthly", null), expiry, product: "venue_monthly");
+        var (status, body) = await RedeemAsync(user, jws);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("venue_monthly", body.Data!.ProductId);
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Venue, u.SubscriptionTier);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(expiry)), u.SubscriptionEndsAt);
+        Assert.Equal(PaymentKind.VenueMonthly, Assert.Single(await PaymentsAsync(user.Id)).Kind);
+        Assert.Equal("venue_monthly", (await RowAsync(original))!.ProductId);
+
+        // Billing: renews through the App Store; and the only offer left is moving down to Premium.
+        using var doc = JsonDocument.Parse(await api.Client(user.Token).GetStringAsync("/api/billing"));
+        Assert.Equal("app_store", doc.RootElement.GetProperty("data").GetProperty("account").GetProperty("store").GetString());
+        Assert.Equal(["premium_monthly"], await AppleOffersAsync(user));
+    }
+
+    /// <summary>
+    /// Premium up to Studio in the same subscription group: Apple keeps the original transaction and starts a
+    /// Studio transaction at once. The account becomes Studio (and only Studio), with Apple's new end.
+    /// </summary>
+    [PostgresFact]
+    public async Task Upgrading_premium_to_studio_in_the_group_makes_the_account_studio_and_never_both()
+    {
+        var user = await UserAsync();
+        var (jws, original) = Subscribed(await TokenAsync(user, "premium_monthly", null), DateTimeOffset.UtcNow.AddDays(20));
+        await RedeemAsync(user, jws);
+        Assert.Equal(SubscriptionTier.Premium, (await AccountAsync(user.Id)).SubscriptionTier);
+
+        // Held through Apple: the upgrade is on offer, and the app gets an intent for it.
+        Assert.Equal(["venue_monthly"], await AppleOffersAsync(user));
+        var upgradeToken = await TokenAsync(user, "venue_monthly", null);
+
+        var next = DateTimeOffset.UtcNow.AddDays(30);
+        var upgrade = Renewed(original, next, product: "venue_monthly", token: upgradeToken);
+        Assert.True((await NotifyAsync(Notification("DID_CHANGE_RENEWAL_PREF", upgrade, "UPGRADE"))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Venue, u.SubscriptionTier);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(next)), u.SubscriptionEndsAt);
+        Assert.Equal("venue_monthly", (await RowAsync(original))!.ProductId);
+        var payments = await PaymentsAsync(user.Id);
+        Assert.Equal([PaymentKind.PremiumMonthly, PaymentKind.VenueMonthly], payments.Select(p => p.Kind));
+        Assert.Single(await api.ReadAsync(db => db.AppStorePurchases.Where(p => p.UserId == user.Id).ToListAsync()));
+
+        // The app hands in the same upgrade too: nothing more happens.
+        await RedeemAsync(user, api.AppStore.Chain.Sign(api.AppStore.Transactions[upgrade]));
+        Assert.Equal(2, (await PaymentsAsync(user.Id)).Count);
+        Assert.Equal(SubscriptionTier.Venue, (await AccountAsync(user.Id)).SubscriptionTier);
+    }
+
+    /// <summary>Studio down to Premium: Apple changes the product at the next renewal, and so does the account.</summary>
+    [PostgresFact]
+    public async Task Moving_studio_down_to_premium_takes_effect_at_the_renewal()
+    {
+        var user = await UserAsync();
+        var (jws, original) = Subscribed(await TokenAsync(user, "venue_monthly", null), DateTimeOffset.UtcNow.AddDays(1), product: "venue_monthly");
+        await RedeemAsync(user, jws);
+
+        // The change of plan for next time: still Studio now.
+        Assert.True((await NotifyAsync(Notification("DID_CHANGE_RENEWAL_PREF", original, "DOWNGRADE"))).IsSuccessStatusCode);
+        Assert.Equal(SubscriptionTier.Venue, (await AccountAsync(user.Id)).SubscriptionTier);
+
+        var next = DateTimeOffset.UtcNow.AddDays(31);
+        var renewal = Renewed(original, next, product: "premium_monthly");
+        Assert.True((await NotifyAsync(Notification("DID_RENEW", renewal))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Premium, u.SubscriptionTier);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(next)), u.SubscriptionEndsAt);
+        Assert.Equal("premium_monthly", (await RowAsync(original))!.ProductId);
+    }
+
+    /// <summary>A plan from the website (or Play) isn't moved through Apple: nothing to buy here, Studio refused.</summary>
+    [PostgresFact]
+    public async Task A_plan_held_elsewhere_is_offered_nothing_and_a_new_studio_subscription_is_refused()
+    {
+        var user = await UserAsync();
+        await api.WriteAsync(async db =>
+        {
+            var u = await db.Users.FirstAsync(x => x.Id == user.Id);
+            u.SubscriptionTier = SubscriptionTier.Premium;
+            u.SubscriptionEndsAt = DateTimeOffset.UtcNow.AddDays(20);
+        });
+        Assert.Empty(await AppleOffersAsync(user));
+        Assert.Equal("app_store_not_offered", Code((await IntentAsync(user, "venue_monthly", null)).Body));
     }
 
     [PostgresFact]

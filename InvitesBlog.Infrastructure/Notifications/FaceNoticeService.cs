@@ -206,17 +206,14 @@ public sealed class FaceNoticeService(
         DateTimeOffset? premiumEnd = premium && organiser!.SubscriptionEndsAt is { } e && organiser.AutoRenewKind is null ? e : null;
         var premiumForever = premium && premiumEnd is null;
 
-        // The venue's plan, when one covers the event (plan.VenueId is only set while it is in force): the
-        // same reading as Premium's, from the venue owner's account.
+        // The organiser's Studio plan (tier Venue), when it covers the event (plan.VenueAccountId is only set
+        // while it is in force): the same reading as Premium's, from the same account.
         DateTimeOffset? venueEnd = null;
         var venueForever = false;
-        if (plan.VenueId is { } venueId)
+        if (plan.VenueAccountId is not null && organiser is { SubscriptionTier: SubscriptionTier.Venue })
         {
-            var venueOwner = await db.Venues.Where(v => v.Id == venueId)
-                .Join(db.Users, v => v.OwnerUserId, u => u.Id, (v, u) => new { u.SubscriptionEndsAt, u.AutoRenewKind })
-                .FirstOrDefaultAsync(ct);
-            venueEnd = venueOwner?.SubscriptionEndsAt is { } ve && venueOwner.AutoRenewKind is null ? ve : null;
-            venueForever = venueOwner is not null && venueEnd is null;
+            venueEnd = organiser.SubscriptionEndsAt is { } ve && organiser.AutoRenewKind is null ? ve : null;
+            venueForever = venueEnd is null;
         }
 
         switch (plan.Kind)

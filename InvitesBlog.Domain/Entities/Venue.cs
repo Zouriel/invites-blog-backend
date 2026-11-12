@@ -3,11 +3,9 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Domain.Entities;
 
 /// <summary>
-/// A resort or hall on the Venue plan. Every event at the property gets its photo albums under the
-/// venue's name, and its staff run them.
-///
-/// <para>One per account: the plan is priced per property, so a group with several properties has an
-/// account for each. The plan itself is the owner's <see cref="AppUser.SubscriptionTier"/>.</para>
+/// LEGACY (owner, 2026-11-12): the old venue page's record (name, logo, code). Nothing reads it any more:
+/// Studio (tier Venue) is a plan on the account, and an event's badge is its organiser's own name and
+/// picture. The table is kept rather than dropped; only account deletion still removes a person's rows.
 /// </summary>
 public sealed class Venue
 {
@@ -32,8 +30,8 @@ public sealed class Venue
 }
 
 /// <summary>
-/// Someone who runs a venue's events alongside its owner. Matched to an account by email, the way
-/// celebrants are, so staff can be added before they have signed up.
+/// LEGACY (owner, 2026-11-12): venue staff no longer exist and give no access. The table is kept rather
+/// than dropped; only account deletion still removes a person's rows.
 /// </summary>
 public sealed class VenueStaff
 {
@@ -48,7 +46,7 @@ public sealed class VenueStaff
 }
 
 /// <summary>
-/// An event pass a Studio account holds to give to a client's event: bought at the Studio price and
+/// RETIRED: from when Premium was called Studio (not today's Studio plan). An event pass that account held to give to a client's event: bought at the Studio price and
 /// used once. <see cref="UsedOnCampaignId"/> is null until it is given.
 /// </summary>
 public sealed class PassCredit

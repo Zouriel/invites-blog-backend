@@ -43,6 +43,8 @@ internal static class TestData
     {
         var plans = Substitute.For<InvitesBlog.Application.Plans.IPlanService>();
         plans.ForCampaignAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Plan());
+        plans.VenueFacesAsync(Arg.Any<IReadOnlyCollection<Campaign>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, InvitesBlog.Application.Plans.VenueFace>());
         return plans;
     }
 

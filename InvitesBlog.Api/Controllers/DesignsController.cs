@@ -178,7 +178,7 @@ public sealed class DesignsController(IDesignService designs, IArtLibrary art, I
 [Route("api")]
 /// <summary>
 /// The designer assistant: a chat per design in which Claude edits the design with the designer's own
-/// tools (run in the browser). Premium and Venue accounts (and admins); the service checks the plan
+/// tools (run in the browser). Premium and Studio (Venue) accounts (and admins); the service checks the plan
 /// and the monthly allowance on every call.
 /// </summary>
 [Route("api/designs/{id:guid}/assistant")]

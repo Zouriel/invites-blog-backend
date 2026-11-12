@@ -82,7 +82,7 @@ public class AccountServiceTests
             _currentUser, _users, _roles, _logins, _inviters, _inquiries, _campaigns, _guests,
             _templates, _photos, TestData.NoCelebrants(), _authProviders, TestData.PassingValidator<RegisterDesignerRequest>(),
             [_sms], _otp, _uow, _tokens, new PhoneNormalizer(), _config,
-            TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _pictures, appleTokens: _apple);
+            TestData.FreePlans(), _pictures, appleTokens: _apple);
     }
 
     private IAppleSignInTokens? _apple;

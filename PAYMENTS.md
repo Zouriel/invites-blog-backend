@@ -8,12 +8,12 @@ How invites.blog takes card payments, and how to test it. BML's docs: https://ba
 
 | Step | Where |
 |---|---|
-| Buyer sees the **Review and pay** screen: item, total in MVR, merchant and country, delivery, refund terms, card logos, and for Premium/Venue that it renews automatically; must tick "I agree" | web-inviter `shared/checkout/` |
+| Buyer sees the **Review and pay** screen: item, total in MVR, merchant and country, delivery, refund terms, card logos, and for Premium/Studio (Venue) that it renews automatically; must tick "I agree" | web-inviter `shared/checkout/` |
 | `POST /api/billing/checkout` refuses without the acceptance or with an old terms version; records `TermsAcceptedAt` + `TermsVersion` | `BillingService.CheckoutAsync`, `Legal/LegalTerms.cs` |
 | A BML transaction is created (Redirect method): amount in laari, our payment id as `localId`, `customerReference`, `redirectUrl`, `webhook` | `Infrastructure/Payments/BmlPaymentProvider.cs` |
 | **Webhook** (`POST /api/payments/webhook`) is the primary result, as BML's merchant rules require. Signature checked (`X-Signature` = sha256hex(nonce + timestamp + API key)); then the transaction is **re-fetched from BML's API**, and it counts only if its amount, currency and `localId` match our payment | `BmlPaymentProvider.HandleWebhookAsync`, `PaymentService.ProcessAsync` |
 | Safety net: every 2 minutes, pending BML payments are asked about; the return page (`?paid=`) asks too, so a lost webhook never leaves a buyer without what they paid for. Pending past 8 days is closed as failed | `Infrastructure/Payments/PaymentSweeper.cs`, `GET /api/billing/payments/{id}` |
-| Premium/Venue: the first payment saves the card (BML customer + `tokenizationDetails`, card-on-file, UNSCHEDULED). From a day before the plan ends the saved card is charged, the plan extended, and a receipt emailed. A failure is retried a day later; three in a row turns auto-renew off. The buyer can turn it off under Billing | `SubscriptionRenewalService`, `POST /api/billing/auto-renew/stop` |
+| Premium/Studio (Venue): the first payment saves the card (BML customer + `tokenizationDetails`, card-on-file, UNSCHEDULED). From a day before the plan ends the saved card is charged, the plan extended, and a receipt emailed. A failure is retried a day later; three in a row turns auto-renew off. The buyer can turn it off under Billing | `SubscriptionRenewalService`, `POST /api/billing/auto-renew/stop` |
 | Refunds: BML has no refund API. Refunds are made in the BML merchant dashboard | |
 
 Nothing retries a POST to BML: a repeated "create transaction" or "charge" would charge twice.

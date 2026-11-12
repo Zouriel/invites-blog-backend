@@ -9,7 +9,7 @@ namespace InvitesBlog.Domain.Entities;
 /// <para><b>Why this is a row and not a column on <see cref="Campaign"/>.</b> It began as a column:
 /// every campaign implicitly owned a photo box, unbounded and free. An event may now have several —
 /// the nikah, the reception, the after-party — each with its own window and audience. How much they
-/// hold together and how long they are kept is the EVENT's plan (Free, a pass, or a venue's), not the
+/// hold together and how long they are kept is the EVENT's plan (Free, a pass, or its organiser's Premium or Studio), not the
 /// bucket's.</para>
 ///
 /// <para><b>It holds nothing else.</b> No name, no cover, and no list of who may see it — the

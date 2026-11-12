@@ -191,5 +191,5 @@ public sealed class SubscriptionRenewalService(
         logger.LogInformation("Renewal of {Plan} failed for account {UserId} ({Failures} in a row).", plan, user.Id, user.RenewalFailures);
     }
 
-    private static string PlanName(PaymentKind kind) => kind == PaymentKind.VenueMonthly ? "Venue" : "Premium pass";
+    private static string PlanName(PaymentKind kind) => kind == PaymentKind.VenueMonthly ? "Studio" : "Premium pass";
 }

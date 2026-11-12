@@ -24,7 +24,7 @@ namespace InvitesBlog.Infrastructure.Payments;
 /// is confirmed by asking BML's API for the transaction before anything is recorded. The same query
 /// answers <see cref="GetStatusAsync"/>, which finishes payments whose webhook never came.</para>
 ///
-/// <para><b>Saved cards</b> (card-on-file) renew Premium and Venue: the first payment is made with
+/// <para><b>Saved cards</b> (card-on-file) renew Premium and Studio (Venue): the first payment is made with
 /// <c>tokenize</c> for a BML customer, and each renewal creates a transaction for that customer and
 /// charges their default card.</para>
 ///

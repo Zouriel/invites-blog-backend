@@ -44,7 +44,6 @@ public sealed class InviteService(
     IConfiguration config,
     IValidator<RsvpRequest> rsvpValidator,
     IPlanService plans,
-    IRepository<Venue> venues,
     IPushQueue push,
     InviteShareLinks shareLinks,
     IRepository<CampaignCelebrant> celebrants) : IInviteService
@@ -185,8 +184,8 @@ public sealed class InviteService(
     }
 
     /// <summary>
-    /// What the guest's pages credit. A Free event carries "Made with invites.blog" — a pass or a venue
-    /// takes it off. An invitation a Premium subscriber designed names them.
+    /// What the guest's pages credit. A Free event carries "Made with invites.blog" — a pass, Premium or
+    /// Studio takes it off; while the organiser's Studio plan covers it, their name and picture show. An invitation a Premium subscriber designed names them.
     /// </summary>
     public async Task<GuestCredit> CreditAsync(Campaign campaign, Template? template, CancellationToken ct = default)
     {
@@ -195,8 +194,8 @@ public sealed class InviteService(
         if (template is { DesignerUserId: { } designerId, DesignerName: { Length: > 0 } name }
             && await plans.IsPremiumAsync(designerId, ct))
             designer = name;
-        var venue = plan.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
-        return new GuestCredit(plan.Branded, designer, venue?.Name, venue?.LogoUrl);
+        var venue = plan.VenueAccountId is { } organiserId ? await users.GetByIdAsync(organiserId, ct) : null;
+        return new GuestCredit(plan.Branded, designer, venue?.DisplayName, venue?.AvatarUrl);
     }
 
     public async Task<GuestCredit> CreditForCampaignAsync(Guid campaignId, CancellationToken ct = default)
@@ -666,13 +665,9 @@ public sealed class InviteService(
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
-        // The venue each event is held at, for the badge on its tile: one query for the page.
-        var venueIds = campaignList.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
-        var venueFaces = venueIds.Count == 0
-            ? new Dictionary<Guid, (string Name, string? LogoUrl)>()
-            : (await venues.Query().Where(v => venueIds.Contains(v.Id))
-                    .Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
-                .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
+        // The organiser's name and picture for the badge on each tile, while their Studio plan (tier Venue)
+        // covers the event: two queries at most for the page.
+        var venueFaces = await plans.VenueFacesAsync(campaignList, ct);
 
         var now = DateTimeOffset.UtcNow;
         return guestList
@@ -698,8 +693,8 @@ public sealed class InviteService(
                     SaveTheDates.Is(c) ? CalendarFor(c) : null,
                     Application.Campaigns.PosterColours.Of(c),
                     c.TimeZone,
-                    c.VenueId is { } vid && venueFaces.TryGetValue(vid, out var face) ? face.Name : null,
-                    c.VenueId is { } lid && venueFaces.TryGetValue(lid, out var logo) ? logo.LogoUrl : null);
+                    venueFaces.GetValueOrDefault(c.Id)?.Name,
+                    venueFaces.GetValueOrDefault(c.Id)?.LogoUrl);
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)

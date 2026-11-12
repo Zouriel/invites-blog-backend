@@ -186,13 +186,11 @@ public sealed class AccountDeletionService(
             .Where(c => c.CreatedByUserId == me.Id
                         || (c.InviterId != null && myInviters.Contains(c.InviterId.Value))
                         || (c.CreatedByUserId == null && c.InviterId == null && ownBuckets.Contains(c.Id)))
-            .Select(c => new { c.Id, c.CreatedByUserId, c.VenueId })
+            .Select(c => new { c.Id, c.CreatedByUserId })
             .ToListAsync(ct);
 
         var creators = candidates.Select(c => c.CreatedByUserId).OfType<Guid>().Distinct().ToList();
         var livingCreators = (await db.Users.Where(u => creators.Contains(u.Id)).Select(u => u.Id).ToListAsync(ct)).ToHashSet();
-        var venueIds = candidates.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
-        var venueOwners = await db.Venues.Where(v => venueIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.OwnerUserId, ct);
 
         var eventIds = candidates.Select(c => c.Id).ToList();
         var others = (await db.CampaignCelebrants.Where(c => eventIds.Contains(c.CampaignId)).ToListAsync(ct))
@@ -225,9 +223,6 @@ public sealed class AccountDeletionService(
                 var chosen = from[Random.Shared.Next(from.Count)];
                 passed[c.Id] = new Successor(chosen.Account?.Id, chosen.Row.Id, chosen.Account?.Email ?? chosen.Row.Email);
             }
-            else if (c.CreatedByUserId == me.Id && c.VenueId is { } venue
-                     && venueOwners.TryGetValue(venue, out var owner) && owner != me.Id)
-                passed[c.Id] = new Successor(owner, null, null);   // started for a venue they work at
             else
                 deleted.Add(c.Id);
         }
@@ -247,7 +242,7 @@ public sealed class AccountDeletionService(
         var paid = new List<string>();
         if (PlanRules.IsActive(me.SubscriptionTier, me.SubscriptionEndsAt, now))
         {
-            if (me.SubscriptionTier == SubscriptionTier.Venue) paid.Add("Venue plan");
+            if (me.SubscriptionTier == SubscriptionTier.Venue) paid.Add("Studio plan");
             else if (me.SubscriptionTier == SubscriptionTier.Premium) paid.Add("Premium pass");
         }
 
@@ -326,8 +321,9 @@ public sealed class AccountDeletionService(
         await db.CampaignCelebrants
             .Where(c => (c.Email != null && scope.Emails.Contains(c.Email)) || (c.PhoneE164 != null && scope.Phones.Contains(c.PhoneE164)))
             .ExecuteDeleteAsync(ct);
+        // Leftovers from the old venue page (no longer read anywhere): the person's own rows and logo go with them.
         await db.VenueStaff.Where(s => scope.Emails.Contains(s.Email)).ExecuteDeleteAsync(ct);
-        await RemoveVenueAsync(me.Id, queue, now, ct);
+        await RemoveVenueAsync(me.Id, queue, ct);
         await db.PassCredits.Where(p => p.OwnerUserId == me.Id).ExecuteDeleteAsync(ct);
         await HandleTemplatesAsync(me, scope, queue, now, ct);
         await KeepPaymentsWithoutThePersonAsync(me, scope.DeletedEvents, queue, ct);
@@ -552,19 +548,16 @@ public sealed class AccountDeletionService(
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.UploaderUserId, (Guid?)null), ct);
     }
 
-    private async Task RemoveVenueAsync(Guid userId, RemovalQueue queue, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// A venue row and logo left from the old venue page. Nothing reads them any more (an event's Studio plan
+    /// is its organiser's), so removing them changes no event; links on events clear by the foreign key.
+    /// </summary>
+    private async Task RemoveVenueAsync(Guid userId, RemovalQueue queue, CancellationToken ct)
     {
         var venues = await db.Venues.Where(v => v.OwnerUserId == userId).Select(v => v.Id).ToListAsync(ct);
         if (venues.Count == 0) return;
 
         foreach (var id in venues) queue.Prefix($"venues/{id:N}/");
-
-        // Events other people hold there stay and stop being the venue's (the foreign key clears them).
-        // Their photos' lapse counts from today, as when a venue's plan ends, so a months-old event isn't
-        // suddenly past its cover and removed on the next sweep with no notice.
-        await db.Campaigns
-            .Where(c => c.VenueId != null && venues.Contains(c.VenueId.Value) && (c.KeepPhotosUntil == null || c.KeepPhotosUntil < now))
-            .ExecuteUpdateAsync(s => s.SetProperty(c => c.KeepPhotosUntil, now), ct);
         await db.Venues.Where(v => venues.Contains(v.Id)).ExecuteDeleteAsync(ct);   // staff cascade
     }
 

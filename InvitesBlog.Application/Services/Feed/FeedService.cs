@@ -13,6 +13,7 @@ using InvitesBlog.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Moderation;
+using InvitesBlog.Application.Plans;
 
 namespace InvitesBlog.Application.Services.Feed;
 
@@ -72,7 +73,7 @@ public sealed class FeedService(
     IUnitOfWork uow,
     IPushQueue push,
     IModerationViewService? moderation = null,
-    IRepository<Venue>? venues = null) : IFeedService
+    IPlanService? plans = null) : IFeedService
 {
     /// <summary>How many photos a post's header shows.</summary>
     public const int HeaderImages = 6;
@@ -132,7 +133,7 @@ public sealed class FeedService(
             .ToList();
         var page = ordered.Skip(skip).Take(take).ToList();
 
-        // The venues of the page's events, for their badges: one query for the page.
+        // The organisers on Studio (tier Venue), for the badges on their events' posts: two queries at most for the page.
         var faces = await VenueFacesAsync(page.Select(x => x.Campaign), ct);
         var posts = new List<FeedPostDto>(page.Count);
         foreach (var (campaign, activity) in page)
@@ -452,22 +453,20 @@ public sealed class FeedService(
 
     // ---------- describing ----------
 
-    /// <summary>The name and logo of the venues these events are held at, by venue id.</summary>
-    private async Task<IReadOnlyDictionary<Guid, (string Name, string? LogoUrl)>> VenueFacesAsync(
-        IEnumerable<Campaign> events, CancellationToken ct)
-    {
-        var ids = events.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
-        if (ids.Count == 0 || venues is null) return new Dictionary<Guid, (string, string?)>();
-        return (await venues.Query().Where(v => ids.Contains(v.Id)).Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
-            .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
-    }
+    /// <summary>
+    /// The badge for each of these events whose organiser is on Studio (tier Venue): their name and picture,
+    /// by event id.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<Guid, VenueFace>> VenueFacesAsync(
+        IEnumerable<Campaign> events, CancellationToken ct) =>
+        plans is null ? new Dictionary<Guid, VenueFace>() : await plans.VenueFacesAsync(events.ToList(), ct);
 
     private async Task<FeedPostDto> DescribeAsync(
         AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct, ModerationView view,
-        IReadOnlyDictionary<Guid, (string Name, string? LogoUrl)>? venueFaces = null)
+        IReadOnlyDictionary<Guid, VenueFace>? venueFaces = null)
     {
         venueFaces ??= await VenueFacesAsync([campaign], ct);
-        (string Name, string? LogoUrl)? atVenue = campaign.VenueId is { } venueId && venueFaces.TryGetValue(venueId, out var face) ? face : null;
+        var atVenue = venueFaces.GetValueOrDefault(campaign.Id);
         var defaultBucket = await DefaultBucketAsync(campaign.Id, ct);
 
         // The event's first photos, from the bucket the invitation's camera posts to, but only for

@@ -75,9 +75,18 @@ public sealed class AppStorePurchaseService(
         if (eventId is not { } id)
         {
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == me, ct);
-            var hasPlan = user is not null && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
+            if (user is null) return new AppStoreOffersDto(true, []);
+            var hasPlan = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
                           && user.SubscriptionTier != SubscriptionTier.None;
-            return new AppStoreOffersDto(true, user is null || hasPlan ? [] : ["premium_monthly"]);
+            // No plan: Premium or Studio. A plan held through an App Store subscription: the other one in the
+            // group (Apple moves the same subscription up to Studio at once, or down to Premium at renewal).
+            // A plan from anywhere else: nothing here (the website or Play renews it).
+            if (!hasPlan) return new AppStoreOffersDto(true, [.. AppStoreCatalog.Subscriptions]);
+            var current = AppStoreCatalog.SubscriptionFor(user.SubscriptionTier);
+            var throughApple = current is not null && await db.AppStorePurchases.AsNoTracking().AnyAsync(p =>
+                p.UserId == me && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null
+                && p.ExpiresAt > now && p.ProductId == current, ct);
+            return new AppStoreOffersDto(true, throughApple ? AppStoreCatalog.Subscriptions.Where(p => p != current).ToList() : []);
         }
 
         var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -98,7 +107,7 @@ public sealed class AppStorePurchaseService(
         Guid? eventId = product.IsSubscription ? null : request.EventId
             ?? throw new AppStoreRefusedException("Say which event this is for.", "app_store_wrong_event", HttpStatusCode.BadRequest);
         if (product.IsSubscription && request.EventId is not null)
-            throw new AppStoreRefusedException("Premium is for the account, not an event.", "app_store_wrong_event", HttpStatusCode.BadRequest);
+            throw new AppStoreRefusedException("Premium and Studio are for the account, not an event.", "app_store_wrong_event", HttpStatusCode.BadRequest);
 
         var now = await OffersAsync(eventId, ct);
         if (!now.Products.Contains(product.Id))
@@ -270,7 +279,9 @@ public sealed class AppStorePurchaseService(
         {
             var intent = t.AppAccountToken is { } token
                 ? await db.AppStoreIntents.AsNoTracking().FirstOrDefaultAsync(i => i.Id == token, ct) : null;
-            if (intent is not null && intent.ProductId != product.Id)
+            // Within the group the product may have moved since the intent (an upgrade or a downgrade at renewal).
+            if (intent is not null && intent.ProductId != product.Id
+                && !(AppStoreCatalog.Subscriptions.Contains(intent.ProductId) && AppStoreCatalog.Subscriptions.Contains(product.Id)))
                 throw new AppStoreRefusedException("That purchase is for something else.", "app_store_wrong_product");
             owner = intent?.UserId;
             intentId = intent?.Id;
@@ -301,6 +312,16 @@ public sealed class AppStorePurchaseService(
 
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == account, ct)
                 ?? throw new AppStoreRefusedException("That account no longer exists.", "app_store_wrong_account", HttpStatusCode.Forbidden);
+
+            // Moved within the group (Premium up to Studio, or Studio down to Premium at renewal): the same
+            // subscription, now for the other product. Its new transaction is a new paid period below, which
+            // sets the account to that tier and nothing else, so the account never holds both.
+            var switched = row.ProductId != product.Id;
+            if (switched)
+            {
+                logger.LogInformation("App Store subscription {PurchaseId} moved from {From} to {To}.", row.Id, row.ProductId, product.Id);
+                row.ProductId = product.Id;
+            }
 
             if (entitled)
             {

@@ -47,8 +47,7 @@ public sealed class AccountService(
     IInviteeTokenIssuer tokenIssuer,
     PhoneNormalizer phones,
     IConfiguration config,
-    IRepository<Venue> venues,
-    IRepository<VenueStaff> venueStaff,
+    InvitesBlog.Application.Plans.IPlanService plans,
     IProfilePictureService pictures,
     IEventInheritance? inheritance = null,
     IAppleSignInTokens? appleTokens = null) : IAccountService
@@ -395,18 +394,14 @@ public sealed class AccountService(
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
-        // The venue each event is held at, for the badge on its tile: one query for the page.
-        var venueIds = mine.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
-        var venueFaces = venueIds.Count == 0
-            ? new Dictionary<Guid, (string Name, string? LogoUrl)>()
-            : (await venues.Query().Where(v => venueIds.Contains(v.Id))
-                    .Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
-                .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
+        // The organiser's name and picture for the badge on each tile, while their Studio plan (tier Venue)
+        // covers the event: two queries at most for the page.
+        var venueFaces = await plans.VenueFacesAsync(mine, ct);
 
         var result = new List<MyCampaignDto>(mine.Count);
         foreach (var c in mine)
         {
-            (string Name, string? LogoUrl)? venue = c.VenueId is { } vid && venueFaces.TryGetValue(vid, out var face) ? face : null;
+            var venue = venueFaces.GetValueOrDefault(c.Id);
             var template = byTemplate.GetValueOrDefault(c.TemplateId);
             result.Add(new MyCampaignDto(
                 c.Id, c.Title, c.Slug, c.Status.ToString(), c.EventType, c.EventStartAt,
@@ -429,7 +424,7 @@ public sealed class AccountService(
                 Relation: IsHost(c) ? "host" : "celebrant",
                 CanManage: IsHost(c) || celebrating.GetValueOrDefault(c.Id),
                 // For the badge only — the limits themselves are PlanService's, per event.
-                Plan: c.VenueId is not null ? "Venue"
+                Plan: venue is not null ? "Venue"
                     : InvitesBlog.Application.Plans.EventPasses.Active(c, DateTimeOffset.UtcNow) switch
                     {
                         Domain.Enums.EventPassKind.Platinum => "PlatinumPass",
@@ -797,19 +792,12 @@ public sealed class AccountService(
                 ? user.SubscriptionTier.ToString()
                 : "None",
             user.SubscriptionEndsAt,
-            await AtVenueAsync(user, ct),
+            // Always false: there is no venue page any more (Studio is a plan on the account). Kept for app builds that read it.
+            false,
             user.AvatarUrl,
             user.Country,
             user.TimeZone,
             user.PushMuted);
-    }
-
-    /// <summary>Whether the account owns a venue or works at one, so its menu leads there.</summary>
-    private async Task<bool> AtVenueAsync(AppUser user, CancellationToken ct)
-    {
-        if (await venues.AnyAsync(v => v.OwnerUserId == user.Id, ct)) return true;
-        var email = user.Email?.Trim().ToLowerInvariant();
-        return !string.IsNullOrEmpty(email) && await venueStaff.AnyAsync(s => s.Email == email, ct);
     }
 
     /// <summary>

@@ -6,7 +6,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Plans;
 
-/// <summary>Works out which plan covers an event: its pass, its venue's plan, its organiser's Premium, and anything bought to keep its photos.</summary>
+/// <summary>
+/// Works out which plan covers an event: its pass, its organiser's Premium or Studio plan (tier Venue), and
+/// anything bought to keep its photos.
+/// </summary>
 public interface IPlanService
 {
     Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
@@ -17,17 +20,25 @@ public interface IPlanService
     /// </summary>
     Task<IReadOnlyDictionary<Guid, EventPlan>> ForCampaignsAsync(IReadOnlyCollection<Campaign> list, CancellationToken ct = default);
 
-    /// <summary>Space used by every event at a venue, for its page. Each event's own space is its plan's.</summary>
-    Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default);
+    /// <summary>
+    /// The badge for each event whose organiser is on Studio (tier Venue) right now: their display name and
+    /// profile picture. Events without one are left out. Two queries at most, whatever the number of events.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, VenueFace>> VenueFacesAsync(IReadOnlyCollection<Campaign> list, CancellationToken ct = default);
 
     /// <summary>Whether this account's Premium subscription is in force.</summary>
     Task<bool> IsPremiumAsync(Guid userId, CancellationToken ct = default);
 }
 
+/// <summary>
+/// The name and picture an event's albums, QR cards and posts carry while its organiser is on Studio: the
+/// organiser's own display name and profile picture (served as venueName / venueLogoUrl).
+/// </summary>
+public sealed record VenueFace(string Name, string? LogoUrl);
+
 public sealed class PlanService(
     ICampaignRepository campaigns,
     IRepository<AppUser> users,
-    IRepository<Venue> venues,
     IRepository<MediaBucket> buckets) : IPlanService
 {
     public async Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
@@ -42,15 +53,11 @@ public sealed class PlanService(
         var ownerId = OwnerOf(campaign, rows);
 
         // Found through the context (not a fresh query), so a change made earlier in the same request counts.
-        (SubscriptionTier, DateTimeOffset?)? venueOwner = null;
-        if (campaign.VenueId is { } venueId && await venues.GetByIdAsync(venueId, ct) is { } place
-            && await users.GetByIdAsync(place.OwnerUserId, ct) is { } vo)
-            venueOwner = (vo.SubscriptionTier, vo.SubscriptionEndsAt);
         (SubscriptionTier, DateTimeOffset?)? organiser = null;
         if (ownerId is { } owner && await users.GetByIdAsync(owner, ct) is { } o)
             organiser = (o.SubscriptionTier, o.SubscriptionEndsAt);
 
-        return Evaluate(campaign, rows, ownerId, venueOwner, organiser, DateTimeOffset.UtcNow);
+        return Evaluate(campaign, rows, ownerId, organiser, DateTimeOffset.UtcNow);
     }
 
     public async Task<IReadOnlyDictionary<Guid, EventPlan>> ForCampaignsAsync(IReadOnlyCollection<Campaign> list, CancellationToken ct = default)
@@ -59,7 +66,7 @@ public sealed class PlanService(
         if (list.Count == 0) return result;
         var ids = list.Select(c => c.Id).Distinct().ToList();
 
-        // Three queries whatever the number of events: their albums, their venues, and the accounts behind both.
+        // Two queries whatever the number of events: their albums, and the accounts that organised them.
         var albums = (await buckets.Query()
                 .Where(b => ids.Contains(b.CampaignId))
                 .Select(b => new { b.CampaignId, Row = new AlbumRow(b.OwnerUserId, b.CreatedAt, b.Tier, b.TermEndAt) })
@@ -68,12 +75,7 @@ public sealed class PlanService(
         var owners = new Dictionary<Guid, Guid?>();
         foreach (var c in list) owners[c.Id] = OwnerOf(c, albums[c.Id].ToList());
 
-        var venueIds = list.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
-        var places = venueIds.Count == 0
-            ? new Dictionary<Guid, Guid>()
-            : await venues.Query().Where(v => venueIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.OwnerUserId, ct);
-
-        var userIds = owners.Values.OfType<Guid>().Concat(places.Values).Distinct().ToList();
+        var userIds = owners.Values.OfType<Guid>().Distinct().ToList();
         var accounts = userIds.Count == 0
             ? new Dictionary<Guid, (SubscriptionTier, DateTimeOffset?)>()
             : (await users.Query().Where(u => userIds.Contains(u.Id))
@@ -86,12 +88,51 @@ public sealed class PlanService(
         {
             if (result.ContainsKey(campaign.Id)) continue;
             var ownerId = owners[campaign.Id];
-            (SubscriptionTier, DateTimeOffset?)? venueOwner =
-                campaign.VenueId is { } v && places.TryGetValue(v, out var vo) && accounts.TryGetValue(vo, out var va) ? va : null;
             (SubscriptionTier, DateTimeOffset?)? organiser =
                 ownerId is { } o && accounts.TryGetValue(o, out var oa) ? oa : null;
-            result[campaign.Id] = Evaluate(campaign, albums[campaign.Id].ToList(), ownerId, venueOwner, organiser, now);
+            result[campaign.Id] = Evaluate(campaign, albums[campaign.Id].ToList(), ownerId, organiser, now);
         }
+        return result;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, VenueFace>> VenueFacesAsync(IReadOnlyCollection<Campaign> list, CancellationToken ct = default)
+    {
+        var result = new Dictionary<Guid, VenueFace>();
+        if (list.Count == 0) return result;
+
+        // Whose plan the event counts, as for its limits: whoever started it, else whoever made its first album.
+        // Only events with no recorded starter need their albums looked at.
+        var unknown = list.Where(c => c.CreatedByUserId is null || c.CreatedByUserId == Guid.Empty)
+            .Select(c => c.Id).Distinct().ToList();
+        var firstAlbumOwners = unknown.Count == 0
+            ? new Dictionary<Guid, Guid>()
+            : (await buckets.Query()
+                    .Where(b => unknown.Contains(b.CampaignId))
+                    .Select(b => new { b.CampaignId, b.OwnerUserId, b.CreatedAt })
+                    .ToListAsync(ct))
+                .GroupBy(b => b.CampaignId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(b => b.CreatedAt).First().OwnerUserId);
+
+        var owners = new Dictionary<Guid, Guid>();
+        foreach (var c in list)
+        {
+            Guid? id = c.CreatedByUserId is { } by && by != Guid.Empty ? by
+                : firstAlbumOwners.TryGetValue(c.Id, out var first) ? first : null;
+            if (id is { } g && g != Guid.Empty) owners[c.Id] = g;
+        }
+        if (owners.Count == 0) return result;
+
+        var userIds = owners.Values.Distinct().ToList();
+        var now = DateTimeOffset.UtcNow;
+        var faces = (await users.Query()
+                .Where(u => userIds.Contains(u.Id) && u.SubscriptionTier == SubscriptionTier.Venue)
+                .Select(u => new { u.Id, u.DisplayName, u.AvatarUrl, u.SubscriptionTier, u.SubscriptionEndsAt })
+                .ToListAsync(ct))
+            .Where(u => PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now))
+            .ToDictionary(u => u.Id, u => new VenueFace(u.DisplayName, u.AvatarUrl));
+
+        foreach (var (campaignId, ownerId) in owners)
+            if (faces.TryGetValue(ownerId, out var face)) result[campaignId] = face;
         return result;
     }
 
@@ -105,26 +146,20 @@ public sealed class PlanService(
     }
 
     /// <summary>The one place an event's plan is worked out from what was loaded, singly or for a page.</summary>
-    /// <param name="venueOwner">The plan of the account that owns the event's venue, if it has one.</param>
     /// <param name="organiser">The plan of the account the event counts as organised by.</param>
     private static EventPlan Evaluate(
         Campaign campaign, IReadOnlyList<AlbumRow> rows, Guid? ownerId,
-        (SubscriptionTier Tier, DateTimeOffset? EndsAt)? venueOwner,
         (SubscriptionTier Tier, DateTimeOffset? EndsAt)? organiser,
         DateTimeOffset now)
     {
-        // The venue's plan is its owner's: in force while they are on Venue.
-        (Guid, bool, DateTimeOffset?)? venue = null;
-        if (campaign.VenueId is { } venueId && venueOwner is { } vo)
+        // The organiser's Studio plan (tier Venue) lifts every event they organise while it lasts, the way
+        // Premium does. Once it has ended, the photos' lapse counts from when it did. An organiser since moved
+        // to another plan is on that plan instead (the admin switch, or a new purchase).
+        (bool, DateTimeOffset?)? venue = null;
+        if (organiser is { Tier: SubscriptionTier.Venue } v)
         {
-            var active = vo.Tier == SubscriptionTier.Venue && PlanRules.IsActive(vo.Tier, vo.EndsAt, now);
-            // Once it has ended, the photos' lapse counts from when it did (ending a plan sets that date).
-            // An owner since moved to another plan has that plan's date on the account, not the venue's:
-            // no known end, so the venue no longer counts (the event is whatever else it has).
-            DateTimeOffset? ended = active ? null
-                : vo.Tier is SubscriptionTier.Venue or SubscriptionTier.None ? vo.EndsAt
-                : null;
-            venue = (venueId, active, ended);
+            var active = PlanRules.IsActive(v.Tier, v.EndsAt, now);
+            venue = (active, active ? null : v.EndsAt);
         }
 
         // Anything from before the plans is never removed sooner than 90 days after the plans arrived,
@@ -159,14 +194,6 @@ public sealed class PlanService(
             ownerId,
             premium,
             campaign.MediaTrimmedAt);
-    }
-
-    public async Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default)
-    {
-        var events = campaigns.Query().Where(c => c.VenueId == venueId).Select(c => c.Id);
-        return await buckets.Query()
-            .Where(b => events.Contains(b.CampaignId))
-            .SumAsync(b => b.UsedBytes, ct);
     }
 
     public async Task<bool> IsPremiumAsync(Guid userId, CancellationToken ct = default) =>
