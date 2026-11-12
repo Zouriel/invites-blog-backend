@@ -395,9 +395,18 @@ public sealed class AccountService(
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
+        // The venue each event is held at, for the badge on its tile: one query for the page.
+        var venueIds = mine.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
+        var venueFaces = venueIds.Count == 0
+            ? new Dictionary<Guid, (string Name, string? LogoUrl)>()
+            : (await venues.Query().Where(v => venueIds.Contains(v.Id))
+                    .Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
+                .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
+
         var result = new List<MyCampaignDto>(mine.Count);
         foreach (var c in mine)
         {
+            (string Name, string? LogoUrl)? venue = c.VenueId is { } vid && venueFaces.TryGetValue(vid, out var face) ? face : null;
             var template = byTemplate.GetValueOrDefault(c.TemplateId);
             result.Add(new MyCampaignDto(
                 c.Id, c.Title, c.Slug, c.Status.ToString(), c.EventType, c.EventStartAt,
@@ -429,7 +438,9 @@ public sealed class AccountService(
                     },
                 Kind: InvitesBlog.Application.Campaigns.SaveTheDates.Name(c.Kind),
                 Colours: InvitesBlog.Application.Campaigns.PosterColours.Of(c),
-                TimeZone: c.TimeZone));
+                TimeZone: c.TimeZone,
+                VenueName: venue?.Name,
+                VenueLogoUrl: venue?.LogoUrl));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));
@@ -680,6 +691,47 @@ public sealed class AccountService(
     /// Country and time zone. Null leaves a field alone, an empty string clears it; anything else must
     /// be a region libphonenumber knows (ISO2) or an IANA zone this server knows.
     /// </summary>
+    /// <summary>The longest name an account may have (the column itself is unbounded text).</summary>
+    public const int MaxNameLength = 80;
+
+    public async Task<AccountDto> SetNameAsync(SetNameRequest req, CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+        var name = CleanName(req.DisplayName);
+        if (name.Length == 0)
+            throw new NameRefusedException("Enter your name.", "name_required");
+        if (name.Length > MaxNameLength)
+            throw new NameRefusedException($"Keep your name to {MaxNameLength} characters or fewer.", "name_too_long");
+        // The same filter as comments and captions: a name is shown to other people too.
+        if (Moderation.ObjectionableText.IsObjectionable(name))
+            throw new NameRefusedException(Moderation.ObjectionableText.Refusal, Moderation.ObjectionableText.Code);
+
+        user.DisplayName = name;
+        users.Update(user);
+        await uow.SaveChangesAsync(ct);
+        return await ToDtoAsync(user, ct);
+    }
+
+    /// <summary>
+    /// A typed name as it is stored: control and invisible formatting characters (zero-width spaces,
+    /// direction overrides) dropped, every run of whitespace one space, trimmed.
+    /// </summary>
+    public static string CleanName(string? typed)
+    {
+        if (string.IsNullOrEmpty(typed)) return "";
+        var sb = new System.Text.StringBuilder(typed.Length);
+        var space = false;
+        foreach (var c in typed)
+        {
+            if (char.IsWhiteSpace(c)) { space = sb.Length > 0; continue; }
+            var category = char.GetUnicodeCategory(c);
+            if (category is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format) continue;
+            if (space) { sb.Append(' '); space = false; }
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     public async Task<AccountDto> UpdateSettingsAsync(UpdateAccountSettingsRequest req, CancellationToken ct = default)
     {
         var user = await CurrentAsync(ct);
@@ -793,3 +845,10 @@ public sealed class AccountService(
         return $"{phone[..Math.Min(4, phone.Length)]}•••{phone[^2..]}";
     }
 }
+
+/// <summary>
+/// A name that can't be saved (400). Its code is also in <c>errors[0].code</c> (field <c>displayName</c>), so a
+/// client can tell <c>name_required</c>, <c>name_too_long</c> and <c>objectionable_text</c> apart.
+/// </summary>
+public sealed class NameRefusedException(string message, string errorCode)
+    : AppException(message, System.Net.HttpStatusCode.BadRequest, errorCode, [new ApiError(message, "displayName", errorCode)]);

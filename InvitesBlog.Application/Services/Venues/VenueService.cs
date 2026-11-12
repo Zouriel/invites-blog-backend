@@ -115,7 +115,7 @@ public sealed class VenueService(
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
         campaigns.Update(campaign);
         await uow.SaveChangesAsync(ct);
-        // The venue's albums collect for as long as a Platinum pass's.
+        // Its albums collect for as long as the event's plan now allows.
         await bucketService.RaiseWindowsToPlanAsync(campaignId, ct);
         return await DescribeForEventAsync(venue, ct);
     }

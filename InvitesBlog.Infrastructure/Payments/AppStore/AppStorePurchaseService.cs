@@ -81,25 +81,11 @@ public sealed class AppStorePurchaseService(
         }
 
         var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (campaign is null || campaign.Status == CampaignStatus.Cancelled
-            || await ownership.AccessOfAsync(me, id, ct) != CampaignAccess.Organiser)
+        var access = campaign is null ? CampaignAccess.None : await ownership.AccessOfAsync(me, id, ct);
+        if (campaign is null || campaign.Status == CampaignStatus.Cancelled || access < CampaignAccess.Celebrant)
             return new AppStoreOffersDto(true, []);
-
-        var list = new List<string>();
-        // A venue's event has its passes at the venue's price, which a store can't charge per event.
-        var discounted = (await offers.ForCampaignAsync(id, ct)).VenuePercent > 0;
-        var active = EventPasses.Active(campaign, now);
-        if (!discounted)
-        {
-            if (active == EventPassKind.None) list.Add("gold_pass");
-            if (active != EventPassKind.Platinum) list.Add("platinum_pass");
-            if (campaign.EventPass == EventPassKind.Gold) list.Add("gold_pass_extend");
-            if (campaign.EventPass == EventPassKind.Platinum) list.Add("platinum_pass_extend");
-        }
-        // Free events are kept for good (owner, 2026-11-03): keeping is for an event that has had a pass.
-        if (campaign.Kind != CampaignKind.SaveTheDate && campaign.EventPass != EventPassKind.None) list.Add("keep_photos_year");
-        list.Add("extra_invites_100");
-        return new AppStoreOffersDto(true, list);
+        return new AppStoreOffersDto(true, GooglePlay.GooglePlayPurchaseService.EventProducts(campaign, access, now)
+            .Where(p => AppStoreCatalog.Find(p) is not null).ToList());
     }
 
     public async Task<AppStoreIntentDto> IntentAsync(AppStoreIntentRequest request, CancellationToken ct = default)
@@ -199,8 +185,8 @@ public sealed class AppStorePurchaseService(
             {
                 var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == eventId, ct)
                     ?? throw new AppStoreRefusedException("That event no longer exists.", "app_store_event_gone");
-                if (await ownership.AccessOfAsync(owner, eventId, ct) != CampaignAccess.Organiser)
-                    throw new AppStoreRefusedException("Only the event's host can use this purchase.", "app_store_not_host", HttpStatusCode.Forbidden);
+                if (!BillingService.MayBuy(product.Kind, await ownership.AccessOfAsync(owner, eventId, ct)))
+                    throw new AppStoreRefusedException("Only the event's host, or the people it is for, can use this purchase.", "app_store_not_host", HttpStatusCode.Forbidden);
                 BillingService.EnsureEventCanHave(product.Kind, campaign, now);
 
                 var payment = NewPayment(product, owner, eventId, t, now, BillingService.Describe(product.Kind, 1, campaign), null);

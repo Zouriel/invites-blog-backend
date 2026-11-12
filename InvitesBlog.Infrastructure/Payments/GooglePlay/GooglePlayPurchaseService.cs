@@ -69,30 +69,34 @@ public sealed class GooglePlayPurchaseService(
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == me, ct);
             var hasPlan = user is not null && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
                           && user.SubscriptionTier != SubscriptionTier.None;
-            return new GooglePlayOffersDto(true, user is null || hasPlan ? [] : ["premium_monthly"], account, null);
+            // Venue is sold here too (not on the iPhone): either plan, while the account has none.
+            return new GooglePlayOffersDto(true, user is null || hasPlan ? [] : ["premium_monthly", "venue_monthly"], account, null);
         }
 
         var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (campaign is null || campaign.Status == CampaignStatus.Cancelled
-            || await ownership.AccessOfAsync(me, id, ct) != CampaignAccess.Organiser)
+        var access = campaign is null ? CampaignAccess.None : await ownership.AccessOfAsync(me, id, ct);
+        if (campaign is null || campaign.Status == CampaignStatus.Cancelled || access < CampaignAccess.Celebrant)
             return new GooglePlayOffersDto(true, [], account, Ids.Of(id));
+        return new GooglePlayOffersDto(true, EventProducts(campaign, access, now), account, Ids.Of(id));
+    }
 
+    /// <summary>
+    /// What a store sells for one event to someone with this access to it. Every buyer pays the same
+    /// (there is no venue price any more), and the people an event is for may buy its passes too
+    /// (<see cref="BillingService.MayBuy"/>). The App Store offers the same list.
+    /// </summary>
+    public static List<string> EventProducts(Campaign campaign, CampaignAccess access, DateTimeOffset now)
+    {
         var list = new List<string>();
-        // A venue's event has its passes at the venue's price, which Play can't charge. They aren't
-        // offered at full price to someone who'd pay half, and a store can't vary it per event.
-        var discounted = (await offers.ForCampaignAsync(id, ct)).VenuePercent > 0;
         var active = EventPasses.Active(campaign, now);
-        if (!discounted)
-        {
-            if (active == EventPassKind.None) list.Add("gold_pass");
-            if (active != EventPassKind.Platinum) list.Add("platinum_pass");
-            if (campaign.EventPass == EventPassKind.Gold) list.Add("gold_pass_extend");
-            if (campaign.EventPass == EventPassKind.Platinum) list.Add("platinum_pass_extend");
-        }
+        if (active == EventPassKind.None) list.Add("gold_pass");
+        if (active != EventPassKind.Platinum) list.Add("platinum_pass");
+        if (campaign.EventPass == EventPassKind.Gold) list.Add("gold_pass_extend");
+        if (campaign.EventPass == EventPassKind.Platinum) list.Add("platinum_pass_extend");
         // Free events are kept for good (owner, 2026-11-03): keeping is for an event that has had a pass.
         if (campaign.Kind != CampaignKind.SaveTheDate && campaign.EventPass != EventPassKind.None) list.Add("keep_photos_year");
-        list.Add("extra_invites_100");
-        return new GooglePlayOffersDto(true, list, account, Ids.Of(id));
+        if (BillingService.MayBuy(PaymentKind.Sending, access)) list.Add("extra_invites_100");
+        return list;
     }
 
     // ----- Redeeming -----------------------------------------------------------------------------
@@ -167,8 +171,8 @@ public sealed class GooglePlayPurchaseService(
             {
                 var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == eventId, ct)
                     ?? throw new GooglePlayRefusedException("That event no longer exists.", "google_play_event_gone");
-                if (await ownership.AccessOfAsync(owner, eventId, ct) != CampaignAccess.Organiser)
-                    throw new GooglePlayRefusedException("Only the event's host can use this purchase.", "google_play_not_host", HttpStatusCode.Forbidden);
+                if (!BillingService.MayBuy(product.Kind, await ownership.AccessOfAsync(owner, eventId, ct)))
+                    throw new GooglePlayRefusedException("Only the event's host, or the people it is for, can use this purchase.", "google_play_not_host", HttpStatusCode.Forbidden);
                 BillingService.EnsureEventCanHave(product.Kind, campaign, now);
 
                 var payment = NewPayment(product, owner, eventId, g.OrderId, total, isTest, now, BillingService.Describe(product.Kind, 1, campaign), null);

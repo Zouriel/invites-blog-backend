@@ -105,14 +105,16 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
 
     private bool Consumed(string product, string token) => Equals(Product(product, token)["consumptionState"], 1);
 
-    private string Subscribed(Guid? account, DateTimeOffset expiry, string state = "SUBSCRIPTION_STATE_ACTIVE", string? order = null, bool test = false, bool autoRenew = true)
+    private string Subscribed(Guid? account, DateTimeOffset expiry, string state = "SUBSCRIPTION_STATE_ACTIVE", string? order = null, bool test = false, bool autoRenew = true,
+        string product = "premium_monthly")
     {
         var token = $"sub-{Guid.NewGuid():N}";
-        api.Google.Subscriptions[token] = SubBody(account, expiry, state, order ?? $"GPA.{Guid.NewGuid():N}"[..28], test, autoRenew);
+        api.Google.Subscriptions[token] = SubBody(account, expiry, state, order ?? $"GPA.{Guid.NewGuid():N}"[..28], test, autoRenew, product);
         return token;
     }
 
-    private static Dictionary<string, object?> SubBody(Guid? account, DateTimeOffset expiry, string state, string order, bool test, bool autoRenew)
+    private static Dictionary<string, object?> SubBody(Guid? account, DateTimeOffset expiry, string state, string order, bool test, bool autoRenew,
+        string product = "premium_monthly")
     {
         var body = new Dictionary<string, object?>
         {
@@ -122,7 +124,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
             {
                 new
                 {
-                    productId = "premium_monthly",
+                    productId = product,
                     expiryTime = expiry.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                     latestSuccessfulOrderId = order,
                     autoRenewingPlan = new { autoRenewEnabled = autoRenew },
@@ -134,10 +136,11 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         return body;
     }
 
-    private void UpdateSub(string token, Guid account, DateTimeOffset expiry, string state, string order, bool autoRenew = true)
+    private void UpdateSub(string token, Guid account, DateTimeOffset expiry, string state, string order, bool autoRenew = true,
+        string product = "premium_monthly")
     {
         var previous = (Dictionary<string, object?>)api.Google.Subscriptions[token];
-        var next = SubBody(account, expiry, state, order, false, autoRenew);
+        var next = SubBody(account, expiry, state, order, false, autoRenew, product);
         next["acknowledgementState"] = previous["acknowledgementState"];
         api.Google.Subscriptions[token] = next;
     }
@@ -426,7 +429,7 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     {
         var host = await UserAsync();
         var before = api.Google.Requests.Count;
-        var (status, body) = await RedeemAsync(host, "venue_monthly", "whatever");
+        var (status, body) = await RedeemAsync(host, "studio_yearly", "whatever");
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Equal("google_play_wrong_product", Code(body));
         Assert.Equal(before, api.Google.Requests.Count);
@@ -707,8 +710,9 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.DoesNotContain("keep_photos_year", await OffersAsync(host, ev));
     }
 
+    /// <summary>Owner, 2026-11-12: no venue price any more, so a venue's event is offered passes like any other.</summary>
     [PostgresFact]
-    public async Task An_event_at_a_venue_isnt_offered_passes_at_full_price()
+    public async Task An_event_at_a_venue_is_offered_passes_like_any_other()
     {
         var owner = await UserAsync(SubscriptionTier.Venue, DateTimeOffset.UtcNow.AddDays(20));
         var venueId = Guid.NewGuid();
@@ -718,13 +722,8 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
             await Task.CompletedTask;
         });
         var ev = await EventAsync(owner, venueId: venueId);
-        var offered = await OffersAsync(owner, ev);
-        Assert.DoesNotContain("gold_pass", offered);
-        Assert.DoesNotContain("platinum_pass", offered);
-        Assert.DoesNotContain("gold_pass_extend", offered);
-        Assert.DoesNotContain("platinum_pass_extend", offered);
-        Assert.Contains("extra_invites_100", offered);
-        Assert.Empty(await OffersAsync(owner));   // nor Premium, on the Venue plan
+        Assert.Equal(["gold_pass", "platinum_pass", "extra_invites_100"], await OffersAsync(owner, ev));
+        Assert.Empty(await OffersAsync(owner));   // nor Premium or Venue, on the Venue plan
     }
 
     [PostgresFact]
@@ -737,11 +736,86 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     }
 
     [PostgresFact]
-    public async Task Premium_is_offered_only_to_an_account_without_a_plan()
+    public async Task Premium_and_Venue_are_offered_only_to_an_account_without_a_plan()
     {
-        Assert.Equal(["premium_monthly"], await OffersAsync(await UserAsync()));
+        Assert.Equal(["premium_monthly", "venue_monthly"], await OffersAsync(await UserAsync()));
         Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(3))));
-        Assert.Equal(["premium_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
+        Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Venue, DateTimeOffset.UtcNow.AddDays(3))));
+        Assert.Equal(["premium_monthly", "venue_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
+    }
+
+    /// <summary>Owner, 2026-11-12: the people an event is for may buy its passes, not its invitations.</summary>
+    [PostgresFact]
+    public async Task A_celebrant_is_offered_and_can_use_a_platinum_pass_for_the_event()
+    {
+        var host = await UserAsync();
+        var couple = await UserAsync();
+        var stranger = await UserAsync();
+        var ev = await EventAsync(host);
+        await api.WriteAsync(async db =>
+        {
+            db.CampaignCelebrants.Add(new CampaignCelebrant { Id = Guid.NewGuid(), CampaignId = ev, Name = "Couple", Email = couple.Email, CreatedAt = DateTimeOffset.UtcNow });
+            await Task.CompletedTask;
+        });
+
+        Assert.Equal(["gold_pass", "platinum_pass"], await OffersAsync(couple, ev));
+        Assert.Empty(await OffersAsync(stranger, ev));
+
+        var token = Bought("platinum_pass", couple.Id, ev);
+        var (status, body) = await RedeemAsync(couple, "platinum_pass", token, ev);
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("applied", body.Data!.State);
+        Assert.Equal(EventPassKind.Platinum, (await CampaignAsync(ev)).EventPass);
+        Assert.True(Consumed("platinum_pass", token));
+
+        // Invitations stay the organiser's to buy.
+        var invites = Bought("extra_invites_100", couple.Id, ev);
+        var (refused, why) = await RedeemAsync(couple, "extra_invites_100", invites, ev);
+        Assert.Equal(HttpStatusCode.Forbidden, refused);
+        Assert.Equal("google_play_not_host", Code(why));
+    }
+
+    [PostgresFact]
+    public async Task A_venue_monthly_subscription_gives_Venue_until_Googles_expiry_and_its_end_ends_it()
+    {
+        var user = await UserAsync();
+        var expiry = DateTimeOffset.UtcNow.AddDays(30);
+        var token = Subscribed(user.Id, expiry, product: "venue_monthly");
+
+        var (status, body) = await RedeemAsync(user, "venue_monthly", token);
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("applied", body.Data!.State);
+        var account = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Venue, account.SubscriptionTier);
+        Assert.Equal(expiry.ToUnixTimeSeconds(), account.SubscriptionEndsAt!.Value.ToUnixTimeSeconds());
+        var paid = Assert.Single(await PaymentsAsync(user.Id));
+        Assert.Equal(PaymentKind.VenueMonthly, paid.Kind);
+        Assert.Equal(PaymentProviders.GooglePlay, paid.Provider);
+
+        // A renewal: a new order moves the end, recorded as a second payment.
+        var row = (await RowAsync(token))!;
+        var renewed = expiry.AddDays(30);
+        UpdateSub(token, user.Id, renewed, "SUBSCRIPTION_STATE_ACTIVE", $"GPA.{Guid.NewGuid():N}"[..28], product: "venue_monthly");
+        await NotifyAsync(new { version = "1.0", packageName = Config["GooglePlay:PackageName"], subscriptionNotification = new { version = "1.0", notificationType = 2, purchaseToken = token } });
+        Assert.Equal(renewed.ToUnixTimeSeconds(), (await AccountAsync(user.Id)).SubscriptionEndsAt!.Value.ToUnixTimeSeconds());
+        Assert.Equal(2, (await PaymentsAsync(user.Id)).Count);
+
+        // Expired at Google: the plan ends now, and the account is no longer an active venue.
+        UpdateSub(token, user.Id, DateTimeOffset.UtcNow.AddMinutes(-5), "SUBSCRIPTION_STATE_EXPIRED", row.OrderId!, autoRenew: false, product: "venue_monthly");
+        await NotifyAsync(new { version = "1.0", packageName = Config["GooglePlay:PackageName"], subscriptionNotification = new { version = "1.0", notificationType = 13, purchaseToken = token } });
+        account = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Venue, account.SubscriptionTier);
+        Assert.True(account.SubscriptionEndsAt <= DateTimeOffset.UtcNow);
+        Assert.False(Application.Plans.PlanRules.IsActive(account.SubscriptionTier, account.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+    }
+
+    [PostgresFact]
+    public async Task A_Premium_account_cant_turn_into_a_venue_through_the_store()
+    {
+        var user = await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(20));
+        var (status, _) = await RedeemAsync(user, "venue_monthly", Subscribed(user.Id, DateTimeOffset.UtcNow.AddDays(30), product: "venue_monthly"));
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Equal(SubscriptionTier.Premium, (await AccountAsync(user.Id)).SubscriptionTier);
     }
 
     // ----- Subscription -------------------------------------------------------------------------
@@ -1204,13 +1278,17 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     }
 
     [Fact]
-    public void Every_product_is_a_billing_item_and_venue_isnt_sold()
+    public void Every_product_is_a_billing_item_and_venue_is_sold_on_play_only()
     {
-        Assert.Equal(7, GooglePlayCatalog.All.Count);
+        Assert.Equal(8, GooglePlayCatalog.All.Count);
         foreach (var p in GooglePlayCatalog.All)
             Assert.NotEqual("other", BillingService.ItemName(p.Kind));
-        Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.VenueMonthly or PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
-        Assert.Single(GooglePlayCatalog.All, p => p.IsSubscription);
+        Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
+        Assert.Equal(["premium_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
+        Assert.Equal(PaymentKind.VenueMonthly, GooglePlayCatalog.Find("venue_monthly")!.Kind);
+        // Not on the iPhone.
+        Assert.Null(AppStoreCatalog.Find("venue_monthly"));
+        Assert.Equal(7, AppStoreCatalog.All.Count);
     }
 
     // ----- Account deletion ----------------------------------------------------------------------

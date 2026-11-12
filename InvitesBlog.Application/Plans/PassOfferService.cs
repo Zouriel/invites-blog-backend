@@ -1,16 +1,15 @@
 using System.Text.Json.Serialization;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Domain.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Plans;
 
 /// <summary>
-/// What an event's passes cost its host, and why. The one discount is a venue's: an event a venue
-/// runs gets the venue discount on its passes and on another year of them. Everything else is full price.
+/// What an event's passes cost, and another year of them. Everyone pays the same: the venue discount
+/// is gone (owner, 2026-11-12), since a venue's plan now covers its events itself.
 /// </summary>
-/// <param name="VenuePercent">The venue discount on an event a venue runs (passes and extensions); 0 otherwise.</param>
-/// <param name="VenueName">That venue.</param>
+/// <param name="VenuePercent">Always 0. Kept for pages and app builds that still read it.</param>
+/// <param name="VenueName">Always null, for the same reason.</param>
 public sealed record PassOfferDto(
     decimal GoldPass, decimal PlatinumPass, decimal FullGoldPass, decimal FullPlatinumPass,
     decimal GoldExtension, decimal PlatinumExtension,
@@ -34,34 +33,12 @@ public interface IPassOfferService
     Task<PassOfferDto> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 }
 
-public sealed class PassOfferService(
-    ICampaignRepository campaigns,
-    IRepository<Domain.Entities.AppUser> users,
-    IPriceBook priceBook,
-    IRepository<Domain.Entities.Venue>? venues = null) : IPassOfferService
+/// <summary>The price book's pass prices, the same for every event and every buyer.</summary>
+public sealed class PassOfferService(IPriceBook priceBook) : IPassOfferService
 {
     public async Task<PassOfferDto> ForCampaignAsync(Guid campaignId, CancellationToken ct = default)
     {
         var p = await priceBook.CurrentAsync(ct);
-        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
-        var offer = new PassOfferDto(p.GoldPass, p.PlatinumPass, p.GoldPass, p.PlatinumPass, p.GoldExtension, p.PlatinumExtension);
-
-        // An event a venue runs: the venue buys its pass, and another year of it, at the venue price,
-        // while the venue's plan is in force.
-        if (campaign?.VenueId is { } venueId && venues is not null
-            && await venues.Query().FirstOrDefaultAsync(v => v.Id == venueId, ct) is { } venue
-            && await users.Query().AnyAsync(u => u.Id == venue.OwnerUserId && u.SubscriptionTier == SubscriptionTier.Venue
-                                                 && (u.SubscriptionEndsAt == null || u.SubscriptionEndsAt > DateTimeOffset.UtcNow), ct)
-            && p.VenueDiscountPercent > 0)
-            offer = offer with
-            {
-                GoldPass = p.VenuePassPrice(EventPassKind.Gold),
-                PlatinumPass = p.VenuePassPrice(EventPassKind.Platinum),
-                GoldExtension = p.VenueExtensionPrice(EventPassKind.Gold),
-                PlatinumExtension = p.VenueExtensionPrice(EventPassKind.Platinum),
-                VenuePercent = p.VenueDiscountPercent,
-                VenueName = venue.Name,
-            };
-        return offer;
+        return new PassOfferDto(p.GoldPass, p.PlatinumPass, p.GoldPass, p.PlatinumPass, p.GoldExtension, p.PlatinumExtension);
     }
 }

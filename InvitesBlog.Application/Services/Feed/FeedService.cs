@@ -71,7 +71,8 @@ public sealed class FeedService(
     IMediaBucketService bucketService,
     IUnitOfWork uow,
     IPushQueue push,
-    IModerationViewService? moderation = null) : IFeedService
+    IModerationViewService? moderation = null,
+    IRepository<Venue>? venues = null) : IFeedService
 {
     /// <summary>How many photos a post's header shows.</summary>
     public const int HeaderImages = 6;
@@ -131,9 +132,11 @@ public sealed class FeedService(
             .ToList();
         var page = ordered.Skip(skip).Take(take).ToList();
 
+        // The venues of the page's events, for their badges: one query for the page.
+        var faces = await VenueFacesAsync(page.Select(x => x.Campaign), ct);
         var posts = new List<FeedPostDto>(page.Count);
         foreach (var (campaign, activity) in page)
-            posts.Add(await DescribeAsync(me, campaign, involved[campaign.Id], activity, ct, view));
+            posts.Add(await DescribeAsync(me, campaign, involved[campaign.Id], activity, ct, view, faces));
 
         return new FeedPageDto(posts, skip + page.Count < ordered.Count);
     }
@@ -449,9 +452,22 @@ public sealed class FeedService(
 
     // ---------- describing ----------
 
-    private async Task<FeedPostDto> DescribeAsync(
-        AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct, ModerationView view)
+    /// <summary>The name and logo of the venues these events are held at, by venue id.</summary>
+    private async Task<IReadOnlyDictionary<Guid, (string Name, string? LogoUrl)>> VenueFacesAsync(
+        IEnumerable<Campaign> events, CancellationToken ct)
     {
+        var ids = events.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
+        if (ids.Count == 0 || venues is null) return new Dictionary<Guid, (string, string?)>();
+        return (await venues.Query().Where(v => ids.Contains(v.Id)).Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
+            .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
+    }
+
+    private async Task<FeedPostDto> DescribeAsync(
+        AppUser me, Campaign campaign, FeedRole role, DateTimeOffset activity, CancellationToken ct, ModerationView view,
+        IReadOnlyDictionary<Guid, (string Name, string? LogoUrl)>? venueFaces = null)
+    {
+        venueFaces ??= await VenueFacesAsync([campaign], ct);
+        (string Name, string? LogoUrl)? atVenue = campaign.VenueId is { } venueId && venueFaces.TryGetValue(venueId, out var face) ? face : null;
         var defaultBucket = await DefaultBucketAsync(campaign.Id, ct);
 
         // The event's first photos, from the bucket the invitation's camera posts to, but only for
@@ -536,7 +552,9 @@ public sealed class FeedService(
             activity,
             hostUser?.AvatarUrl,
             campaign.CreatedByUserId,
-            campaign.TimeZone);
+            campaign.TimeZone,
+            atVenue?.Name,
+            atVenue?.LogoUrl);
     }
 
     private async Task<List<FeedCommentDto>> DescribeCommentsAsync(

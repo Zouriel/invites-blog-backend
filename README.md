@@ -40,7 +40,8 @@ guest list are the event's, shared with the invitation, and its space is the eve
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
 (`PlanCatalog`): Free for every event, a Gold or Platinum pass bought per event, or the organiser's
 Premium pass. The Premium pass (2 GB on every event, kept while it lasts) and Venue (resorts and
-halls, passes at half price) are the only subscriptions; hosts pay per event. The template designer
+halls: 10 GB on every event held there, kept while it lasts; normal pass prices) are the only
+subscriptions; hosts pay per event. The template designer
 is open to every account. Prices are in rufiyaa.
 
 A bucket is an occasion rather than a drive, so it only **takes** anything around its event: open

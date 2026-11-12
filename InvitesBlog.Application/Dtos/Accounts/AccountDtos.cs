@@ -70,6 +70,9 @@ public sealed record UpdateAccountSettingsRequest(string? Country = null, string
 /// <summary>The visitor's country as the request reports it (Cloudflare), or null when unknown.</summary>
 public sealed record GeoDto(string? Country);
 
+/// <summary>The account's new name, as the person typed it. See IAccountService.SetNameAsync for the rules.</summary>
+public sealed record SetNameRequest(string? DisplayName);
+
 /// <summary>Sets the account's light/dark preference. Anything but "dark" is treated as light.</summary>
 public sealed record SetThemeRequest(string? Theme);
 
@@ -151,7 +154,11 @@ public sealed record MyCampaignDto(
     /// <summary>The design's background and accent (#rrggbb), for a tile with no picture; null when it declares none.</summary>
     IReadOnlyList<string>? Colours = null,
     /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
-    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy,
+    /// <summary>The venue the event is held at, for the small badge on its tile; null when there is none.</summary>
+    string? VenueName = null,
+    /// <summary>That venue's logo; null when it has none (show its first letter) or there is no venue.</summary>
+    string? VenueLogoUrl = null);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);

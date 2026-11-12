@@ -27,6 +27,10 @@ namespace InvitesBlog.Infrastructure.Notifications;
 /// at least one more have gone out. Extending, "Keep your photos" or Premium again moves the cover
 /// end, which calls the cut off.</para>
 ///
+/// <para>An event held at a venue whose plan has ended goes the same way (owner, 2026-11-12). Its
+/// warnings also go to the venue (owner and staff) and to everyone the event is for, and the email
+/// offers a Platinum pass for the event, which any of them may buy. The push never sells.</para>
+///
 /// <para>A cancelled event's photos go at once; so do the albums of an event that was deleted.</para>
 ///
 /// <para>Runs inside the API host: there is no separate worker in production. With
@@ -237,7 +241,10 @@ public sealed class MediaRetentionService(
             return;
         }
 
-        var recipients = await RecipientsAsync(db, campaign, plan, ct);
+        var venue = campaign.VenueId is { } venueId
+            ? await db.Venues.Where(v => v.Id == venueId).Select(v => new VenueContact(v.Id, v.Name, v.OwnerUserId)).FirstOrDefaultAsync(ct)
+            : null;
+        var recipients = await RecipientsAsync(db, campaign, plan, venue, ct);
         if (recipients.Count == 0 && plan.OwnerUserId is null)
         {
             // Nobody to warn means nothing may be removed: the event stays as it is.
@@ -255,10 +262,9 @@ public sealed class MediaRetentionService(
             return;
         }
 
-        var extension = campaign.EventPass != EventPassKind.None && offers is not null
-            ? (await offers.ForCampaignAsync(campaign.Id, ct)).ExtensionPrice(campaign.EventPass)
-            : (decimal?)null;
-        var (subject, body) = Notice(stage, campaign, trimAt.Value, cut.RemoveBytes, extension);
+        var offer = offers is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
+        var extension = campaign.EventPass != EventPassKind.None ? offer?.ExtensionPrice(campaign.EventPass) : null;
+        var (subject, body) = Notice(stage, campaign, trimAt.Value, cut.RemoveBytes, extension, venue?.Name, offer?.PlatinumPass);
         foreach (var to in recipients)
             await email.SendAsync(new EmailMessage(
                 To: to, Subject: subject, Html: body, Stream: EmailStream.System,
@@ -268,12 +274,16 @@ public sealed class MediaRetentionService(
         // Saved before the push: a push sender may save the unit of work itself.
         await db.SaveChangesAsync(ct);
 
-        if (push is not null && plan.OwnerUserId is { } owner)
-            await push.SendAsync(owner, PushTitle(stage, campaign, trimAt.Value), PushBody(InvitesBlog.Application.Events.EventTime.Local(trimAt.Value, campaign.TimeZone), cut.RemoveBytes),
-                // Each warning replaces the one before it on the phone.
-                Application.Push.PushKinds.Data($"/dashboard/{campaign.Id}", Application.Push.PushKinds.Album,
-                    campaign.Id.ToString(), $"trim-{campaign.Id:N}"), ct);
+        if (push is not null)
+            foreach (var userId in await PushRecipientsAsync(db, campaign, plan, venue, ct))
+                await push.SendAsync(userId, PushTitle(stage, campaign, trimAt.Value), PushBody(InvitesBlog.Application.Events.EventTime.Local(trimAt.Value, campaign.TimeZone), cut.RemoveBytes),
+                    // Each warning replaces the one before it on the phone.
+                    Application.Push.PushKinds.Data($"/dashboard/{campaign.Id}", Application.Push.PushKinds.Album,
+                        campaign.Id.ToString(), $"trim-{campaign.Id:N}"), ct);
     }
+
+    /// <summary>The venue an event is held at, as its warnings need it.</summary>
+    private sealed record VenueContact(Guid Id, string Name, Guid OwnerUserId);
 
     /// <summary>The event's live photos and videos, and what of them doesn't fit in Free's space.</summary>
     private static async Task<MediaTrim.Plan> PlanCutAsync(AppDbContext db, Campaign campaign, CancellationToken ct)
@@ -394,9 +404,12 @@ public sealed class MediaRetentionService(
             .ExecuteUpdateAsync(s => s.SetProperty(b => b.UsedBytes, 0L).SetProperty(b => b.UpdatedAt, now), ct);
     }
 
-    /// <summary>The organiser, and anyone the event is for who has full access.</summary>
+    /// <summary>
+    /// The organiser, and anyone the event is for who has full access. At a venue: also the venue's owner
+    /// and staff, and everyone the event is for (any of them may buy the pass that keeps the photos).
+    /// </summary>
     private static async Task<List<string>> RecipientsAsync(
-        AppDbContext db, Campaign campaign, EventPlan plan, CancellationToken ct)
+        AppDbContext db, Campaign campaign, EventPlan plan, VenueContact? venue, CancellationToken ct)
     {
         var list = new List<string>();
         if (plan.OwnerUserId is { } owner
@@ -406,13 +419,47 @@ public sealed class MediaRetentionService(
                  && await db.Inviters.Where(i => i.Id == inviterId).Select(i => i.Email).FirstOrDefaultAsync(ct) is { } inviterEmail)
             list.Add(inviterEmail);
 
+        var atVenue = venue is not null;
         list.AddRange(await db.CampaignCelebrants
-            .Where(c => c.CampaignId == campaign.Id && c.CanManage && c.Email != null)
+            .Where(c => c.CampaignId == campaign.Id && (atVenue || c.CanManage) && c.Email != null)
             .Select(c => c.Email!)
             .ToListAsync(ct));
 
+        if (venue is not null)
+        {
+            if (await db.Users.Where(u => u.Id == venue.OwnerUserId).Select(u => u.Email).FirstOrDefaultAsync(ct) is { } venueEmail)
+                list.Add(venueEmail);
+            list.AddRange(await db.VenueStaff.Where(s => s.VenueId == venue.Id).Select(s => s.Email).ToListAsync(ct));
+        }
+
         return list.Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e.Trim().ToLowerInvariant()).Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Who gets the push: the organiser and, at a venue, the venue's owner and staff and everyone the event
+    /// is for, wherever they have an account (matched on its proved email or phone, as access is).
+    /// </summary>
+    private static async Task<List<Guid>> PushRecipientsAsync(
+        AppDbContext db, Campaign campaign, EventPlan plan, VenueContact? venue, CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        if (plan.OwnerUserId is { } owner) ids.Add(owner);
+        if (venue is not null)
+        {
+            ids.Add(venue.OwnerUserId);
+            var people = await db.CampaignCelebrants.Where(c => c.CampaignId == campaign.Id)
+                .Select(c => new { c.Email, c.PhoneE164 }).ToListAsync(ct);
+            var emails = people.Select(p => p.Email).OfType<string>()
+                .Concat(await db.VenueStaff.Where(s => s.VenueId == venue.Id).Select(s => s.Email).ToListAsync(ct))
+                .Select(e => e.Trim().ToLowerInvariant()).Distinct().ToList();
+            var phones = people.Select(p => p.PhoneE164).OfType<string>().Distinct().ToList();
+            if (emails.Count > 0 || phones.Count > 0)
+                ids.AddRange(await db.Users
+                    .Where(u => (u.Email != null && emails.Contains(u.Email.ToLower())) || (u.PhoneE164 != null && phones.Contains(u.PhoneE164)))
+                    .Select(u => u.Id).ToListAsync(ct));
+        }
+        return ids.Distinct().ToList();
     }
 
     /// <summary>"1.4 GB", "350 MB": how much will be removed, in the words the pages use.</summary>
@@ -437,7 +484,10 @@ public sealed class MediaRetentionService(
     public static string PushBody(DateTimeOffset trimAt, long bytes) =>
         $"On {trimAt.ToString("d MMMM", System.Globalization.CultureInfo.GetCultureInfo("en-GB"))} about {Size(bytes)} above Free's {FreeSize} will be removed. Download what you want to keep before then.";
 
-    private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension)
+    /// <param name="venueName">The venue the event is held at, if any. With no pass, its ended plan is what
+    /// covered the event, and the way to keep everything is a Platinum pass at <paramref name="platinum"/>.</param>
+    private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension,
+        string? venueName = null, decimal? platinum = null)
     {
         var baseUrl = config.InviterBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
@@ -447,14 +497,21 @@ public sealed class MediaRetentionService(
             .ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
         var size = Size(bytes);
         var pass = campaign.EventPass == EventPassKind.Platinum ? "Platinum pass" : campaign.EventPass == EventPassKind.Gold ? "Gold pass" : null;
+        // An event at a venue, with no pass of its own: the venue's plan is what ended.
+        var venue = pass is null && venueName is { Length: > 0 } ? WebUtility.HtmlEncode(venueName) : null;
         var keep = pass is not null && extension is { } price
             ? $"extend the {pass} for a year ({PlanCatalog.Currency} {price:0})"
-            : "subscribe to Premium again";
+            : venue is not null
+                ? $"get a Platinum pass for the event{(platinum is { } pp ? $" ({PlanCatalog.Currency} {pp:0})" : "")}, which keeps it for a year"
+                : "subscribe to Premium again";
+        var ended = pass is not null ? $"The {pass} for <strong>{title}</strong>"
+            : venue is not null ? $"{venue}'s plan, which covered <strong>{title}</strong>,"
+            : "Your Premium";
 
         var (subject, lead) = stage switch
         {
             1 => ($"{campaign.Title} goes back to Free on {on}",
-                $"{(pass is null ? "Your Premium" : $"The {pass} for <strong>{title}</strong>")} has ended, so the event goes back to Free. " +
+                $"{ended} has ended, so the event goes back to Free. " +
                 $"Free events are kept for good, up to {FreeSize}."),
             2 => ($"One week left to keep everything from {campaign.Title}",
                 $"<strong>{title}</strong> goes back to Free on {on}."),
@@ -471,7 +528,7 @@ public sealed class MediaRetentionService(
             "<div style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#152026\">" +
             $"<p style=\"font-size:16px;line-height:1.6\">{lines}</p>" +
             $"<p style=\"text-align:center;margin:28px 0 12px\"><a href=\"{dashboard}\" style=\"display:inline-block;background:#7A0C1E;color:#fff;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600\">Download everything</a></p>" +
-            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{dashboard}\" style=\"color:#7A0C1E\">{(pass is null ? "Get Premium again" : "Extend the pass")}</a></p>" +
+            $"<p style=\"text-align:center;margin:0 0 28px\"><a href=\"{dashboard}\" style=\"color:#7A0C1E\">{(pass is not null ? "Extend the pass" : venue is not null ? "Get a Platinum pass" : "Get Premium again")}</a></p>" +
             "<p style=\"font-size:12px;color:#4a6378;line-height:1.6\">Sent via invites.blog</p></div>";
 
         return (subject, html);
