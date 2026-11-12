@@ -1,4 +1,5 @@
 using InvitesBlog.Application.Abstractions.Persistence;
+using InvitesBlog.Domain.Entities;
 using InvitesBlog.Application.Exceptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,6 +22,10 @@ public sealed record SendingAllowanceDto(int Included, int Extra, int Used)
 public interface ISendingAllowanceService
 {
     Task<SendingAllowanceDto> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>The same for many events in one query, given plans already worked out for them.</summary>
+    Task<IReadOnlyDictionary<Guid, SendingAllowanceDto>> ForCampaignsAsync(
+        IReadOnlyCollection<Campaign> list, IReadOnlyDictionary<Guid, EventPlan> plans, CancellationToken ct = default);
 }
 
 public sealed class SendingAllowanceService(
@@ -35,5 +40,23 @@ public sealed class SendingAllowanceService(
         var plan = await plans.ForCampaignAsync(campaignId, ct);
         var used = await invites.Query().CountAsync(i => i.CampaignId == campaignId && i.FirstEmailedAt != null, ct);
         return new SendingAllowanceDto(plan.IncludedInvites, Math.Max(0, campaign.PaidInviteCapacity), used);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, SendingAllowanceDto>> ForCampaignsAsync(
+        IReadOnlyCollection<Campaign> list, IReadOnlyDictionary<Guid, EventPlan> plans, CancellationToken ct = default)
+    {
+        var ids = list.Select(c => c.Id).Distinct().ToList();
+        var used = ids.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await invites.Query()
+                .Where(i => ids.Contains(i.CampaignId) && i.FirstEmailedAt != null)
+                .GroupBy(i => i.CampaignId)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+        var result = new Dictionary<Guid, SendingAllowanceDto>(ids.Count);
+        foreach (var c in list)
+            result[c.Id] = new SendingAllowanceDto(plans[c.Id].IncludedInvites, Math.Max(0, c.PaidInviteCapacity),
+                used.GetValueOrDefault(c.Id));
+        return result;
     }
 }

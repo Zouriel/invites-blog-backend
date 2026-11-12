@@ -193,6 +193,135 @@ public sealed class VenuePlanTests(PostgresApiFixture api)
         Assert.Null(c.MediaTrimAt);
     }
 
+    // ----- Billing lists the events you're in ------------------------------------------------
+
+    [PostgresFact]
+    public async Task Billing_lists_a_venue_event_for_its_couple_with_platinum_once_the_venue_ends_and_not_for_a_stranger()
+    {
+        var (owner, venueId) = await VenueAsync(active: true);
+        var organiser = await UserAsync();
+        var ev = await EventAsync(organiser, venueId, eventAt: DateTimeOffset.UtcNow.AddYears(-1));
+        var couple = await UserAsync();
+        var stranger = await UserAsync();
+        await CelebrantAsync(ev, couple.Email, canManage: false);
+
+        // While the venue's plan lasts: the couple sees the event under "for you", on the venue's plan.
+        var row = ForYou(await DataAsync(await api.Client(couple.Token).GetAsync("/api/billing")), ev);
+        Assert.Equal("celebrant", row.GetProperty("role").GetString());
+        Assert.Equal("Venue", row.GetProperty("plan").GetString());
+        Assert.False(row.GetProperty("venueEnded").GetBoolean());
+
+        // The venue's plan ends: back to Free, flagged as an ended venue, with the Platinum pass on offer.
+        await api.WriteAsync(db => db.Users.Where(u => u.Id == owner.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.SubscriptionEndsAt, DateTimeOffset.UtcNow.AddMinutes(-5))));
+        var overview = await DataAsync(await api.Client(couple.Token).GetAsync("/api/billing"));
+        row = ForYou(overview, ev);
+        Assert.Equal("Free", row.GetProperty("plan").GetString());
+        Assert.Equal("UploadsClosed", row.GetProperty("phase").GetString());
+        Assert.True(row.GetProperty("venueEnded").GetBoolean());
+        Assert.True(row.GetProperty("atVenue").GetBoolean());
+        Assert.Equal((await PricesAsync()).PlatinumPass, row.GetProperty("offer").GetProperty("platinumPass").GetDecimal());
+        // Not the couple's own event: their own list stays as it was.
+        Assert.DoesNotContain(overview.GetProperty("events").EnumerateArray(), e => e.GetProperty("campaignId").GetGuid() == ev);
+        // And what the row offers can really be bought by them.
+        var quote = await api.Client(couple.Token).PostAsJsonAsync("/api/billing/quote", new { item = "platinum-pass", campaignId = ev });
+        Assert.Equal(HttpStatusCode.OK, quote.StatusCode);
+
+        // A stranger sees it nowhere.
+        var theirs = await DataAsync(await api.Client(stranger.Token).GetAsync("/api/billing"));
+        Assert.Empty(theirs.GetProperty("forYou").EnumerateArray());
+        Assert.DoesNotContain(theirs.GetProperty("events").EnumerateArray(), e => e.GetProperty("campaignId").GetGuid() == ev);
+
+        // The organiser sees it in their own list only, as before, even when they are also one of the people it is for.
+        await CelebrantAsync(ev, organiser.Email, canManage: true);
+        var mine = await DataAsync(await api.Client(organiser.Token).GetAsync("/api/billing"));
+        var own = Assert.Single(mine.GetProperty("events").EnumerateArray(), e => e.GetProperty("campaignId").GetGuid() == ev);
+        Assert.Equal("organiser", own.GetProperty("role").GetString());
+        Assert.DoesNotContain(mine.GetProperty("forYou").EnumerateArray(), e => e.GetProperty("campaignId").GetGuid() == ev);
+    }
+
+    [PostgresFact]
+    public async Task Billing_lists_events_for_managing_celebrants_and_venue_staff_but_not_cancelled_ones()
+    {
+        var (owner, venueId) = await VenueAsync(active: true);
+        var staff = await UserAsync();
+        await api.WriteAsync(async db =>
+        {
+            db.VenueStaff.Add(new VenueStaff { Id = Guid.NewGuid(), VenueId = venueId, Email = staff.Email, CreatedAt = DateTimeOffset.UtcNow });
+            await Task.CompletedTask;
+        });
+        var organiser = await UserAsync();
+        var atVenue = await EventAsync(organiser, venueId);
+        var elsewhere = await EventAsync(organiser, null);
+        var cancelled = await EventAsync(organiser, venueId);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == cancelled)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.Status, CampaignStatus.Cancelled)));
+        var partner = await UserAsync();
+        await CelebrantAsync(elsewhere, partner.Email, canManage: true);
+        await CelebrantAsync(cancelled, partner.Email, canManage: true);
+
+        var forPartner = (await DataAsync(await api.Client(partner.Token).GetAsync("/api/billing"))).GetProperty("forYou");
+        var only = Assert.Single(forPartner.EnumerateArray());
+        Assert.Equal(elsewhere, only.GetProperty("campaignId").GetGuid());
+        Assert.Equal("manager", only.GetProperty("role").GetString());
+        Assert.False(only.GetProperty("venueEnded").GetBoolean());
+
+        foreach (var who in new[] { staff, owner })
+        {
+            var rows = (await DataAsync(await api.Client(who.Token).GetAsync("/api/billing"))).GetProperty("forYou").EnumerateArray().ToList();
+            var row = Assert.Single(rows);
+            Assert.Equal(atVenue, row.GetProperty("campaignId").GetGuid());
+            Assert.Equal("venue", row.GetProperty("role").GetString());
+            Assert.Equal("Venue", row.GetProperty("plan").GetString());
+        }
+
+        // GET /api/billing/events/{id} says the same role for a single event.
+        var single = await DataAsync(await api.Client(partner.Token).GetAsync($"/api/billing/events/{elsewhere}"));
+        Assert.Equal("manager", single.GetProperty("role").GetString());
+    }
+
+    /// <summary>The batched plans Billing uses are exactly the one-at-a-time ones, whatever covers the event.</summary>
+    [PostgresFact]
+    public async Task Plans_worked_out_for_a_page_match_plans_worked_out_one_at_a_time()
+    {
+        var (_, liveVenue) = await VenueAsync(active: true);
+        var (_, endedVenue) = await VenueAsync(active: false);
+        var premium = await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(30));
+        var plain = await UserAsync();
+        var ids = new List<Guid>
+        {
+            await EventAsync(plain, liveVenue),
+            await EventAsync(plain, endedVenue, eventAt: DateTimeOffset.UtcNow.AddYears(-1)),
+            await EventAsync(premium, null),
+            await EventAsync(plain, null),
+        };
+        var withPass = await EventAsync(plain, liveVenue);
+        await api.WriteAsync(db => db.Campaigns.Where(c => c.Id == withPass).ExecuteUpdateAsync(s => s
+            .SetProperty(c => c.EventPass, EventPassKind.Platinum)
+            .SetProperty(c => c.EventPassUntil, DateTimeOffset.UtcNow.AddMonths(6))));
+        ids.Add(withPass);
+        await AlbumAsync(ids[3], plain.Id);
+
+        using var scope = api.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPlanService>();
+        var list = await api.ReadAsync(db => db.Campaigns.AsNoTracking().Where(c => ids.Contains(c.Id)).ToListAsync());
+        var batch = await service.ForCampaignsAsync(list);
+        Assert.Equal(ids.Count, batch.Count);
+        var kinds = new HashSet<PlanKind>();
+        foreach (var id in ids)
+        {
+            var single = await PlanAsync(id);
+            Assert.Equal(single, batch[id]);
+            kinds.Add(single.Kind);
+        }
+        // The cases really differ, so the comparison covers each branch.
+        Assert.Superset(new HashSet<PlanKind> { PlanKind.Venue, PlanKind.Free, PlanKind.Premium, PlanKind.PlatinumPass }, kinds);
+        Assert.Equal(4, kinds.Count);
+    }
+
+    private static JsonElement ForYou(JsonElement overview, Guid ev) =>
+        Assert.Single(overview.GetProperty("forYou").EnumerateArray(), e => e.GetProperty("campaignId").GetGuid() == ev);
+
     // ----- The badge --------------------------------------------------------------------------
 
     [PostgresFact]
