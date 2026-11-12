@@ -135,6 +135,9 @@ public static class DependencyInjection
         services.AddScoped<TemplateManifestRefresher>();
         services.AddScoped<TemplateTypeSeeder>();
         services.AddScoped<DesignFontSeeder>();
+        // The sample event behind GET /api/demo/event and its photos (docs/GUIDANCE.md section 7).
+        services.AddScoped<Demo.DemoAssetSeeder>();
+        services.AddSingleton<Demo.DemoEventBuilder>();
         services.AddScoped<Rendering.InviteRenderService>();
 
         // Email — Resend at launch (provider guide), Console for dev when no key is configured.

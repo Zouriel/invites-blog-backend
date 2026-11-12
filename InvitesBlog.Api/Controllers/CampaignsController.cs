@@ -17,7 +17,7 @@ namespace InvitesBlog.Api.Controllers;
 [Route("api/campaigns")]
 public sealed class CampaignsController(
     ICampaignService campaigns, IImportedDesignService designs, IMediaBucketService buckets,
-    IGuestColoursService colours) : BaseApiController
+    IGuestColoursService colours, Application.Services.Guidance.IGuidanceService guidance) : BaseApiController
 {
     // Creation is open to anonymous callers: a brand-new visitor spins up a draft and receives a
     // possession token that grants Inviter rights thereafter. The Public role does NOT hold
@@ -207,8 +207,12 @@ public sealed class CampaignsController(
     // (hashed + matched) in the service. Mapped explicitly off the campaigns route prefix.
     [HttpGet("/api/dashboard/{id:guid}")]
     [HasPermission(Permissions.Dashboard.Read)]
-    public async Task<IActionResult> GetDashboard(Guid id, [FromQuery] string? token, CancellationToken ct) =>
-        Success(await campaigns.GetDashboardAsync(id, token, ct));
+    public async Task<IActionResult> GetDashboard(Guid id, [FromQuery] string? token, CancellationToken ct)
+    {
+        var dashboard = await campaigns.GetDashboardAsync(id, token, ct);
+        if (string.IsNullOrEmpty(token)) await AcknowledgeIfCelebrantAsync(dashboard, ct);
+        return Success(dashboard);
+    }
 
     /// <summary>
     /// The same dashboard, opened from Sent by the account that booked the campaign — no magic link
@@ -217,8 +221,22 @@ public sealed class CampaignsController(
     /// </summary>
     [HttpGet("/api/me/campaigns/{id:guid}/dashboard")]
     [HasPermission(Permissions.Dashboard.Read)]
-    public async Task<IActionResult> GetMyDashboard(Guid id, CancellationToken ct) =>
-        Success(await campaigns.GetDashboardAsync(id, null, ct));
+    public async Task<IActionResult> GetMyDashboard(Guid id, CancellationToken ct)
+    {
+        var dashboard = await campaigns.GetDashboardAsync(id, null, ct);
+        await AcknowledgeIfCelebrantAsync(dashboard, ct);
+        return Success(dashboard);
+    }
+
+    /// <summary>
+    /// A celebrant opening the event has seen that they were added: it leaves newRoles on
+    /// GET /api/me/guidance (docs/GUIDANCE.md). Organisers have no celebrant row to mark.
+    /// </summary>
+    private async Task AcknowledgeIfCelebrantAsync(DashboardResponse dashboard, CancellationToken ct)
+    {
+        if (dashboard.Campaign.Viewer is "celebrant" or "manager")
+            await guidance.AcknowledgeRoleAsync(dashboard.Campaign.Id, ct);
+    }
 
     [HttpPost("{id:guid}/cancel")]
     [HasPermission(Permissions.Campaigns.Cancel)]

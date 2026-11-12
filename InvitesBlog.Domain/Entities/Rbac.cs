@@ -93,6 +93,18 @@ public sealed class AppUser
     /// groups in <c>PushKinds.Mutable</c>. Every push sender honours it, for every device of the account.
     /// </summary>
     public List<string> PushMuted { get; set; } = [];
+
+    /// <summary>
+    /// The person switched tips off (Settings › Tips, or "Turn off tips" on any tip). Stored as "off" so
+    /// the column's default (false) is the normal case: tips are on. See docs/GUIDANCE.md.
+    /// </summary>
+    public bool GuidanceTipsOff { get; set; }
+
+    /// <summary>
+    /// Ids of the tips, tours and offers this account has seen (docs/GUIDANCE.md), oldest first, at most
+    /// <c>GuidanceRules.MaxStored</c>. Shared by every device the account signs in on.
+    /// </summary>
+    public List<string> GuidanceSeen { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

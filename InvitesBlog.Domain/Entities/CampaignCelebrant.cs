@@ -33,5 +33,14 @@ public sealed class CampaignCelebrant
     /// <summary>When the "you've been added" email went out, or null if it never did.</summary>
     public DateTimeOffset? NotifiedAt { get; set; }
 
+    /// <summary>
+    /// When the person this row matches saw that they were added: they opened the event's dashboard,
+    /// or dismissed the "you've been added" card (POST /api/me/roles/{campaignId}/ack). Null until then,
+    /// which is what lists the row in <c>newRoles</c> of GET /api/me/guidance (docs/GUIDANCE.md).
+    /// Rows that existed before guidance shipped were set to the migration's time, so nobody gets a
+    /// card for an event they have known about for months.
+    /// </summary>
+    public DateTimeOffset? AcknowledgedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }

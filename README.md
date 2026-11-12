@@ -204,6 +204,19 @@ dotnet test          # 883 tests
   independently of the others.
 - **Cloudflare R2** for assets behind a custom domain, with cache headers set per key so template
   packages revalidate while campaign images stay immutable.
+- **Guidance: tips, tours and the example event** ([`docs/GUIDANCE.md`](./docs/GUIDANCE.md), the spec shared
+  with the web app and the Flutter app). On the account (`users.guidance_tips_off`, `users.guidance_seen`):
+  `GET /api/me/guidance` returns `tipsOn`, `seen` (at most 500 ids, oldest dropped first), `welcomeUntil`
+  (account created + 30 days), `progress` (`hasName`, `hasPhoto`, `hasEvent`, `hasGuests`, `hasSent`,
+  `hasPhotoInAlbum`, `hasDesign`, each defined in `GuidanceProgressDto`) and `newRoles` (events I was added
+  to as a celebrant and haven't opened: `campaign_celebrants.acknowledged_at` is null). `POST
+  /api/me/guidance/seen {ids}` (ids `[a-z0-9.-]{1,64}`, at most 50 a call), `PUT /api/me/guidance {tipsOn}`,
+  `POST /api/me/guidance/reset` and `POST /api/me/roles/{campaignId}/ack` answer 204; opening the event's
+  dashboard as its celebrant acknowledges it too. `GET /api/demo/event` is public and cached for an hour:
+  the organiser dashboard's shape (`DashboardResponse`) plus `demo: true`, `celebrants`, `buckets`, `album`
+  and `covers` (each in its own endpoint's shape), filled with a fixed sample wedding whose ids exist
+  nowhere (`de300000-0000-4000-8000-…`). Its photos live in `InvitesBlog.Infrastructure/Demo/Photos`
+  (sources and licences in its README) and are published to storage under `demo/v1/` at start-up.
 
 ## Not yet real
 
