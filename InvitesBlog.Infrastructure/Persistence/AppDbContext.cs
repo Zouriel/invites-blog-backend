@@ -486,6 +486,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         b.Entity<MediaBucket>(e =>
         {
+            e.Property(x => x.FacesEndNoticeStage).HasDefaultValue(0);
             e.ToTable("media_buckets");
             e.HasKey(x => x.Id);
             // Written on INSERT only. Every later change goes through IMediaBucketUsageRepository as an
@@ -607,6 +608,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.PaymentCustomerId).HasMaxLength(64);
             e.Property(x => x.Country).HasMaxLength(2);
             e.Property(x => x.TimeZone).HasMaxLength(64);
+            e.Property(x => x.PushMuted).HasDefaultValueSql("'{}'::text[]");
         });
 
         b.Entity<UserExternalLogin>(e =>

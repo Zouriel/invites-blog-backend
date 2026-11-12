@@ -88,6 +88,15 @@ public sealed class AuthController(IAccountService accounts, IAccountDeletionSer
     public async Task<IActionResult> SetTheme([FromBody] SetThemeRequest req, CancellationToken ct) =>
         Success(await accounts.SetThemeAsync(req, ct));
 
+    /// <summary>
+    /// Which kinds of phone notification are off (the app's Settings › Notifications):
+    /// <c>{ "muted": ["photos", "hearts"] }</c>. Returns the account.
+    /// </summary>
+    [HttpPut("me/notifications")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> SetNotifications([FromBody] SetNotificationsRequest req, CancellationToken ct) =>
+        Success(await accounts.SetNotificationsAsync(req, ct));
+
     /// <summary>The signed-in account: identifiers, roles, plan, country and time zone.</summary>
     [HttpGet("me")]
     [HasPermission(Permissions.Templates.Read)]

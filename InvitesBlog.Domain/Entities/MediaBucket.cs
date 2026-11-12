@@ -196,6 +196,30 @@ public sealed class MediaBucket
 
     /// <summary>The newest favourite that notice covered; anything after it is still to tell.</summary>
     public DateTimeOffset? FavouritesNotifiedUpTo { get; set; }
+
+    /// <summary>When the album's people were last told about new photos (AlbumPhotoNoticeService).</summary>
+    public DateTimeOffset? PhotosPushedAt { get; set; }
+
+    /// <summary>The newest upload that notice covered; anything after it is still to tell.</summary>
+    public DateTimeOffset? PhotosPushedUpTo { get; set; }
+
+    /// <summary>
+    /// When the host was told face grouping had finished its first pass; null until then. Switching grouping on
+    /// again clears it, so each switch-on is told once, not every photo after it.
+    /// </summary>
+    public DateTimeOffset? FacesReadyPushedAt { get; set; }
+
+    /// <summary>When the host was last told that someone opted out of face grouping here (at most daily).</summary>
+    public DateTimeOffset? FacesOptOutPushedAt { get; set; }
+
+    /// <summary>The newest opt-out that notice covered.</summary>
+    public DateTimeOffset? FacesOptOutPushedUpTo { get; set; }
+
+    /// <summary>The day face grouping is due to end that the host was warned about (a pass ending, or the album idle).</summary>
+    public DateTimeOffset? FacesEndNoticeFor { get; set; }
+
+    /// <summary>Warnings sent for <see cref="FacesEndNoticeFor"/>: 1 a month before, 2 a week before.</summary>
+    public int FacesEndNoticeStage { get; set; }
 }
 
 /// <summary>

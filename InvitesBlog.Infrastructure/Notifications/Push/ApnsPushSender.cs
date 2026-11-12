@@ -27,12 +27,13 @@ public sealed class ApnsPushSender(
         if (mine.Count == 0) return;
 
         var payload = ApnsClient.Payload(title, body, data);
+        var collapse = data is not null && data.TryGetValue(Application.Push.PushKinds.CollapseKey, out var c) ? c : null;
         var gone = new List<DeviceToken>();
         foreach (var device in mine)
         {
             try
             {
-                var outcome = await apns.SendAsync(device.Token, device.Environment == DeviceToken.Sandbox, payload, ct);
+                var outcome = await apns.SendAsync(device.Token, device.Environment == DeviceToken.Sandbox, payload, ct, collapse);
                 if (outcome == ApnsOutcome.Gone) gone.Add(device);
                 else if (outcome != ApnsOutcome.Sent)
                     logger.LogInformation("Push to device {DeviceId} not delivered: {Outcome}.", device.Id, outcome);

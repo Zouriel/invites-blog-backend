@@ -663,6 +663,16 @@ public sealed class AccountService(
         return await ToDtoAsync(user, ct);
     }
 
+    public async Task<AccountDto> SetNotificationsAsync(SetNotificationsRequest req, CancellationToken ct = default)
+    {
+        var user = await CurrentAsync(ct);
+        // Only switches the app has; in its own order so the stored list never depends on the client's.
+        var asked = (req.Muted ?? []).Select(m => m?.Trim().ToLowerInvariant()).ToHashSet();
+        user.PushMuted = Push.PushKinds.Mutable.Where(asked.Contains).ToList();
+        await uow.SaveChangesAsync(ct);
+        return await ToDtoAsync(user, ct);
+    }
+
     /// <summary>The signed-in account, as /auth/me shows it.</summary>
     public async Task<AccountDto> MeAsync(CancellationToken ct = default) => await ToDtoAsync(await CurrentAsync(ct), ct);
 
@@ -738,7 +748,8 @@ public sealed class AccountService(
             await AtVenueAsync(user, ct),
             user.AvatarUrl,
             user.Country,
-            user.TimeZone);
+            user.TimeZone,
+            user.PushMuted);
     }
 
     /// <summary>Whether the account owns a venue or works at one, so its menu leads there.</summary>

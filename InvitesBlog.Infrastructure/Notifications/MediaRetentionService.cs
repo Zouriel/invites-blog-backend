@@ -270,7 +270,9 @@ public sealed class MediaRetentionService(
 
         if (push is not null && plan.OwnerUserId is { } owner)
             await push.SendAsync(owner, PushTitle(stage, campaign, trimAt.Value), PushBody(InvitesBlog.Application.Events.EventTime.Local(trimAt.Value, campaign.TimeZone), cut.RemoveBytes),
-                new Dictionary<string, string> { ["path"] = $"/dashboard/{campaign.Id}" }, ct);
+                // Each warning replaces the one before it on the phone.
+                Application.Push.PushKinds.Data($"/dashboard/{campaign.Id}", Application.Push.PushKinds.Album,
+                    campaign.Id.ToString(), $"trim-{campaign.Id:N}"), ct);
     }
 
     /// <summary>The event's live photos and videos, and what of them doesn't fit in Free's space.</summary>
@@ -428,8 +430,12 @@ public sealed class MediaRetentionService(
         _ => $"Tomorrow: photos above {FreeSize} from {campaign.Title} are removed",
     };
 
-    private static string PushBody(DateTimeOffset trimAt, long bytes) =>
-        $"On {trimAt:d MMMM} about {Size(bytes)} above Free's {FreeSize} will be removed. Download everything or extend to keep it all.";
+    /// <summary>
+    /// The day is the event's own (the caller passes it in the event's zone). No selling: the app shows this as
+    /// it is, and the app may not point people at buying (the email and the dashboard carry the options).
+    /// </summary>
+    public static string PushBody(DateTimeOffset trimAt, long bytes) =>
+        $"On {trimAt.ToString("d MMMM", System.Globalization.CultureInfo.GetCultureInfo("en-GB"))} about {Size(bytes)} above Free's {FreeSize} will be removed. Download what you want to keep before then.";
 
     private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension)
     {

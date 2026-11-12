@@ -87,6 +87,12 @@ public sealed class AppUser
     /// money, so it's off until an admin turns it on for the account (Admin › Designers).
     /// </summary>
     public bool AiPicturesAllowed { get; set; }
+
+    /// <summary>
+    /// Kinds of phone notification this account turned off in the app (Settings › Notifications): the mute
+    /// groups in <c>PushKinds.Mutable</c>. Every push sender honours it, for every device of the account.
+    /// </summary>
+    public List<string> PushMuted { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

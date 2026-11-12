@@ -263,6 +263,13 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("public_publishing_revoked_at");
 
+                    b.PrimitiveCollection<List<string>>("PushMuted")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("push_muted")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<int>("RenewalFailures")
                         .HasColumnType("integer")
                         .HasColumnName("renewal_failures");
@@ -1166,6 +1173,14 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("ignored");
 
+                    b.Property<DateTimeOffset?>("IgnoredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ignored_at");
+
+                    b.Property<Guid?>("IgnoredByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("ignored_by_user_id");
+
                     b.Property<string>("Name")
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)")
@@ -1479,6 +1494,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("guest_id");
 
+                    b.Property<DateTimeOffset?>("ReminderPushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reminder_pushed_at");
+
                     b.Property<bool>("RequiresOtp")
                         .HasColumnType("boolean")
                         .HasColumnName("requires_otp");
@@ -1633,6 +1652,28 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("face_grouping_on");
 
+                    b.Property<DateTimeOffset?>("FacesEndNoticeFor")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("faces_end_notice_for");
+
+                    b.Property<int>("FacesEndNoticeStage")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("faces_end_notice_stage");
+
+                    b.Property<DateTimeOffset?>("FacesOptOutPushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("faces_opt_out_pushed_at");
+
+                    b.Property<DateTimeOffset?>("FacesOptOutPushedUpTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("faces_opt_out_pushed_up_to");
+
+                    b.Property<DateTimeOffset?>("FacesReadyPushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("faces_ready_pushed_at");
+
                     b.Property<DateTimeOffset?>("FavouritesNotifiedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("favourites_notified_at");
@@ -1654,6 +1695,14 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_user_id");
+
+                    b.Property<DateTimeOffset?>("PhotosPushedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("photos_pushed_at");
+
+                    b.Property<DateTimeOffset?>("PhotosPushedUpTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("photos_pushed_up_to");
 
                     b.Property<DateTimeOffset?>("TermEndAt")
                         .HasColumnType("timestamp with time zone")

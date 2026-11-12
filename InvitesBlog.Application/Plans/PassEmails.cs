@@ -16,12 +16,16 @@ public static class PassEmails
 
     /// <summary>A month, then a week, before a pass ends: the photos' space and albums go with it.</summary>
     /// <param name="timeZone">The event's IANA zone: the day is the one the pass ends on there.</param>
-    public static EmailMessage EndingSoon(string to, string eventTitle, string passName, DateTimeOffset endsAt, decimal extendPrice, string link, string? timeZone = null)
+    /// <param name="facesOn">An album of the event groups photos by face: say that it stops, and its face data is deleted, when the pass ends.</param>
+    public static EmailMessage EndingSoon(string to, string eventTitle, string passName, DateTimeOffset endsAt, decimal extendPrice, string link, string? timeZone = null, bool facesOn = false)
     {
         var on = Events.EventTime.Local(endsAt, timeZone).ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
+        var faces = facesOn
+            ? " Face grouping is switched off then too, and its face data deleted."
+            : "";
         return Build(to, $"Your {passName} for {eventTitle} ends on {on}",
             $"The <strong>{E(passName)}</strong> on <strong>{E(eventTitle)}</strong> ends on {E(on)}. After that its extra space and albums go, " +
-            $"and the photos start to wind down. Keep it another year for {PlanCatalog.Currency} {extendPrice:0} (no invitations included).",
+            $"and the photos start to wind down.{faces} Keep it another year for {PlanCatalog.Currency} {extendPrice:0} (no invitations included).",
             "Extend it", link);
     }
 

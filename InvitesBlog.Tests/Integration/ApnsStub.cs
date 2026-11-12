@@ -50,7 +50,8 @@ public sealed class ApnsStub
         Requests.Enqueue(new ApnsRequest(
             uri.Host, token, request.Version,
             request.Headers.Authorization?.Scheme, request.Headers.Authorization?.Parameter,
-            Header(request, "apns-topic"), Header(request, "apns-push-type"), JsonDocument.Parse(body).RootElement.Clone()));
+            Header(request, "apns-topic"), Header(request, "apns-push-type"), JsonDocument.Parse(body).RootElement.Clone(),
+            Header(request, "apns-collapse-id")));
 
         if (Refuse.TryGetValue(token, out var refusal))
             return new HttpResponseMessage(refusal.Status)
@@ -72,8 +73,11 @@ public sealed class ApnsStub
 }
 
 public sealed record ApnsRequest(
-    string Host, string Token, Version Version, string? AuthScheme, string? Jwt, string? Topic, string? PushType, JsonElement Payload)
+    string Host, string Token, Version Version, string? AuthScheme, string? Jwt, string? Topic, string? PushType, JsonElement Payload,
+    string? CollapseId = null)
 {
+    public string? Data(string key) => Payload.TryGetProperty(key, out var v) ? v.GetString() : null;
+    public string? ThreadId => Payload.GetProperty("aps").TryGetProperty("thread-id", out var v) ? v.GetString() : null;
     public string Title => Payload.GetProperty("aps").GetProperty("alert").GetProperty("title").GetString()!;
     public string Body => Payload.GetProperty("aps").GetProperty("alert").GetProperty("body").GetString()!;
     public string Path => Payload.GetProperty("path").GetString()!;

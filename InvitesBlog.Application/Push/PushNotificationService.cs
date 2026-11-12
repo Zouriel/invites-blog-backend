@@ -7,8 +7,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Push;
 
-/// <summary>A notification for one account: short plain words, and the app path its tap opens.</summary>
-public sealed record PushNote(Guid UserId, string Title, string Body, string Path);
+/// <summary>
+/// A notification for one account: short plain words, the app path its tap opens, what kind it is
+/// (<see cref="PushKinds"/>), the event or album it groups under on the phone, and the key a newer one
+/// replaces it by.
+/// </summary>
+public sealed record PushNote(Guid UserId, string Title, string Body, string Path,
+    string Kind = PushKinds.Invitation, string? Thread = null, string? Collapse = null)
+{
+    public Dictionary<string, string> Data => PushKinds.Data(Path, Kind, Thread, Collapse);
+}
 
 /// <summary>
 /// Turns a <see cref="PushJob"/> into notifications and sends them. Runs on the background worker with
@@ -24,6 +32,7 @@ public sealed class PushNotificationService(
     IRepository<AppUser> users,
     IRepository<CampaignCelebrant> celebrants,
     IRepository<PostComment> comments,
+    IRepository<MediaBucket> buckets,
     IUnitOfWork uow,
     IPushSender sender,
     Moderation.IModerationViewService? moderation = null)
@@ -40,8 +49,7 @@ public sealed class PushNotificationService(
             // Someone who blocked the actor hears nothing about what they do.
             if (job.ActorUserId is { } actor && moderation is not null
                 && await moderation.HasBlockedAsync(note.UserId, actor, ct)) continue;
-            await sender.SendAsync(note.UserId, note.Title, note.Body,
-                new Dictionary<string, string> { ["path"] = note.Path }, ct);
+            await sender.SendAsync(note.UserId, note.Title, note.Body, note.Data, ct);
         }
     }
 
@@ -52,6 +60,7 @@ public sealed class PushNotificationService(
         GuestReplied j => await ReplyAsync(j, ct),
         CommentAdded j => await CommentAsync(j, ct),
         CelebrantAdded j => await CelebrantAsync(j, ct),
+        FacesSwitchedOff j => await FacesOffAsync(j, ct),
         _ => [],
     };
 
@@ -92,7 +101,8 @@ public sealed class PushNotificationService(
         foreach (var g in due)
             foreach (var userId in await AccountsAsync(g.Email, g.PhoneE164, ct))
                 if (!organisers.Contains(userId) && seen.Add(userId))
-                    notes.Add(new PushNote(userId, title, body, $"/invitation/{campaign.Id}"));
+                    notes.Add(new PushNote(userId, title, body, $"/invitation/{campaign.Id}",
+                        PushKinds.Invitation, campaign.Id.ToString(), $"invite-{campaign.Id:N}"));
         return notes;
     }
 
@@ -119,7 +129,9 @@ public sealed class PushNotificationService(
         var replier = (await AccountsAsync(guest.Email, guest.PhoneE164, ct)).ToHashSet();
         return (await PeopleOfAsync(campaign, ct))
             .Where(id => !replier.Contains(id))
-            .Select(id => new PushNote(id, campaign.Title, body, $"/dashboard/{campaign.Id}"))
+            // A changed answer replaces the one already on the phone rather than stacking under it.
+            .Select(id => new PushNote(id, campaign.Title, body, $"/dashboard/{campaign.Id}",
+                PushKinds.Reply, campaign.Id.ToString(), $"reply-{invite.Id:N}"))
             .ToList();
     }
 
@@ -137,14 +149,20 @@ public sealed class PushNotificationService(
         var quote = Quote(comment.Body);
         var path = $"/feed?post={campaign.Id}";
 
+        var thread = campaign.Id.ToString();
         var notes = new Dictionary<Guid, PushNote>();
-        // Somebody answered your comment: that's the more personal of the two, so it wins.
+        PushNote Replied(Guid to) => new(to, campaign.Title, $"{who} replied: {quote}", path, PushKinds.Comment, thread);
+        // Somebody answered your comment: that's the more personal of the two, so it wins. That's whoever
+        // wrote the comment they pressed reply on, and whoever started the thread it went into.
+        if (job.RepliedToCommentId is { } target && target != comment.ParentId
+            && await comments.GetByIdAsync(target, ct) is { DeletedAt: null } answered && answered.CampaignId == comment.CampaignId)
+            notes[answered.UserId] = Replied(answered.UserId);
         if (comment.ParentId is { } parentId && await comments.GetByIdAsync(parentId, ct) is { DeletedAt: null } parent)
-            notes[parent.UserId] = new PushNote(parent.UserId, campaign.Title, $"{who} replied: {quote}", path);
+            notes.TryAdd(parent.UserId, Replied(parent.UserId));
 
         // The post is the event's, so it is the organisers' post.
         foreach (var id in await OrganisersAsync(campaign, ct))
-            notes.TryAdd(id, new PushNote(id, campaign.Title, $"{who} commented: {quote}", path));
+            notes.TryAdd(id, new PushNote(id, campaign.Title, $"{who} commented: {quote}", path, PushKinds.Comment, thread));
         return notes.Values.ToList();
     }
 
@@ -165,14 +183,42 @@ public sealed class PushNotificationService(
 
         return (await AccountsAsync(celebrant.Email, celebrant.PhoneE164, ct))
             .Select(id => new PushNote(id, $"You've been added to {campaign.Title}",
-                "See who's coming and all the photos.", $"/dashboard/{campaign.Id}"))
+                "See who's coming and all the photos.", $"/dashboard/{campaign.Id}",
+                PushKinds.Added, campaign.Id.ToString()))
             .ToList();
+    }
+
+    // ----- Face grouping switched off -----------------------------------------------------------------
+
+    private async Task<IReadOnlyList<PushNote>> FacesOffAsync(FacesSwitchedOff job, CancellationToken ct)
+    {
+        var bucket = await buckets.GetByIdAsync(job.BucketId, ct);
+        if (bucket is null) return [];
+        var album = await AlbumTitleAsync(bucket, ct);
+        var body = job.Reason switch
+        {
+            FacesOffReason.Idle => "Face grouping was switched off and its face data deleted: the album had no new photos for a long time. You can switch it on again.",
+            _ => "Face grouping was switched off and its face data deleted because the event's pass or Premium ended.",
+        };
+        return (await AlbumHostsAsync(bucket, ct))
+            .Select(id => new PushNote(id, $"Face grouping is off in {album}", body, $"/buckets/{bucket.Id}",
+                PushKinds.Album, bucket.Id.ToString(), $"faces-end-{bucket.Id:N}"))
+            .ToList();
+    }
+
+    /// <summary>What a notification calls an album: its event's title, else its own name.</summary>
+    public async Task<string> AlbumTitleAsync(MediaBucket bucket, CancellationToken ct)
+    {
+        if (bucket.CampaignId != Guid.Empty && await campaigns.GetByIdAsync(bucket.CampaignId, ct) is { } campaign
+            && !string.IsNullOrWhiteSpace(campaign.Title))
+            return campaign.Title.Trim();
+        return string.IsNullOrWhiteSpace(bucket.Name) ? "your album" : bucket.Name.Trim();
     }
 
     // ----- Who --------------------------------------------------------------------------------------
 
     /// <summary>Accounts that have proved this email or phone number.</summary>
-    private async Task<IReadOnlyList<Guid>> AccountsAsync(string? email, string? phone, CancellationToken ct)
+    public async Task<IReadOnlyList<Guid>> AccountsAsync(string? email, string? phone, CancellationToken ct)
     {
         var mail = string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
         var tel = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
@@ -186,7 +232,7 @@ public sealed class PushNotificationService(
     }
 
     /// <summary>Whoever started the event and whoever is hosting it.</summary>
-    private async Task<IReadOnlyList<Guid>> OrganisersAsync(Campaign campaign, CancellationToken ct)
+    public async Task<IReadOnlyList<Guid>> OrganisersAsync(Campaign campaign, CancellationToken ct)
     {
         var ids = new List<Guid>();
         if (campaign.CreatedByUserId is { } creator && await users.AnyAsync(u => u.Id == creator && u.IsActive, ct))
@@ -206,6 +252,20 @@ public sealed class PushNotificationService(
         if (bucket.CampaignId != Guid.Empty && await campaigns.GetByIdAsync(bucket.CampaignId, ct) is { } campaign
             && campaign.Status != CampaignStatus.Cancelled)
             ids.AddRange(await PeopleOfAsync(campaign, ct));
+        return ids.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Who runs an album: its owner, and (when it belongs to an event) the event's organisers. Only they see an
+    /// album's People tab and switch face grouping, so only they hear about it.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> AlbumHostsAsync(MediaBucket bucket, CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        if (await users.AnyAsync(u => u.Id == bucket.OwnerUserId && u.IsActive, ct)) ids.Add(bucket.OwnerUserId);
+        if (bucket.CampaignId != Guid.Empty && await campaigns.GetByIdAsync(bucket.CampaignId, ct) is { } campaign
+            && campaign.Status != CampaignStatus.Cancelled)
+            ids.AddRange(await OrganisersAsync(campaign, ct));
         return ids.Distinct().ToList();
     }
 
