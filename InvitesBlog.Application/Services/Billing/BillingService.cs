@@ -47,10 +47,11 @@ public sealed record PaymentStatusDto(Guid Id, string Item, string Description, 
 /// <param name="Offer">What its passes cost: the same for every event and buyer.</param>
 /// <param name="IsDraft">Not finished yet: a pass bought now is what it goes out with.</param>
 /// <param name="Role">Why the account sees it: "organiser" (it started it), "manager" (someone it is for, given
-/// full access), "celebrant" (someone it is for, read-only) or "venue" (it owns or works at the venue the event is
-/// at). Everyone but the organiser may buy a pass, another year of one and keeping the photos, not emails
+/// full access) or "celebrant" (someone it is for, read-only). ("venue" is no longer sent: there are no venue
+/// owners or staff any more.) Everyone but the organiser may buy a pass, another year of one and keeping the photos, not emails
 /// (<see cref="BillingService.MayBuy"/>).</param>
-/// <param name="VenueEnded">It is at a venue whose plan no longer covers it: a Platinum pass is what keeps its photos.</param>
+/// <param name="AtVenue">Its organiser's Studio plan (tier Venue) covers it, or did.</param>
+/// <param name="VenueEnded">Its organiser's Studio plan covered it and has ended: a Platinum pass is what keeps its photos.</param>
 public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
     DateTimeOffset? PassUntil, DateTimeOffset? KeepPhotosUntil, DateTimeOffset? CoveredUntil, string Phase,
@@ -64,7 +65,6 @@ public static class BillingRoles
     public const string Organiser = "organiser";
     public const string Manager = "manager";
     public const string Celebrant = "celebrant";
-    public const string Venue = "venue";
 }
 
 public sealed record BillingPaymentDto(
@@ -162,9 +162,7 @@ public sealed class BillingService(
     Payments.IPaymentService? paymentService = null,
     IRepository<GooglePlayPurchase>? playPurchases = null,
     IRepository<AppStorePurchase>? appStorePurchases = null,
-    IRepository<CampaignCelebrant>? celebrants = null,
-    IRepository<Venue>? venues = null,
-    IRepository<VenueStaff>? venueStaff = null) : IBillingService
+    IRepository<CampaignCelebrant>? celebrants = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -216,12 +214,12 @@ public sealed class BillingService(
 
     /// <summary>
     /// Events someone else started that this account is in, with why: one of the people it is for (matched on the
-    /// account's proved email or phone, as <see cref="ICampaignOwnershipService"/> does), or the owner or staff of
-    /// the venue it is at. Cancelled events are left out, as in the account's own list. Three queries.
+    /// account's proved email or phone, as <see cref="ICampaignOwnershipService"/> does). Cancelled events are
+    /// left out, as in the account's own list. Two queries.
     /// </summary>
     private async Task<IReadOnlyList<(Campaign Campaign, string Role)>> ForYouAsync(AppUser user, CancellationToken ct)
     {
-        if (celebrants is null || venues is null || venueStaff is null) return [];
+        if (celebrants is null) return [];
         var email = user.Email?.Trim().ToLowerInvariant();
         var phone = user.PhoneE164?.Trim();
         // Access to an event needs a proved contact (CampaignOwnershipService): none, no events.
@@ -235,23 +233,17 @@ public sealed class BillingService(
             .ToDictionary(g => g.Key, g => g.Any(c => c.CanManage));
         var celebratingIds = celebrating.Keys.ToList();
 
-        var venueIds = await venues.Query().Where(v => v.OwnerUserId == user.Id).Select(v => v.Id)
-            .Union(venueStaff.Query().Where(s => email != null && s.Email == email).Select(s => s.VenueId))
-            .ToListAsync(ct);
-
-        if (celebratingIds.Count == 0 && venueIds.Count == 0) return [];
+        if (celebratingIds.Count == 0) return [];
         var me = user.Id;
         var list = await campaigns.Query()
-            .Where(c => c.CreatedByUserId != me && c.Status != CampaignStatus.Cancelled
-                        && (celebratingIds.Contains(c.Id) || (c.VenueId != null && venueIds.Contains(c.VenueId.Value))))
+            .Where(c => c.CreatedByUserId != me && c.Status != CampaignStatus.Cancelled && celebratingIds.Contains(c.Id))
             .OrderByDescending(c => c.EventStartAt)
             .Take(MaxListed)
             .ToListAsync(ct);
 
-        // The same order of precedence as the event's access: a managing celebrant, then the venue, then read-only.
+        // The same order of precedence as the event's access: a managing celebrant, then read-only.
         return list.Select(c => (c,
                 celebrating.TryGetValue(c.Id, out var manages) && manages ? BillingRoles.Manager
-                : c.VenueId is { } v && venueIds.Contains(v) ? BillingRoles.Venue
                 : BillingRoles.Celebrant))
             .ToList();
     }
@@ -282,15 +274,15 @@ public sealed class BillingService(
         return new BillingEventDto(
             c.Id, c.Title, c.EventStartAt, SaveTheDates.Name(c.Kind), plan.Kind.ToString(),
             pass == EventPassKind.None ? null : c.EventPassUntil, c.KeepPhotosUntil, plan.CoveredUntil,
-            plan.Phase.ToString(), sending, c.VenueId is not null,
+            plan.Phase.ToString(), sending, plan.VenueAccountId is not null || plan.VenueEnded,
             c.EventPass.ToString(), pass != EventPassKind.None, offer,
             c.Status == CampaignStatus.Draft,
             plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimAt : null,
             plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimBytes : null,
             c.TimeZone,
             role,
-            // At a venue, and the venue's plan no longer covers it (ended, or its owner moved on).
-            c.VenueId is not null && plan.VenueId is null);
+            // The organiser's Studio plan covered it and has ended.
+            plan.VenueEnded);
     }
 
     public async Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default)
@@ -466,7 +458,7 @@ public sealed class BillingService(
     {
         var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
         if (kind == PaymentKind.PremiumMonthly && active && user.SubscriptionTier == SubscriptionTier.Venue)
-            throw new BusinessRuleException("This account is on the Venue plan. Talk to us about changing it.", "billing_venue_account");
+            throw new BusinessRuleException("This account is on Studio. Talk to us about changing it.", "billing_venue_account");
         if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Premium)
             throw new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account");
     }
@@ -680,8 +672,9 @@ public sealed class BillingService(
             PaymentKind.KeepPhotos => $"Keep your photos, a year{on}",
             PaymentKind.Sending => $"{quantity * PricingCalculator.BlockSize} emailed invitations{on}",
             PaymentKind.PremiumMonthly => "Premium pass, a month",
-            PaymentKind.StudioYearly => "Studio, a year",
-            PaymentKind.VenueMonthly => "Venue, a month",
+            // StudioYearly was Premium's yearly payment when Premium was called Studio: not today's Studio.
+            PaymentKind.StudioYearly => "Premium pass, a year",
+            PaymentKind.VenueMonthly => "Studio, a month",
             PaymentKind.StudioGoldCredits => $"{quantity} Gold pass{(quantity == 1 ? "" : "es")} for clients",
             PaymentKind.StudioPlatinumCredits => $"{quantity} Platinum pass{(quantity == 1 ? "" : "es")} for clients",
             _ => kind.ToString(),

@@ -37,10 +37,10 @@ public sealed record AccountDto(
     IReadOnlyList<string> LinkedProviders,
     /// <summary>"light" or "dark", or null to take the default. Follows the account, not the browser.</summary>
     string? ThemePreference = null,
-    /// <summary>The account's plan in force right now: None, Premium or Venue.</summary>
+    /// <summary>The account's plan in force right now: None, Premium or Venue (shown as "Studio").</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
-    /// <summary>Owns a venue or is on a venue's staff, so the venue's page is theirs to open.</summary>
+    /// <summary>Always false: there is no venue page any more. Kept so app builds that read it keep working.</summary>
     bool AtVenue = false,
     /// <summary>The profile picture, or null to show initials.</summary>
     string? AvatarUrl = null,
@@ -147,7 +147,7 @@ public sealed record MyCampaignDto(
     string Relation = "host",
     /// <summary>For a celebrant: whether the organiser gave them full access.</summary>
     bool CanManage = true,
-    /// <summary>What the event is on, for its badge: Free, GoldPass, PlatinumPass or Venue.</summary>
+    /// <summary>What the event is on, for its badge: Free, GoldPass, PlatinumPass or Venue (its organiser's Studio plan; shown as "Studio").</summary>
     string Plan = "Free",
     /// <summary>"invitation" or "saveTheDate".</summary>
     string Kind = "invitation",
@@ -155,9 +155,9 @@ public sealed record MyCampaignDto(
     IReadOnlyList<string>? Colours = null,
     /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
     string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy,
-    /// <summary>The venue the event is held at, for the small badge on its tile; null when there is none.</summary>
+    /// <summary>The organiser's display name while their Studio plan (tier Venue) covers the event, for the small badge on its tile; null otherwise.</summary>
     string? VenueName = null,
-    /// <summary>That venue's logo; null when it has none (show its first letter) or there is no venue.</summary>
+    /// <summary>The organiser's profile picture for that badge; null when they have none (show the first letter) or there is no badge.</summary>
     string? VenueLogoUrl = null);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>

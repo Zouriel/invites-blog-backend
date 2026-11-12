@@ -30,7 +30,7 @@ public interface ISaveTheDateService
 /// <item>the guest list, with each guest's "already emailed" mark, so emailing them the invitation
 /// doesn't count against the allowance a second time (SendingAllowanceService counts per invite);</item>
 /// <item>the pass and any extra emails added — one pool per wedding, not one per campaign;</item>
-/// <item>the people it is for, the host, the venue link and the wording.</item>
+/// <item>the people it is for, the host and the wording.</item>
 /// </list>
 /// </summary>
 public sealed class SaveTheDateService(
@@ -69,7 +69,6 @@ public sealed class SaveTheDateService(
         invitation.EventType = std.EventType;
         invitation.CustomContentJson = std.CustomContentJson;
         invitation.InviterId = std.InviterId;
-        invitation.VenueId = std.VenueId;
         invitation.IsSensitive = std.IsSensitive;
         invitation.CreatedByUserId = std.CreatedByUserId ?? invitation.CreatedByUserId;
 

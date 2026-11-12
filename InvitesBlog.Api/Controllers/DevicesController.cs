@@ -9,7 +9,7 @@ namespace InvitesBlog.Api.Controllers;
 
 /// <summary>
 /// The signed-in account's devices for push notifications. Limited per address by "openlink"
-/// (30 a minute): plenty for a household or a venue's Wi-Fi, and it stops a client filling the table.
+/// (30 a minute): plenty for a household or a hall's Wi-Fi, and it stops a client filling the table.
 /// </summary>
 [Route("api/me/devices")]
 public sealed class DevicesController(IDeviceTokenService devices) : BaseApiController

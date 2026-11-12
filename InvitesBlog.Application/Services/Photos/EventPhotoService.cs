@@ -157,7 +157,7 @@ public sealed class EventPhotoService(
     IImageOptimizer imageOptimizer,
     IMediaBucketService bucketService,
     IUnitOfWork uow,
-    IRepository<Venue> venues,
+    IRepository<AppUser> accounts,
     Plans.IPlanService plans,
     ILogger<EventPhotoService>? logger = null,
     IVideoTools? videoTools = null,
@@ -246,9 +246,10 @@ public sealed class EventPhotoService(
         // still open — a Platinum pass's five-day album would otherwise be told it had closed after one.
         var windowDays = await bucketService.WindowForCampaignAsync(campaignId, ct);
 
-        var venue = campaign.VenueId is { } venueId ? await venues.GetByIdAsync(venueId, ct) : null;
         // The plan's side of the same answer the writer gives: its cover and its space.
         var plan = await plans.ForCampaignAsync(campaignId, ct);
+        // While the organiser's Studio plan (tier Venue) covers the event, their name and picture head its albums.
+        var venue = plan.VenueAccountId is { } organiserId ? await accounts.GetByIdAsync(organiserId, ct) : null;
         var eventUsed = await bucketService.EventUsedBytesAsync(campaignId, ct);
 
         var closed =
@@ -283,8 +284,8 @@ public sealed class EventPhotoService(
                 mine.Contains(p.Id),
                 faces is null ? null : peopleIn.GetValueOrDefault(p.Id) ?? [])).ToList(),
             closed,
-            venue?.Name,
-            venue?.LogoUrl,
+            venue?.DisplayName,
+            venue?.AvatarUrl,
             campaign.Kind == CampaignKind.SaveTheDate,
             faces);
     }

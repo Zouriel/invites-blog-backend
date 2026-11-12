@@ -27,9 +27,9 @@ namespace InvitesBlog.Infrastructure.Notifications;
 /// at least one more have gone out. Extending, "Keep your photos" or Premium again moves the cover
 /// end, which calls the cut off.</para>
 ///
-/// <para>An event held at a venue whose plan has ended goes the same way (owner, 2026-11-12). Its
-/// warnings also go to the venue (owner and staff) and to everyone the event is for, and the email
-/// offers a Platinum pass for the event, which any of them may buy. The push never sells.</para>
+/// <para>An event whose organiser's Studio plan (tier Venue) has ended goes the same way (owner,
+/// 2026-11-12). Its warnings go to the organiser and to everyone the event is for, and the email offers a
+/// Platinum pass for the event, which any of them may buy. The push never sells.</para>
 ///
 /// <para>A cancelled event's photos go at once; so do the albums of an event that was deleted.</para>
 ///
@@ -241,8 +241,9 @@ public sealed class MediaRetentionService(
             return;
         }
 
-        var venue = campaign.VenueId is { } venueId
-            ? await db.Venues.Where(v => v.Id == venueId).Select(v => new VenueContact(v.Id, v.Name, v.OwnerUserId)).FirstOrDefaultAsync(ct)
+        // The organiser's Studio plan is what ended: they, and everyone the event is for, are told, by the organiser's name.
+        var venue = plan.VenueEnded && plan.OwnerUserId is { } organiserId
+            ? await db.Users.Where(u => u.Id == organiserId).Select(u => new VenueContact(u.DisplayName)).FirstOrDefaultAsync(ct)
             : null;
         var recipients = await RecipientsAsync(db, campaign, plan, venue, ct);
         if (recipients.Count == 0 && plan.OwnerUserId is null)
@@ -282,8 +283,8 @@ public sealed class MediaRetentionService(
                         campaign.Id.ToString(), $"trim-{campaign.Id:N}"), ct);
     }
 
-    /// <summary>The venue an event is held at, as its warnings need it.</summary>
-    private sealed record VenueContact(Guid Id, string Name, Guid OwnerUserId);
+    /// <summary>The organiser whose Studio plan covered the event and has ended, as its warnings need them.</summary>
+    private sealed record VenueContact(string Name);
 
     /// <summary>The event's live photos and videos, and what of them doesn't fit in Free's space.</summary>
     private static async Task<MediaTrim.Plan> PlanCutAsync(AppDbContext db, Campaign campaign, CancellationToken ct)
@@ -405,8 +406,8 @@ public sealed class MediaRetentionService(
     }
 
     /// <summary>
-    /// The organiser, and anyone the event is for who has full access. At a venue: also the venue's owner
-    /// and staff, and everyone the event is for (any of them may buy the pass that keeps the photos).
+    /// The organiser, and anyone the event is for who has full access. When the organiser's Studio plan is
+    /// what ended: everyone the event is for (any of them may buy the pass that keeps the photos).
     /// </summary>
     private static async Task<List<string>> RecipientsAsync(
         AppDbContext db, Campaign campaign, EventPlan plan, VenueContact? venue, CancellationToken ct)
@@ -425,19 +426,12 @@ public sealed class MediaRetentionService(
             .Select(c => c.Email!)
             .ToListAsync(ct));
 
-        if (venue is not null)
-        {
-            if (await db.Users.Where(u => u.Id == venue.OwnerUserId).Select(u => u.Email).FirstOrDefaultAsync(ct) is { } venueEmail)
-                list.Add(venueEmail);
-            list.AddRange(await db.VenueStaff.Where(s => s.VenueId == venue.Id).Select(s => s.Email).ToListAsync(ct));
-        }
-
         return list.Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e.Trim().ToLowerInvariant()).Distinct().ToList();
     }
 
     /// <summary>
-    /// Who gets the push: the organiser and, at a venue, the venue's owner and staff and everyone the event
+    /// Who gets the push: the organiser and, when their Studio plan is what ended, everyone the event
     /// is for, wherever they have an account (matched on its proved email or phone, as access is).
     /// </summary>
     private static async Task<List<Guid>> PushRecipientsAsync(
@@ -447,11 +441,9 @@ public sealed class MediaRetentionService(
         if (plan.OwnerUserId is { } owner) ids.Add(owner);
         if (venue is not null)
         {
-            ids.Add(venue.OwnerUserId);
             var people = await db.CampaignCelebrants.Where(c => c.CampaignId == campaign.Id)
                 .Select(c => new { c.Email, c.PhoneE164 }).ToListAsync(ct);
             var emails = people.Select(p => p.Email).OfType<string>()
-                .Concat(await db.VenueStaff.Where(s => s.VenueId == venue.Id).Select(s => s.Email).ToListAsync(ct))
                 .Select(e => e.Trim().ToLowerInvariant()).Distinct().ToList();
             var phones = people.Select(p => p.PhoneE164).OfType<string>().Distinct().ToList();
             if (emails.Count > 0 || phones.Count > 0)
@@ -484,8 +476,8 @@ public sealed class MediaRetentionService(
     public static string PushBody(DateTimeOffset trimAt, long bytes) =>
         $"On {trimAt.ToString("d MMMM", System.Globalization.CultureInfo.GetCultureInfo("en-GB"))} about {Size(bytes)} above Free's {FreeSize} will be removed. Download what you want to keep before then.";
 
-    /// <param name="venueName">The venue the event is held at, if any. With no pass, its ended plan is what
-    /// covered the event, and the way to keep everything is a Platinum pass at <paramref name="platinum"/>.</param>
+    /// <param name="venueName">The organiser, when their ended Studio plan covered the event. With no pass, that
+    /// plan is what covered the event, and the way to keep everything is a Platinum pass at <paramref name="platinum"/>.</param>
     private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension,
         string? venueName = null, decimal? platinum = null)
     {
@@ -497,7 +489,7 @@ public sealed class MediaRetentionService(
             .ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB"));
         var size = Size(bytes);
         var pass = campaign.EventPass == EventPassKind.Platinum ? "Platinum pass" : campaign.EventPass == EventPassKind.Gold ? "Gold pass" : null;
-        // An event at a venue, with no pass of its own: the venue's plan is what ended.
+        // An event with no pass of its own whose organiser's Studio plan is what ended.
         var venue = pass is null && venueName is { Length: > 0 } ? WebUtility.HtmlEncode(venueName) : null;
         var keep = pass is not null && extension is { } price
             ? $"extend the {pass} for a year ({PlanCatalog.Currency} {price:0})"
@@ -505,7 +497,7 @@ public sealed class MediaRetentionService(
                 ? $"get a Platinum pass for the event{(platinum is { } pp ? $" ({PlanCatalog.Currency} {pp:0})" : "")}, which keeps it for a year"
                 : "subscribe to Premium again";
         var ended = pass is not null ? $"The {pass} for <strong>{title}</strong>"
-            : venue is not null ? $"{venue}'s plan, which covered <strong>{title}</strong>,"
+            : venue is not null ? $"{venue}'s Studio plan, which covered <strong>{title}</strong>,"
             : "Your Premium";
 
         var (subject, lead) = stage switch

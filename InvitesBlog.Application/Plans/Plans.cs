@@ -6,9 +6,10 @@ using InvitesBlog.Domain.Enums;
 namespace InvitesBlog.Application.Plans;
 
 /// <summary>
-/// What an event is on right now. A Platinum pass outranks a Gold pass, which outranks a venue's plan
-/// (the venue it is held at), which outranks Premium (its organiser's subscription), which outranks Free.
-/// With a pass and a venue together, the event shows the pass but gets the best of both, limit by limit.
+/// What an event is on right now. A Platinum pass outranks a Gold pass, which outranks the organiser's
+/// Studio plan (<see cref="Venue"/>, the enum name kept for stored values and shipped apps), which outranks
+/// Premium (also the organiser's subscription), which outranks Free. With a pass and Studio together, the
+/// event shows the pass but gets the best of both, limit by limit.
 /// </summary>
 public enum PlanKind
 {
@@ -44,10 +45,11 @@ public enum MediaPhase
 ///
 /// <para>Hosts pay per event, because most have one big day rather than a monthly need: Free for
 /// everything small, a Gold pass, a Platinum pass. Premium is a monthly subscription that lifts every
-/// event its subscriber organises to 2 GB, without the mark, kept while it lasts. Venue (resorts and
-/// halls) is a monthly subscription that does the same for every event held at the venue, with 10 GB
-/// each (owner, 2026-11-12); a pass on top adds what it has more of. Venues pay normal pass prices: the
-/// venue discount is gone. The template designer is open to every account. Prices are in rufiyaa,
+/// event its subscriber organises to 2 GB, without the mark, kept while it lasts. Studio (shown as
+/// "Studio", kind and tier "Venue" internally) is an account plan for businesses that run events: a monthly
+/// subscription that does the same for every event its subscriber organises, with 10 GB each, and puts their
+/// picture and name on those events (owner, 2026-11-12); a pass on top adds what it has more of. Studio
+/// accounts pay normal pass prices. The template designer is open to every account. Prices are in rufiyaa,
 /// shown with dollars alongside.</para>
 /// </summary>
 public static class PlanCatalog
@@ -59,7 +61,7 @@ public static class PlanCatalog
     public const long PremiumEventBytes = 2 * Gb;
     public const long GoldEventBytes = 5 * Gb;
     public const long PlatinumEventBytes = 10 * Gb;
-    /// <summary>Each event held at a venue whose plan is in force.</summary>
+    /// <summary>Each event organised by an account whose Studio plan (tier Venue) is in force.</summary>
     public const long VenueEventBytes = 10 * Gb;
 
     public const int FreeBuckets = 1;
@@ -115,7 +117,7 @@ public static class PlanCatalog
     public const decimal PlatinumExtension = 349m;
     public const decimal PremiumMonthly = 200m;
 
-    /// <summary>A venue account, a month (owner, 2026-11-12: about $50).</summary>
+    /// <summary>A Studio account (tier Venue), a month (owner, 2026-11-12: about $50).</summary>
     public const decimal VenueMonthly = 775m;
 
     /// <summary>
@@ -153,8 +155,9 @@ public static class PlanCatalog
                 // Every event its subscriber organises, kept while it lasts (no retention days).
                 new PlanDto("Premium", "Premium pass", p.PremiumMonthly, "per month",
                     PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
-                // Every event held at the venue, kept while it lasts (no retention days), like Premium with 10 GB.
-                new PlanDto("Venue", "Venue", p.VenueMonthly, "per month",
+                // Every event its subscriber organises, kept while it lasts (no retention days), like Premium with 10 GB.
+                // Shown as "Studio" (owner, 2026-11-12); the kind stays "Venue" for shipped apps and stored data.
+                new PlanDto("Venue", "Studio", p.VenueMonthly, "per month",
                     VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
@@ -168,7 +171,7 @@ public static class PlanCatalog
 /// <summary>One plan as the pricing page shows it.</summary>
 /// <param name="ExtensionPrice">Another year of this pass, without invitations; null for the rest.</param>
 /// <param name="RetentionDays">How long photos are kept from the event day; null when they are kept for good (Free) or while a subscription covers them.</param>
-/// <param name="EventBytes">Space for each event; for Premium, each event its subscriber organises; for Venue, each event held at the venue.</param>
+/// <param name="EventBytes">Space for each event; for Premium and Studio (Venue), each event its subscriber organises.</param>
 /// <param name="IncludedInvites">Invitations sent for the event without charge.</param>
 /// <param name="PrivateAlbums">Whether an album can be closed to some guests.</param>
 /// <param name="Branded">Whether the invitation and album carry a small "Made with invites.blog".</param>
@@ -191,11 +194,12 @@ public sealed record PlanCatalogDto(
     SendingPriceDto Sending, LapseDto Lapse, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent);
 
 /// <summary>What one event may do right now, and how long it is covered for.</summary>
-/// <param name="AccountBytes">A venue's space across all of its events; null for everything else.</param>
+/// <param name="AccountBytes">No longer set by any plan (it was a venue's space across its events); always null.</param>
 /// <param name="IncludedInvites">Invitations invites.blog sends for it without charging.</param>
-/// <param name="CoveredUntil">When its cover ends; null when it never does: a free event (one that never had a pass), or while its organiser's Premium (with no end) or its venue's plan covers it.</param>
+/// <param name="CoveredUntil">When its cover ends; null when it never does: a free event (one that never had a pass), or while its organiser's Premium (with no end) or Studio plan covers it.</param>
 /// <param name="OwnerUserId">Whoever organised the event: the one told when its photos are ending.</param>
-/// <param name="VenueId">The venue whose plan covers it right now, when one does. Its space is still the event's own (AccountBytes stays null).</param>
+/// <param name="VenueAccountId">The organiser, when their Studio plan (tier Venue) covers the event right now: whose picture and name its albums carry.</param>
+/// <param name="VenueEnded">The organiser's Studio plan covered it and has ended: a pass is what keeps its photos now.</param>
 public sealed record EventPlan(
     PlanKind Kind,
     long EventBytes,
@@ -208,13 +212,14 @@ public sealed record EventPlan(
     DateTimeOffset? CoveredUntil,
     MediaPhase Phase,
     Guid? OwnerUserId,
-    Guid? VenueId = null);
+    Guid? VenueAccountId = null,
+    bool VenueEnded = false);
 
 /// <summary>The rules, with no database in them, so every branch can be tested directly.</summary>
 public static class PlanRules
 {
     /// <summary>
-    /// "Group photos by face" comes with every paid plan: a Gold or Platinum pass, Premium, or a venue (owner,
+    /// "Group photos by face" comes with every paid plan: a Gold or Platinum pass, Premium, or Studio (owner,
     /// 2026-11-11). A Free event doesn't get it, and an event whose pass has ended loses it (FaceGroupingService).
     /// </summary>
     public static bool IncludesFaceGrouping(EventPlan plan) => plan.Kind != PlanKind.Free;
@@ -227,8 +232,8 @@ public static class PlanRules
         (eventDate > now ? eventDate : now).AddMonths(PlanCatalog.PassMonths);
 
     /// <param name="venue">
-    /// The venue the event is held at, if any: whether its owner's Venue plan is in force, and when it
-    /// ended (null while active, or when it never covered anything). While it lasts the event gets
+    /// The organiser's Studio plan (tier Venue), if they have or had one: whether it is in force, and when
+    /// it ended (null while active). While it lasts the event gets
     /// a plan like Premium with <see cref="PlanCatalog.VenueEventBytes"/> and no end date; with a pass
     /// as well, the best of both, limit by limit. Once it ends the event goes back to Free like an ended
     /// Premium: uploads close, then the warnings and the cut (owner, 2026-11-12).
@@ -246,7 +251,7 @@ public static class PlanRules
         EventPassKind pass,
         DateTimeOffset? passUntil,
         DateTimeOffset? keepPhotosUntil,
-        (Guid Id, bool Active, DateTimeOffset? EndedAt)? venue,
+        (bool Active, DateTimeOffset? EndedAt)? venue,
         DateTimeOffset? legacyCoverUntil,
         DateTimeOffset? mediaDeletedAt,
         Guid? ownerUserId,
@@ -317,7 +322,8 @@ public static class PlanRules
             coveredUntil,
             PhaseOf(now, coveredUntil, mediaDeletedAt),
             ownerUserId,
-            venueActive ? venue!.Value.Id : null);
+            venueActive ? ownerUserId : null,
+            venue is { Active: false, EndedAt: not null });
     }
 
     public static MediaPhase PhaseOf(DateTimeOffset now, DateTimeOffset? coveredUntil, DateTimeOffset? deletedAt)

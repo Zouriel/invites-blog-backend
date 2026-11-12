@@ -17,7 +17,7 @@ public sealed record MediaBucketDto(
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
-    /// <summary>The event's plan: Free, GoldPass, PlatinumPass, Premium or Venue.</summary>
+    /// <summary>The event's plan: Free, GoldPass, PlatinumPass, Premium or Venue (the organiser's Studio plan).</summary>
     string Tier,
     /// <summary>The event's space in GB, to one decimal. Shared by all of the event's buckets.</summary>
     double Gb,
@@ -49,11 +49,11 @@ public sealed record MediaBucketDto(
     string Phase = "Active",
     /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
     long EventUsedBytes = 0,
-    /// <summary>Whether the album can be closed to some guests (a Platinum pass; a venue's plan alone doesn't).</summary>
+    /// <summary>Whether the album can be closed to some guests (a Platinum pass; Studio alone doesn't).</summary>
     bool PrivateAlbums = false,
     /// <summary>Whether the event is on Free, so its pages carry a small "Made with invites.blog".</summary>
     bool Branded = true,
-    /// <summary>The venue the event is held at, whose name and logo its albums and QR cards carry.</summary>
+    /// <summary>The organiser's display name while their Studio plan (tier Venue) covers the event: it and their picture (VenueLogoUrl) go on its albums and QR cards.</summary>
     string? VenueName = null,
     string? VenueLogoUrl = null,
     /// <summary>The colours the QR table card is printed in, or null for the original cream and gold.</summary>
@@ -71,13 +71,13 @@ public sealed record MediaBucketDto(
     bool FaceGrouping = false,
     /// <summary>Whether this server can group faces at all (the models are installed).</summary>
     bool FaceGroupingAvailable = false,
-    /// <summary>Whether the event's plan includes face grouping (any pass, Premium or a venue; not Free).</summary>
+    /// <summary>Whether the event's plan includes face grouping (any pass, Premium or Studio; not Free).</summary>
     bool FaceGroupingIncluded = false);
 
 /// <summary>
-/// A venue's events, for its owner and staff: whether its plan is in force (<c>Tier</c> "Venue") and how
-/// much its events use together. There is no venue-wide limit (<c>AccountBytes</c> is always null): each
-/// event has its own space. For anyone who isn't a venue's owner or staff, <c>Tier</c> is "None".
+/// The account's Studio plan: whether it is in force (<c>Tier</c> "Venue") and how much the events it
+/// organised use together, with its display name. There is no account-wide limit (<c>AccountBytes</c> is
+/// always null): each event has its own space. For any other account, <c>Tier</c> is "None".
 /// </summary>
 public sealed record StorageSummaryDto(string Tier, long? AccountBytes, long UsedBytes, string? VenueName);
 

@@ -137,7 +137,10 @@ public sealed class Campaign
     /// <summary>"Keep your photos": the album stays online until then, bought a year at a time.</summary>
     public DateTimeOffset? KeepPhotosUntil { get; set; }
 
-    /// <summary>The venue this event is held at, when a venue runs its photo albums. See <see cref="Venue"/>.</summary>
+    /// <summary>
+    /// Left from the old venue page (venue codes): no longer read or written. An event's Studio plan is its
+    /// organiser's. The column stays so nothing is dropped.
+    /// </summary>
     public Guid? VenueId { get; set; }
 
     /// <summary>

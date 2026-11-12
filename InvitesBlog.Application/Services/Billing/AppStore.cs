@@ -7,13 +7,26 @@ namespace InvitesBlog.Application.Services.Billing;
 /// Everything sold through the App Store. The same ids and the same items as Google Play (Apple allows
 /// letters, digits, underscores and periods, and ids are permanent once created in App Store Connect).
 /// The app has the same table. Event-bound items are consumables, bought again for each event;
-/// premium_monthly is an auto-renewable subscription. See the app's docs/APPLE-PURCHASES.md.
-/// Venue is not sold on the iPhone, so venue_monthly is left out here.
+/// premium_monthly and venue_monthly (Studio, owner 2026-11-12) are auto-renewable subscriptions in ONE
+/// subscription group, Studio the higher level, so a person holds only one: moving between them keeps the
+/// same original transaction, and the server follows whichever product Apple says is current. See the app's
+/// docs/APPLE-PURCHASES.md.
 /// </summary>
 public static class AppStoreCatalog
 {
-    public static IReadOnlyList<PlayProduct> All { get; } =
-        GooglePlayCatalog.All.Where(p => p.Kind != Domain.Enums.PaymentKind.VenueMonthly).ToList();
+    public static IReadOnlyList<PlayProduct> All { get; } = GooglePlayCatalog.All;
+
+    /// <summary>The subscription group (Premium, Studio): one at a time.</summary>
+    public static IReadOnlyList<string> Subscriptions { get; } =
+        All.Where(p => p.IsSubscription).Select(p => p.Id).ToList();
+
+    /// <summary>The group's product for an account tier: what an App Store subscription on that tier is.</summary>
+    public static string? SubscriptionFor(Domain.Enums.SubscriptionTier tier) => tier switch
+    {
+        Domain.Enums.SubscriptionTier.Premium => "premium_monthly",
+        Domain.Enums.SubscriptionTier.Venue => "venue_monthly",
+        _ => null,
+    };
 
     public static PlayProduct? Find(string? id) => All.FirstOrDefault(p => p.Id == id);
 }

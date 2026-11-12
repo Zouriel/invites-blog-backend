@@ -42,12 +42,12 @@ public sealed class AppUser
     /// </summary>
     public DateTimeOffset? AvatarChosenAt { get; set; }
 
-    /// <summary>The account's plan (Premium or Venue): bought, or given by an admin.</summary>
+    /// <summary>The account's plan (Premium, or Venue: shown as Studio): bought, or given by an admin.</summary>
     public SubscriptionTier SubscriptionTier { get; set; }
 
     /// <summary>
-    /// When the plan stops, or null for no end. Kept after it ends: for a venue it is also when its
-    /// events stopped being covered, which their photo retention counts from.
+    /// When the plan stops, or null for no end. Kept after it ends: for Studio (Venue) it is also when the
+    /// events it organised stopped being covered, which their photo retention counts from.
     /// </summary>
     public DateTimeOffset? SubscriptionEndsAt { get; set; }
 

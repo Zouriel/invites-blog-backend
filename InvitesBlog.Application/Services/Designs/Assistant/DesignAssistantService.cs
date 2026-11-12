@@ -261,7 +261,7 @@ public sealed partial class DesignAssistantService(
         return new AssistantStatusDto(reason is null, reason, usedUsd, allowance, resets);
     }
 
-    /// <summary>Premium or Venue in force, or an admin (who supports both).</summary>
+    /// <summary>Premium or Studio (Venue) in force, or an admin (who supports both).</summary>
     private async Task<bool> EligibleAsync(Guid me, DateTimeOffset now, CancellationToken ct)
     {
         if (currentUser.HasPermission(Permissions.Templates.Manage)) return true;

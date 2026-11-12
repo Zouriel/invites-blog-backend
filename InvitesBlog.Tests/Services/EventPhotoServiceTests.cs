@@ -72,8 +72,8 @@ public class EventPhotoServiceTests
 
     private EventPhotoService Sut() => new(
         _photos, _campaigns, _guests,
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
-        _currentUser, _storage, _optimizer, _buckets, _uow, TestData.Empty<Venue>(), TestData.FreePlans());
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
+        _currentUser, _storage, _optimizer, _buckets, _uow, _users, TestData.FreePlans());
 
     [Fact]
     public async Task A_direct_upload_keeps_its_id_its_reservation_and_is_not_refused_for_closing_time()

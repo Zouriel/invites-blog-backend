@@ -5,7 +5,7 @@ namespace InvitesBlog.Api.Rendering;
 
 /// <summary>
 /// The credit line a guest sees: "Made with invites.blog" on a Free event, the Premium designer who
-/// made the invitation, the venue whose albums they are. Kept small and out of the way — it is a
+/// made the invitation, the organiser on Studio whose albums they are. Kept small and out of the way — it is a
 /// signature, not an advert — and every value is encoded on the way in.
 /// </summary>
 public static class GuestCreditHtml
@@ -37,12 +37,12 @@ public static class GuestCreditHtml
     {
         if (credit is null || credit.IsEmpty) return "";
         var parts = new List<string>();
-        if (credit.VenueName is { } venue) parts.Add($"Photos at {E(venue)}");
+        if (credit.VenueName is { } venue) parts.Add($"Album by {E(venue)}");
         if (credit.MadeWith) parts.Add($"""<a href="{E(HomeUrl)}" target="_blank" rel="noopener">Made with invites.blog</a>""");
         return parts.Count == 0 ? "" : $"""<p class="credit">{string.Join(" · ", parts)}</p>""";
     }
 
-    /// <summary>The venue's name and logo at the head of the guests' album page.</summary>
+    /// <summary>The organiser's name and picture (while their Studio plan covers the event) at the head of the guests' album page.</summary>
     public static string AlbumHeader(GuestCredit? credit)
     {
         if (credit?.VenueName is not { } venue) return "";

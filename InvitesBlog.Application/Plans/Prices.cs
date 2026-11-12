@@ -61,7 +61,7 @@ public sealed record Prices(
         Positive(PlatinumPass, "The Platinum pass");
         Positive(KeepPhotosYearly, "Keep your photos");
         Positive(PremiumMonthly, "Premium a month");
-        Positive(VenueMonthly, "Venue a month");
+        Positive(VenueMonthly, "Studio a month");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
         Positive(GoldExtension, "Extending a Gold pass");

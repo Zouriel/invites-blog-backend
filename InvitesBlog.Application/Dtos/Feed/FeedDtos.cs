@@ -9,7 +9,7 @@ public sealed record FeedImageDto(string Url, bool IsVideo);
 /// <param name="ImagesAreCover">True when the header is the invitation's cover because there are no photos to show this viewer.</param>
 /// <param name="Role">host, manager, celebrant or guest: how this viewer is involved.</param>
 /// <param name="Link">Where "Open" goes for this viewer: the event's dashboard, or their invitation.</param>
-/// <param name="Venue">The place as the invitation words it (free text). Not the venue on the Venue plan: that is VenueName.</param>
+/// <param name="Venue">The place as the invitation words it (free text). Not the badge: that is VenueName.</param>
 public sealed record FeedPostDto(
     Guid CampaignId,
     string Title,
@@ -33,9 +33,9 @@ public sealed record FeedPostDto(
     Guid? HostUserId = null,
     /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
     string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy,
-    /// <summary>The venue (on the Venue plan) the event is held at, for the badge at the post's top corner; null when none.</summary>
+    /// <summary>The organiser's display name while their Studio plan (tier Venue) covers the event, for the badge at the post's top corner; null otherwise.</summary>
     string? VenueName = null,
-    /// <summary>That venue's logo; null when it has none (show its first letter) or there is no venue.</summary>
+    /// <summary>The organiser's profile picture for that badge; null when they have none (show the first letter) or there is no badge.</summary>
     string? VenueLogoUrl = null);
 
 public sealed record FeedPageDto(IReadOnlyList<FeedPostDto> Items, bool HasMore);

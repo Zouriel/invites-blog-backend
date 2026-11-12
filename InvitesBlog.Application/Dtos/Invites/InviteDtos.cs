@@ -50,9 +50,9 @@ public sealed record InboxCardResponse(
     IReadOnlyList<string>? Colours = null,
     /// <summary>The event's IANA time zone: EventDate (an instant) is the time on this clock.</summary>
     string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy,
-    /// <summary>The venue the event is held at, for the small badge on its tile; null when there is none.</summary>
+    /// <summary>The organiser's display name while their Studio plan (tier Venue) covers the event, for the small badge on its tile; null otherwise.</summary>
     string? VenueName = null,
-    /// <summary>That venue's logo; null when it has none (show its first letter) or there is no venue.</summary>
+    /// <summary>The organiser's profile picture for that badge; null when they have none (show the first letter) or there is no badge.</summary>
     string? VenueLogoUrl = null);
 
 /// <summary>Add to calendar, pre-filled: Google, Outlook.com and Microsoft 365.</summary>
@@ -69,7 +69,7 @@ public sealed record InviteRenderData(
 
 /// <summary>
 /// The small line a guest-facing page carries: "Made with invites.blog" on a Free event, the Premium
-/// designer who made the invitation, and the venue whose albums they are.
+/// designer who made the invitation, and the organiser on Studio whose albums they are.
 /// </summary>
 public sealed record GuestCredit(bool MadeWith, string? DesignedBy, string? VenueName, string? VenueLogoUrl)
 {

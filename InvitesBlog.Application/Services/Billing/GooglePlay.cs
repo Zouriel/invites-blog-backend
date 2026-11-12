@@ -9,9 +9,9 @@ public sealed record PlayProduct(string Id, PaymentKind Kind, bool IsSubscriptio
 
 /// <summary>
 /// Everything sold through Google Play. The ids are permanent once created in Play Console; the same
-/// table is in the app (<c>play_products.dart</c>). venue_monthly (owner, 2026-11-12) is sold on Google
-/// Play only, never on the App Store (<see cref="AppStoreCatalog"/>). Not here: anything Studio. See the
-/// app's docs/STORE-RULES.md.
+/// table is in the app (<c>play_products.dart</c>). The App Store sells the same list (<see cref="AppStoreCatalog"/>),
+/// venue_monthly (Studio) included since 2026-11-12. Not here: the retired passes held for clients (from when
+/// Premium was called Studio). See the app's docs/STORE-RULES.md.
 /// </summary>
 public static class GooglePlayCatalog
 {

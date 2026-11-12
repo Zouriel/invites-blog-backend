@@ -83,7 +83,7 @@ public sealed class MediaBucketsController(
     public async Task<IActionResult> VisibleBuckets(Guid campaignId, CancellationToken ct) =>
         Success(await buckets.VisibleForCampaignAsync(campaignId, ct));
 
-    /// <summary>The space a venue's events share, for its owner and staff.</summary>
+    /// <summary>The account's Studio plan and the space the events it organised use.</summary>
     [HttpGet("/api/me/storage")]
     [HasPermission(Permissions.Buckets.Read)]
     public async Task<IActionResult> Storage(CancellationToken ct) =>

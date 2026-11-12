@@ -66,9 +66,9 @@ public class MediaBucketServiceTests
 
     private MediaBucketService Sut() => new(
         _buckets, _qrs, _users, _photos, _campaigns, _guests, _members, _campaignService,
-        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants(), TestData.Empty<Venue>(), TestData.Empty<VenueStaff>()),
+        new CampaignOwnershipService(_currentUser, _users, _campaigns, _inviters, TestData.NoCelebrants()),
         _currentUser, _storage, _renderer, new PhoneNormalizer(), _config,
-        _uow, _plans, TestData.Empty<Venue>(), TestData.Empty<VenueStaff>(), _usage);
+        _uow, _plans, _usage);
 
     /// <summary>
     /// Stands in for the database's atomic update and lock. What these tests pin down is what the
@@ -1105,36 +1105,20 @@ public class MediaBucketServiceTests
         Assert.Equal(5, longer.UploadWindowDays);
     }
 
-    // ---------- a venue's space, and private albums ----------
+    // ---------- a Studio event's space, and private albums ----------
 
     [Fact]
-    public async Task A_venue_counts_its_space_across_all_of_its_events()
+    public async Task A_studio_event_has_its_own_space_and_its_uploads_queue_on_the_event()
     {
-        var venue = Guid.NewGuid();
+        // Studio (tier Venue) is the organiser's plan: each event has its own 10 GB, nothing account-wide.
         var bucket = Mine();
         Stored(bucket);
         _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(eventBytes: 100 * PlanCatalog.Gb, maxBuckets: 5, maxWindowDays: 5,
-                kind: PlanKind.Venue, accountBytes: 10 * PlanCatalog.Gb, venueId: venue));
-        _plans.VenueUsedBytesAsync(venue, Arg.Any<CancellationToken>()).Returns(10 * PlanCatalog.Gb - 100);
-
-        await Sut().EnsureRoomAsync(bucket.Id, 100);
-        var e = await Assert.ThrowsAsync<BusinessRuleException>(() => Sut().EnsureRoomAsync(bucket.Id, 101));
-        Assert.Equal("account_full", e.ErrorCode);
-    }
-
-    [Fact]
-    public async Task Uploads_at_a_venue_queue_on_the_venue()
-    {
-        var venue = Guid.NewGuid();
-        var bucket = Mine();
-        Stored(bucket);
-        _plans.ForCampaignAsync(bucket.CampaignId, Arg.Any<CancellationToken>())
-            .Returns(TestData.Plan(kind: PlanKind.Venue, accountBytes: 10 * PlanCatalog.Gb, venueId: venue));
+            .Returns(TestData.Plan(eventBytes: PlanCatalog.VenueEventBytes, kind: PlanKind.Venue, venueId: Guid.NewGuid()));
 
         await Sut().ReserveRoomAsync(bucket.Id, 10);
 
-        Assert.Equal([(venue, bucket.Id, 10L)], _usage.Reserved);
+        Assert.Equal([(bucket.CampaignId, bucket.Id, 10L)], _usage.Reserved);
     }
 
     [Fact]

@@ -34,9 +34,9 @@ public class GuestCreditHtmlTests
     }
 
     [Fact]
-    public void An_album_at_a_venue_carries_its_name()
+    public void An_album_whose_organiser_is_on_studio_carries_their_name()
     {
-        Assert.Contains("Photos at Sun Siyam", GuestCreditHtml.AlbumFooter(new GuestCredit(false, null, "Sun Siyam", null)));
+        Assert.Contains("Album by Sun Siyam", GuestCreditHtml.AlbumFooter(new GuestCredit(false, null, "Sun Siyam", null)));
         Assert.Contains("Sun Siyam", GuestCreditHtml.AlbumHeader(new GuestCredit(false, null, "Sun Siyam", "/assets/logo.png")));
         Assert.Equal("", GuestCreditHtml.AlbumHeader(new GuestCredit(true, null, null, null)));
     }

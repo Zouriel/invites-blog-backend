@@ -3,18 +3,18 @@ namespace InvitesBlog.Application.Dtos.Admin;
 /// <summary>An application user with the names of the roles assigned to them.</summary>
 public sealed record AdminUserDto(
     Guid Id, string? Email, string DisplayName, bool IsActive, IReadOnlyList<string> Roles,
-    /// <summary>None, Premium or Venue, as set, whether or not it has ended.</summary>
+    /// <summary>None, Premium or Venue (Studio), as set, whether or not it has ended.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
     bool SubscriptionActive = false);
 
-/// <summary>Sets an account's plan: None, Premium or Venue. <c>None</c> ends it now.</summary>
+/// <summary>Sets an account's plan: None, Premium or Venue (Studio). <c>None</c> ends it now.</summary>
 public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
 
 /// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>
 /// <param name="Pass">None, Gold or Platinum.</param>
-/// <param name="Plan">What covers it now: Free, GoldPass, PlatinumPass or Venue.</param>
-/// <param name="CoveredUntil">When its photos start to lapse; null while a venue covers it.</param>
+/// <param name="Plan">What covers it now: Free, GoldPass, PlatinumPass or Venue (the organiser's Studio plan).</param>
+/// <param name="CoveredUntil">When its photos start to lapse; null while the organiser's Studio plan covers it.</param>
 /// <param name="Phase">Active, UploadsClosed, OrganiserOnly or Deleted.</param>
 /// <param name="Sending">Emailed invitations: included, added, used.</param>
 public sealed record AdminUserEventDto(

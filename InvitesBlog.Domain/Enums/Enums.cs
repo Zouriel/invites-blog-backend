@@ -80,7 +80,7 @@ public enum PaymentKind
     Sending,
     PremiumMonthly,         // was StudioMonthly: Studio became Premium (2026-10)
     StudioYearly,           // retired: Premium is monthly only
-    StudioGoldCredits,     // retired: Studio clients get the discount automatically now
+    StudioGoldCredits,     // retired (old Studio, i.e. Premium); nothing to do with today's Studio (VenueMonthly)
     StudioPlatinumCredits,   // retired
     GoldExtension,
     PlatinumExtension,
@@ -169,7 +169,11 @@ public enum SubscriptionTier
     /// <summary>A monthly subscription: every event the account organises gets 2 GB, no "Made with
     /// invites.blog" mark, and keeps its photos for as long as the subscription lasts.</summary>
     Premium = 2,
-    /// <summary>A resort or hall: albums for every event at the property, under its own name, run by its staff.</summary>
+    /// <summary>
+    /// Shown as "Studio" (the name kept for stored values and shipped apps): an account plan for businesses that
+    /// run events. Every event the account organises gets 10 GB, no mark, face grouping, photos kept while it
+    /// lasts, and the account's picture and name on its albums, QR cards and posts.
+    /// </summary>
     Venue = 3,
 }
 

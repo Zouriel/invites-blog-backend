@@ -703,10 +703,14 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         Assert.DoesNotContain("Designer Name", body);
     }
 
-    // ----- Venues, and events someone else started ---------------------------------------------
+    // ----- Leftover venue rows, and events someone else started ----------------------------------
 
+    /// <summary>
+    /// The venue page is gone (owner, 2026-11-12): a leftover venue row and its staff go with their owner, and an
+    /// event another host linked to it stays theirs, untouched (the link clears; it never counted for anything).
+    /// </summary>
     [PostgresFact]
-    public async Task A_venue_owners_venue_and_staff_go_and_other_hosts_events_there_stay_with_a_fresh_lapse()
+    public async Task A_leftover_venue_row_and_its_staff_go_with_the_owner_and_other_hosts_events_stay_as_they_were()
     {
         var owner = await UserAsync(subscription: SubscriptionTier.Venue);
         var host = await UserAsync();
@@ -717,9 +721,8 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             db.VenueStaff.Add(new VenueStaff { Id = Guid.NewGuid(), VenueId = venue, Email = staffEmail, CreatedAt = DateTimeOffset.UtcNow });
             await Task.CompletedTask;
         });
-        // A year old: on its free cover alone, its photos would be removed at the next sweep.
         var theirs = await EventAsync(host, venueId: venue, eventAt: DateTimeOffset.UtcNow.AddYears(-1));
-        var own = await EventAsync(owner, venueId: venue);
+        var own = await EventAsync(owner);
 
         await DeleteThroughApiAsync(api.Client(owner.Token), owner.Email!);
 
@@ -730,18 +733,20 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             Assert.False(await db.Campaigns.AnyAsync(c => c.Id == own));
             var kept = await db.Campaigns.SingleAsync(c => c.Id == theirs);
             Assert.Null(kept.VenueId);
-            Assert.True(kept.KeepPhotosUntil > DateTimeOffset.UtcNow.AddMinutes(-5));
+            Assert.Null(kept.KeepPhotosUntil);
+            Assert.Equal(host.Id, kept.CreatedByUserId);
             return true;
         });
-        // Their event never had a pass, so it is a free event: kept for good (owner, 2026-11-03).
+        // Never had a pass: a free event, kept for good (owner, 2026-11-03).
         using var scope = api.Services.CreateScope();
         var plan = await scope.ServiceProvider.GetRequiredService<InvitesBlog.Application.Plans.IPlanService>().ForCampaignAsync(theirs);
         Assert.Equal(InvitesBlog.Application.Plans.MediaPhase.Active, plan.Phase);
         Assert.Null(plan.CoveredUntil);
     }
 
+    /// <summary>Staff no longer exist: a former staff member's own event is theirs, and goes with them like any other.</summary>
     [PostgresFact]
-    public async Task A_staff_members_venue_event_passes_to_the_venue_owner_and_their_staff_link_goes()
+    public async Task A_former_staff_members_event_is_their_own_and_their_staff_row_goes()
     {
         var owner = await UserAsync(subscription: SubscriptionTier.Venue);
         var staff = await UserAsync();
@@ -752,18 +757,18 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             await Task.CompletedTask;
         });
         var ev = await EventAsync(staff, venueId: venue);
-        var album = await AlbumAsync(ev, staff.Id);
+        await AlbumAsync(ev, staff.Id);
 
         var summary = await api.Client(staff.Token).GetFromJsonAsync<Envelope<SummaryDto>>("/api/auth/me/deletion/summary", Web);
-        Assert.Equal(0, summary!.Data.EventsDeleted);
+        Assert.Equal(1, summary!.Data.EventsDeleted);
 
         await DeleteThroughApiAsync(api.Client(staff.Token), staff.Email!);
 
         await api.ReadAsync(async db =>
         {
-            Assert.Equal(owner.Id, (await db.Campaigns.SingleAsync(c => c.Id == ev)).CreatedByUserId);
-            Assert.Equal(owner.Id, (await db.MediaBuckets.SingleAsync(b => b.Id == album)).OwnerUserId);
+            Assert.False(await db.Campaigns.AnyAsync(c => c.Id == ev));
             Assert.False(await db.VenueStaff.AnyAsync(s => s.Email == staff.Email));
+            Assert.True(await db.Venues.AnyAsync(v => v.Id == venue));
             return true;
         });
     }

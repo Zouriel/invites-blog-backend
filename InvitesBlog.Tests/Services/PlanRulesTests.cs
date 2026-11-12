@@ -10,7 +10,8 @@ public class PlanRulesTests
 {
     private static readonly DateTimeOffset Now = new(2027, 3, 1, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Night = new(2027, 2, 1, 18, 0, 0, TimeSpan.Zero);
-    private static readonly Guid VenueId = Guid.NewGuid();
+    /// <summary>The organiser: on Studio (tier Venue) in the venue cases.</summary>
+    private static readonly Guid Organiser = Guid.NewGuid();
 
     private static EventPlan Evaluate(
         EventPassKind pass = EventPassKind.None, DateTimeOffset? passUntil = null, DateTimeOffset? keep = null,
@@ -19,8 +20,8 @@ public class PlanRulesTests
         (bool, DateTimeOffset?)? premium = null, DateTimeOffset? trimmedAt = null) =>
         PlanRules.Evaluate(
             now ?? Now, night ?? Night, pass, passUntil, keep,
-            venueActive is { } active ? (VenueId, active, venueEnded) : null,
-            legacyCover, null, Guid.NewGuid(), premium, trimmedAt);
+            venueActive is { } active ? (active, venueEnded) : null,
+            legacyCover, null, Organiser, premium, trimmedAt);
 
     [Fact]
     public void A_free_event_gets_300_mb_one_album_one_night_kept_for_good_and_the_mark()
@@ -176,7 +177,7 @@ public class PlanRulesTests
         Assert.True(PlanRules.IncludesFaceGrouping(plan));
         Assert.Null(plan.CoveredUntil);
         Assert.Equal(MediaPhase.Active, plan.Phase);
-        Assert.Equal(VenueId, plan.VenueId);
+        Assert.Equal(Organiser, plan.VenueAccountId);
     }
 
     [Fact]
@@ -202,7 +203,7 @@ public class PlanRulesTests
         Assert.False(plan.PrivateAlbums);
         Assert.False(plan.Branded);
         Assert.Null(plan.CoveredUntil);
-        Assert.Equal(VenueId, plan.VenueId);
+        Assert.Equal(Organiser, plan.VenueAccountId);
     }
 
     [Fact]
@@ -243,7 +244,8 @@ public class PlanRulesTests
         Assert.Equal(PlanCatalog.FreeEventBytes, closed.EventBytes);
         Assert.True(closed.Branded);
         Assert.False(PlanRules.IncludesFaceGrouping(closed));
-        Assert.Null(closed.VenueId);
+        Assert.Null(closed.VenueAccountId);
+        Assert.True(closed.VenueEnded);
         Assert.Equal(ended, closed.CoveredUntil);
         Assert.Equal(MediaPhase.UploadsClosed, closed.Phase);
 
@@ -272,7 +274,8 @@ public class PlanRulesTests
         var plan = Evaluate(venueActive: false, venueEnded: null, now: Night.AddYears(2));
 
         Assert.Equal(PlanKind.Free, plan.Kind);
-        Assert.Null(plan.VenueId);
+        Assert.Null(plan.VenueAccountId);
+        Assert.False(plan.VenueEnded);
         Assert.Null(plan.CoveredUntil);
         Assert.Equal(MediaPhase.Active, plan.Phase);
     }

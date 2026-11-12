@@ -69,7 +69,7 @@ public sealed class GooglePlayPurchaseService(
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == me, ct);
             var hasPlan = user is not null && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
                           && user.SubscriptionTier != SubscriptionTier.None;
-            // Venue is sold here too (not on the iPhone): either plan, while the account has none.
+            // Premium or Studio (Venue), while the account has none (the App Store sells both too).
             return new GooglePlayOffersDto(true, user is null || hasPlan ? [] : ["premium_monthly", "venue_monthly"], account, null);
         }
 
