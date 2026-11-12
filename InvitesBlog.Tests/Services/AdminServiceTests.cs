@@ -241,6 +241,26 @@ public class AdminServiceTests
         Assert.DoesNotContain(Roles.Customer, result.Roles);
     }
 
+    /// <summary>An admin moves an account straight from one plan to the other, in either direction.</summary>
+    [Theory]
+    [InlineData(SubscriptionTier.Premium, SubscriptionTier.Venue)]
+    [InlineData(SubscriptionTier.Venue, SubscriptionTier.Premium)]
+    public async Task An_active_plan_switches_straight_to_the_other(SubscriptionTier from, SubscriptionTier to)
+    {
+        var user = Account(Roles.Customer);
+        user.SubscriptionTier = from;
+        user.SubscriptionEndsAt = DateTimeOffset.UtcNow.AddDays(20);
+        _currentUser.UserId.Returns(_me);
+        var until = DateTimeOffset.UtcNow.AddMonths(1);
+
+        var result = await Sut().SetSubscriptionAsync(user.Id, new SetSubscriptionRequest(to.ToString(), until));
+
+        Assert.Equal(to, user.SubscriptionTier);
+        Assert.Equal(until, user.SubscriptionEndsAt);
+        Assert.Equal(to.ToString(), result.SubscriptionTier);
+        await _uow.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task An_account_that_is_not_there_is_a_not_found()
     {
