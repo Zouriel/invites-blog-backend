@@ -46,19 +46,39 @@ public sealed record PaymentStatusDto(Guid Id, string Item, string Description, 
 /// <param name="Pass">The pass it has or last had (None, Gold, Platinum) — what an extension extends.</param>
 /// <param name="Offer">What its passes cost: the same for every event and buyer.</param>
 /// <param name="IsDraft">Not finished yet: a pass bought now is what it goes out with.</param>
+/// <param name="Role">Why the account sees it: "organiser" (it started it), "manager" (someone it is for, given
+/// full access), "celebrant" (someone it is for, read-only) or "venue" (it owns or works at the venue the event is
+/// at). Everyone but the organiser may buy a pass, another year of one and keeping the photos, not emails
+/// (<see cref="BillingService.MayBuy"/>).</param>
+/// <param name="VenueEnded">It is at a venue whose plan no longer covers it: a Platinum pass is what keeps its photos.</param>
 public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
     DateTimeOffset? PassUntil, DateTimeOffset? KeepPhotosUntil, DateTimeOffset? CoveredUntil, string Phase,
     SendingAllowanceDto Sending, bool AtVenue, string Pass, bool PassActive, PassOfferDto Offer, bool IsDraft,
-    DateTimeOffset? TrimAt = null, long? TrimBytes = null, string? TimeZone = null);
+    DateTimeOffset? TrimAt = null, long? TrimBytes = null, string? TimeZone = null,
+    string Role = BillingRoles.Organiser, bool VenueEnded = false);
+
+/// <summary>The values of <see cref="BillingEventDto.Role"/>.</summary>
+public static class BillingRoles
+{
+    public const string Organiser = "organiser";
+    public const string Manager = "manager";
+    public const string Celebrant = "celebrant";
+    public const string Venue = "venue";
+}
 
 public sealed record BillingPaymentDto(
     Guid Id, string Item, string Description, decimal Amount, string Currency, string Status,
     DateTimeOffset CreatedAt, DateTimeOffset? PaidAt, Guid? CampaignId);
 
+/// <param name="Events">The events the account started (unchanged, for older app builds).</param>
+/// <param name="ForYou">Events someone else started that the account is in: it is one of the people the event is for
+/// (read-only or managing), or it owns or works at the venue the event is at. Same rows as <paramref name="Events"/>,
+/// with <see cref="BillingEventDto.Role"/> saying which; never an event that is also in <paramref name="Events"/>.</param>
 public sealed record BillingOverviewDto(
     bool PaymentsEnabled, string Currency, decimal MvrPerUsd, BillingPricesDto Prices, BillingAccountDto Account,
-    IReadOnlyList<BillingEventDto> Events, IReadOnlyList<BillingPaymentDto> Payments);
+    IReadOnlyList<BillingEventDto> Events, IReadOnlyList<BillingPaymentDto> Payments,
+    IReadOnlyList<BillingEventDto> ForYou);
 
 /// <param name="Item">gold-pass, platinum-pass, gold-extension, platinum-extension, keep-photos, sending,
 /// premium-monthly or venue-monthly.</param>
@@ -141,7 +161,10 @@ public sealed class BillingService(
     IRecurringPaymentProvider? recurring = null,
     Payments.IPaymentService? paymentService = null,
     IRepository<GooglePlayPurchase>? playPurchases = null,
-    IRepository<AppStorePurchase>? appStorePurchases = null) : IBillingService
+    IRepository<AppStorePurchase>? appStorePurchases = null,
+    IRepository<CampaignCelebrant>? celebrants = null,
+    IRepository<Venue>? venues = null,
+    IRepository<VenueStaff>? venueStaff = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -160,8 +183,16 @@ public sealed class BillingService(
             .OrderByDescending(c => c.EventStartAt)
             .Take(MaxListed)
             .ToListAsync(ct);
-        var events = new List<BillingEventDto>(mine.Count);
-        foreach (var c in mine) events.Add(await DescribeEventAsync(c, now, ct));
+        var theirs = await ForYouAsync(user, ct);
+
+        // Every row's plan, emails and offer in a fixed number of queries, however many events there are.
+        var all = mine.Concat(theirs.Select(t => t.Campaign)).ToList();
+        var planOf = await plans.ForCampaignsAsync(all, ct);
+        var sendingOf = await allowances.ForCampaignsAsync(all, planOf, ct);
+        // The offer is the price book's, the same for every event and buyer.
+        var offer = all.Count == 0 ? null : await offers.ForCampaignAsync(all[0].Id, ct);
+        var events = mine.Select(c => Describe(c, planOf[c.Id], sendingOf[c.Id], offer!, now, BillingRoles.Organiser)).ToList();
+        var forYou = theirs.Select(t => Describe(t.Campaign, planOf[t.Campaign.Id], sendingOf[t.Campaign.Id], offer!, now, t.Role)).ToList();
 
         var ids = mine.Select(c => c.Id).ToList();
         var history = await payments.Query()
@@ -179,32 +210,87 @@ public sealed class BillingService(
             await AccountWithStoreAsync(user, now, ct),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
-                x.Amount, x.Currency, x.Status.ToString(), x.CreatedAt, x.PaidAt, x.CampaignId)).ToList());
+                x.Amount, x.Currency, x.Status.ToString(), x.CreatedAt, x.PaidAt, x.CampaignId)).ToList(),
+            forYou);
+    }
+
+    /// <summary>
+    /// Events someone else started that this account is in, with why: one of the people it is for (matched on the
+    /// account's proved email or phone, as <see cref="ICampaignOwnershipService"/> does), or the owner or staff of
+    /// the venue it is at. Cancelled events are left out, as in the account's own list. Three queries.
+    /// </summary>
+    private async Task<IReadOnlyList<(Campaign Campaign, string Role)>> ForYouAsync(AppUser user, CancellationToken ct)
+    {
+        if (celebrants is null || venues is null || venueStaff is null) return [];
+        var email = user.Email?.Trim().ToLowerInvariant();
+        var phone = user.PhoneE164?.Trim();
+        // Access to an event needs a proved contact (CampaignOwnershipService): none, no events.
+        if (string.IsNullOrEmpty(email) && string.IsNullOrEmpty(phone)) return [];
+
+        var celebrating = (await celebrants.Query()
+                .Where(c => (email != null && c.Email == email) || (phone != null && c.PhoneE164 == phone))
+                .Select(c => new { c.CampaignId, c.CanManage })
+                .ToListAsync(ct))
+            .GroupBy(c => c.CampaignId)
+            .ToDictionary(g => g.Key, g => g.Any(c => c.CanManage));
+        var celebratingIds = celebrating.Keys.ToList();
+
+        var venueIds = await venues.Query().Where(v => v.OwnerUserId == user.Id).Select(v => v.Id)
+            .Union(venueStaff.Query().Where(s => email != null && s.Email == email).Select(s => s.VenueId))
+            .ToListAsync(ct);
+
+        if (celebratingIds.Count == 0 && venueIds.Count == 0) return [];
+        var me = user.Id;
+        var list = await campaigns.Query()
+            .Where(c => c.CreatedByUserId != me && c.Status != CampaignStatus.Cancelled
+                        && (celebratingIds.Contains(c.Id) || (c.VenueId != null && venueIds.Contains(c.VenueId.Value))))
+            .OrderByDescending(c => c.EventStartAt)
+            .Take(MaxListed)
+            .ToListAsync(ct);
+
+        // The same order of precedence as the event's access: a managing celebrant, then the venue, then read-only.
+        return list.Select(c => (c,
+                celebrating.TryGetValue(c.Id, out var manages) && manages ? BillingRoles.Manager
+                : c.VenueId is { } v && venueIds.Contains(v) ? BillingRoles.Venue
+                : BillingRoles.Celebrant))
+            .ToList();
     }
 
     public async Task<BillingEventDto> EventAsync(Guid campaignId, CancellationToken ct = default)
     {
         RequireUser();
         // Whoever may buy something for it: the people it is for as well as whoever runs it.
-        if (await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant)
+        var access = await ownership.AccessAsync(campaignId, ct);
+        if (access < CampaignAccess.Celebrant)
             throw new ForbiddenException("Only the event's host, or the people it is for, can see what it costs.");
         var c = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new NotFoundException("That event no longer exists.");
-        return await DescribeEventAsync(c, DateTimeOffset.UtcNow, ct);
+        var role = access switch
+        {
+            CampaignAccess.Organiser => BillingRoles.Organiser,
+            CampaignAccess.Manager => BillingRoles.Manager,
+            _ => BillingRoles.Celebrant,
+        };
+        var plan = await plans.ForCampaignAsync(c.Id, ct);
+        return Describe(c, plan, await allowances.ForCampaignAsync(c.Id, ct), await offers.ForCampaignAsync(c.Id, ct),
+            DateTimeOffset.UtcNow, role);
     }
 
-    private async Task<BillingEventDto> DescribeEventAsync(Campaign c, DateTimeOffset now, CancellationToken ct)
+    private static BillingEventDto Describe(
+        Campaign c, EventPlan plan, SendingAllowanceDto sending, PassOfferDto offer, DateTimeOffset now, string role)
     {
-        var plan = await plans.ForCampaignAsync(c.Id, ct);
         var pass = EventPasses.Active(c, now);
         return new BillingEventDto(
             c.Id, c.Title, c.EventStartAt, SaveTheDates.Name(c.Kind), plan.Kind.ToString(),
             pass == EventPassKind.None ? null : c.EventPassUntil, c.KeepPhotosUntil, plan.CoveredUntil,
-            plan.Phase.ToString(), await allowances.ForCampaignAsync(c.Id, ct), c.VenueId is not null,
-            c.EventPass.ToString(), pass != EventPassKind.None, await offers.ForCampaignAsync(c.Id, ct),
+            plan.Phase.ToString(), sending, c.VenueId is not null,
+            c.EventPass.ToString(), pass != EventPassKind.None, offer,
             c.Status == CampaignStatus.Draft,
             plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimAt : null,
             plan.Phase == MediaPhase.UploadsClosed ? c.MediaTrimBytes : null,
-            c.TimeZone);
+            c.TimeZone,
+            role,
+            // At a venue, and the venue's plan no longer covers it (ended, or its owner moved on).
+            c.VenueId is not null && plan.VenueId is null);
     }
 
     public async Task<CheckoutQuoteDto> QuoteAsync(CheckoutRequest req, CancellationToken ct = default)
