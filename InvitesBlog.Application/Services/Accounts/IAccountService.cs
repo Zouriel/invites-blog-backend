@@ -46,6 +46,13 @@ public interface IAccountService
     /// <summary>Which kinds of phone notification the account turned off in the app; the push senders honour it.</summary>
     Task<AccountDto> SetNotificationsAsync(SetNotificationsRequest req, CancellationToken ct = default);
 
+    /// <summary>
+    /// Changes the account's own name (any account: Free, Premium, a venue's owner or staff, an admin).
+    /// Trimmed, whitespace collapsed, control characters dropped; 1 to <see cref="AccountService.MaxNameLength"/>
+    /// characters; refused by the word filter like comments. A later Google or Apple sign-in never replaces it.
+    /// </summary>
+    Task<AccountDto> SetNameAsync(SetNameRequest req, CancellationToken ct = default);
+
     /// <summary>Sets the account's country and/or time zone.</summary>
     Task<AccountDto> UpdateSettingsAsync(UpdateAccountSettingsRequest req, CancellationToken ct = default);
 

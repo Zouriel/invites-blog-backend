@@ -666,6 +666,14 @@ public sealed class InviteService(
             .Select(g => new { CampaignId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.CampaignId, x => x.Count, ct);
 
+        // The venue each event is held at, for the badge on its tile: one query for the page.
+        var venueIds = campaignList.Select(c => c.VenueId).OfType<Guid>().Distinct().ToList();
+        var venueFaces = venueIds.Count == 0
+            ? new Dictionary<Guid, (string Name, string? LogoUrl)>()
+            : (await venues.Query().Where(v => venueIds.Contains(v.Id))
+                    .Select(v => new { v.Id, v.Name, v.LogoUrl }).ToListAsync(ct))
+                .ToDictionary(v => v.Id, v => (v.Name, v.LogoUrl));
+
         var now = DateTimeOffset.UtcNow;
         return guestList
             .Select(g =>
@@ -689,7 +697,9 @@ public sealed class InviteService(
                     SaveTheDates.Name(c.Kind),
                     SaveTheDates.Is(c) ? CalendarFor(c) : null,
                     Application.Campaigns.PosterColours.Of(c),
-                    c.TimeZone);
+                    c.TimeZone,
+                    c.VenueId is { } vid && venueFaces.TryGetValue(vid, out var face) ? face.Name : null,
+                    c.VenueId is { } lid && venueFaces.TryGetValue(lid, out var logo) ? logo.LogoUrl : null);
             })
             .OfType<InboxCardResponse>()
             .OrderByDescending(i => i.EventDate)

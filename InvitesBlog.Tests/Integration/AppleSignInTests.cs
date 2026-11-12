@@ -159,6 +159,25 @@ public sealed class AppleSignInTests(PostgresApiFixture api)
         Assert.Null(await api.ReadAsync(db => db.UserExternalLogins.Where(l => l.ExternalSubjectId == sub).Select(l => l.RefreshTokenSealed).SingleAsync()));
     }
 
+    /// <summary>Owner, 2026-11-12: a name the person chose is theirs; signing in again never puts Apple's back.</summary>
+    [PostgresFact]
+    public async Task A_name_the_person_chose_survives_signing_in_with_apple_again()
+    {
+        var sub = $"001234.{Guid.NewGuid():N}.0002";
+        var email = $"r{Guid.NewGuid():N}@privaterelay.appleid.com";
+        var client = api.Client();
+        var first = await SignInAsync(client, api.Apple.IdentityToken(sub, email, "nonce-a"), "nonce-a", null, "Aisha", "Ibrahim");
+        Assert.Equal("Aisha Ibrahim", first.Result!.Account.DisplayName);
+
+        var renamed = await api.Client(first.Result.Token).PutAsJsonAsync("/api/auth/me/name", new { displayName = "Aishath I." });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+
+        var again = await SignInAsync(api.Client(), api.Apple.IdentityToken(sub, email, "nonce-b"), "nonce-b", null, "Someone", "Else");
+        Assert.Equal(HttpStatusCode.OK, again.Status);
+        Assert.Equal("Aishath I.", again.Result!.Account.DisplayName);
+        Assert.Equal("Aishath I.", await api.ReadAsync(db => db.Users.Where(u => u.Id == first.Result.Account.Id).Select(u => u.DisplayName).SingleAsync()));
+    }
+
     private async Task<string> OptionsAsync(string url)
     {
         var res = await api.Client().GetAsync(url);

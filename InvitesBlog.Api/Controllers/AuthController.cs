@@ -103,6 +103,15 @@ public sealed class AuthController(IAccountService accounts, IAccountDeletionSer
     public async Task<IActionResult> Me(CancellationToken ct) => Success(await accounts.MeAsync(ct));
 
     /// <summary>
+    /// Changes the signed-in account's own name: <c>{ "displayName": "..." }</c>, answered with the same
+    /// account as <c>GET me</c>. Refusals: <c>name_required</c>, <c>name_too_long</c> (over 80), <c>objectionable_text</c>.
+    /// </summary>
+    [HttpPut("me/name")]
+    [HasPermission(Permissions.Templates.Read)]
+    public async Task<IActionResult> SetName([FromBody] SetNameRequest req, CancellationToken ct) =>
+        Success(await accounts.SetNameAsync(req, ct));
+
+    /// <summary>
     /// The account's country (ISO2, the default for phone numbers without a code) and time zone
     /// (IANA, the default for new events). Null leaves a field alone; "" clears it.
     /// </summary>

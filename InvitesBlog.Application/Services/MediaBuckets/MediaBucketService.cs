@@ -889,7 +889,7 @@ public sealed class MediaBucketService(
             .SumAsync(b => b.UsedBytes, ct);
         if (eventUsed + incomingBytes > plan.EventBytes)
             throw new BusinessRuleException(
-                plan.Kind is PlanKind.PlatinumPass or PlanKind.Venue
+                plan.Kind is PlanKind.PlatinumPass or PlanKind.Venue || plan.EventBytes >= PlanCatalog.PlatinumEventBytes
                     ? $"This event's {Size(plan.EventBytes)} is full."
                     : plan.Kind == PlanKind.GoldPass
                         ? $"This event's {Size(plan.EventBytes)} is full. A Platinum pass gives it more room."
@@ -910,10 +910,10 @@ public sealed class MediaBucketService(
                      ?? throw new NotFoundException("That album no longer exists.");
         var plan = await plans.ForCampaignAsync(bucket.CampaignId, ct);
 
-        // The lock is on whatever the check sums across. A venue's limit spans all of its events, so
-        // every upload there queues on the venue; otherwise the space is the event's, shared by its albums.
+        // The lock is on whatever the check sums across: the event's space, shared by its albums. Only a
+        // limit across a whole venue (none today: a venue's events each have their own) would queue on the venue.
         await usage.ReserveAsync(
-            plan.VenueId ?? bucket.CampaignId, bucketId, bytes,
+            plan.AccountBytes is not null && plan.VenueId is { } venueId ? venueId : bucket.CampaignId, bucketId, bytes,
             c => EnsureRoomAsync(bucketId, bytes, c), ct);
     }
 
@@ -948,7 +948,7 @@ public sealed class MediaBucketService(
                      && PlanRules.IsActive(owner.SubscriptionTier, owner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
         return new StorageSummaryDto(
             active ? SubscriptionTier.Venue.ToString() : "None",
-            // No venue-wide space any more: each event's space is its pass's.
+            // No venue-wide space: each event's space is its own plan's (10 GB while the venue's plan is in force).
             null,
             await plans.VenueUsedBytesAsync(venue.Id, ct),
             venue.Name);

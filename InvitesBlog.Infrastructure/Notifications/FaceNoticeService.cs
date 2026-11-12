@@ -188,8 +188,9 @@ public sealed class FaceNoticeService(
 
     /// <summary>
     /// When the event stops having a plan that includes face grouping (PlanRules.IncludesFaceGrouping: anything
-    /// but Free), or null when nothing ends it: a pass ends on its day unless the organiser's Premium carries on
-    /// after it; Premium ends on its end date only when it won't renew by itself. (The photos' own cover,
+    /// but Free), or null when nothing ends it: a pass ends on its day unless the organiser's Premium or the
+    /// venue's plan carries on after it; Premium and a venue's plan end on their end date only when they won't
+    /// renew by themselves. (The photos' own cover,
     /// EventPlan.CoveredUntil, runs longer and isn't this.)
     /// </summary>
     public static async Task<DateTimeOffset?> PlanEndsAsync(AppDbContext db, EventPlan plan, Guid campaignId, CancellationToken ct)
@@ -205,12 +206,31 @@ public sealed class FaceNoticeService(
         DateTimeOffset? premiumEnd = premium && organiser!.SubscriptionEndsAt is { } e && organiser.AutoRenewKind is null ? e : null;
         var premiumForever = premium && premiumEnd is null;
 
+        // The venue's plan, when one covers the event (plan.VenueId is only set while it is in force): the
+        // same reading as Premium's, from the venue owner's account.
+        DateTimeOffset? venueEnd = null;
+        var venueForever = false;
+        if (plan.VenueId is { } venueId)
+        {
+            var venueOwner = await db.Venues.Where(v => v.Id == venueId)
+                .Join(db.Users, v => v.OwnerUserId, u => u.Id, (v, u) => new { u.SubscriptionEndsAt, u.AutoRenewKind })
+                .FirstOrDefaultAsync(ct);
+            venueEnd = venueOwner?.SubscriptionEndsAt is { } ve && venueOwner.AutoRenewKind is null ? ve : null;
+            venueForever = venueOwner is not null && venueEnd is null;
+        }
+
         switch (plan.Kind)
         {
             case PlanKind.GoldPass or PlanKind.PlatinumPass:
                 var passEnd = await db.Campaigns.Where(c => c.Id == campaignId).Select(c => c.EventPassUntil).FirstOrDefaultAsync(ct);
-                if (passEnd is null || premiumForever) return null;
-                return premium && premiumEnd > passEnd ? premiumEnd : passEnd;
+                if (passEnd is null || premiumForever || venueForever) return null;
+                var latest = passEnd;
+                if (premium && premiumEnd > latest) latest = premiumEnd;
+                if (venueEnd > latest) latest = venueEnd;
+                return latest;
+            case PlanKind.Venue:
+                if (venueForever || premiumForever) return null;
+                return premium && premiumEnd > venueEnd ? premiumEnd : venueEnd;
             case PlanKind.Premium:
                 return premiumEnd;
             default:

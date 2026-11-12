@@ -8,11 +8,14 @@ namespace InvitesBlog.Application.Services.Billing;
 /// letters, digits, underscores and periods, and ids are permanent once created in App Store Connect).
 /// The app has the same table. Event-bound items are consumables, bought again for each event;
 /// premium_monthly is an auto-renewable subscription. See the app's docs/APPLE-PURCHASES.md.
+/// Venue is not sold on the iPhone, so venue_monthly is left out here.
 /// </summary>
 public static class AppStoreCatalog
 {
-    public static IReadOnlyList<PlayProduct> All => GooglePlayCatalog.All;
-    public static PlayProduct? Find(string? id) => GooglePlayCatalog.Find(id);
+    public static IReadOnlyList<PlayProduct> All { get; } =
+        GooglePlayCatalog.All.Where(p => p.Kind != Domain.Enums.PaymentKind.VenueMonthly).ToList();
+
+    public static PlayProduct? Find(string? id) => All.FirstOrDefault(p => p.Id == id);
 }
 
 /// <summary>

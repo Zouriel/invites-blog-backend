@@ -158,29 +158,118 @@ public class PlanRulesTests
         Assert.Equal(Now.AddMonths(12), PlanRules.PassUntil(Night, Now));
     }
 
-    /// <summary>
-    /// A venue no longer covers its events: it buys their passes (at the venue price), so an event it
-    /// runs is on whatever pass it has, and Free without one.
-    /// </summary>
-    [Fact]
-    public void A_venue_s_event_is_on_its_pass_not_on_the_venue()
-    {
-        var withPass = Evaluate(EventPassKind.Gold, Now.AddMonths(2), venueActive: true);
-        var without = Evaluate(venueActive: true);
+    // ----- Venue (owner, 2026-11-12): a plan like Premium for every event at the venue, with 10 GB -----
 
-        Assert.Equal(PlanKind.GoldPass, withPass.Kind);
-        Assert.Equal(PlanCatalog.GoldEventBytes, withPass.EventBytes);
-        Assert.Null(withPass.AccountBytes);
-        Assert.Null(withPass.VenueId);
-        Assert.Equal(PlanKind.Free, without.Kind);
-        Assert.Null(without.CoveredUntil);
+    [Fact]
+    public void An_event_at_an_active_venue_gets_10_gb_one_album_no_mark_face_grouping_and_no_end()
+    {
+        var plan = Evaluate(venueActive: true);
+
+        Assert.Equal(PlanKind.Venue, plan.Kind);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Null(plan.AccountBytes);
+        Assert.Equal(1, plan.MaxBuckets);
+        Assert.Equal(PlanCatalog.FreeWindowDays, plan.MaxWindowDays);
+        Assert.Equal(0, plan.IncludedInvites);
+        Assert.False(plan.PrivateAlbums);
+        Assert.False(plan.Branded);
+        Assert.True(PlanRules.IncludesFaceGrouping(plan));
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+        Assert.Equal(VenueId, plan.VenueId);
     }
 
     [Fact]
-    public void An_event_at_a_venue_that_ended_without_a_pass_is_a_free_event_kept_for_good()
+    public void An_active_venue_is_kept_years_after_the_event()
+    {
+        var plan = Evaluate(venueActive: true, now: Night.AddYears(5));
+        Assert.Equal(PlanKind.Venue, plan.Kind);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    /// <summary>Best of both, limit by limit: the venue's 10 GB, the pass's albums, days and invitations.</summary>
+    [Fact]
+    public void A_venue_event_with_a_gold_pass_gets_the_best_of_both()
+    {
+        var plan = Evaluate(EventPassKind.Gold, Now.AddMonths(2), venueActive: true);
+
+        Assert.Equal(PlanKind.GoldPass, plan.Kind);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(PlanCatalog.GoldBuckets, plan.MaxBuckets);
+        Assert.Equal(PlanCatalog.GoldWindowDays, plan.MaxWindowDays);
+        Assert.Equal(PlanCatalog.GoldIncludedInvites, plan.IncludedInvites);
+        Assert.False(plan.PrivateAlbums);
+        Assert.False(plan.Branded);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(VenueId, plan.VenueId);
+    }
+
+    [Fact]
+    public void A_venue_event_with_a_platinum_pass_gets_everything_platinum_has()
+    {
+        var plan = Evaluate(EventPassKind.Platinum, Now.AddMonths(2), venueActive: true);
+
+        Assert.Equal(PlanKind.PlatinumPass, plan.Kind);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Equal(PlanCatalog.PlatinumBuckets, plan.MaxBuckets);
+        Assert.Equal(PlanCatalog.PlatinumWindowDays, plan.MaxWindowDays);
+        Assert.Equal(PlanCatalog.PlatinumIncludedInvites, plan.IncludedInvites);
+        Assert.True(plan.PrivateAlbums);
+        Assert.False(plan.Branded);
+        Assert.Null(plan.CoveredUntil);
+    }
+
+    /// <summary>The pass ran out while the venue's plan goes on: the venue still covers it.</summary>
+    [Fact]
+    public void A_venue_event_whose_pass_ended_is_on_the_venue()
+    {
+        var ended = Night.AddMonths(12);
+        var plan = Evaluate(EventPassKind.Gold, ended, venueActive: true, now: ended.AddDays(3));
+        Assert.Equal(PlanKind.Venue, plan.Kind);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
+        Assert.Null(plan.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, plan.Phase);
+    }
+
+    /// <summary>Like an ended Premium: uploads close at the end, then the warnings and the cut to Free.</summary>
+    [Fact]
+    public void When_the_venue_s_plan_ends_its_event_goes_back_to_free_like_an_ended_premium()
     {
         var ended = Night.AddDays(400);
-        var plan = Evaluate(venueActive: false, venueEnded: ended, now: ended.AddDays(40));
+
+        var closed = Evaluate(venueActive: false, venueEnded: ended, now: ended.AddDays(1));
+        Assert.Equal(PlanKind.Free, closed.Kind);
+        Assert.Equal(PlanCatalog.FreeEventBytes, closed.EventBytes);
+        Assert.True(closed.Branded);
+        Assert.False(PlanRules.IncludesFaceGrouping(closed));
+        Assert.Null(closed.VenueId);
+        Assert.Equal(ended, closed.CoveredUntil);
+        Assert.Equal(MediaPhase.UploadsClosed, closed.Phase);
+
+        // Once cut down to Free it is a free event like any other, kept for good.
+        var cut = Evaluate(venueActive: false, venueEnded: ended, now: ended.AddDays(40), trimmedAt: ended.AddDays(31));
+        Assert.Null(cut.CoveredUntil);
+        Assert.Equal(MediaPhase.Active, cut.Phase);
+    }
+
+    [Fact]
+    public void An_ended_venue_never_shortens_a_pass_and_a_pass_never_shortens_the_venue()
+    {
+        var venueEnd = Night.AddMonths(20);
+        var passEnd = Night.AddMonths(12);
+        Assert.Equal(venueEnd, Evaluate(EventPassKind.Gold, passEnd, venueActive: false, venueEnded: venueEnd, now: venueEnd.AddDays(1)).CoveredUntil);
+        Assert.Equal(passEnd, Evaluate(EventPassKind.Gold, passEnd, venueActive: false, venueEnded: Night.AddMonths(3), now: passEnd.AddDays(1)).CoveredUntil);
+    }
+
+    /// <summary>
+    /// PlanService passes no end date when the venue's owner has moved to another plan (that plan's date
+    /// isn't the venue's): the venue then counts for nothing, and a free event stays a free event.
+    /// </summary>
+    [Fact]
+    public void A_venue_whose_owner_is_no_longer_on_venue_counts_for_nothing()
+    {
+        var plan = Evaluate(venueActive: false, venueEnded: null, now: Night.AddYears(2));
 
         Assert.Equal(PlanKind.Free, plan.Kind);
         Assert.Null(plan.VenueId);
@@ -188,14 +277,13 @@ public class PlanRulesTests
         Assert.Equal(MediaPhase.Active, plan.Phase);
     }
 
+    /// <summary>A venue outranks its organiser's Premium: 10 GB, not 2.</summary>
     [Fact]
-    public void A_venue_s_pass_event_goes_back_to_free_like_any_other()
+    public void A_venue_outranks_the_organiser_s_premium()
     {
-        var ended = Night.AddMonths(12);
-        var plan = Evaluate(EventPassKind.Gold, ended, venueActive: true, now: ended.AddDays(3));
-        Assert.Equal(PlanKind.Free, plan.Kind);
-        Assert.Equal(ended, plan.CoveredUntil);
-        Assert.Equal(MediaPhase.UploadsClosed, plan.Phase);
+        var plan = Evaluate(venueActive: true, premium: (true, null));
+        Assert.Equal(PlanKind.Venue, plan.Kind);
+        Assert.Equal(10 * PlanCatalog.Gb, plan.EventBytes);
     }
 
     [Fact]
@@ -253,13 +341,6 @@ public class PlanRulesTests
     }
 
     [Fact]
-    public void Venue_passes_cost_half()
-    {
-        Assert.Equal(100m, Prices.Defaults.VenuePassPrice(EventPassKind.Gold));
-        Assert.Equal(250m, Prices.Defaults.VenuePassPrice(EventPassKind.Platinum)); // 249.50, rounded up
-    }
-
-    [Fact]
     public void The_catalogue_shows_the_price_book_not_the_defaults()
     {
         var changed = Prices.Defaults with { GoldPass = 249m, SendingPerBlock = 60m, VenueDiscountPercent = 20, PremiumMonthly = 500m };
@@ -268,7 +349,8 @@ public class PlanRulesTests
         Assert.Equal(249m, gold.Price);
         Assert.Equal(500m, c.Plans.Single(p => p.Kind == "Premium").Price);
         Assert.Equal(60m, c.Sending.PerBlock);
-        Assert.Equal(20, c.VenueDiscountPercent);
+        // The venue discount is gone: 0, whatever a saved price list holds.
+        Assert.Equal(0, c.VenueDiscountPercent);
         // Limits are not prices: they stay where the code enforces them.
         Assert.Equal(PlanCatalog.GoldEventBytes, gold.EventBytes);
     }
@@ -290,12 +372,12 @@ public class PlanRulesTests
 
         Assert.Equal("MVR", catalog.Currency);
         Assert.Equal(["Free", "GoldPass", "PlatinumPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
-        // Premium and Venue are monthly subscriptions; a venue gets its events' passes at half price.
-        Assert.Equal([0m, 199m, 499m, 200m, 2300m], catalog.Plans.Select(p => p.Price));
+        // Premium and Venue are monthly subscriptions; Venue is MVR 775 (about $50) since 2026-11-12.
+        Assert.Equal([0m, 199m, 499m, 200m, 775m], catalog.Plans.Select(p => p.Price));
         Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
-        Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, (long?)null],
+        Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, 10 * PlanCatalog.Gb],
             catalog.Plans.Select(p => p.EventBytes));
-        Assert.Equal(50, catalog.VenueDiscountPercent);
+        Assert.Equal(0, catalog.VenueDiscountPercent);
         Assert.Equal(150m, catalog.KeepPhotos.Price);
         Assert.Equal(50m, catalog.Sending.PerBlock);
         Assert.Equal(100, catalog.Sending.BlockSize);

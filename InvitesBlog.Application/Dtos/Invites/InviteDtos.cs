@@ -49,7 +49,11 @@ public sealed record InboxCardResponse(
     /// <summary>The design's background and accent (#rrggbb), for a tile with no picture; null when it declares none.</summary>
     IReadOnlyList<string>? Colours = null,
     /// <summary>The event's IANA time zone: EventDate (an instant) is the time on this clock.</summary>
-    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy,
+    /// <summary>The venue the event is held at, for the small badge on its tile; null when there is none.</summary>
+    string? VenueName = null,
+    /// <summary>That venue's logo; null when it has none (show its first letter) or there is no venue.</summary>
+    string? VenueLogoUrl = null);
 
 /// <summary>Add to calendar, pre-filled: Google, Outlook.com and Microsoft 365.</summary>
 public sealed record CalendarLinksDto(string Google, string Outlook, string Office365);

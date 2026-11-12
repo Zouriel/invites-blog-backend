@@ -17,7 +17,7 @@ public sealed record MediaBucketDto(
     string Title,
     /// <summary>The event's cover, chosen by the host on the campaign.</summary>
     string? CoverUrl,
-    /// <summary>The event's plan: Free, GoldPass, PlatinumPass or Venue.</summary>
+    /// <summary>The event's plan: Free, GoldPass, PlatinumPass, Premium or Venue.</summary>
     string Tier,
     /// <summary>The event's space in GB, to one decimal. Shared by all of the event's buckets.</summary>
     double Gb,
@@ -49,7 +49,7 @@ public sealed record MediaBucketDto(
     string Phase = "Active",
     /// <summary>What all of the event's buckets hold together, against the event's space.</summary>
     long EventUsedBytes = 0,
-    /// <summary>Whether the album can be closed to some guests (Platinum pass and venues).</summary>
+    /// <summary>Whether the album can be closed to some guests (a Platinum pass; a venue's plan alone doesn't).</summary>
     bool PrivateAlbums = false,
     /// <summary>Whether the event is on Free, so its pages carry a small "Made with invites.blog".</summary>
     bool Branded = true,
@@ -75,8 +75,9 @@ public sealed record MediaBucketDto(
     bool FaceGroupingIncluded = false);
 
 /// <summary>
-/// The space a venue's events share: how much there is and how much is used. For anyone who isn't a
-/// venue's owner or staff, <c>Tier</c> is "None" and there is nothing to show.
+/// A venue's events, for its owner and staff: whether its plan is in force (<c>Tier</c> "Venue") and how
+/// much its events use together. There is no venue-wide limit (<c>AccountBytes</c> is always null): each
+/// event has its own space. For anyone who isn't a venue's owner or staff, <c>Tier</c> is "None".
 /// </summary>
 public sealed record StorageSummaryDto(string Tier, long? AccountBytes, long UsedBytes, string? VenueName);
 

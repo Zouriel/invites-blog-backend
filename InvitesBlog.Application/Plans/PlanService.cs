@@ -6,12 +6,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace InvitesBlog.Application.Plans;
 
-/// <summary>Works out which plan covers an event: its pass, its organiser's Premium, and anything bought to keep its photos.</summary>
+/// <summary>Works out which plan covers an event: its pass, its venue's plan, its organiser's Premium, and anything bought to keep its photos.</summary>
 public interface IPlanService
 {
     Task<EventPlan> ForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
-    /// <summary>Space used by every event at a venue, which the venue's plan counts together.</summary>
+    /// <summary>Space used by every event at a venue, for its page. Each event's own space is its plan's.</summary>
     Task<long> VenueUsedBytesAsync(Guid venueId, CancellationToken ct = default);
 
     /// <summary>Whether this account's Premium subscription is in force.</summary>
@@ -45,7 +45,12 @@ public sealed class PlanService(
             var active = venueOwner.SubscriptionTier == SubscriptionTier.Venue
                          && PlanRules.IsActive(venueOwner.SubscriptionTier, venueOwner.SubscriptionEndsAt, DateTimeOffset.UtcNow);
             // Once it has ended, the photos' lapse counts from when it did (ending a plan sets that date).
-            venue = (venueId, active, active ? null : venueOwner.SubscriptionEndsAt);
+            // An owner since moved to another plan has that plan's date on the account, not the venue's:
+            // no known end, so the venue no longer counts (the event is whatever else it has).
+            DateTimeOffset? ended = active ? null
+                : venueOwner.SubscriptionTier is SubscriptionTier.Venue or SubscriptionTier.None ? venueOwner.SubscriptionEndsAt
+                : null;
+            venue = (venueId, active, ended);
         }
 
         // Anything from before the plans is never removed sooner than 90 days after the plans arrived,

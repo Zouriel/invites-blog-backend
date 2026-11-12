@@ -44,7 +44,7 @@ public sealed record PaymentStatusDto(Guid Id, string Item, string Description, 
 
 /// <summary>One of the account's events, with everything that can be bought for it.</summary>
 /// <param name="Pass">The pass it has or last had (None, Gold, Platinum) — what an extension extends.</param>
-/// <param name="Offer">What its passes cost this host: with the venue discount on an event a venue runs.</param>
+/// <param name="Offer">What its passes cost: the same for every event and buyer.</param>
 /// <param name="IsDraft">Not finished yet: a pass bought now is what it goes out with.</param>
 public sealed record BillingEventDto(
     Guid CampaignId, string Title, DateTimeOffset EventStartAt, string Kind, string Plan,
@@ -114,8 +114,9 @@ public interface IBillingService
 
 /// <summary>
 /// Everything that can be paid for, in one place: per event (a pass, another year of it, keeping the
-/// photos, emails) and per account (Premium, Venue). Prices come from the price book; a pass for an
-/// event a venue runs is discounted automatically (<see cref="IPassOfferService"/>).
+/// photos, emails) and per account (Premium, Venue). Prices come from the price book, the same for
+/// everyone (<see cref="IPassOfferService"/>). A pass, another year of one, or keeping the photos can be
+/// bought by anyone the event is for as well as whoever runs it (<see cref="MayBuy"/>).
 ///
 /// <para><b>Ready for the gateway.</b> Checkout records a pending <see cref="Payment"/> and asks the
 /// <see cref="IPaymentProvider"/> for a checkout page; the gateway's webhook marks it paid
@@ -172,7 +173,8 @@ public sealed class BillingService(
         return new BillingOverviewDto(
             Enabled, PlanCatalog.Currency, p.MvrPerUsd,
             new BillingPricesDto(p.GoldPass, p.PlatinumPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
-                p.PremiumMonthly, p.VenueDiscountPercent,
+                // The venue discount is gone: 0 whatever a saved price list holds.
+                p.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
                 p.GoldExtension, p.PlatinumExtension, p.VenueMonthly),
             await AccountWithStoreAsync(user, now, ct),
             events,
@@ -183,8 +185,9 @@ public sealed class BillingService(
     public async Task<BillingEventDto> EventAsync(Guid campaignId, CancellationToken ct = default)
     {
         RequireUser();
-        if (await ownership.AccessAsync(campaignId, ct) != CampaignAccess.Organiser)
-            throw new ForbiddenException("Only the event's host can see what it costs.");
+        // Whoever may buy something for it: the people it is for as well as whoever runs it.
+        if (await ownership.AccessAsync(campaignId, ct) < CampaignAccess.Celebrant)
+            throw new ForbiddenException("Only the event's host, or the people it is for, can see what it costs.");
         var c = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new NotFoundException("That event no longer exists.");
         return await DescribeEventAsync(c, DateTimeOffset.UtcNow, ct);
     }
@@ -315,8 +318,10 @@ public sealed class BillingService(
         if (IsEventItem(kind))
         {
             if (req.CampaignId is not { } id) throw new BusinessRuleException("Choose which event it's for.", "billing_event_required");
-            if (await ownership.AccessAsync(id, ct) != CampaignAccess.Organiser)
-                throw new ForbiddenException("Only the event's host can pay for it.");
+            if (!MayBuy(kind, await ownership.AccessAsync(id, ct)))
+                throw new ForbiddenException(kind == PaymentKind.Sending
+                    ? "Only the event's host can pay for it."
+                    : "Only the event's host, or the people it is for, can pay for it.");
             campaign = await campaigns.GetByIdAsync(id, ct) ?? throw new NotFoundException("That event no longer exists.");
             EnsureEventCanHave(kind, campaign, now);
         }
@@ -341,13 +346,19 @@ public sealed class BillingService(
             _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
         };
         var description = Describe(kind, quantity, campaign);
-        // The discount says where it comes from, on the receipt as on the page.
-        if (offer is { VenuePercent: > 0 } v && kind is PaymentKind.GoldPass or PaymentKind.PlatinumPass
-                or PaymentKind.GoldExtension or PaymentKind.PlatinumExtension)
-            description += $" · {v.VenuePercent}% venue price, {v.VenueName}";
 
         return new Priced(kind, quantity, campaign, amount, description);
     }
+
+    /// <summary>
+    /// Whether someone with this access to an event may buy this item for it. A pass, another year of one,
+    /// and keeping the photos: anyone the event is for (a celebrant, read-only or not), whoever runs it
+    /// (a venue's owner or staff) and its organiser; so a couple can keep their photos when the venue's plan
+    /// ends (owner, 2026-11-12). Emailed invitations: the organiser only, as before. Checkout and both stores
+    /// ask the same question.
+    /// </summary>
+    public static bool MayBuy(PaymentKind kind, CampaignAccess access) =>
+        kind == PaymentKind.Sending ? access == CampaignAccess.Organiser : access >= CampaignAccess.Celebrant;
 
     /// <summary>Whether this event can have this item now. Checkout and a store purchase ask the same question.</summary>
     public static void EnsureEventCanHave(PaymentKind kind, Campaign campaign, DateTimeOffset now)

@@ -9,8 +9,9 @@ public sealed record PlayProduct(string Id, PaymentKind Kind, bool IsSubscriptio
 
 /// <summary>
 /// Everything sold through Google Play. The ids are permanent once created in Play Console; the same
-/// table is in the app (<c>play_products.dart</c>). Not here, on purpose: Venue, venue prices and
-/// anything Studio. See the app's docs/STORE-RULES.md.
+/// table is in the app (<c>play_products.dart</c>). venue_monthly (owner, 2026-11-12) is sold on Google
+/// Play only, never on the App Store (<see cref="AppStoreCatalog"/>). Not here: anything Studio. See the
+/// app's docs/STORE-RULES.md.
 /// </summary>
 public static class GooglePlayCatalog
 {
@@ -23,6 +24,7 @@ public static class GooglePlayCatalog
         new("keep_photos_year", PaymentKind.KeepPhotos, false),
         new("extra_invites_100", PaymentKind.Sending, false),
         new("premium_monthly", PaymentKind.PremiumMonthly, true),
+        new("venue_monthly", PaymentKind.VenueMonthly, true),
     ];
 
     public static PlayProduct? Find(string? id) => All.FirstOrDefault(p => p.Id == id);

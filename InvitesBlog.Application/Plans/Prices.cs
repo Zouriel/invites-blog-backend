@@ -12,6 +12,8 @@ namespace InvitesBlog.Application.Plans;
 /// <see cref="PlanCatalog"/> because the code enforces them; prices are what an admin may change
 /// without a release, so they live here and are read through <see cref="IPriceBook"/>.
 /// </summary>
+/// <param name="VenueDiscountPercent">No longer applied anywhere (owner, 2026-11-12: venues pay normal pass
+/// prices). Kept so a saved price list and the admin page still read and write the same shape.</param>
 public sealed record Prices(
     decimal GoldPass,
     decimal PlatinumPass,
@@ -45,15 +47,6 @@ public sealed record Prices(
         EventPassKind.Platinum => PlatinumExtension,
         _ => 0m,
     };
-
-    /// <summary>A pass a venue buys for an event it runs: the venue discount off.</summary>
-    public decimal VenuePassPrice(EventPassKind kind) => Off(PassPrice(kind), VenueDiscountPercent);
-
-    /// <summary>Another year of a pass, bought by a venue: the same discount.</summary>
-    public decimal VenueExtensionPrice(EventPassKind kind) => Off(ExtensionPrice(kind), VenueDiscountPercent);
-
-    private static decimal Off(decimal price, int percent) =>
-        Math.Round(price * (100 - percent) / 100m, 0, MidpointRounding.AwayFromZero);
 
     /// <summary>Why these prices can't be saved, or nothing when they can.</summary>
     public IReadOnlyList<string> Problems()

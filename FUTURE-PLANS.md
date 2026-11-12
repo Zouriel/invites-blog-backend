@@ -855,8 +855,10 @@ A second campaign kind (`Campaign.Kind = SaveTheDate`), sent months ahead with j
   Free's window and emails, no "Made with" mark, and its photos are kept while the subscription
   lasts (`CoveredUntil` null with no end date, else the end date; the lapse counts from there).
   Invitations made from a Premium subscriber's designs say "Designed by" them.
-- **The Studio discount is gone** (30% off a design made for someone). The only discount is a
-  venue's: **50% off** its events' passes and renewals (`Prices.VenueDiscountPercent`, default 50).
+- **The Studio discount is gone** (30% off a design made for someone). The venue discount went too
+  (2026-11-12): a venue's plan covers its events itself (10 GB each, no mark, face grouping, kept while
+  it lasts, MVR 775 a month, `venue_monthly` on Google Play) and venues pay normal pass prices.
+  `Prices.VenueDiscountPercent` is still stored but never applied and always served as 0.
 - **The template designer is open to every account:** `Customer` holds `designer.manage` and
   `designs.manage`; `DesignerAccessService` and its sweeper are deleted. The admin Designers list
   is the accounts that have used the designer (a design or a published template, or the old role).

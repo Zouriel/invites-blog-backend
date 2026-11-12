@@ -502,7 +502,8 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
             var apple = (await api.Client(host.Token).GetFromJsonAsync<Envelope<Offers>>($"/api/billing/app-store/offers{q}", Web))!.Data!;
             var play = (await api.Client(host.Token).GetFromJsonAsync<Envelope<Offers>>($"/api/billing/google-play/offers{q}", Web))!.Data!;
             Assert.True(apple.Available);
-            Assert.Equal(play.Products, apple.Products);
+            // The same, except Venue: sold on Google Play only (owner, 2026-11-12).
+            Assert.Equal(play.Products.Where(p => p != "venue_monthly"), apple.Products);
         }
     }
 
