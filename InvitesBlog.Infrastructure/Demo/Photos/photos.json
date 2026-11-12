@@ -1,0 +1,110 @@
+[
+  {
+    "file": "01-table-roses",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 70376,
+    "description": "Place setting with cream roses, gold chargers and candlesticks"
+  },
+  {
+    "file": "02-hall",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 161866,
+    "description": "Reception hall with long tables under string lights"
+  },
+  {
+    "file": "03-aisle",
+    "width": 1280,
+    "height": 854,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 81784,
+    "description": "Ceremony aisle lined with rose arrangements"
+  },
+  {
+    "file": "04-rings",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 48960,
+    "description": "Two wedding rings tied with a satin ribbon"
+  },
+  {
+    "file": "05-bouquet",
+    "width": 780,
+    "height": 1280,
+    "thumbWidth": 292,
+    "thumbHeight": 480,
+    "bytes": 55728,
+    "description": "Bride holding a bouquet of roses and baby's breath"
+  },
+  {
+    "file": "06-hands",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 50616,
+    "description": "Hands with rings resting on the bouquet"
+  },
+  {
+    "file": "07-couple",
+    "width": 1280,
+    "height": 851,
+    "thumbWidth": 480,
+    "thumbHeight": 319,
+    "bytes": 66188,
+    "description": "The couple on a bench by the lake, seen from behind"
+  },
+  {
+    "file": "08-cake",
+    "width": 853,
+    "height": 1280,
+    "thumbWidth": 320,
+    "thumbHeight": 480,
+    "bytes": 38930,
+    "description": "White ruffle cake topped with roses"
+  },
+  {
+    "file": "09-champagne",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 78022,
+    "description": "Trays of champagne glasses"
+  },
+  {
+    "file": "10-candlelight",
+    "width": 1280,
+    "height": 853,
+    "thumbWidth": 480,
+    "thumbHeight": 320,
+    "bytes": 58864,
+    "description": "Candlelit table with ros\u00e9 and a small gift"
+  },
+  {
+    "file": "11-lights",
+    "width": 1280,
+    "height": 956,
+    "thumbWidth": 480,
+    "thumbHeight": 358,
+    "bytes": 71850,
+    "description": "Hanging bulbs over the reception tables"
+  },
+  {
+    "file": "12-shoes",
+    "width": 853,
+    "height": 1280,
+    "thumbWidth": 320,
+    "thumbHeight": 480,
+    "bytes": 24488,
+    "description": "Bridal shoes hanging by their heels"
+  }
+]

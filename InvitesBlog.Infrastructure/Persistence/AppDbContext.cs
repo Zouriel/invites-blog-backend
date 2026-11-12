@@ -609,6 +609,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Country).HasMaxLength(2);
             e.Property(x => x.TimeZone).HasMaxLength(64);
             e.Property(x => x.PushMuted).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.GuidanceTipsOff).HasDefaultValue(false);
+            e.Property(x => x.GuidanceSeen).HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
         });
 
         b.Entity<UserExternalLogin>(e =>

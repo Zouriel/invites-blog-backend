@@ -124,6 +124,7 @@ using (var scope = app.Services.CreateScope())
         await services.GetRequiredService<TemplateTypeSeeder>().SeedAsync();
         await services.GetRequiredService<RbacSeeder>().SeedAsync();
         await services.GetRequiredService<DesignFontSeeder>().SeedAsync();
+        await services.GetRequiredService<InvitesBlog.Infrastructure.Demo.DemoAssetSeeder>().SeedAsync();
     }
     catch (Exception ex)
     {
