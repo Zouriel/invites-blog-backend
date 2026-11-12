@@ -99,8 +99,9 @@ public sealed class FavouriteNoticeService(
                     theirs.Add(h);
                 }
                 if (theirs.Count == 0) continue;
+                // Grouped under the album; the next round of hearts replaces this one on the phone.
                 await sender.SendAsync(recipient, title, Body(theirs, names),
-                    new Dictionary<string, string> { ["path"] = $"/buckets/{bucket.Id}" }, ct);
+                    PushKinds.Data($"/buckets/{bucket.Id}", PushKinds.Hearts, bucket.Id.ToString(), $"hearts-{bucket.Id:N}"), ct);
                 sent++;
             }
 

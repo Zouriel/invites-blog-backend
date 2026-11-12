@@ -52,6 +52,12 @@ public sealed class FacePerson
     /// <summary>"Ignore my face": nothing of theirs is shown or kept except <see cref="Centroid"/>.</summary>
     public bool Ignored { get; set; }
 
+    /// <summary>When they opted out: the host is told (batched, never who) that someone did.</summary>
+    public DateTimeOffset? IgnoredAt { get; set; }
+
+    /// <summary>The account that opted out, when signed in: they aren't told about their own opt-out.</summary>
+    public Guid? IgnoredByUserId { get; set; }
+
     /// <summary>The average of the group's fingerprints (unit length), what a new face is compared with.</summary>
     public float[] Centroid { get; set; } = [];
 

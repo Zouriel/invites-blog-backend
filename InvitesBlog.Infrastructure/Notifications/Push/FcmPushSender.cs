@@ -23,7 +23,10 @@ public sealed class FcmPushSender(
 {
     public const string ClientName = "fcm";
 
-    /// <summary>The Android notification channel the app creates (MainActivity.kt); must match.</summary>
+    /// <summary>
+    /// The Android notification channel when a push names no kind; the app's manifest default (Push.kt). Each
+    /// kind's own channel comes from <see cref="Application.Push.PushKinds.AndroidChannel"/>.
+    /// </summary>
     public const string AndroidChannel = "events";
 
     private static readonly JsonSerializerOptions Json = new()
@@ -84,6 +87,8 @@ public sealed class FcmPushSender(
         HttpClient client, string projectId, string accessToken, DeviceToken device,
         string title, string body, IReadOnlyDictionary<string, string>? data, CancellationToken ct)
     {
+        var kind = data is not null && data.TryGetValue(Application.Push.PushKinds.KindKey, out var k) ? k : null;
+        var tag = data is not null && data.TryGetValue(Application.Push.PushKinds.CollapseKey, out var c) && !string.IsNullOrWhiteSpace(c) ? c : null;
         using var request = new HttpRequestMessage(HttpMethod.Post, $"v1/projects/{projectId}/messages:send")
         {
             Content = JsonContent.Create(new
@@ -93,8 +98,14 @@ public sealed class FcmPushSender(
                     token = device.Token,
                     notification = new { title, body },
                     data = data is { Count: > 0 } ? data : null,
-                    // High priority so a phone in Doze shows it now, on the app's own channel.
-                    android = new { priority = "HIGH", notification = new { channel_id = AndroidChannel } },
+                    // High priority so a phone in Doze shows it now, on the kind's own channel (one the
+                    // installed app doesn't have yet falls back to the manifest's default). A tag replaces the
+                    // notification with the same tag already showing.
+                    android = new
+                    {
+                        priority = "HIGH",
+                        notification = new { channel_id = kind is null ? AndroidChannel : Application.Push.PushKinds.AndroidChannel(kind), tag },
+                    },
                 },
             }, options: Json),
         };

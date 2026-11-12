@@ -28,6 +28,12 @@ public interface IFeedService
 {
     Task<FeedPageDto> FeedAsync(int skip, int take, CancellationToken ct = default);
     Task<IReadOnlyList<FeedCommentDto>> CommentsAsync(Guid campaignId, CancellationToken ct = default);
+
+    /// <summary>
+    /// One event's post, as the feed shows it: what a tapped comment notification opens. Not found when the
+    /// person can't see it (not involved, a save the date, or taken out of the feed for them).
+    /// </summary>
+    Task<FeedPostDto> PostAsync(Guid campaignId, CancellationToken ct = default);
     Task<FeedCommentDto> AddCommentAsync(Guid campaignId, AddFeedCommentRequest req, CancellationToken ct = default);
     Task DeleteCommentAsync(Guid campaignId, Guid commentId, CancellationToken ct = default);
     Task<LikeStateDto> SetPostLikeAsync(Guid campaignId, SetLikeRequest req, CancellationToken ct = default);
@@ -132,6 +138,27 @@ public sealed class FeedService(
         return new FeedPageDto(posts, skip + page.Count < ordered.Count);
     }
 
+    public async Task<FeedPostDto> PostAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var me = await MeAsync(ct);
+        var involved = await InvolvedAsync(me, ct);
+        var campaign = involved.TryGetValue(campaignId, out var role) ? await campaigns.GetByIdAsync(campaignId, ct) : null;
+        // The same rules as the feed itself.
+        var view = await ViewAsync(ct);
+        if (campaign is null || campaign.Status == CampaignStatus.Cancelled || campaign.Kind == CampaignKind.SaveTheDate
+            || (role < FeedRole.Manager && (campaign.PostHiddenAt is not null || view.HidesPost(campaign.Id, campaign.CreatedByUserId))))
+            throw new NotFoundException("That post isn't in your feed.");
+
+        var activity = campaign.CreatedAt;
+        var lastPhoto = await photos.Query().Where(p => p.CampaignId == campaignId && p.DeletedAt == null)
+            .MaxAsync(p => (DateTimeOffset?)p.CreatedAt, ct);
+        var lastComment = await comments.Query().Where(c => c.CampaignId == campaignId && c.DeletedAt == null)
+            .MaxAsync(c => (DateTimeOffset?)c.CreatedAt, ct);
+        if (lastPhoto > activity) activity = lastPhoto.Value;
+        if (lastComment > activity) activity = lastComment.Value;
+        return await DescribeAsync(me, campaign, role, activity, ct, view);
+    }
+
     public async Task<IReadOnlyList<FeedCommentDto>> CommentsAsync(Guid campaignId, CancellationToken ct = default)
     {
         var me = await MeAsync(ct);
@@ -160,6 +187,8 @@ public sealed class FeedService(
             throw new BusinessRuleException($"Keep a comment under {MaxCommentLength} characters.", "comment_too_long");
         ObjectionableText.Check(body);
 
+        // The comment they pressed reply on, before replies are folded into its thread below.
+        var repliedTo = req.ParentId;
         if (req.ParentId is { } parentId)
         {
             var parent = await comments.Query()
@@ -182,7 +211,7 @@ public sealed class FeedService(
         };
         await comments.AddAsync(comment, ct);
         await uow.SaveChangesAsync(ct);
-        push.Enqueue(new CommentAdded(comment.Id, me.Id));
+        push.Enqueue(new CommentAdded(comment.Id, me.Id, repliedTo));
 
         return (await DescribeCommentsAsync(me, campaign, role, [comment], ct))[0];
     }

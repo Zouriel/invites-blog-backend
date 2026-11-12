@@ -70,7 +70,8 @@ public sealed class FaceGroupingService(
     IUnitOfWork uow,
     IFaceAnalyzer? analyzer = null,
     IRepository<AuditLog>? audit = null,
-    Plans.IPlanService? plans = null) : IFaceGroupingService
+    Plans.IPlanService? plans = null,
+    Push.IPushQueue? push = null) : IFaceGroupingService
 {
 
     public bool Available => analyzer?.Available ?? false;
@@ -119,6 +120,11 @@ public sealed class FaceGroupingService(
             bucket.FaceGroupingOn = true;
             bucket.FaceGroupingConfirmedAt = now;
             bucket.FaceGroupingConfirmedBy = by;
+            // The host hears once when this switch-on's first pass is done (FaceNoticeService), and gets fresh
+            // warnings before it ends.
+            bucket.FacesReadyPushedAt = null;
+            bucket.FacesEndNoticeFor = null;
+            bucket.FacesEndNoticeStage = 0;
             bucket.UpdatedAt = now;
             buckets.Update(bucket);
 
@@ -294,6 +300,7 @@ public sealed class FaceGroupingService(
             await ClearAsync(bucket.Id, ct);
             await AuditAsync("faces.expired", bucket, bucket.Id, "retention", new { idleDays = (int)idle.TotalDays }, ct);
             await uow.SaveChangesAsync(ct);
+            push?.Enqueue(new Push.FacesSwitchedOff(bucket.Id, Push.FacesOffReason.Idle));
             expired++;
         }
         return expired;
@@ -314,6 +321,7 @@ public sealed class FaceGroupingService(
             await ClearAsync(bucket.Id, ct);
             await AuditAsync("faces.plan_ended", bucket, bucket.Id, "plan", new { plan = plan.Kind.ToString() }, ct);
             await uow.SaveChangesAsync(ct);
+            push?.Enqueue(new Push.FacesSwitchedOff(bucket.Id, Push.FacesOffReason.PlanEnded));
             expired++;
         }
         return expired;
@@ -328,6 +336,8 @@ public sealed class FaceGroupingService(
         person.Ignored = true;
         person.Name = null;
         person.UpdatedAt = DateTimeOffset.UtcNow;
+        person.IgnoredAt = person.UpdatedAt;
+        person.IgnoredByUserId = Guid.TryParse(actor, out var by) ? by : null;
         people.Update(person);
         faces.RemoveRange(await faces.Query(tracking: true).Where(f => f.PersonId == personId).ToListAsync(ct));
         await AuditAsync("faces.opt_out", null, person.BucketId, actor, new { }, ct);

@@ -18,6 +18,12 @@ public sealed class FeedController(IFeedService feed) : BaseApiController
     public async Task<IActionResult> Feed([FromQuery] int skip = 0, [FromQuery] int take = 10, CancellationToken ct = default) =>
         Success(await feed.FeedAsync(skip, take, ct));
 
+    /// <summary>One post, as the feed shows it: what a comment notification opens.</summary>
+    [HttpGet("{campaignId:guid}")]
+    [HasPermission(Permissions.Inbox.Read)]
+    public async Task<IActionResult> Post(Guid campaignId, CancellationToken ct) =>
+        Success(await feed.PostAsync(campaignId, ct));
+
     [HttpGet("{campaignId:guid}/comments")]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> Comments(Guid campaignId, CancellationToken ct) =>

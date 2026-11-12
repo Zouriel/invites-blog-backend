@@ -50,7 +50,15 @@ public sealed record AccountDto(
     /// </summary>
     string? Country = null,
     /// <summary>IANA time zone ("Europe/London"), the default for new events; null until the person sets one.</summary>
-    string? TimeZone = null);
+    string? TimeZone = null,
+    /// <summary>Kinds of phone notification turned off in the app: some of "replies", "comments", "photos", "hearts", "reminders".</summary>
+    IReadOnlyList<string>? MutedNotifications = null);
+
+/// <summary>
+/// The kinds of phone notification to turn off (the rest are on): any of "replies", "comments", "photos",
+/// "hearts", "reminders". Anything else is ignored.
+/// </summary>
+public sealed record SetNotificationsRequest(IReadOnlyList<string>? Muted);
 
 /// <summary>
 /// The account's region settings. A field left out (null) is left as it is; an empty string clears it.

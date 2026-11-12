@@ -20,7 +20,7 @@ public sealed class PushCollection : ICollectionFixture<PostgresApiFixture>;
 /// queued pushes are sent by draining the worker's line, as the running worker would.
 /// </summary>
 [Collection("push")]
-public sealed class PushNotificationTests(PostgresApiFixture api)
+public sealed partial class PushNotificationTests(PostgresApiFixture api)
 {
     private sealed record Person(Guid Id, string Email, string Name, string Token);
 

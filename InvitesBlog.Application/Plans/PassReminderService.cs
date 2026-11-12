@@ -25,7 +25,8 @@ public sealed class PassReminderService(
     IPassOfferService offers,
     IEmailSender email,
     IConfiguration config,
-    IUnitOfWork uow) : IPassReminderService
+    IUnitOfWork uow,
+    IRepository<MediaBucket>? buckets = null) : IPassReminderService
 {
     public static readonly TimeSpan MonthBefore = TimeSpan.FromDays(30);
     public static readonly TimeSpan WeekBefore = TimeSpan.FromDays(7);
@@ -55,8 +56,9 @@ public sealed class PassReminderService(
 
             var offer = await offers.ForCampaignAsync(c.Id, ct);
             var passName = c.EventPass == EventPassKind.Platinum ? "Platinum pass" : "Gold pass";
+            var facesOn = buckets is not null && await buckets.Query().AnyAsync(b => b.CampaignId == c.Id && b.FaceGroupingOn, ct);
             await email.SendAsync(PassEmails.EndingSoon(to, c.Title, passName, c.EventPassUntil!.Value,
-                offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}", c.TimeZone), ct);
+                offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}", c.TimeZone, facesOn), ct);
             sent++;
         }
         if (due.Count > 0) await uow.SaveChangesAsync(ct);

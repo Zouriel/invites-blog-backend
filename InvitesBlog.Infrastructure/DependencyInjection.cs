@@ -263,8 +263,11 @@ public static class DependencyInjection
                 var senders = new List<IPushSender>();
                 if (fcmOn) senders.Add(sp.GetRequiredService<Notifications.Push.FcmPushSender>());
                 if (apnsSettings.IsConfigured) senders.Add(sp.GetRequiredService<Notifications.Push.ApnsPushSender>());
-                return new Notifications.Push.CompositePushSender(senders,
-                    sp.GetRequiredService<ILogger<Notifications.Push.CompositePushSender>>());
+                // Whatever the account muted in the app is dropped before any service is called.
+                return new Notifications.Push.MutingPushSender(
+                    new Notifications.Push.CompositePushSender(senders,
+                        sp.GetRequiredService<ILogger<Notifications.Push.CompositePushSender>>()),
+                    sp.GetRequiredService<Application.Abstractions.Persistence.IRepository<Domain.Entities.AppUser>>());
             });
             services.AddSingleton<Application.Push.IPushQueue>(sp => sp.GetRequiredService<Notifications.Push.PushQueue>());
         }

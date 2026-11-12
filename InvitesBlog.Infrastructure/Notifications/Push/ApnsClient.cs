@@ -100,24 +100,33 @@ public sealed class ApnsClient : IDisposable
             .Replace("-----BEGIN PRIVATE KEY-----", "").Replace("-----END PRIVATE KEY-----", "")
             .Where(c => !char.IsWhiteSpace(c)).ToArray());
 
-    /// <summary>The JSON Apple wants: the alert under "aps", and each data entry at the top level.</summary>
+    /// <summary>
+    /// The JSON Apple wants: the alert under "aps", and each data entry at the top level. A <c>thread</c> in the
+    /// data groups the phone's notifications about one event or album (aps thread-id); hearts arrive quietly
+    /// (interruption-level passive: listed, no sound, screen stays dark).
+    /// </summary>
     public static string Payload(string title, string body, IReadOnlyDictionary<string, string>? data)
     {
-        var root = new Dictionary<string, object>
+        var aps = new Dictionary<string, object>
         {
-            ["aps"] = new Dictionary<string, object>
-            {
-                ["alert"] = new Dictionary<string, string> { ["title"] = title, ["body"] = body },
-                ["sound"] = "default",
-            },
+            ["alert"] = new Dictionary<string, string> { ["title"] = title, ["body"] = body },
         };
+        var kind = data is not null && data.TryGetValue(Application.Push.PushKinds.KindKey, out var kindValue) ? kindValue : null;
+        if (kind == Application.Push.PushKinds.Hearts) aps["interruption-level"] = "passive";
+        else aps["sound"] = "default";
+        if (data is not null && data.TryGetValue(Application.Push.PushKinds.ThreadKey, out var thread) && !string.IsNullOrWhiteSpace(thread))
+            aps["thread-id"] = thread;
+        var root = new Dictionary<string, object> { ["aps"] = aps };
         if (data is not null)
             foreach (var (k, v) in data)
                 if (k != "aps") root[k] = v;
         return JsonSerializer.Serialize(root);
     }
 
-    public async Task<ApnsOutcome> SendAsync(string deviceToken, bool sandbox, string payloadJson, CancellationToken ct)
+    /// <summary>Apple's limit for apns-collapse-id.</summary>
+    public const int MaxCollapseIdBytes = 64;
+
+    public async Task<ApnsOutcome> SendAsync(string deviceToken, bool sandbox, string payloadJson, CancellationToken ct, string? collapseId = null)
     {
         var signer = sandbox ? _sandbox : _production;
         if (signer is null) return ApnsOutcome.NotConfigured;
@@ -133,6 +142,9 @@ public sealed class ApnsClient : IDisposable
         request.Headers.TryAddWithoutValidation("apns-topic", _topic);
         request.Headers.TryAddWithoutValidation("apns-push-type", "alert");
         request.Headers.TryAddWithoutValidation("apns-priority", "10");
+        // A newer notification with the same key replaces the one already on the phone (a changed answer, say).
+        if (!string.IsNullOrWhiteSpace(collapseId) && Encoding.UTF8.GetByteCount(collapseId) <= MaxCollapseIdBytes)
+            request.Headers.TryAddWithoutValidation("apns-collapse-id", collapseId);
         // A day: an invitation or a reply is still worth hearing about after a phone was off overnight.
         request.Headers.TryAddWithoutValidation("apns-expiration",
             _clock.GetUtcNow().AddDays(1).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));

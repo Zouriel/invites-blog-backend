@@ -20,6 +20,9 @@ public sealed class Invite
     /// </summary>
     public DateTimeOffset? FirstEmailedAt { get; set; }
     public DateTimeOffset? RespondedAt { get; set; }
+
+    /// <summary>When the guest's phone was reminded the day before the event (EventReminderService); once.</summary>
+    public DateTimeOffset? ReminderPushedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 

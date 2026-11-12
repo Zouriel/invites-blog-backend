@@ -22,6 +22,10 @@ builder.Services.AddInvitesBlogApi(builder.Configuration);
 builder.Services.AddHostedService<PhotoDigestService>();
 // Hearts in an album, batched to one push per album per quiet period. Exactly one host, like the digest.
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.FavouriteNoticeService>();
+// Phone notifications that come from sweeps rather than an action (each in this host only, so two never race).
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.AlbumPhotoNoticeService>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.EventReminderService>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.FaceNoticeService>();
 // Emails organisers as a pass event's photo cover runs out, and removes the photos 90 days after.
 // Free events have no end and are never touched.
 builder.Services.AddHostedService<MediaRetentionService>();

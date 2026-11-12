@@ -66,4 +66,7 @@ public sealed record FcmRequest(string Url, string? Authorization, string Token,
     public string Title => Message.GetProperty("notification").GetProperty("title").GetString()!;
     public string Body => Message.GetProperty("notification").GetProperty("body").GetString()!;
     public string Path => Message.GetProperty("data").GetProperty("path").GetString()!;
+    public string? Data(string key) => Message.GetProperty("data").TryGetProperty(key, out var v) ? v.GetString() : null;
+    public string? Channel => Message.GetProperty("android").GetProperty("notification").GetProperty("channel_id").GetString();
+    public string? Tag => Message.GetProperty("android").GetProperty("notification").TryGetProperty("tag", out var v) ? v.GetString() : null;
 }

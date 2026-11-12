@@ -43,6 +43,9 @@ public interface IAccountService
     /// <summary>The signed-in account.</summary>
     Task<AccountDto> MeAsync(CancellationToken ct = default);
 
+    /// <summary>Which kinds of phone notification the account turned off in the app; the push senders honour it.</summary>
+    Task<AccountDto> SetNotificationsAsync(SetNotificationsRequest req, CancellationToken ct = default);
+
     /// <summary>Sets the account's country and/or time zone.</summary>
     Task<AccountDto> UpdateSettingsAsync(UpdateAccountSettingsRequest req, CancellationToken ct = default);
 
