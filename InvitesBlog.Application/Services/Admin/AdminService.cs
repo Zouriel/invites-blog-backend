@@ -241,11 +241,9 @@ public sealed class AdminService(
             ?? throw new NotFoundException("That account no longer exists.");
 
         var wasActive = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-        // One end date serves both plans, and a venue's events count their lapse from it; switching
-        // straight across would overwrite the date the venue's photos are being kept by.
-        if (wasActive && tier != SubscriptionTier.None && user.SubscriptionTier != tier)
-            throw new BusinessRuleException(
-                $"End their {user.SubscriptionTier} plan first (choose None), then give them {tier}.", "tier_switch");
+        // Switching straight from Premium to Venue (or back) is allowed: the old plan ends now and the new
+        // one starts. Doing it as None then the new plan left exactly the same data, so refusing the
+        // direct switch protected nothing (owner hit it, 2026-11-12).
         if (tier == SubscriptionTier.None)
         {
             if (wasActive) user.SubscriptionEndsAt = now;
