@@ -18,7 +18,7 @@ public static class AppStoreCatalog
 
     /// <summary>
     /// The subscription group, one at a time. Levels in App Store Connect, highest first: venue_monthly (Studio),
-    /// premium_ai_monthly (Premium with the AI designer), premium_monthly. Up is at once, down at the next renewal.
+    /// photographer_monthly (Photographer, 2026-11-13), premium_ai_monthly (Premium with the AI designer), premium_monthly. Up is at once, down at the next renewal.
     /// </summary>
     public static IReadOnlyList<string> Subscriptions { get; } =
         All.Where(p => p.IsSubscription).Select(p => p.Id).ToList();
@@ -28,6 +28,7 @@ public static class AppStoreCatalog
     {
         Domain.Enums.SubscriptionTier.Premium => "premium_monthly",
         Domain.Enums.SubscriptionTier.Venue => "venue_monthly",
+        Domain.Enums.SubscriptionTier.Photographer => "photographer_monthly",
         _ => null,
     };
 

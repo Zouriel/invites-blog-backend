@@ -53,6 +53,21 @@ public class PriceBookTests
         Assert.Equal((80m, 90m), (p.PremiumMonthly, p.DesignerAiMonthly));
     }
 
+    /// <summary>Production's saved price list predates Photographer (2026-11-13): it reads 540 until an admin saves another.</summary>
+    [Fact]
+    public async Task A_row_saved_before_photographer_reads_it_at_540_and_a_saved_one_wins()
+    {
+        var before = new AppSetting { Key = PriceBook.Key, ValueJson = """{"GoldPass":249,"PremiumMonthly":77,"DesignerAiMonthly":77}""" };
+        var old = await Sut(before).CurrentAsync();
+        Assert.Equal(540m, old.PhotographerMonthly);
+        Assert.Equal(249m, old.GoldPass);
+        PriceBook.ClearCache();
+
+        var saved = new AppSetting { Key = PriceBook.Key, ValueJson = """{"PhotographerMonthly":600}""" };
+        Assert.Equal(600m, (await Sut(saved).CurrentAsync()).PhotographerMonthly);
+        Assert.Contains("Photographer a month must be more than 0.", (Prices.Defaults with { PhotographerMonthly = 0m }).Problems());
+    }
+
     [Fact]
     public void An_ai_designer_price_of_nothing_cannot_be_saved()
     {

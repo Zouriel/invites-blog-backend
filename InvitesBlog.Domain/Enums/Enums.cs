@@ -89,6 +89,8 @@ public enum PaymentKind
     PremiumAiMonthly,
     /// <summary>The AI designer added to a running Premium for the rest of its paid month (prorated).</summary>
     DesignerAiAdd,
+    /// <summary>Photographer, a month (owner, 2026-11-13: $35, MVR 540).</summary>
+    PhotographerMonthly,
 }
 
 public enum PaymentStatus
@@ -179,6 +181,21 @@ public enum SubscriptionTier
     /// lasts, and the account's picture and name on its albums, QR cards and posts.
     /// </summary>
     Venue = 3,
+    /// <summary>
+    /// Photographer (owner, 2026-11-13): everything Studio gives (10 GB events, no mark, face grouping, kept while
+    /// it lasts, the account's badge, the portfolio) except the AI designer. See <see cref="SubscriptionTiers"/>.
+    /// </summary>
+    Photographer = 4,
+}
+
+/// <summary>Questions about a plan's tier that more than one tier answers yes to.</summary>
+public static class SubscriptionTiers
+{
+    /// <summary>
+    /// Studio (Venue) or Photographer: the account plans that lift every event the account organises to 10 GB under
+    /// its own picture and name, and come with the portfolio. Only the AI designer tells them apart (Studio has it).
+    /// </summary>
+    public static bool IsStudioClass(SubscriptionTier tier) => tier is SubscriptionTier.Venue or SubscriptionTier.Photographer;
 }
 
 /// <summary>

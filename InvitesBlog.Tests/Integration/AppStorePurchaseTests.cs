@@ -758,7 +758,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     public async Task An_account_with_no_plan_is_offered_premium_and_studio_and_a_studio_subscription_gives_studio()
     {
         var user = await UserAsync();
-        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], await AppleOffersAsync(user));
 
         var expiry = DateTimeOffset.UtcNow.AddDays(30);
         var (jws, original) = Subscribed(await TokenAsync(user, "venue_monthly", null), expiry, product: "venue_monthly");
@@ -776,7 +776,34 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         // the AI designer.
         using var doc = JsonDocument.Parse(await api.Client(user.Token).GetStringAsync("/api/billing"));
         Assert.Equal("app_store", doc.RootElement.GetProperty("data").GetProperty("account").GetProperty("store").GetString());
-        Assert.Equal(["premium_monthly", "premium_ai_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly"], await AppleOffersAsync(user));
+    }
+
+    /// <summary>
+    /// Photographer (owner, 2026-11-13) in the same group, between Premium and Studio: a subscription gives Photographer,
+    /// the other three are the moves left, and moving up to Studio makes the account Studio (never both).
+    /// </summary>
+    [PostgresFact]
+    public async Task A_photographer_subscription_gives_photographer_and_moving_up_to_studio_makes_it_studio()
+    {
+        var user = await UserAsync();
+        var (jws, original) = Subscribed(await TokenAsync(user, "photographer_monthly", null), DateTimeOffset.UtcNow.AddDays(30), product: "photographer_monthly");
+        var (status, body) = await RedeemAsync(user, jws);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("photographer_monthly", body.Data!.ProductId);
+        Assert.Equal(SubscriptionTier.Photographer, (await AccountAsync(user.Id)).SubscriptionTier);
+        Assert.Equal(PaymentKind.PhotographerMonthly, Assert.Single(await PaymentsAsync(user.Id)).Kind);
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await AppleOffersAsync(user));
+
+        var next = DateTimeOffset.UtcNow.AddDays(31);
+        var upgrade = Renewed(original, next, product: "venue_monthly", token: await TokenAsync(user, "venue_monthly", null));
+        Assert.True((await NotifyAsync(Notification("DID_CHANGE_RENEWAL_PREF", upgrade, "UPGRADE"))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Venue, u.SubscriptionTier);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(next)), u.SubscriptionEndsAt);
+        Assert.Equal([PaymentKind.PhotographerMonthly, PaymentKind.VenueMonthly], (await PaymentsAsync(user.Id)).Select(p => p.Kind));
     }
 
     /// <summary>
@@ -793,7 +820,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
 
         // Held through Apple: the moves within the group are on offer (the AI designer, or up to Studio), and the
         // app gets an intent for one.
-        Assert.Equal(["premium_ai_monthly", "venue_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_ai_monthly", "photographer_monthly", "venue_monthly"], await AppleOffersAsync(user));
         var upgradeToken = await TokenAsync(user, "venue_monthly", null);
 
         var next = DateTimeOffset.UtcNow.AddDays(30);
@@ -841,7 +868,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         Assert.Equal("app_store", ai.Source);
         Assert.Equal([PaymentKind.PremiumMonthly, PaymentKind.PremiumAiMonthly], (await PaymentsAsync(user.Id)).Select(p => p.Kind));
         // Now the moves are down to plain Premium, or up to Studio.
-        Assert.Equal(["premium_monthly", "venue_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_monthly", "photographer_monthly", "venue_monthly"], await AppleOffersAsync(user));
 
         using var doc = JsonDocument.Parse(await api.Client(user.Token).GetStringAsync("/api/auth/me"));
         var row = doc.RootElement.GetProperty("data").GetProperty("addOns")[0];

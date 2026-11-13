@@ -70,8 +70,8 @@ public sealed class GooglePlayPurchaseService(
             if (user is null) return new GooglePlayOffersDto(true, [], account, null);
             var hasPlan = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
                           && user.SubscriptionTier != SubscriptionTier.None;
-            // Premium (with or without the AI designer) or Studio (Venue), while the account has none.
-            if (!hasPlan) return new GooglePlayOffersDto(true, ["premium_monthly", "premium_ai_monthly", "venue_monthly"], account, null);
+            // Premium (with or without the AI designer), Photographer or Studio (Venue), while the account has none.
+            if (!hasPlan) return new GooglePlayOffersDto(true, ["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], account, null);
             // Premium held through Play: the AI designer on or off, by replacing the subscription (pricing 2026-11).
             var current = await CurrentSubscriptionAsync(me, now, ct);
             return new GooglePlayOffersDto(true, current switch

@@ -131,6 +131,21 @@ public class DesignAssistantServiceTests
         Assert.True((await Sut().GetAsync(_design)).Status.Allowed);
     }
 
+    /// <summary>Photographer is Studio without the AI designer (owner, 2026-11-13): refused, nothing sent to the model.</summary>
+    [Fact]
+    public async Task Photographer_may_not_use_it_and_is_told_why()
+    {
+        SetTier(SubscriptionTier.Photographer, DateTimeOffset.UtcNow.AddDays(10));
+
+        var chat = await Sut().GetAsync(_design);
+        Assert.False(chat.Status.Allowed);
+        Assert.Equal("photographer", chat.Status.Reason);
+        var e = await Assert.ThrowsAsync<ForbiddenException>(() => Sut().SendAsync(_design, Say("hi")));
+        Assert.Equal("assistant_premium_only", e.ErrorCode);
+        Assert.Contains("Photographer", e.Message);
+        Assert.Empty(_model.Requests);
+    }
+
     [Fact]
     public async Task Someone_elses_design_is_reported_missing()
     {

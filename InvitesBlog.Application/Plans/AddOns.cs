@@ -49,8 +49,20 @@ public static class AddOns
     public static bool PremiumActive(AppUser user, DateTimeOffset now) =>
         user.SubscriptionTier == SubscriptionTier.Premium && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
 
+    /// <summary>
+    /// Studio or Photographer in force (<see cref="SubscriptionTiers.IsStudioClass"/>): the portfolio, Download all,
+    /// the account's badge. Only the AI designer is Studio's alone (<see cref="VenueActive"/>).
+    /// </summary>
     public static bool StudioActive(AppUser user, DateTimeOffset now) =>
+        SubscriptionTiers.IsStudioClass(user.SubscriptionTier) && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+
+    /// <summary>Studio itself (tier Venue) in force, which has the AI designer included; Photographer doesn't.</summary>
+    public static bool VenueActive(AppUser user, DateTimeOffset now) =>
         user.SubscriptionTier == SubscriptionTier.Venue && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+
+    /// <summary>Photographer in force: Studio without the AI designer (owner, 2026-11-13).</summary>
+    public static bool PhotographerActive(AppUser user, DateTimeOffset now) =>
+        user.SubscriptionTier == SubscriptionTier.Photographer && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
 
     /// <summary>The add-on itself is in force: Premium is, and the add-on's paid time hasn't run out.</summary>
     public static bool DesignerAiActive(AppUser user, DateTimeOffset now) =>
@@ -58,14 +70,14 @@ public static class AddOns
 
     /// <summary>
     /// Whether the account may use the AI designer (the design assistant): Studio, or Premium with the add-on.
-    /// Admins are let in by their permission where it is checked.
+    /// Not Photographer (owner, 2026-11-13). Admins are let in by their permission where it is checked.
     /// </summary>
-    public static bool HasDesignerAi(AppUser user, DateTimeOffset now) => StudioActive(user, now) || DesignerAiActive(user, now);
+    public static bool HasDesignerAi(AppUser user, DateTimeOffset now) => VenueActive(user, now) || DesignerAiActive(user, now);
 
     /// <summary>The add-ons as the account and billing pages show them: one row per known add-on.</summary>
     public static IReadOnlyList<AccountAddOnDto> ForAccount(AppUser user, DateTimeOffset now, bool admin = false)
     {
-        if (admin || StudioActive(user, now)) return [new AccountAddOnDto(DesignerAi, true, false, null, true)];
+        if (admin || VenueActive(user, now)) return [new AccountAddOnDto(DesignerAi, true, false, null, true)];
         var a = Find(user, DesignerAi);
         if (!DesignerAiActive(user, now)) return [new AccountAddOnDto(DesignerAi, false, false, null)];
         // A store renews (or not) what its sync recorded; a card plan only renews when its card renews Premium.
@@ -124,7 +136,7 @@ public static class DownloadRules
 
     public const string Message = "Download more than 10 at once with Premium.";
 
-    /// <summary>The account itself may take any number: Premium or Studio in force.</summary>
+    /// <summary>The account itself may take any number: Premium, Photographer or Studio in force.</summary>
     public static bool AccountAllows(AppUser? user, DateTimeOffset now) =>
         user is not null && (AddOns.PremiumActive(user, now) || AddOns.StudioActive(user, now));
 

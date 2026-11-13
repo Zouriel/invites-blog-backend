@@ -374,12 +374,12 @@ public class PlanRulesTests
         var catalog = PlanCatalog.Describe();
 
         Assert.Equal("MVR", catalog.Currency);
-        Assert.Equal(["Free", "GoldPass", "PlatinumPass", "Premium", "Venue"], catalog.Plans.Select(p => p.Kind));
+        Assert.Equal(["Free", "GoldPass", "PlatinumPass", "Premium", "Photographer", "Venue"], catalog.Plans.Select(p => p.Kind));
         // Premium and Venue are monthly subscriptions; Venue is MVR 775 (about $50) since 2026-11-12, Premium 77
-        // since 2026-11-13 (the AI designer became an add-on).
-        Assert.Equal([0m, 199m, 499m, 77m, 775m], catalog.Plans.Select(p => p.Price));
-        Assert.Equal(["every event", "per event", "per event", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
-        Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, 10 * PlanCatalog.Gb],
+        // since 2026-11-13 (the AI designer became an add-on); Photographer MVR 540 ($35) since 2026-11-13.
+        Assert.Equal([0m, 199m, 499m, 77m, 540m, 775m], catalog.Plans.Select(p => p.Price));
+        Assert.Equal(["every event", "per event", "per event", "per month", "per month", "per month"], catalog.Plans.Select(p => p.Billing));
+        Assert.Equal([300 * PlanCatalog.Mb, 5 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 2 * PlanCatalog.Gb, 10 * PlanCatalog.Gb, 10 * PlanCatalog.Gb],
             catalog.Plans.Select(p => p.EventBytes));
         Assert.Equal(0, catalog.VenueDiscountPercent);
         Assert.Equal(150m, catalog.KeepPhotos.Price);

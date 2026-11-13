@@ -59,6 +59,9 @@ public sealed class AdminService(
             case "venue":
                 query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Venue);
                 break;
+            case "photographer":
+                query = query.Where(u => u.SubscriptionTier == SubscriptionTier.Photographer);
+                break;
         }
 
         var total = await query.CountAsync(ct);
@@ -230,7 +233,7 @@ public sealed class AdminService(
         Guid userId, SetSubscriptionRequest req, CancellationToken ct = default)
     {
         if (!Enum.TryParse<SubscriptionTier>(req.Tier?.Trim(), ignoreCase: true, out var tier) || !Enum.IsDefined(tier))
-            throw new BusinessRuleException("Choose None, Premium or Venue (Studio).", "tier_unknown");
+            throw new BusinessRuleException("Choose None, Premium, Photographer or Venue (Studio).", "tier_unknown");
 
         var now = DateTimeOffset.UtcNow;
         if (tier != SubscriptionTier.None && req.EndsAt is { } requested && requested <= now)
@@ -242,7 +245,7 @@ public sealed class AdminService(
             ?? throw new NotFoundException("That account no longer exists.");
 
         var wasActive = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-        // Switching straight from Premium to Venue (or back) is allowed: the old plan ends now and the new
+        // Switching straight between Premium, Photographer and Venue is allowed: the old plan ends now and the new
         // one starts. Doing it as None then the new plan left exactly the same data, so refusing the
         // direct switch protected nothing (owner hit it, 2026-11-12).
         if (tier == SubscriptionTier.None)

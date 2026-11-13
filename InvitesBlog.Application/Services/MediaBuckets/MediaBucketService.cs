@@ -887,7 +887,7 @@ public sealed class MediaBucketService(
             .SumAsync(b => b.UsedBytes, ct);
         if (eventUsed + incomingBytes > plan.EventBytes)
             throw new BusinessRuleException(
-                plan.Kind is PlanKind.PlatinumPass or PlanKind.Venue || plan.EventBytes >= PlanCatalog.PlatinumEventBytes
+                plan.Kind is PlanKind.PlatinumPass or PlanKind.Venue or PlanKind.Photographer || plan.EventBytes >= PlanCatalog.PlatinumEventBytes
                     ? $"This event's {Size(plan.EventBytes)} is full."
                     : plan.Kind == PlanKind.GoldPass
                         ? $"This event's {Size(plan.EventBytes)} is full. A Platinum pass gives it more room."
@@ -934,13 +934,13 @@ public sealed class MediaBucketService(
     {
         var me = RequireUser();
         var user = await users.GetByIdAsync(me, ct);
-        if (user is not { SubscriptionTier: SubscriptionTier.Venue }
+        if (user is null || !SubscriptionTiers.IsStudioClass(user.SubscriptionTier)
             || !PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, DateTimeOffset.UtcNow))
             return new StorageSummaryDto("None", null, 0, null);
 
         var mine = campaigns.Query().Where(c => c.CreatedByUserId == me).Select(c => c.Id);
         var used = await buckets.Query().Where(b => mine.Contains(b.CampaignId)).SumAsync(b => b.UsedBytes, ct);
-        return new StorageSummaryDto(SubscriptionTier.Venue.ToString(), null, used, user.DisplayName);
+        return new StorageSummaryDto(user.SubscriptionTier.ToString(), null, used, user.DisplayName);
     }
 
     private static string Size(long bytes) =>

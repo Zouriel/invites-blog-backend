@@ -430,7 +430,7 @@ public sealed class AccountService(
                 Relation: IsHost(c) ? "host" : "celebrant",
                 CanManage: IsHost(c) || celebrating.GetValueOrDefault(c.Id),
                 // For the badge only — the limits themselves are PlanService's, per event.
-                Plan: venue is not null ? "Venue"
+                Plan: venue is not null ? venue.Kind
                     : InvitesBlog.Application.Plans.EventPasses.Active(c, DateTimeOffset.UtcNow) switch
                     {
                         Domain.Enums.EventPassKind.Platinum => "PlatinumPass",

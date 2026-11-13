@@ -111,7 +111,7 @@ public sealed class AppStorePurchaseService(
         Guid? eventId = product.IsSubscription ? null : request.EventId
             ?? throw new AppStoreRefusedException("Say which event this is for.", "app_store_wrong_event", HttpStatusCode.BadRequest);
         if (product.IsSubscription && request.EventId is not null)
-            throw new AppStoreRefusedException("Premium and Studio are for the account, not an event.", "app_store_wrong_event", HttpStatusCode.BadRequest);
+            throw new AppStoreRefusedException("Plans are for the account, not an event.", "app_store_wrong_event", HttpStatusCode.BadRequest);
 
         var now = await OffersAsync(eventId, ct);
         if (!now.Products.Contains(product.Id))

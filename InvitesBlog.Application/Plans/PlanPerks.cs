@@ -17,6 +17,8 @@ public static class PlanPerks
     public const string FavouritesDownload = "Download all your Favourites at once";
     public const string DesignerCredit = "Your name on the invitations you design";
     public const string DesignerAiIncluded = "The AI designer included";
+    public const string Portfolio = "Your own portfolio page at invites.blog/@you";
+    public const string BadgeOnEvents = "Your picture and name on your events' albums";
 
     public static IReadOnlyList<string> For(PlanKind kind) => kind switch
     {
@@ -64,11 +66,24 @@ public static class PlanPerks
         PlanKind.Venue =>
         [
             $"{Size(PlanCatalog.VenueEventBytes)} for every event you organise",
-            "Your picture and name on your events' albums",
+            BadgeOnEvents,
+            Portfolio,
             NoMarkOnEvents,
             KeptWhileSubscribed,
             FacesOnEvents,
             DesignerAiIncluded,
+            DownloadAnywhere,
+            FavouritesDownload,
+        ],
+        // Studio without the AI designer (owner, 2026-11-13).
+        PlanKind.Photographer =>
+        [
+            $"{Size(PlanCatalog.VenueEventBytes)} for every event you organise",
+            BadgeOnEvents,
+            Portfolio,
+            NoMarkOnEvents,
+            KeptWhileSubscribed,
+            FacesOnEvents,
             DownloadAnywhere,
             FavouritesDownload,
         ],

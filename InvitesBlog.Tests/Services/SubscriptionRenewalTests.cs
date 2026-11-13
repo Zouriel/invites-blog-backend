@@ -250,6 +250,34 @@ public class SubscriptionRenewalTests
     }
 
     [Fact]
+    public async Task Photographer_renews_as_photographer_at_its_own_price()
+    {
+        Charges(WebhookEventKind.PaymentSucceeded);
+        _user.SubscriptionTier = SubscriptionTier.Photographer;
+        _user.AutoRenewKind = PaymentKind.PhotographerMonthly;
+
+        await Sut().RunOnceAsync(Now);
+
+        var payment = Assert.Single(_payments);
+        Assert.Equal(PaymentKind.PhotographerMonthly, payment.Kind);
+        Assert.Equal(Prices.Defaults.PhotographerMonthly, payment.Amount);
+        Assert.Equal(540m, payment.Amount);
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.Html.Contains("Photographer") || m.Subject.Contains("Photographer")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_photographer_renewal_on_an_account_moved_to_studio_isnt_charged()
+    {
+        _user.SubscriptionTier = SubscriptionTier.Venue;
+        _user.AutoRenewKind = PaymentKind.PhotographerMonthly;
+
+        await Sut().RunOnceAsync(Now);
+
+        Assert.Null(_user.AutoRenewKind);
+        Assert.Empty(_payments);
+    }
+
+    [Fact]
     public async Task A_plan_changed_by_hand_since_isnt_renewed_as_the_old_one()
     {
         _user.SubscriptionTier = SubscriptionTier.Venue;

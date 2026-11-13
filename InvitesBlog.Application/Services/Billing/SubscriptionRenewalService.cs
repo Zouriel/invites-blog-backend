@@ -86,7 +86,7 @@ public sealed class SubscriptionRenewalService(
         // Studio's year is retired: Studio became Premium, which renews by the month. The AI designer renews
         // as an add-on to Premium, decided below from the add-on itself.
         if (kind is PaymentKind.StudioYearly or PaymentKind.PremiumAiMonthly) kind = PaymentKind.PremiumMonthly;
-        var tier = kind == PaymentKind.VenueMonthly ? SubscriptionTier.Venue : SubscriptionTier.Premium;
+        var tier = BillingService.TierOf(kind) ?? SubscriptionTier.Premium;
         // Premium whose AI designer renews with it (not turned off, and not a carried-over one that ends with this
         // period): one charge for both, 77 + 77 (pricing 2026-11).
         // Only an add-on that runs to this period's end: one left from an earlier subscription doesn't come back.
@@ -103,8 +103,8 @@ public sealed class SubscriptionRenewalService(
 
         // A renewal already waiting at the gateway is finished there, not charged a second time.
         var pendingSince = now - GiveUpAfter;
-        var sameRenewal = kind == PaymentKind.VenueMonthly
-            ? new[] { PaymentKind.VenueMonthly }
+        var sameRenewal = kind is PaymentKind.VenueMonthly or PaymentKind.PhotographerMonthly
+            ? new[] { kind }
             : new[] { PaymentKind.PremiumMonthly, PaymentKind.PremiumAiMonthly };
         if (await payments.Query().AnyAsync(p => p.UserId == user.Id && p.AutoRenew && sameRenewal.Contains(p.Kind)
                 && p.Status == PaymentStatus.Pending && p.CreatedAt > pendingSince, ct))
@@ -131,6 +131,7 @@ public sealed class SubscriptionRenewalService(
         var price = kind switch
         {
             PaymentKind.VenueMonthly => p.VenueMonthly,
+            PaymentKind.PhotographerMonthly => p.PhotographerMonthly,
             PaymentKind.PremiumAiMonthly => p.PremiumMonthly + p.DesignerAiMonthly,
             _ => p.PremiumMonthly,
         };
@@ -205,6 +206,7 @@ public sealed class SubscriptionRenewalService(
     private static string PlanName(PaymentKind kind) => kind switch
     {
         PaymentKind.VenueMonthly => "Studio",
+        PaymentKind.PhotographerMonthly => "Photographer",
         PaymentKind.PremiumAiMonthly => "Premium with the AI designer",
         _ => "Premium",
     };
