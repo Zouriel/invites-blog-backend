@@ -27,6 +27,8 @@ public static class DependencyInjection
         services.AddSingleton(AppleWebSettings.From(config));
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<Controllers.AppleWebHandoffs>();
+        // invites.blog -> app.invites.blog sign-in handoff codes (60 s, one use, in memory).
+        services.AddSingleton<Controllers.SessionHandoffs>();
 
         // Every request is resolved into a permissioned principal by our scheme (full-RBAC model).
         services.AddAuthentication(AppAuthenticationHandler.SchemeName)
@@ -58,14 +60,14 @@ public static class DependencyInjection
         services.AddSingleton<Photos.ArchiveTickets>();
         services.AddScoped<Rendering.RenderedInvitations>();
 
-        // Two named origins, never a wildcard — which is also what makes AllowCredentials safe to
+        // The web app at app.invites.blog calls https://invites.blog/api for Sign in with Apple's start and
+        // redeem (their cookies live on the host Apple returns to), so it needs credentials across origins.
+        // Named origins, never a wildcard — which is also what makes AllowCredentials safe to
         // grant. It is needed by the contributor's admission cookie: in production the app and the
         // API share an origin and CORS never enters into it, but a browser pointed at the dev server
         // is talking cross-origin and drops a Set-Cookie it was not told to expect.
         services.AddCors(o => o.AddDefaultPolicy(p => p
-            .WithOrigins(
-                config.InviterBase(),
-                config.InviteeBase())
+            .WithOrigins(new[] { config.InviterBase(), config.AppBase(), config.InviteeBase() }.Distinct().ToArray())
             .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
         services.AddRateLimiter(options =>
@@ -99,6 +101,11 @@ public static class DependencyInjection
             // Sign in with Apple on the website: start, Apple's return and the redeem are three calls per
             // sign-in, so it has its own allowance rather than spending the code-senders' five.
             options.AddPolicy(Controllers.AppleWebSignInController.RateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(10) }));
+            // Moving a sign-in from invites.blog to app.invites.blog: one code and one redeem per move, so this
+            // is generous for a person and still caps guessing codes (32 random bytes) at nothing useful.
+            options.AddPolicy(Controllers.SessionHandoffController.RateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(10) }));
             options.AddPolicy("openlink", ctx => RateLimitPartition.GetFixedWindowLimiter(

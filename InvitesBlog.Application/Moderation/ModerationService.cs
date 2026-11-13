@@ -487,7 +487,7 @@ public sealed class ReportMailService(
             return;
         }
 
-        var queue = $"{Common.AppUrls.InviterBase(config)}/admin/reports";
+        var queue = $"{Common.AppUrls.AppBase(config)}/admin/reports";
         var rows = string.Concat(lines
             .Where(l => !string.IsNullOrWhiteSpace(l.Value))
             .Select(l => $"<p><strong>{WebUtility.HtmlEncode(l.Label)}:</strong> {WebUtility.HtmlEncode(l.Value)}</p>"));

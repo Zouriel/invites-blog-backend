@@ -51,7 +51,7 @@ public sealed class SubscriptionRenewalService(
     public static readonly TimeSpan GiveUpAfter = TimeSpan.FromDays(7);
     public const int MaxFailures = 3;
 
-    private string BillingLink => $"{config.InviterBase()}/billing";
+    private string BillingLink => $"{config.AppBase()}/billing";
 
     public async Task<int> RunOnceAsync(DateTimeOffset now, CancellationToken ct = default)
     {

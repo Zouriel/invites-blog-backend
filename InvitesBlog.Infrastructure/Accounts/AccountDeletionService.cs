@@ -484,7 +484,7 @@ public sealed class AccountDeletionService(
         foreach (var t in told.Where(t => !string.IsNullOrWhiteSpace(t.Email)))
         {
             var title = WebUtility.HtmlEncode(t.Title);
-            var link = $"{config.InviterBase()}/dashboard/{t.CampaignId}";
+            var link = $"{config.AppBase()}/dashboard/{t.CampaignId}";
             var how = t.HasAccount ? "It's in your events when you sign in." : "Sign up with this email address to open it.";
             try
             {

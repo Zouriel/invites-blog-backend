@@ -481,7 +481,7 @@ public sealed class MediaRetentionService(
     private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension,
         string? venueName = null, decimal? platinum = null)
     {
-        var baseUrl = config.InviterBase();
+        var baseUrl = config.AppBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
         var title = WebUtility.HtmlEncode(campaign.Title);
         // The day on the event's own clock (the server runs on UTC).

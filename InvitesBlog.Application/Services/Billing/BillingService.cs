@@ -389,7 +389,8 @@ public sealed class BillingService(
         await payments.AddAsync(payment, ct);
         await uow.SaveChangesAsync(ct);
 
-        var inviterBase = config.InviterBase();
+        // Back to the web app (app.invites.blog), where the review step and Billing live.
+        var inviterBase = config.AppBase();
         var back = string.IsNullOrWhiteSpace(req.ReturnPath) || !req.ReturnPath.StartsWith('/') || req.ReturnPath.StartsWith("//")
             ? "/billing" : req.ReturnPath;
         var session = await provider.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest(

@@ -294,7 +294,7 @@ public sealed class CampaignService(
         // finishing, and arrived again every time they touched the host-details step.
         if (currentUser.UserId is not null) return;
 
-        var inviterBase = config.InviterBase();
+        var inviterBase = config.AppBase();
         var resumeLink = $"{inviterBase}/create/{campaign.Id}/editor?resume={accessToken}";
         await email.SendAsync(new Application.Abstractions.EmailMessage(
             To: normEmail,

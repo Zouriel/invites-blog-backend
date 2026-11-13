@@ -659,7 +659,7 @@ public sealed class DesignService(
     /// <summary>Tells someone a designer made a template for them, and where to find it.</summary>
     private EmailMessage BuildMadeForYouEmail(string to, string designerName, string templateName)
     {
-        var inviterBase = config.InviterBase();
+        var inviterBase = config.AppBase();
         var link = $"{inviterBase}/my-templates?tab=requests";
         var safeDesigner = System.Net.WebUtility.HtmlEncode(designerName);
         var safeTpl = System.Net.WebUtility.HtmlEncode(templateName);

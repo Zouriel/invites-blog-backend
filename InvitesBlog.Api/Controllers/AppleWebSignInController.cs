@@ -144,7 +144,7 @@ public sealed class AppleWebSignInController(
             IsEssential = true,
         });
         // The fragment never reaches a server log or a Referer header.
-        return Redirect303($"{config.InviterBase()}/oauth/apple#code={Uri.EscapeDataString(handoff)}");
+        return Redirect303($"{config.AppBase()}/oauth/apple#code={Uri.EscapeDataString(handoff)}");
     }
 
     /// <summary>Something opened the return URL by hand: back to sign-in.</summary>
@@ -175,7 +175,7 @@ public sealed class AppleWebSignInController(
     }
 
     private IActionResult Fail(string reason) =>
-        Redirect303($"{config.InviterBase()}/login?appleError={Uri.EscapeDataString(Word(reason))}");
+        Redirect303($"{config.AppBase()}/login?appleError={Uri.EscapeDataString(Word(reason))}");
 
     /// <summary>303 so the browser follows with a GET, not a re-POST of Apple's form.</summary>
     private IActionResult Redirect303(string url)

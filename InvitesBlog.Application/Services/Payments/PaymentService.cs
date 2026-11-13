@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
+using InvitesBlog.Application.Common;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Payments;
 using InvitesBlog.Application.Exceptions.Campaigns;
@@ -37,7 +38,8 @@ public sealed class PaymentService(
 {
     private readonly ILogger logger = (ILogger?)log ?? NullLogger.Instance;
 
-    private string InviterBase => (config["Urls:InviterBase"] ?? "http://localhost:4200").TrimEnd('/');
+    /// <summary>The signed-in web app (app.invites.blog), where checkouts return to.</summary>
+    private string InviterBase => config.AppBase();
     private string WebhookSecret => config["Payments:WebhookSecret"] ?? "fake-webhook-secret";
 
     public async Task<CheckoutResponse> CheckoutAsync(Guid campaignId, CancellationToken ct = default)
@@ -191,9 +193,10 @@ public sealed class PaymentService(
         return home;
     }
 
-    /// <summary>The two apps' origins, as configured. The only hosts a return address may name.</summary>
+    /// <summary>The apps' origins, as configured. The only hosts a return address may name.</summary>
     private IEnumerable<string> AppOrigins =>
-        new[] { InviterBase, config["Urls:InviteeBase"] ?? "http://localhost:4201" }
+        // The web app, the public site (the same host until app.invites.blog split off) and the guest app.
+        new[] { InviterBase, config.InviterBase(), config.InviteeBase() }
             .Select(b => Uri.TryCreate(b, UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Authority) : null)
             .OfType<string>();
 

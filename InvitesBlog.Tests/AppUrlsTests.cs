@@ -34,4 +34,20 @@ public class AppUrlsTests
         Assert.Equal("https://invites.blog", config.InviterBase());
         Assert.Equal("https://me.invites.blog", config.InviteeBase());
     }
+
+    [Fact]
+    public void The_web_app_has_its_own_host_and_falls_back_to_the_site_when_none_is_set()
+    {
+        var split = Config(new()
+        {
+            ["Urls:InviterBase"] = "https://invites.blog",
+            ["Urls:AppBase"] = "https://app.invites.blog/",
+        });
+        var single = Config(new() { ["Urls:InviterBase"] = "https://staging.invites.blog" });
+
+        Assert.Equal("https://app.invites.blog", split.AppBase());
+        Assert.Equal("https://invites.blog", split.InviterBase());
+        Assert.Equal("https://staging.invites.blog", single.AppBase());
+        Assert.Equal("http://localhost:4200", Config(new()).AppBase());
+    }
 }
