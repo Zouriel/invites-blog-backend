@@ -10,6 +10,7 @@ using InvitesBlog.Application.Pricing;
 using InvitesBlog.Application.Services.Campaigns;
 using InvitesBlog.Domain.Entities;
 using InvitesBlog.Domain.Enums;
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json.Serialization;
@@ -177,7 +178,8 @@ public sealed class BillingService(
     Payments.IPaymentService? paymentService = null,
     IRepository<GooglePlayPurchase>? playPurchases = null,
     IRepository<AppStorePurchase>? appStorePurchases = null,
-    IRepository<CampaignCelebrant>? celebrants = null) : IBillingService
+    IRepository<CampaignCelebrant>? celebrants = null,
+    ILogger<BillingService>? logger = null) : IBillingService
 {
     private const int MaxListed = 50;
 
@@ -331,7 +333,7 @@ public sealed class BillingService(
     public async Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default)
     {
         var me = RequireUser();
-        var (kind, quantity, campaign, price, description, _) = await PriceAsync(me, req, ct);
+        var (kind, quantity, campaign, price, description, pricedFor) = await PriceAsync(me, req, ct);
         var now = DateTimeOffset.UtcNow;
         // What the card is charged, which is what the payment records and the gateway must confirm.
         var (amount, currency) = ChargeCurrency.For(config, price, (await priceBook.CurrentAsync(ct)).MvrPerUsd);
@@ -387,6 +389,9 @@ public sealed class BillingService(
             CreatedAt = now,
             TermsAcceptedAt = now,
             TermsVersion = LegalTerms.Version,
+            // The add-on is priced for the rest of the plan's month as it stands now; that month is what it buys,
+            // however late the payment completes (FulfilAsync).
+            PeriodEndsAt = kind == PaymentKind.DesignerAiAdd ? pricedFor?.SubscriptionEndsAt : null,
         };
         await payments.AddAsync(payment, ct);
         await uow.SaveChangesAsync(ct);
@@ -548,6 +553,13 @@ public sealed class BillingService(
             case PaymentKind.GoldExtension:
             case PaymentKind.PlatinumExtension:
                 if (campaign is null) break;
+                // Checked again here: checkout checked the pass the event had then, and a Gold extension paid
+                // after the event moved to Platinum must not lengthen the Platinum pass.
+                if (campaign.EventPass != (payment.Kind == PaymentKind.PlatinumExtension ? EventPassKind.Platinum : EventPassKind.Gold))
+                {
+                    logger?.LogWarning("Payment {PaymentId}: {Kind} paid for an event whose pass is now {Pass}; not applied", payment.Id, payment.Kind, campaign.EventPass);
+                    break;
+                }
                 raiseWindows = EventPasses.Extend(campaign, now);
                 break;
             case PaymentKind.KeepPhotos:
@@ -569,7 +581,13 @@ public sealed class BillingService(
                 // For the rest of the paid month (a month when Premium has no end), and with every card renewal
                 // after it while Premium renews by card.
                 var renewsByCard = account.AutoRenewKind is not null && account.SubscriptionEndsAt is not null;
-                AddOns.Set(account, AddOns.DesignerAi, account.SubscriptionEndsAt ?? now.AddMonths(1), renewsByCard, AddOnSource(payment));
+                // Up to the end of the month it was priced for (recorded at checkout), never a later month the
+                // plan renewed into while the payment waited; when that end has passed, as many days as were paid for.
+                var paidUntil = payment.PeriodEndsAt is { } priced
+                    ? (priced > now ? priced : now + (priced - payment.CreatedAt))
+                    : account.SubscriptionEndsAt ?? now.AddMonths(1);
+                var until = account.SubscriptionEndsAt is { } planEnd && planEnd < paidUntil ? planEnd : paidUntil;
+                AddOns.Set(account, AddOns.DesignerAi, until, renewsByCard, AddOnSource(payment));
                 break;
             }
             case PaymentKind.PremiumMonthly:

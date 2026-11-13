@@ -256,6 +256,10 @@ public sealed class CampaignService(
     public async Task UpdateInviterAsync(Guid id, UpdateInviterRequest req, string? accessToken, CancellationToken ct = default)
     {
         await inviterValidator.ValidateAndThrowAsync(req, ct);
+        // Who hosts the event decides who organises it (CampaignOwnershipService matches the host's email
+        // and phone), so only the organiser changes it: a celebrant given full access must not be able to
+        // make themselves the organiser by typing in their own details.
+        if (await ownership.AccessAsync(id, ct) != CampaignAccess.Organiser) throw new CampaignAccessDeniedException();
         var campaign = await LoadOwnedAsync(id, ct);
 
         var normEmail = req.Email.Trim().ToLowerInvariant();
@@ -276,7 +280,10 @@ public sealed class CampaignService(
             };
             await inviters.AddAsync(inviter, ct);
         }
-        else
+        // A host record is shared by every event booked with that email, and its phone and email give
+        // organiser access to all of them. Typing someone's email here must never change their record: the
+        // event is booked under it as it stands, and only its proven owner (see ProvesInviterAsync) edits it.
+        else if (await ProvesInviterAsync(inviter, normEmail, ct))
         {
             inviter.Name = req.Name;
             inviter.PhoneE164 = phone.E164 ?? req.Phone ?? string.Empty;
@@ -1147,6 +1154,18 @@ public sealed class CampaignService(
     {
         var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
         return template?.Visibility == TemplateVisibility.Imported;
+    }
+
+    /// <summary>
+    /// Whether the caller has proved they are this host: signed in to an account whose verified email is the
+    /// host's email, or whose verified phone is the host record's phone.
+    /// </summary>
+    private async Task<bool> ProvesInviterAsync(Inviter inviter, string normEmail, CancellationToken ct)
+    {
+        if (currentUser.UserId is not { } userId || await users.GetByIdAsync(userId, ct) is not { } me) return false;
+        if (!string.IsNullOrWhiteSpace(me.Email) && string.Equals(me.Email.Trim(), normEmail, StringComparison.OrdinalIgnoreCase)) return true;
+        return !string.IsNullOrWhiteSpace(me.PhoneE164) && !string.IsNullOrWhiteSpace(inviter.PhoneE164)
+               && string.Equals(me.PhoneE164.Trim(), inviter.PhoneE164.Trim(), StringComparison.Ordinal);
     }
 
     private async Task<Campaign> LoadOwnedAsync(Guid id, CancellationToken ct)

@@ -36,7 +36,7 @@ public sealed class SessionHandoffTests(AppHostFixture api)
     private sealed record Envelope<T>(T Data);
     private sealed record Account(Guid Id, string? Email);
     private sealed record AuthResult(string Token, Account Account);
-    private sealed record Handoff(string Code, int ExpiresInSeconds);
+    private sealed record Handoff(string Code, int ExpiresInSeconds, string? Cookie = null);
     private sealed record Start(string AuthorizeUrl);
 
     private async Task<AuthResult> SignedInAsync()
@@ -55,14 +55,21 @@ public sealed class SessionHandoffTests(AppHostFixture api)
     {
         var res = await api.Client(token).PostAsync("/api/auth/handoff", null);
         var body = await res.Content.ReadAsStringAsync();
-        return (res.StatusCode, res.IsSuccessStatusCode ? JsonSerializer.Deserialize<Envelope<Handoff>>(body, Web)!.Data : null);
+        if (!res.IsSuccessStatusCode) return (res.StatusCode, null);
+        // The browser keeps the binding cookie the API set and sends it back from the app host.
+        var cookie = res.Headers.TryGetValues("Set-Cookie", out var set)
+            ? set.Select(c => c.Split(';')[0]).FirstOrDefault(c => c.StartsWith(SessionHandoffController.BindingCookie + "="))
+            : null;
+        return (res.StatusCode, JsonSerializer.Deserialize<Envelope<Handoff>>(body, Web)!.Data with { Cookie = cookie });
     }
 
-    private async Task<(HttpStatusCode Status, AuthResult? Result)> RedeemAsync(string code)
+    private async Task<(HttpStatusCode Status, AuthResult? Result)> RedeemAsync(string code, string? cookie = null)
     {
-        // A different client from the one that issued it: the code is the whole credential, as it is when
-        // it arrives in another host's page.
-        var res = await api.Client().PostAsJsonAsync("/api/auth/handoff/redeem", new { code });
+        // A different client from the one that issued it, as when the code arrives in another host's page;
+        // only the binding cookie (when given) carries over, as the browser does.
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/auth/handoff/redeem") { Content = JsonContent.Create(new { code }) };
+        if (cookie is not null) req.Headers.Add("Cookie", cookie);
+        var res = await api.Client().SendAsync(req);
         var body = await res.Content.ReadAsStringAsync();
         return (res.StatusCode, res.IsSuccessStatusCode ? JsonSerializer.Deserialize<Envelope<AuthResult>>(body, Web)!.Data : null);
     }
@@ -77,7 +84,8 @@ public sealed class SessionHandoffTests(AppHostFixture api)
         Assert.Equal(60, handoff!.ExpiresInSeconds);
         Assert.True(handoff.Code.Length >= 40);
 
-        var moved = await RedeemAsync(handoff.Code);
+        Assert.NotNull(handoff.Cookie);
+        var moved = await RedeemAsync(handoff.Code, handoff.Cookie);
         Assert.Equal(HttpStatusCode.OK, moved.Status);
         Assert.Equal(site.Account.Id, moved.Result!.Account.Id);
         // The session it hands over is a working one.
@@ -85,11 +93,37 @@ public sealed class SessionHandoffTests(AppHostFixture api)
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
 
         // Once only.
-        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(handoff.Code)).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(handoff.Code, handoff.Cookie)).Status);
 
         Assert.Contains(api.Logs.Lines, l => l.Contains($"session handoff issued for account {site.Account.Id}"));
         Assert.Contains(api.Logs.Lines, l => l.Contains($"session handoff redeemed for account {site.Account.Id}"));
         Assert.DoesNotContain(api.Logs.Lines, l => l.Contains(handoff.Code) || l.Contains(moved.Result.Token) || l.Contains(site.Token));
+    }
+
+    [PostgresFact]
+    public async Task A_code_only_signs_in_the_browser_it_was_issued_to()
+    {
+        // Someone issues a code for their own account and puts it in a link for another person: that
+        // person's browser has no binding cookie (or a different one), so it is refused, and the code is spent.
+        var attacker = await SignedInAsync();
+        var (_, mine) = await IssueAsync(attacker.Token);
+        var (_, other) = await IssueAsync(attacker.Token);
+        Assert.NotNull(mine!.Cookie);
+        Assert.NotEqual(mine.Cookie, other!.Cookie);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(mine.Code)).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(other.Code, mine.Cookie)).Status);
+        // Both were spent by the refused tries.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(mine.Code, mine.Cookie)).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RedeemAsync(other.Code, other.Cookie)).Status);
+    }
+
+    [Fact]
+    public void The_binding_cookie_is_shared_with_the_app_subdomain_only()
+    {
+        Assert.Equal("invites.blog", SessionHandoffController.SharedCookieDomain("https://invites.blog", "https://app.invites.blog"));
+        Assert.Null(SessionHandoffController.SharedCookieDomain("https://invites.blog", "https://invites.blog"));
+        Assert.Null(SessionHandoffController.SharedCookieDomain("https://invites.blog", "https://evilinvites.blog"));
     }
 
     [PostgresFact]

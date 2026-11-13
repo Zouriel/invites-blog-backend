@@ -163,6 +163,7 @@ public sealed class AuthController(IAccountService accounts, IAccountDeletionSer
         Success(await accounts.RequestLinkCodeAsync(request, ct));
 
     [HttpPost("link/verify")]
+    [EnableRateLimiting(RateLimiting.RateLimitPolicies.OtpVerify)]
     [HasPermission(Permissions.Templates.Read)]
     public async Task<IActionResult> VerifyLink([FromBody] VerifyCodeRequest request, CancellationToken ct) =>
         Success(await accounts.VerifyLinkAsync(request, ct));

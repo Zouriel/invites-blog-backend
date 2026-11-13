@@ -502,7 +502,10 @@ public sealed class MediaBucketService(
         var isFirst = !await buckets.AnyAsync(b => b.CampaignId == eventId, ct);
         var eventDate = isFirst ? campaignDate : req.EventDate ?? campaignDate;
 
-        var bucket = NewBucket(userId, eventId, eventDate, windowDays);
+        // Owned by the event's organiser. A celebrant given full access may add an album, but must not end
+        // up owning it: owning an album outlives the access it came from (see OwnedAsync).
+        var bucket = NewBucket(
+            req.CampaignId is null ? userId : await OwnerForAsync(target, ct), eventId, eventDate, windowDays);
 
         var chosenName = req.Name?.Trim();
         if (!string.IsNullOrWhiteSpace(chosenName) && eventPlan.MaxBuckets > 1)
@@ -778,7 +781,7 @@ public sealed class MediaBucketService(
         // claimed has no account behind it, and an empty owner is correct there rather than an error.
         // As many days as the event's plan gives: one on Free, more with a pass or at a venue.
         var bucket = NewBucket(
-            campaign.CreatedByUserId ?? currentUser.UserId ?? Guid.Empty,
+            await OwnerForAsync(campaign, ct),
             campaignId, campaign.EventStartAt,
             WindowFor((await plans.ForCampaignAsync(campaignId, ct)).MaxWindowDays, EventDayWindow.MaxWindowDays));
 
@@ -1174,10 +1177,25 @@ public sealed class MediaBucketService(
 
         if (bucket is null) throw new NotFoundException("That album no longer exists.");
 
-        if (currentUser.UserId is { } me && bucket.OwnerUserId == me) return bucket;
-        if (await ownership.OwnsAsync(bucket.CampaignId, ct)) return bucket;
+        var access = await ownership.AccessAsync(bucket.CampaignId, ct);
+        if (access >= CampaignAccess.Manager) return bucket;
+        // The row's own owner, unless the event now says they are only a read-only celebrant of it (an album
+        // a celebrant made while they had full access stays theirs no longer than that access).
+        if (currentUser.UserId is { } me && bucket.OwnerUserId == me && access != CampaignAccess.Celebrant) return bucket;
 
         throw new ForbiddenException("That album isn't yours.");
+    }
+
+    /// <summary>
+    /// Who a new album on this event belongs to: the account that started the event; else the caller, but
+    /// only when they are its organiser (never a guest or celebrant who happens to be first to reach it);
+    /// else nobody yet (<see cref="Guid.Empty"/>), which the host's account claims later.
+    /// </summary>
+    private async Task<Guid> OwnerForAsync(Campaign campaign, CancellationToken ct)
+    {
+        if (campaign.CreatedByUserId is { } creator) return creator;
+        if (currentUser.UserId is { } me && await ownership.AccessAsync(campaign.Id, ct) == CampaignAccess.Organiser) return me;
+        return Guid.Empty;
     }
 
     private Guid RequireUser() =>

@@ -134,6 +134,23 @@ public class DesignerAiAddOnTests
         Assert.Equal(Soon, quote.PeriodEndsAt);
     }
 
+    [Fact]
+    public async Task Paid_after_premium_renewed_it_covers_only_the_month_it_was_priced_for()
+    {
+        OnPremium();
+        await Service().CheckoutAsync(Item("designer-ai-add"));
+        var payment = _payments.Last();
+        Assert.Equal(Soon, payment.PeriodEndsAt);
+
+        // The payment waits; meanwhile the card renews Premium a month further.
+        _user.SubscriptionEndsAt = Soon.AddMonths(1);
+        payment.Status = PaymentStatus.Paid;
+        await Service().FulfilAsync(payment.Id);
+
+        var ai = Assert.Single(_user.AddOns, a => a.Key == AddOns.DesignerAi);
+        Assert.Equal(Soon, ai.EndsAt);
+    }
+
     // ----- Who may buy what ---------------------------------------------------------------------
 
     [Fact]

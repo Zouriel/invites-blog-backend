@@ -29,8 +29,7 @@ public static class ServerBinder
 
     private static readonly JsonSerializerOptions PayloadJson = new()
     {
-        // The payload is embedded in a <script> block; keeping non-ASCII escaped means no character
-        // in a guest's name can terminate the element early.
+        // The payload is embedded in a <script> block; "<" is escaped where it is written (see Bind).
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
@@ -298,7 +297,10 @@ public static class ServerBinder
             payload.SetAttribute("type", "application/json");
             (doc.Body ?? doc.DocumentElement).AppendChild(payload);
         }
-        payload.TextContent = data.ToJsonString(PayloadJson);
+        // A script element ends at the first "</script" whatever is inside it, and the relaxed encoder above
+        // leaves "<" as it is, so a title or guest name could close the block and start a script of its own.
+        // In JSON "<" only ever appears inside a string, where \u003c reads back as the same character.
+        payload.TextContent = data.ToJsonString(PayloadJson).Replace("<", "\\u003c");
         // Says the DOM is already bound, so nothing downstream re-applies it.
         payload.SetAttribute("data-bound", "1");
 

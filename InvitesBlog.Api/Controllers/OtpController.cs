@@ -22,6 +22,7 @@ public sealed class OtpController(IOtpService otp) : BaseApiController
         Success(await otp.RequestAsync(req, ct: ct));
 
     [HttpPost("verify")]
+    [EnableRateLimiting(RateLimiting.RateLimitPolicies.OtpVerify)]
     [AllowAnonymous]
     [HasPermission(Permissions.Otp.Verify)]
     public async Task<IActionResult> Verify([FromBody] VerifyOtpRequest req, CancellationToken ct) =>

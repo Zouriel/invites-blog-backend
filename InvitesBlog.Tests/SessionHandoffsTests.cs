@@ -20,10 +20,10 @@ public sealed class SessionHandoffsTests
     {
         var store = new SessionHandoffs(new Clock());
         var session = Session();
-        var code = store.Add(session)!;
+        var code = store.Add(session, "bind")!;
 
-        Assert.Same(session, store.Take(code));
-        Assert.Null(store.Take(code));
+        Assert.Same(session, store.Take(code, "bind"));
+        Assert.Null(store.Take(code, "bind"));
         Assert.Equal(0, store.Count);
     }
 
@@ -32,13 +32,13 @@ public sealed class SessionHandoffsTests
     {
         var clock = new Clock();
         var store = new SessionHandoffs(clock);
-        var onTime = store.Add(Session("a"))!;
-        var late = store.Add(Session("b"))!;
+        var onTime = store.Add(Session("a"), "bind")!;
+        var late = store.Add(Session("b"), "bind")!;
 
         clock.Now = clock.Now.AddSeconds(59);
-        Assert.NotNull(store.Take(onTime));
+        Assert.NotNull(store.Take(onTime, "bind"));
         clock.Now = clock.Now.AddSeconds(2);   // 61 s after issue
-        Assert.Null(store.Take(late));
+        Assert.Null(store.Take(late, "bind"));
         Assert.Equal(TimeSpan.FromSeconds(60), SessionHandoffs.Lifetime);
     }
 
@@ -46,12 +46,12 @@ public sealed class SessionHandoffsTests
     public void Unknown_empty_and_oversized_codes_give_nothing()
     {
         var store = new SessionHandoffs(new Clock());
-        store.Add(Session());
+        store.Add(Session(), "bind");
 
-        Assert.Null(store.Take(null));
-        Assert.Null(store.Take(""));
-        Assert.Null(store.Take("not-a-code"));
-        Assert.Null(store.Take(new string('a', 500)));
+        Assert.Null(store.Take(null, "bind"));
+        Assert.Null(store.Take("", "bind"));
+        Assert.Null(store.Take("not-a-code", "bind"));
+        Assert.Null(store.Take(new string('a', 500), "bind"));
         Assert.Equal(1, store.Count);
     }
 
@@ -60,13 +60,30 @@ public sealed class SessionHandoffsTests
     {
         var clock = new Clock();
         var store = new SessionHandoffs(clock);
-        var a = store.Add(Session())!;
-        var b = store.Add(Session())!;
+        var a = store.Add(Session(), "bind")!;
+        var b = store.Add(Session(), "bind")!;
         Assert.NotEqual(a, b);
         Assert.Matches("^[A-Za-z0-9_-]{43}$", a);
 
         clock.Now = clock.Now.AddMinutes(5);
-        store.Add(Session());
+        store.Add(Session(), "bind");
         Assert.Equal(1, store.Count);
+    }
+    [Fact]
+    public void A_code_only_works_with_the_binding_it_was_issued_with_and_a_wrong_try_spends_it()
+    {
+        var store = new SessionHandoffs(new Clock());
+        var session = Session();
+
+        var stolen = store.Add(session, "victim-browser")!;
+        Assert.Null(store.Take(stolen, null));
+        Assert.Null(store.Take(stolen, "victim-browser"));   // spent by the failed try
+
+        var other = store.Add(session, "right")!;
+        Assert.Null(store.Take(other, "wrong"));
+        Assert.Null(store.Take(other, "right"));
+
+        var ok = store.Add(session, "right")!;
+        Assert.Same(session, store.Take(ok, "right"));
     }
 }

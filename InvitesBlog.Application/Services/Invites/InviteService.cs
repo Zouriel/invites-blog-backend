@@ -813,13 +813,22 @@ public sealed class InviteService(
         // only proves the person opening it right now can be reached there. Deliberately doesn't call
         // OtpService.VerifyAsync — this must NOT mint the normal 30-day account JWT (see class docs on
         // IInviteService.VerifyReauthAsync: this reauth is scoped to just this one invite).
-        await otp.VerifyContactAsync(req, ct);
+        var guest = await guests.GetByIdAsync(invite.GuestId, ct) ?? throw new InviteNotFoundException();
+        // Only a re-check code, and only one sent to THIS guest's own email or phone: any other valid code
+        // (one the caller asked for to their own address, for signing in) proves nothing about this invite.
+        var verified = await otp.VerifyContactForAsync(req, OtpPurpose.InviteReauth, ct);
+        if (!IsGuestContact(guest, verified)) throw new Exceptions.Otp.OtpChallengeNotFoundException();
 
         if (!string.IsNullOrWhiteSpace(ipAddress))
             await TrustIpAsync(invite.Id, ipAddress, ct);
 
         return await GetByTokenAsync(token, ipAddress, render, ct);
     }
+
+    private static bool IsGuestContact(Guest guest, VerifiedContact verified) =>
+        verified.ContactType == "phone"
+            ? !string.IsNullOrWhiteSpace(guest.PhoneE164) && string.Equals(guest.PhoneE164.Trim(), verified.Contact.Trim(), StringComparison.Ordinal)
+            : !string.IsNullOrWhiteSpace(guest.Email) && string.Equals(guest.Email.Trim(), verified.Contact.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// True if the IP is already trusted for this invite (bumping its last-seen time), or if this is

@@ -144,9 +144,30 @@ public sealed class OtpService(
     public Task<VerifiedContact> VerifyContactForAsync(VerifyOtpRequest req, OtpPurpose purpose, CancellationToken ct = default) =>
         VerifyAsync(req, purpose, ct);
 
+    /// <summary>
+    /// Guesses at one code are checked one at a time (the API runs as one instance), so guesses sent side by
+    /// side all see the count the one before them left and the fifth wrong one still ends the code. Striped
+    /// by challenge id: a lock per code without keeping one per code.
+    /// </summary>
+    private static readonly SemaphoreSlim[] VerifyLocks = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+
     private async Task<VerifiedContact> VerifyAsync(VerifyOtpRequest req, OtpPurpose? purpose, CancellationToken ct)
     {
         await verifyValidator.ValidateAndThrowAsync(req, ct);
+        var gate = VerifyLocks[(req.ChallengeId.GetHashCode() & int.MaxValue) % VerifyLocks.Length];
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await VerifyOnceAsync(req, purpose, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<VerifiedContact> VerifyOnceAsync(VerifyOtpRequest req, OtpPurpose? purpose, CancellationToken ct)
+    {
 
         var challenge = await challenges.GetByIdAsync(req.ChallengeId, ct)
             ?? throw new OtpChallengeNotFoundException();

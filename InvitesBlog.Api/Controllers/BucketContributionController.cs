@@ -134,6 +134,7 @@ public sealed class BucketContributionController(
     /// <see cref="ContributorTickets"/> for what the ticket does and does not carry.</para>
     /// </summary>
     [HttpPost("{token}/otp/verify")]
+    [EnableRateLimiting(RateLimiting.RateLimitPolicies.OtpVerify)]
     [HasPermission(Permissions.Otp.Verify)]
     public async Task<IActionResult> VerifyCode(
         string token, [FromBody] VerifyContributorRequest req, CancellationToken ct)

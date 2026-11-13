@@ -475,7 +475,7 @@ public class InviteServiceTests
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
         _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
-        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+        _otp.VerifyContactForAsync(Arg.Any<VerifyOtpRequest>(), OtpPurpose.InviteReauth, Arg.Any<CancellationToken>())
             .Returns(new VerifiedContact("email", guest.Email!));
 
         var res = await Sut().VerifyReauthAsync("tok", Ip2, new VerifyOtpRequest(Guid.NewGuid(), "123456"), Renderer);
@@ -506,7 +506,7 @@ public class InviteServiceTests
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);
         _templates.GetByIdAsync(campaign.TemplateId, Arg.Any<CancellationToken>()).Returns(template);
-        _otp.VerifyContactAsync(Arg.Any<VerifyOtpRequest>(), Arg.Any<CancellationToken>())
+        _otp.VerifyContactForAsync(Arg.Any<VerifyOtpRequest>(), OtpPurpose.InviteReauth, Arg.Any<CancellationToken>())
             .Returns(new VerifiedContact("email", guest.Email!));
 
         await Sut().VerifyReauthAsync("tok", Ip4, new VerifyOtpRequest(Guid.NewGuid(), "123456"), Renderer);

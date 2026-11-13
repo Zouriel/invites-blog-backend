@@ -303,12 +303,33 @@ public class CampaignServiceTests
         Own(c);
         var existing = new Inviter { Id = Guid.NewGuid(), Email = "host@test.com", Name = "Old", PhoneE164 = "+9601111111" };
         _inviters.GetByEmailAsync("host@test.com", Arg.Any<CancellationToken>()).Returns(existing);
+        // Signed in to the account that proved this email: the record is theirs to edit.
+        var account = new AppUser { Id = Guid.NewGuid(), Email = "host@test.com", DisplayName = "Host", IsActive = true };
+        _currentUser.UserId.Returns(account.Id);
+        _users.GetByIdAsync(account.Id, Arg.Any<CancellationToken>()).Returns(account);
         var req = new UpdateInviterRequest("New Name", "+9607777777", "host@test.com", null, null, null, "MV");
 
         await Sut().UpdateInviterAsync(c.Id, req, "access-tok");
 
         _inviters.Received(1).Update(existing);
         Assert.Equal("New Name", existing.Name);
+        Assert.Equal(existing.Id, c.InviterId);
+    }
+
+    [Fact]
+    public async Task UpdateInviter_existing_inviter_someone_else_has_is_used_but_never_changed()
+    {
+        var c = TestData.Campaign();
+        Own(c);   // the event's link, no account: nothing proves the email is theirs
+        var existing = new Inviter { Id = Guid.NewGuid(), Email = "host@test.com", Name = "Old", PhoneE164 = "+9601111111" };
+        _inviters.GetByEmailAsync("host@test.com", Arg.Any<CancellationToken>()).Returns(existing);
+        var req = new UpdateInviterRequest("New Name", "+9607777777", "host@test.com", null, null, null, "MV");
+
+        await Sut().UpdateInviterAsync(c.Id, req, "access-tok");
+
+        _inviters.DidNotReceive().Update(Arg.Any<Inviter>());
+        Assert.Equal("Old", existing.Name);
+        Assert.Equal("+9601111111", existing.PhoneE164);
         Assert.Equal(existing.Id, c.InviterId);
     }
 
