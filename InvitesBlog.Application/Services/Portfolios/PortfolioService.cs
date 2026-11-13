@@ -120,7 +120,8 @@ public sealed class PortfolioService(
         var (reason, message) = await HandleProblemAsync(p, handle, ct);
         string? suggestion = null;
         if (reason is "taken" or "reserved" or "invalid")
-            suggestion = await SuggestAsync(p, reason == "invalid" ? p.DisplayName : handle, ct);
+            // A reserved or malformed name says nothing about the studio: suggest from its own name instead.
+            suggestion = await SuggestAsync(p, reason == "taken" ? handle : p.DisplayName, ct);
         return new HandleCheckDto(handle, reason is "ok" or "yours", reason, message, suggestion);
     }
 
@@ -466,7 +467,10 @@ public sealed class PortfolioService(
         if (bytes is null) return null;
         var type = ImageSniffer.Detect(bytes) ?? source.ContentType;
         var id = Guid.NewGuid();
-        var full = await Task.Run(() => images.OptimizeForDisplay(bytes, type, FullEdge), ct);
+        // The album's viewing copy is already at most 2048px and has no camera metadata: kept as it is, it isn't
+        // compressed a second time. Only a larger one (an old row) is made smaller.
+        var full = await Task.Run(() => images.Preserve(bytes, type) is var kept && Math.Max(kept.Width, kept.Height) <= FullEdge
+            ? kept : images.OptimizeForDisplay(bytes, type, FullEdge), ct);
         var thumb = await Task.Run(() => images.OptimizeForDisplay(bytes, type, ThumbEdge), ct);
         var stem = $"portfolios/{p.Id:N}/{id:N}";
         var fullUrl = storage.PutAsync($"{stem}{MediaFileTypes.ExtensionFor(full.ContentType)}", full.Content, full.ContentType, ct);

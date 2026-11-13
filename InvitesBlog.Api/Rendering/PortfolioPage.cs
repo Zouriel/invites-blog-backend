@@ -26,9 +26,13 @@ public static class PortfolioPage
         var line = Mix(theme.Bg, theme.Text, theme.Dark ? 0.16 : 0.14);
         var description = p.Tagline ?? $"Photos and work by {p.DisplayName}.";
         var title = $"{p.DisplayName} (@{p.Handle})";
+        // Stored pictures can be site-relative (/assets/...); link previews and search need full addresses.
+        string? Abs(string? url) => url is null ? null : url.StartsWith('/') && !url.StartsWith("//") ? siteBase + url : url;
 
         var sb = new StringBuilder(32_000);
-        sb.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
+        // email_off: Cloudflare's Email Obfuscation would rewrite the Email button into a link that needs a script our
+        // CSP (rightly) refuses, leaving "[email protected]". The page shows the address on purpose.
+        sb.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><!--email_off-->");
         sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">");
         sb.Append($"<title>{E(title)}</title>");
         sb.Append($"<meta name=\"description\" content=\"{E(description)}\">");
@@ -37,7 +41,7 @@ public static class PortfolioPage
         sb.Append("<meta property=\"og:type\" content=\"profile\">");
         sb.Append($"<meta property=\"og:site_name\" content=\"invites.blog\"><meta property=\"og:title\" content=\"{E(p.DisplayName)}\">");
         sb.Append($"<meta property=\"og:description\" content=\"{E(description)}\"><meta property=\"og:url\" content=\"{E(p.Url)}\">");
-        var ogImage = p.CoverUrl ?? p.LogoUrl;
+        var ogImage = Abs(p.CoverUrl ?? p.LogoUrl);
         if (ogImage is not null)
         {
             sb.Append($"<meta property=\"og:image\" content=\"{E(ogImage)}\"><meta name=\"twitter:image\" content=\"{E(ogImage)}\">");
@@ -52,7 +56,7 @@ public static class PortfolioPage
             sb.Append($"<link rel=\"stylesheet\" href=\"{E(FontsUrl(font))}\">");
         }
         if (p.CoverUrl is not null) sb.Append($"<link rel=\"preload\" as=\"image\" href=\"{E(p.CoverUrl)}\">");
-        sb.Append(JsonLd(p, nonce));
+        sb.Append(JsonLd(p, nonce, Abs));
         sb.Append("<style>");
         sb.Append($":root{{color-scheme:{(theme.Dark ? "dark" : "light")};--bg:{theme.Bg};--surface:{theme.Surface};--text:{theme.Text};--muted:{theme.Muted};");
         sb.Append($"--accent:{accent};--on-accent:{onAccent};--line:{line};--head:{FontStack(font.Heading, serif: font.Heading != font.Body)};--body:{FontStack(font.Body, serif: false)};}}");
@@ -93,7 +97,7 @@ public static class PortfolioPage
 
         sb.Append($"<script nonce=\"{nonce}\">window.__pf={{handle:{JsonString(p.Handle)},photos:[");
         sb.Append(string.Join(',', allPhotos.Select(x => $"{{id:{JsonString(x.Id.ToString())},src:{JsonString(x.Url)}}}")));
-        sb.Append("]};").Append(Script).Append("</script></body></html>");
+        sb.Append("]};").Append(Script).Append("</script><!--/email_off--></body></html>");
         return sb.ToString();
     }
 
@@ -407,12 +411,12 @@ public static class PortfolioPage
     private static string JsonString(string? s) => System.Text.Json.JsonSerializer.Serialize(s ?? "")
         .Replace("<", "\\u003c").Replace(">", "\\u003e");
 
-    private static string JsonLd(PublicPortfolioDto p, string nonce)
+    private static string JsonLd(PublicPortfolioDto p, string nonce, Func<string?, string?> abs)
     {
         var ld = new Dictionary<string, object?>
         {
             ["@context"] = "https://schema.org", ["@type"] = "ProfessionalService", ["name"] = p.DisplayName, ["url"] = p.Url,
-            ["description"] = p.Tagline, ["image"] = p.CoverUrl ?? p.LogoUrl, ["logo"] = p.LogoUrl,
+            ["description"] = p.Tagline, ["image"] = abs(p.CoverUrl ?? p.LogoUrl), ["logo"] = abs(p.LogoUrl),
             ["email"] = p.Contact.Email, ["telephone"] = p.Contact.Phone,
             ["sameAs"] = p.Contact.Instagram is { } ig ? new[] { $"https://instagram.com/{ig}" } : null,
         };
