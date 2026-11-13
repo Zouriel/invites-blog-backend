@@ -59,7 +59,7 @@ public static class PortfolioPage
         sb.Append(JsonLd(p, nonce, Abs));
         sb.Append("<style>");
         sb.Append($":root{{color-scheme:{(theme.Dark ? "dark" : "light")};--bg:{theme.Bg};--surface:{theme.Surface};--text:{theme.Text};--muted:{theme.Muted};");
-        sb.Append($"--accent:{accent};--on-accent:{onAccent};--line:{line};--head:{FontStack(font.Heading, serif: font.Heading != font.Body)};--body:{FontStack(font.Body, serif: false)};}}");
+        sb.Append($"--accent:{accent};--on-accent:{onAccent};--line:{line};--head:{FontStack(font.Heading, serif: font.Heading != font.Body)};--body:{FontStack(font.Body, serif: false)};--head-weight:{(SingleWeight(font.Heading) ? 400 : 600)};}}");
         sb.Append(Css);
         sb.Append("</style></head><body>");
         if (preview)
@@ -273,7 +273,7 @@ public static class PortfolioPage
         *{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
         body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--body);-webkit-font-smoothing:antialiased}
         img{display:block;max-width:100%}
-        h1,h2,h3{font-family:var(--head);font-weight:600;line-height:1.15;margin:0;letter-spacing:-.01em}
+        h1,h2,h3{font-family:var(--head);font-weight:var(--head-weight);line-height:1.15;margin:0;letter-spacing:-.01em}
         h2{font-size:clamp(1.6rem,4.5vw,2.4rem);margin-bottom:24px}h3{font-size:1.2rem}
         a{color:inherit}
         .preview{position:sticky;top:0;z-index:20;background:var(--accent);color:var(--on-accent);text-align:center;font-size:.9rem;padding:8px 16px;font-weight:600}
@@ -397,11 +397,14 @@ public static class PortfolioPage
     private static string FontsUrl(PortfolioFontChoice f)
     {
         static string Family(string name, string weights) => "family=" + name.Replace(' ', '+') + ":wght@" + weights;
-        var parts = new List<string> { Family(f.Heading, "500;600") };
+        // Display faces that come in one weight only: asking Google Fonts for another one fails the whole request.
+        var parts = new List<string> { Family(f.Heading, SingleWeight(f.Heading) ? "400" : "500;600") };
         if (f.Body != f.Heading) parts.Add(Family(f.Body, "400;600"));
         else parts[0] = Family(f.Heading, "400;500;600");
         return "https://fonts.googleapis.com/css2?" + string.Join('&', parts) + "&display=swap";
     }
+
+    private static bool SingleWeight(string family) => family is "DM Serif Display";
 
     private static string FontStack(string family, bool serif) =>
         family == "system-ui"

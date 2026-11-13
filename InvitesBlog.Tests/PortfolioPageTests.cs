@@ -30,4 +30,12 @@ public sealed class PortfolioPageTests
         var mail = html.IndexOf("mailto:hi@example.com", StringComparison.Ordinal);
         Assert.True(on >= 0 && off > mail && mail > on);
     }
+
+    [Fact]
+    public void Every_font_pair_asks_google_for_weights_it_has()
+    {
+        var html = PortfolioPage.Render(Page(null) with { Font = "editorial" }, "n", "https://invites.blog", false);
+        Assert.Contains("family=DM+Serif+Display:wght@400&", html);
+        Assert.Contains("--head-weight:400", html);
+    }
 }
