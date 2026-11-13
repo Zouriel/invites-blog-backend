@@ -84,6 +84,28 @@ public sealed class PortfolioPageTests
     }
 
     [Fact]
+    public void Every_photo_button_says_which_photo_and_which_collection_it_opens()
+    {
+        var html = PortfolioPage.Render(Full(Both), "n", "https://invites.blog", false);
+        // UI audit 2026-11-13: every button was "Open photo", so a screen reader heard the same words for each.
+        Assert.DoesNotContain("aria-label=\"Open photo\"", html);
+        Assert.Contains("class=\"slide\" data-i=\"0\" aria-label=\"Open photo 1 of 2, Moments\"", html);
+        Assert.Contains("class=\"slide\" data-i=\"1\" aria-label=\"Open photo 2 of 2, Moments\"", html);
+        Assert.Contains("class=\"tile rv\" data-i=\"2\" aria-label=\"Open photo 1 of 2, Weddings\"", html);
+        Assert.Contains("class=\"tile rv\" data-i=\"3\" aria-label=\"Open photo 2 of 2, Weddings\"", html);
+    }
+
+    [Fact]
+    public void The_message_forms_status_line_takes_no_room_until_there_is_something_to_say()
+    {
+        var html = PortfolioPage.Render(Full(Both), "n", "https://invites.blog", false);
+        // An empty line under Send made the card's bottom deeper than its top (UI audit 2026-11-13). It appears with
+        // "Sending..." and keeps its line from then on, so nothing moves while the reply is awaited.
+        Assert.Contains("display:none", Rule(html, ".note:empty"));
+        Assert.Contains("min-height:1.4em", Rule(html, ".note"));
+    }
+
+    [Fact]
     public void Things_wait_hidden_for_their_reveal_only_when_the_script_runs()
     {
         var html = PortfolioPage.Render(Full(Both), "nonce1", "https://invites.blog", false);

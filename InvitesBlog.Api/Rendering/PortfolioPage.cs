@@ -150,9 +150,10 @@ public static class PortfolioPage
         if (layout == "slideshow")
         {
             sb.Append("<div class=\"show rv\" data-show><div class=\"show-track\">");
+            var n = 0;
             foreach (var ph in c.Photos)
             {
-                sb.Append($"<button type=\"button\" class=\"slide\" data-i=\"{index++}\" aria-label=\"Open photo\">")
+                sb.Append($"<button type=\"button\" class=\"slide\" data-i=\"{index++}\" aria-label=\"{OpenLabel(++n, c)}\">")
                   .Append($"<img src=\"{E(ph.Url)}\" alt=\"\" loading=\"lazy\" decoding=\"async\" width=\"{ph.Width}\" height=\"{ph.Height}\"></button>");
                 all.Add(ph);
             }
@@ -166,9 +167,10 @@ public static class PortfolioPage
         else
         {
             sb.Append($"<div class=\"{layout}\">");
+            var n = 0;
             foreach (var ph in c.Photos)
             {
-                sb.Append($"<button type=\"button\" class=\"tile rv\" data-i=\"{index++}\" aria-label=\"Open photo\">")
+                sb.Append($"<button type=\"button\" class=\"tile rv\" data-i=\"{index++}\" aria-label=\"{OpenLabel(++n, c)}\">")
                   .Append($"<img src=\"{E(ph.ThumbUrl)}\" alt=\"\" loading=\"lazy\" decoding=\"async\" width=\"{ph.Width}\" height=\"{ph.Height}\"></button>");
                 all.Add(ph);
             }
@@ -176,6 +178,12 @@ public static class PortfolioPage
         }
         sb.Append("</section>");
     }
+
+    /// <summary>
+    /// "Open photo 3 of 12, Weddings": each photo button says which one it is and where (UI audit 2026-11-13: every
+    /// button was only "Open photo", so a screen reader heard dozens of identical buttons).
+    /// </summary>
+    internal static string OpenLabel(int n, PublicCollectionDto c) => E($"Open photo {n} of {c.Photos.Count}, {c.Title}");
 
     private static void About(StringBuilder sb, PublicPortfolioSectionDto s)
     {
@@ -376,7 +384,7 @@ public static class PortfolioPage
         input,textarea{width:100%;font:16px var(--body);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-height:48px}
         input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
         .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
-        .note{margin:0;min-height:1.4em;font-size:.95rem;color:var(--muted)}.note.err{color:#c0392b}
+        .note{margin:0;min-height:1.4em;font-size:.95rem;color:var(--muted)}.note:empty{display:none}.note.err{color:#c0392b}
         .muted{color:var(--muted)}
         .foot{max-width:1120px;margin:0 auto;padding:40px 20px;display:flex;flex-wrap:wrap;gap:16px 24px;justify-content:space-between;align-items:center;
           color:var(--muted);font-size:.9rem}
