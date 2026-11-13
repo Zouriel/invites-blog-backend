@@ -758,7 +758,7 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
     public async Task An_account_with_no_plan_is_offered_premium_and_studio_and_a_studio_subscription_gives_studio()
     {
         var user = await UserAsync();
-        Assert.Equal(["premium_monthly", "venue_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await AppleOffersAsync(user));
 
         var expiry = DateTimeOffset.UtcNow.AddDays(30);
         var (jws, original) = Subscribed(await TokenAsync(user, "venue_monthly", null), expiry, product: "venue_monthly");
@@ -772,10 +772,11 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         Assert.Equal(PaymentKind.VenueMonthly, Assert.Single(await PaymentsAsync(user.Id)).Kind);
         Assert.Equal("venue_monthly", (await RowAsync(original))!.ProductId);
 
-        // Billing: renews through the App Store; and the only offer left is moving down to Premium.
+        // Billing: renews through the App Store; and the offers left are moving down to Premium, with or without
+        // the AI designer.
         using var doc = JsonDocument.Parse(await api.Client(user.Token).GetStringAsync("/api/billing"));
         Assert.Equal("app_store", doc.RootElement.GetProperty("data").GetProperty("account").GetProperty("store").GetString());
-        Assert.Equal(["premium_monthly"], await AppleOffersAsync(user));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly"], await AppleOffersAsync(user));
     }
 
     /// <summary>
@@ -790,8 +791,9 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         await RedeemAsync(user, jws);
         Assert.Equal(SubscriptionTier.Premium, (await AccountAsync(user.Id)).SubscriptionTier);
 
-        // Held through Apple: the upgrade is on offer, and the app gets an intent for it.
-        Assert.Equal(["venue_monthly"], await AppleOffersAsync(user));
+        // Held through Apple: the moves within the group are on offer (the AI designer, or up to Studio), and the
+        // app gets an intent for one.
+        Assert.Equal(["premium_ai_monthly", "venue_monthly"], await AppleOffersAsync(user));
         var upgradeToken = await TokenAsync(user, "venue_monthly", null);
 
         var next = DateTimeOffset.UtcNow.AddDays(30);
@@ -810,6 +812,85 @@ public sealed class AppStorePurchaseTests(PostgresApiFixture api)
         await RedeemAsync(user, api.AppStore.Chain.Sign(api.AppStore.Transactions[upgrade]));
         Assert.Equal(2, (await PaymentsAsync(user.Id)).Count);
         Assert.Equal(SubscriptionTier.Venue, (await AccountAsync(user.Id)).SubscriptionTier);
+    }
+
+    // ----- The AI designer add-on (pricing 2026-11) ---------------------------------------------
+
+    private Task<AccountAddOn?> AiAsync(Guid id) =>
+        api.ReadAsync(async db => (await db.Users.AsNoTracking().FirstAsync(u => u.Id == id)).AddOns.FirstOrDefault(a => a.Key == "designer-ai"));
+
+    [PostgresFact]
+    public async Task Premium_up_to_premium_with_ai_in_the_group_turns_the_add_on_on_at_once_to_apples_end()
+    {
+        var user = await UserAsync();
+        var (jws, original) = Subscribed(await TokenAsync(user, "premium_monthly", null), DateTimeOffset.UtcNow.AddDays(20));
+        await RedeemAsync(user, jws);
+        Assert.Null(await AiAsync(user.Id));
+
+        var next = DateTimeOffset.UtcNow.AddDays(30);
+        var upgrade = Renewed(original, next, product: "premium_ai_monthly", token: await TokenAsync(user, "premium_ai_monthly", null));
+        Assert.True((await NotifyAsync(Notification("DID_CHANGE_RENEWAL_PREF", upgrade, "UPGRADE"))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Premium, u.SubscriptionTier);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(next)), u.SubscriptionEndsAt);
+        var ai = await AiAsync(user.Id);
+        Assert.NotNull(ai);
+        Assert.Equal(u.SubscriptionEndsAt, ai!.EndsAt);
+        Assert.True(ai.Renews);
+        Assert.Equal("app_store", ai.Source);
+        Assert.Equal([PaymentKind.PremiumMonthly, PaymentKind.PremiumAiMonthly], (await PaymentsAsync(user.Id)).Select(p => p.Kind));
+        // Now the moves are down to plain Premium, or up to Studio.
+        Assert.Equal(["premium_monthly", "venue_monthly"], await AppleOffersAsync(user));
+
+        using var doc = JsonDocument.Parse(await api.Client(user.Token).GetStringAsync("/api/auth/me"));
+        var row = doc.RootElement.GetProperty("data").GetProperty("addOns")[0];
+        Assert.True(row.GetProperty("active").GetBoolean());
+        Assert.True(row.GetProperty("renews").GetBoolean());
+    }
+
+    [PostgresFact]
+    public async Task Turning_the_ai_designer_off_in_the_app_stops_it_renewing_and_it_ends_with_the_paid_month()
+    {
+        var user = await UserAsync();
+        var end = DateTimeOffset.UtcNow.AddDays(1);
+        var (jws, original) = Subscribed(await TokenAsync(user, "premium_ai_monthly", null), end, product: "premium_ai_monthly");
+        await RedeemAsync(user, jws);
+        Assert.True((await AiAsync(user.Id))!.Renews);
+
+        // The downgrade waits for the renewal: Apple says the next product is premium_monthly.
+        var (status, latest, renewal) = api.AppStore.Subscriptions[original];
+        api.AppStore.Subscriptions[original] = (status, latest, new Dictionary<string, object?>(renewal) { ["autoRenewProductId"] = "premium_monthly" });
+        Assert.True((await NotifyAsync(Notification("DID_CHANGE_RENEWAL_PREF", original, "DOWNGRADE"))).IsSuccessStatusCode);
+        var ai = await AiAsync(user.Id);
+        Assert.False(ai!.Renews);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(end)), ai.EndsAt);
+
+        // It renews as plain Premium: Premium goes on, the add-on ends where it was paid to.
+        var next = DateTimeOffset.UtcNow.AddDays(31);
+        Assert.True((await NotifyAsync(Notification("DID_RENEW", Renewed(original, next, product: "premium_monthly")))).IsSuccessStatusCode);
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(next)), u.SubscriptionEndsAt);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Ms(end)), (await AiAsync(user.Id))!.EndsAt);
+        Assert.Equal([PaymentKind.PremiumAiMonthly, PaymentKind.PremiumMonthly], (await PaymentsAsync(user.Id)).Select(p => p.Kind));
+    }
+
+    [PostgresFact]
+    public async Task When_premium_with_ai_expires_the_add_on_stops_with_it()
+    {
+        var user = await UserAsync();
+        var (jws, original) = Subscribed(await TokenAsync(user, "premium_ai_monthly", null), DateTimeOffset.UtcNow.AddDays(10), product: "premium_ai_monthly");
+        await RedeemAsync(user, jws);
+
+        var ended = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var lapse = Renewed(original, ended, status: 2, autoRenew: false, product: "premium_ai_monthly");
+        Assert.True((await NotifyAsync(Notification("EXPIRED", lapse, "VOLUNTARY"))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.True(u.SubscriptionEndsAt <= DateTimeOffset.UtcNow);
+        var ai = await AiAsync(user.Id);
+        Assert.True(ai!.EndsAt <= DateTimeOffset.UtcNow);
+        Assert.False(ai.Renews);
     }
 
     /// <summary>Studio down to Premium: Apple changes the product at the next renewal, and so does the account.</summary>

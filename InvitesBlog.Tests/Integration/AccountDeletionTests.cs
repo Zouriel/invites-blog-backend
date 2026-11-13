@@ -73,7 +73,7 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         Assert.Equal(1, summary.Data.Photos);
         Assert.Equal(1, summary.Data.Videos);
         Assert.True(summary.Data.AutoRenews);
-        Assert.Contains("Premium pass", summary.Data.Paid);
+        Assert.Contains("Premium", summary.Data.Paid);
         Assert.Contains(summary.Data.Paid, p => p.StartsWith("Platinum pass on"));
         Assert.Null(summary.Data.Blocked);
         Assert.Equal("email", summary.Data.CodeChannel);

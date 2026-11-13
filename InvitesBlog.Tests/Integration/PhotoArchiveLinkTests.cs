@@ -26,7 +26,8 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
     [PostgresFact]
     public async Task A_host_names_1500_photos_in_the_body_and_the_link_alone_downloads_the_zip()
     {
-        var host = await UserAsync();
+        // On Premium: more than ten at once is theirs anywhere (pricing 2026-11).
+        var host = await UserAsync(SubscriptionTier.Premium);
         var ev = await EventAsync(host);
         var stored = new List<(Guid Id, byte[] Bytes)>();
         for (var i = 0; i < 3; i++) stored.Add(await PhotoAsync(ev, i));
@@ -76,7 +77,8 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
         var host = await UserAsync();
         var guest = await UserAsync();
         var stranger = await UserAsync();
-        var ev = await EventAsync(host);
+        // A Gold pass: everyone who sees the photos may download them all.
+        var ev = await EventAsync(host, EventPassKind.Gold);
         await GuestAsync(ev, guest.Email);
         await PhotoAsync(ev, 0);
 
@@ -99,6 +101,131 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
         Assert.Contains("expired", await got.Content.ReadAsStringAsync());
     }
 
+    // ----- Ten at a time (pricing 2026-11) ------------------------------------------------------
+
+    private static async Task<(HttpStatusCode Status, string? Code)> OutcomeAsync(HttpResponseMessage r)
+    {
+        if (r.IsSuccessStatusCode) return (r.StatusCode, null);
+        var body = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var code = body.TryGetProperty("errors", out var e) && e.ValueKind == JsonValueKind.Array && e.GetArrayLength() > 0
+            ? e[0].GetProperty("code").GetString() : null;
+        return (r.StatusCode, code);
+    }
+
+    private static readonly (HttpStatusCode, string?) Refused = (HttpStatusCode.Forbidden, "download_limit");
+
+    [PostgresFact]
+    public async Task On_a_free_event_anyone_takes_up_to_ten_at_a_time_and_never_all_of_them()
+    {
+        var host = await UserAsync();
+        var guest = await UserAsync();
+        var ev = await EventAsync(host);
+        await GuestAsync(ev, guest.Email);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 11; i++) photos.Add((await PhotoAsync(ev, i)).Id);
+        var ten = photos.Take(10).ToArray();
+        var eleven = photos.ToArray();
+
+        foreach (var (token, route) in new[] { (host.Token, $"/api/campaigns/{ev}/photos"), (guest.Token, $"/api/me/invitations/{ev}/photos") })
+        {
+            Assert.Equal(HttpStatusCode.OK, (await api.Client(token).PostAsJsonAsync($"{route}/download-link", new { ids = ten })).StatusCode);
+            Assert.Equal(Refused, await OutcomeAsync(await api.Client(token).PostAsJsonAsync($"{route}/download-link", new { ids = eleven })));
+            // No ids is "Download all".
+            Assert.Equal(Refused, await OutcomeAsync(await api.Client(token).PostAsJsonAsync($"{route}/download-link", new { })));
+            // The streamed zip too, before a byte of it is written.
+            var streamed = await api.Client(token).GetAsync($"{route}/download");
+            Assert.Equal(HttpStatusCode.Forbidden, streamed.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await api.Client(token).GetAsync($"{route}/download?{string.Join('&', ten.Select(id => $"ids={id}"))}")).StatusCode);
+
+            // The album says so, so the apps can stop the eleventh tap.
+            var box = (await api.Client(token).GetFromJsonAsync<JsonElement>(route)).GetProperty("data");
+            Assert.False(box.GetProperty("downloadAll").GetBoolean());
+            Assert.Equal(10, box.GetProperty("downloadLimit").GetInt32());
+        }
+    }
+
+    [PostgresFact]
+    public async Task The_viewers_own_premium_or_studio_lifts_the_limit_anywhere_they_can_see_photos()
+    {
+        var host = await UserAsync();
+        var ev = await EventAsync(host);
+        await PhotoAsync(ev, 0);
+        await PhotoAsync(ev, 1);
+
+        foreach (var tier in new[] { SubscriptionTier.Premium, SubscriptionTier.Venue })
+        {
+            var guest = await UserAsync(tier);
+            await GuestAsync(ev, guest.Email);
+            Assert.Equal(HttpStatusCode.OK, (await api.Client(guest.Token).PostAsJsonAsync($"/api/me/invitations/{ev}/photos/download-link", new { })).StatusCode);
+            Assert.True((await api.Client(guest.Token).GetFromJsonAsync<JsonElement>($"/api/me/invitations/{ev}/photos")).GetProperty("data").GetProperty("downloadAll").GetBoolean());
+            var me = (await api.Client(guest.Token).GetFromJsonAsync<JsonElement>("/api/auth/me")).GetProperty("data");
+            Assert.True(me.GetProperty("canDownloadAll").GetBoolean());
+        }
+
+        // A Premium that has ended is Free again.
+        var lapsed = await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddMinutes(-5));
+        await GuestAsync(ev, lapsed.Email);
+        Assert.Equal(Refused, await OutcomeAsync(await api.Client(lapsed.Token).PostAsJsonAsync($"/api/me/invitations/{ev}/photos/download-link", new { })));
+        Assert.False((await api.Client(lapsed.Token).GetFromJsonAsync<JsonElement>("/api/auth/me")).GetProperty("data").GetProperty("canDownloadAll").GetBoolean());
+    }
+
+    [PostgresFact]
+    public async Task A_pass_in_force_lifts_it_for_everyone_in_that_event_and_an_ended_pass_does_not()
+    {
+        var host = await UserAsync();
+        var guest = await UserAsync();
+        var gold = await EventAsync(host, EventPassKind.Platinum);
+        var ended = await EventAsync(host, EventPassKind.Gold, DateTimeOffset.UtcNow.AddMinutes(-5));
+        foreach (var ev in new[] { gold, ended })
+        {
+            await GuestAsync(ev, guest.Email);
+            await PhotoAsync(ev, 0);
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(guest.Token).PostAsJsonAsync($"/api/me/invitations/{gold}/photos/download-link", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await api.Client(host.Token).PostAsJsonAsync($"/api/campaigns/{gold}/photos/download-link", new { })).StatusCode);
+        Assert.True((await api.Client(guest.Token).GetFromJsonAsync<JsonElement>($"/api/me/invitations/{gold}/photos")).GetProperty("data").GetProperty("downloadAll").GetBoolean());
+        Assert.Equal(Refused, await OutcomeAsync(await api.Client(guest.Token).PostAsJsonAsync($"/api/me/invitations/{ended}/photos/download-link", new { })));
+    }
+
+    [PostgresFact]
+    public async Task Favourites_are_ten_at_a_time_unless_the_account_or_every_chosen_event_allows_more()
+    {
+        var host = await UserAsync();
+        var free = await EventAsync(host);
+        var platinum = await EventAsync(host, EventPassKind.Platinum);
+        var inFree = new List<Guid>();
+        var inPlatinum = new List<Guid>();
+        for (var i = 0; i < 11; i++)
+        {
+            inFree.Add((await PhotoAsync(free, i)).Id);
+            inPlatinum.Add((await PhotoAsync(platinum, i)).Id);
+        }
+        await api.WriteAsync(async db =>
+        {
+            foreach (var id in inFree.Concat(inPlatinum))
+                db.Favourites.Add(new Favourite { Id = Guid.NewGuid(), UserId = host.Id, PhotoId = id, CreatedAt = DateTimeOffset.UtcNow });
+            await Task.CompletedTask;
+        });
+        var client = api.Client(host.Token);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/me/favourites/download-link", new { ids = inFree.Take(10) })).StatusCode);
+        Assert.Equal(Refused, await OutcomeAsync(await client.PostAsJsonAsync("/api/me/favourites/download-link", new { ids = inFree })));
+        Assert.Equal(Refused, await OutcomeAsync(await client.PostAsJsonAsync("/api/me/favourites/download-link", new { })));
+        // Eleven, all from the Platinum event: that event may be downloaded whole, so they may too.
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/me/favourites/download-link", new { ids = inPlatinum })).StatusCode);
+        // One from the free event among them is enough to need the account's own Premium.
+        Assert.Equal(Refused, await OutcomeAsync(await client.PostAsJsonAsync("/api/me/favourites/download-link", new { ids = inPlatinum.Append(inFree[0]) })));
+
+        await api.WriteAsync(async db =>
+        {
+            var u = await db.Users.SingleAsync(x => x.Id == host.Id);
+            u.SubscriptionTier = SubscriptionTier.Premium;
+            u.SubscriptionEndsAt = DateTimeOffset.UtcNow.AddDays(10);
+        });
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/me/favourites/download-link", new { })).StatusCode);
+    }
+
     private async Task<(Guid Id, byte[] Bytes)> PhotoAsync(Guid ev, int n)
     {
         var id = Guid.NewGuid();
@@ -118,21 +245,25 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
         return (id, bytes);
     }
 
-    private async Task<Person> UserAsync()
+    private async Task<Person> UserAsync(SubscriptionTier tier = SubscriptionTier.None, DateTimeOffset? endsAt = null)
     {
         var id = Guid.NewGuid();
         var mail = $"a-{id:N}@example.com";
         await api.WriteAsync(async db =>
         {
             var roleId = await db.Roles.Where(r => r.Name == Roles.Customer).Select(r => r.Id).SingleAsync();
-            var user = new AppUser { Id = id, Email = mail, DisplayName = "Person", IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+            var user = new AppUser
+            {
+                Id = id, Email = mail, DisplayName = "Person", IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
+                SubscriptionTier = tier, SubscriptionEndsAt = tier == SubscriptionTier.None ? null : endsAt ?? DateTimeOffset.UtcNow.AddDays(20),
+            };
             user.UserRoles.Add(new UserRole { RoleId = roleId });
             db.Users.Add(user);
         });
         return new Person(id, mail, api.TokenFor(id, "email", mail, Roles.Customer));
     }
 
-    private async Task<Guid> EventAsync(Person creator)
+    private async Task<Guid> EventAsync(Person creator, EventPassKind pass = EventPassKind.None, DateTimeOffset? passUntil = null)
     {
         var id = Guid.NewGuid();
         var templateId = Guid.NewGuid();
@@ -150,6 +281,7 @@ public sealed class PhotoArchiveLinkTests(PostgresApiFixture api)
                 CreatedByUserId = creator.Id, AccessTokenHash = Guid.NewGuid().ToString("N"),
                 Title = "Big album", Slug = $"e-{id:N}", Status = CampaignStatus.Dispatched,
                 EventStartAt = DateTimeOffset.UtcNow.AddDays(-1), CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                EventPass = pass, EventPassUntil = pass == EventPassKind.None ? null : passUntil ?? DateTimeOffset.UtcNow.AddMonths(11),
             });
             await Task.CompletedTask;
         });

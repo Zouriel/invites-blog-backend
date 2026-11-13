@@ -14,6 +14,7 @@ How invites.blog takes card payments, and how to test it. BML's docs: https://ba
 | **Webhook** (`POST /api/payments/webhook`) is the primary result, as BML's merchant rules require. Signature checked (`X-Signature` = sha256hex(nonce + timestamp + API key)); then the transaction is **re-fetched from BML's API**, and it counts only if its amount, currency and `localId` match our payment | `BmlPaymentProvider.HandleWebhookAsync`, `PaymentService.ProcessAsync` |
 | Safety net: every 2 minutes, pending BML payments are asked about; the return page (`?paid=`) asks too, so a lost webhook never leaves a buyer without what they paid for. Pending past 8 days is closed as failed | `Infrastructure/Payments/PaymentSweeper.cs`, `GET /api/billing/payments/{id}` |
 | Premium/Studio (Venue): the first payment saves the card (BML customer + `tokenizationDetails`, card-on-file, UNSCHEDULED). From a day before the plan ends the saved card is charged, the plan extended, and a receipt emailed. A failure is retried a day later; three in a row turns auto-renew off. The buyer can turn it off under Billing | `SubscriptionRenewalService`, `POST /api/billing/auto-renew/stop` |
+| **AI designer add-on (2026-11, docs/PRICING-2026-11.md):** `premium-ai-monthly` (Premium with it, 77 + 77), `designer-ai-add` (added to a running card Premium for the rest of its paid month: days left x 77/30 rounded up, 5 to 77; on at once). The plan renews as `PremiumMonthly`; the add-on's `Renews` flag (`users.add_ons`) makes the renewal one `PremiumAiMonthly` charge of 154. `POST /api/billing/designer-ai-off` / `-on` flip that flag (off: it stays until the paid month ends). A store Premium is refused (`designer_ai_store`): Play/App Store sell `premium_ai_monthly` | `BillingService`, `SubscriptionRenewalService`, `Plans/AddOns.cs` |
 | Refunds: BML has no refund API. Refunds are made in the BML merchant dashboard | |
 
 Nothing retries a POST to BML: a repeated "create transaction" or "charge" would charge twice.
@@ -44,6 +45,8 @@ Use the UAT test cards BML provides (ask BML; they are not kept in this repo).
 5. Buy the Premium pass (monthly): expect "Renews automatically" under Billing. Set the account's `subscription_ends_at` to an hour
    from now and restart the API: expect a second payment "renewed automatically", the plan a month longer, and a receipt email.
 6. Turn off automatic renewal under Billing.
+7. On a Premium bought by card: add the AI designer (expect the prorated amount on the review step and "renews at MVR 154"),
+   then turn it off (expect it on until the month ends) and on again (no charge).
 
 ## BML documentation issues found while building this
 

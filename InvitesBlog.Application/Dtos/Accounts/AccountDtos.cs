@@ -52,7 +52,11 @@ public sealed record AccountDto(
     /// <summary>IANA time zone ("Europe/London"), the default for new events; null until the person sets one.</summary>
     string? TimeZone = null,
     /// <summary>Kinds of phone notification turned off in the app: some of "replies", "comments", "photos", "hearts", "reminders".</summary>
-    IReadOnlyList<string>? MutedNotifications = null);
+    IReadOnlyList<string>? MutedNotifications = null,
+    /// <summary>The plan's add-ons (the AI designer): one row per known add-on, active or not (pricing 2026-11).</summary>
+    IReadOnlyList<InvitesBlog.Application.Plans.AccountAddOnDto>? AddOns = null,
+    /// <summary>The account itself may download or share any number of photos at once: Premium or Studio in force.</summary>
+    bool CanDownloadAll = false);
 
 /// <summary>
 /// The kinds of phone notification to turn off (the rest are on): any of "replies", "comments", "photos",

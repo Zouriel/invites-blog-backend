@@ -46,3 +46,10 @@ public class InvalidStateException(string message, string errorCode = "invalid_s
 /// <summary>A rule/business precondition failed (400).</summary>
 public class BusinessRuleException(string message, string errorCode = "business_rule")
     : AppException(message, HttpStatusCode.BadRequest, errorCode);
+
+/// <summary>
+/// A refusal whose code the client needs to act on (an offer to show, another item to buy): the code is in
+/// <c>errors[0].code</c> of the response as well as on the exception.
+/// </summary>
+public class CodedRuleException(string message, string errorCode, HttpStatusCode status = HttpStatusCode.BadRequest)
+    : AppException(message, status, errorCode, [new ApiError(message, null, errorCode)]);

@@ -92,10 +92,10 @@ public sealed class AccountDeletionService(
         var notes = new List<string>();
         if (storeRenews)
             notes.Add(play.IsConfigured
-                ? "Your Premium pass stops renewing on Google Play."
-                : "Your Premium pass renews through Google Play. Cancel it there too, or Google keeps charging you.");
+                ? "Your Premium stops renewing on Google Play."
+                : "Your Premium renews through Google Play. Cancel it there too, or Google keeps charging you.");
         if (appleRenews)
-            notes.Add("Your Premium pass renews through the App Store. Cancel it in your Apple account's subscriptions too, or Apple keeps charging you.");
+            notes.Add("Your Premium renews through the App Store. Cancel it in your Apple account's subscriptions too, or Apple keeps charging you.");
         return new AccountDeletionSummaryDto(
             eventIds.Count, scope.Passed.Count, bucketIds.Count, media.Count - videos, videos,
             await PaidAsync(me, eventIds, now, ct),
@@ -243,7 +243,7 @@ public sealed class AccountDeletionService(
         if (PlanRules.IsActive(me.SubscriptionTier, me.SubscriptionEndsAt, now))
         {
             if (me.SubscriptionTier == SubscriptionTier.Venue) paid.Add("Studio plan");
-            else if (me.SubscriptionTier == SubscriptionTier.Premium) paid.Add("Premium pass");
+            else if (me.SubscriptionTier == SubscriptionTier.Premium) paid.Add("Premium");
         }
 
         var running = await db.Campaigns

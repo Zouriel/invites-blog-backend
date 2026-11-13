@@ -6,10 +6,14 @@ public sealed record AdminUserDto(
     /// <summary>None, Premium or Venue (Studio), as set, whether or not it has ended.</summary>
     string SubscriptionTier = "None",
     DateTimeOffset? SubscriptionEndsAt = null,
-    bool SubscriptionActive = false);
+    bool SubscriptionActive = false,
+    /// <summary>The AI designer add-on is in force (Premium with it), or included (Studio).</summary>
+    bool DesignerAi = false);
 
 /// <summary>Sets an account's plan: None, Premium or Venue (Studio). <c>None</c> ends it now.</summary>
-public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt);
+/// <param name="DesignerAi">For Premium: true gives the AI designer add-on to the same end date, false takes it away
+/// now, null leaves it as it is.</param>
+public sealed record SetSubscriptionRequest(string Tier, DateTimeOffset? EndsAt, bool? DesignerAi = null);
 
 /// <summary>An event an account organised, with its pass and how long its photos are kept.</summary>
 /// <param name="Pass">None, Gold or Platinum.</param>

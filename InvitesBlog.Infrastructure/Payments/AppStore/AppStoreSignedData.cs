@@ -78,7 +78,7 @@ public sealed class AppStoreSignedData(AppStoreTrust trust, IConfiguration confi
     {
         using var doc = Verify(jws);
         var j = doc.RootElement;
-        return new AppStoreRenewalInfo(Long(j, "autoRenewStatus") == 1, Ms(j, "gracePeriodExpiresDate"));
+        return new AppStoreRenewalInfo(Long(j, "autoRenewStatus") == 1, Ms(j, "gracePeriodExpiresDate"), Str(j, "autoRenewProductId"));
     }
 
     public AppStoreNotification Notification(string jws)

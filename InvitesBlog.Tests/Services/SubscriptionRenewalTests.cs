@@ -101,6 +101,62 @@ public class SubscriptionRenewalTests
     }
 
     [Fact]
+    public async Task Premium_whose_ai_designer_renews_is_charged_77_plus_77_in_one_payment()
+    {
+        Charges(WebhookEventKind.PaymentSucceeded);
+        _user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = _user.SubscriptionEndsAt, Renews = true, Source = "bml" }];
+
+        await Sut().RunOnceAsync(Now);
+
+        var payment = Assert.Single(_payments);
+        Assert.Equal(PaymentKind.PremiumAiMonthly, payment.Kind);
+        Assert.Equal(Prices.Defaults.PremiumMonthly + Prices.Defaults.DesignerAiMonthly, payment.Amount);
+        Assert.Equal(154m, payment.Amount);
+        Assert.StartsWith("Premium with the AI designer, a month", payment.Description);
+        await _email.Received(1).SendAsync(Arg.Is<EmailMessage>(m => m.Subject.Contains("renewed")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Premium_whose_ai_designer_was_turned_off_or_carried_over_renews_alone_at_77()
+    {
+        Charges(WebhookEventKind.PaymentSucceeded);
+        _user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = _user.SubscriptionEndsAt, Renews = false, Source = "carried-over" }];
+
+        await Sut().RunOnceAsync(Now);
+
+        var payment = Assert.Single(_payments);
+        Assert.Equal(PaymentKind.PremiumMonthly, payment.Kind);
+        Assert.Equal(77m, payment.Amount);
+    }
+
+    [Fact]
+    public async Task An_ai_designer_left_from_an_earlier_subscription_does_not_come_back_at_renewal()
+    {
+        Charges(WebhookEventKind.PaymentSucceeded);
+        _user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = Now.AddDays(-40), Renews = true, Source = "bml" }];
+
+        await Sut().RunOnceAsync(Now);
+
+        Assert.Equal(PaymentKind.PremiumMonthly, Assert.Single(_payments).Kind);
+    }
+
+    [Fact]
+    public async Task A_premium_with_ai_renewal_still_pending_is_not_charged_again()
+    {
+        _user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = _user.SubscriptionEndsAt, Renews = true, Source = "bml" }];
+        _payments.Add(new Payment
+        {
+            Id = Guid.NewGuid(), UserId = _user.Id, Kind = PaymentKind.PremiumMonthly, AutoRenew = true, Quantity = 1,
+            Amount = 77m, Currency = "MVR", Status = PaymentStatus.Pending, Provider = "Bml", CreatedAt = Now.AddHours(-1),
+        });
+
+        await Sut().RunOnceAsync(Now);
+
+        Assert.Single(_payments);
+        await _recurring.DidNotReceiveWithAnyArgs().ChargeSavedCardAsync(default!, default);
+    }
+
+    [Fact]
     public async Task A_plan_not_yet_due_is_left_alone()
     {
         _user.SubscriptionEndsAt = Now.AddDays(5);

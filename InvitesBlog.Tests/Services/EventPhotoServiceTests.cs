@@ -158,9 +158,16 @@ public class EventPhotoServiceTests
     }
 
     /// <summary>A guest of this campaign, wired up so both doors can be opened or shut per test.</summary>
-    private (Campaign Campaign, Guest Guest) OnTheGuestList()
+    private (Campaign Campaign, Guest Guest) OnTheGuestList(bool pass = true)
     {
         var campaign = TestData.Campaign(status: CampaignStatus.Dispatched);
+        // A Platinum pass lets anyone who sees the photos download them all (pricing 2026-11), which the archive
+        // tests below rely on. The ten-at-a-time limit is tested on the real API (PhotoArchiveLinkTests).
+        if (pass)
+        {
+            campaign.EventPass = EventPassKind.Platinum;
+            campaign.EventPassUntil = DateTimeOffset.UtcNow.AddMonths(6);
+        }
         var guest = TestData.Guest(campaign.Id);
         _campaigns.GetByIdAsync(campaign.Id, Arg.Any<CancellationToken>()).Returns(campaign);
         _guests.GetByIdAsync(guest.Id, Arg.Any<CancellationToken>()).Returns(guest);

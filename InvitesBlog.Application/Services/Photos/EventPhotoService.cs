@@ -287,7 +287,19 @@ public sealed class EventPhotoService(
             venue?.DisplayName,
             venue?.AvatarUrl,
             campaign.Kind == CampaignKind.SaveTheDate,
-            faces);
+            faces,
+            DownloadAll: await MayDownloadAllAsync(campaign, ct));
+    }
+
+    /// <summary>
+    /// "Download all", and more than <see cref="DownloadRules.Limit"/> at once: the event's Gold or Platinum pass
+    /// lets everyone who sees its photos; otherwise the caller's own Premium or Studio does (pricing 2026-11).
+    /// </summary>
+    private async Task<bool> MayDownloadAllAsync(Campaign? campaign, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (campaign is not null && DownloadRules.EventAllows(campaign, now)) return true;
+        return currentUser.UserId is { } me && DownloadRules.AccountAllows(await accounts.GetByIdAsync(me, ct), now);
     }
 
     public async Task<EventPhotoDto> AddAsync(
@@ -475,7 +487,9 @@ public sealed class EventPhotoService(
                         : null,
             bucket.VenueName,
             bucket.VenueLogoUrl,
-            Faces: faces);
+            Faces: faces,
+            DownloadAll: await MayDownloadAllAsync(
+                bucket.CampaignId is { } cid ? await campaigns.GetByIdAsync(cid, ct) : null, ct));
     }
 
     /// <summary>Face grouping for the photos a box shows: the groups, and who is in each photo. Null when it's off.</summary>
@@ -886,6 +900,11 @@ public sealed class EventPhotoService(
             throw new ForbiddenException("The photos from this event are only available to its organiser now.");
 
         var view = await ViewForAsync(campaignId, hosts, viewerGuestId, ct);
+
+        // Up to ten at a time for everyone; all of them, or more, with Premium or Studio, or in a pass event.
+        // Checked here, where every archive (host, guest, celebrant, the link and the stream) is planned.
+        if (!DownloadRules.WithinLimit(ids) && !await MayDownloadAllAsync(campaign, ct))
+            throw DownloadRules.Refusal();
 
         var wanted = ids is { Count: > 0 } ? ids.ToHashSet() : null;
         // Filtered by bucket BEFORE the emptiness check, so a guest shut out of every bucket is told

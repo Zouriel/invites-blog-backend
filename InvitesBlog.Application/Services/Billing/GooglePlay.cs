@@ -24,6 +24,8 @@ public static class GooglePlayCatalog
         new("keep_photos_year", PaymentKind.KeepPhotos, false),
         new("extra_invites_100", PaymentKind.Sending, false),
         new("premium_monthly", PaymentKind.PremiumMonthly, true),
+        // Premium with the AI designer add-on (pricing 2026-11): the same Premium, plus the add-on for each period.
+        new("premium_ai_monthly", PaymentKind.PremiumAiMonthly, true),
         new("venue_monthly", PaymentKind.VenueMonthly, true),
     ];
 

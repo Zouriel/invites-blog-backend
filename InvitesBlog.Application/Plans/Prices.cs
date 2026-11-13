@@ -24,14 +24,16 @@ public sealed record Prices(
     decimal MvrPerUsd,
     decimal GoldExtension = PlanCatalog.GoldExtension,
     decimal PlatinumExtension = PlanCatalog.PlatinumExtension,
-    decimal VenueMonthly = PlanCatalog.VenueMonthly)
+    decimal VenueMonthly = PlanCatalog.VenueMonthly,
+    decimal DesignerAiMonthly = PlanCatalog.DesignerAiMonthly)
 {
     /// <summary>The prices in code, used until an admin saves others.</summary>
     public static Prices Defaults { get; } = new(
         PlanCatalog.GoldPassPrice, PlanCatalog.PlatinumPassPrice, PlanCatalog.KeepPhotosYearly,
         PlanCatalog.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
         Pricing.PricingCalculator.PricePerBlock, PlanCatalog.MvrPerUsd,
-        PlanCatalog.GoldExtension, PlanCatalog.PlatinumExtension, PlanCatalog.VenueMonthly);
+        PlanCatalog.GoldExtension, PlanCatalog.PlatinumExtension, PlanCatalog.VenueMonthly,
+        PlanCatalog.DesignerAiMonthly);
 
     public decimal PassPrice(EventPassKind kind) => kind switch
     {
@@ -62,6 +64,7 @@ public sealed record Prices(
         Positive(KeepPhotosYearly, "Keep your photos");
         Positive(PremiumMonthly, "Premium a month");
         Positive(VenueMonthly, "Studio a month");
+        Positive(DesignerAiMonthly, "The AI designer a month");
         Positive(SendingPerBlock, "Emailed invitations");
         Positive(MvrPerUsd, "The dollar rate");
         Positive(GoldExtension, "Extending a Gold pass");
@@ -167,7 +170,9 @@ public sealed class PriceBook(
                 D(nameof(Prices.MvrPerUsd), p.MvrPerUsd),
                 Renamed(nameof(Prices.GoldExtension), "PartyExtension", p.GoldExtension),
                 Renamed(nameof(Prices.PlatinumExtension), "WeddingExtension", p.PlatinumExtension),
-                D(nameof(Prices.VenueMonthly), p.VenueMonthly));
+                D(nameof(Prices.VenueMonthly), p.VenueMonthly),
+                // Added 2026-11 (the AI designer add-on): a list saved before it takes the default.
+                D(nameof(Prices.DesignerAiMonthly), p.DesignerAiMonthly));
             return read.Problems().Count == 0 ? read : p;
         }
         catch (JsonException)

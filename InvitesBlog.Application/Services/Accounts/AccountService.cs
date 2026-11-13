@@ -797,7 +797,10 @@ public sealed class AccountService(
             user.AvatarUrl,
             user.Country,
             user.TimeZone,
-            user.PushMuted);
+            user.PushMuted,
+            // Admins have the AI designer as part of running the site (DesignAssistantService lets them in).
+            AddOns.ForAccount(user, DateTimeOffset.UtcNow, admin: RoleNames(user).Contains(Roles.Admin)),
+            DownloadRules.AccountAllows(user, DateTimeOffset.UtcNow));
     }
 
     /// <summary>
