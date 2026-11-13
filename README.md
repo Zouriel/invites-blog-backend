@@ -39,10 +39,13 @@ A bucket owns its **window** and its **audience** and little else: its cover, it
 guest list are the event's, shared with the invitation, and its space is the event's plan's. It does **not** need an invitation behind it — a trip, a reunion or a season of somebody's football club is a bucket with
 no event attached. How much an event's buckets may hold, and for how long, comes from its plan
 (`PlanCatalog`): Free for every event, a Gold or Platinum pass bought per event, or the organiser's
-Premium pass. The Premium pass (2 GB on every event, kept while it lasts) and Venue (resorts and
+Premium. Premium (2 GB on every event, kept while it lasts, Download all anywhere; the AI designer is a +77 add-on,
+docs/PRICING-2026-11.md) and Venue (resorts and
 halls: 10 GB on every event held there, kept while it lasts; normal pass prices) are the only
 subscriptions; hosts pay per event. The template designer
-is open to every account. Prices are in rufiyaa.
+is open to every account. Anyone may download or share up to 10 photos at once; more, or Download all, needs the
+viewer's own Premium or Studio, or a Gold/Platinum pass on the event (enforced on every archive endpoint, 403
+`download_limit`). Prices are in rufiyaa.
 
 A bucket is an occasion rather than a drive, so it only **takes** anything around its event: open
 from the start of the day before (Malé time) until the day after ends — or, with a pass, until 3 or
