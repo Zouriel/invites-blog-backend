@@ -655,6 +655,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Handle).HasMaxLength(30);
             e.Property(x => x.DisplayName).HasMaxLength(80).HasDefaultValue("");
             e.Property(x => x.Tagline).HasMaxLength(140);
+            e.Property(x => x.CoverImageUrl).HasMaxLength(1024);
             e.Property(x => x.Theme).HasMaxLength(32).HasDefaultValue("oxblood");
             e.Property(x => x.Accent).HasMaxLength(32).HasDefaultValue("theme");
             e.Property(x => x.Font).HasMaxLength(32).HasDefaultValue("classic");

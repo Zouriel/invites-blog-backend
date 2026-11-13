@@ -32,6 +32,18 @@ public sealed class PortfolioPageTests
     }
 
     [Fact]
+    public void The_remove_request_dialog_hides_what_it_hides_and_offers_the_photos_to_pick()
+    {
+        var html = PortfolioPage.Render(Page(null), "n", "https://invites.blog", false);
+        // img{display:block} beat the hidden attribute, so an empty picture frame showed in the dialog.
+        Assert.Contains("[hidden]{display:none!important}", html);
+        Assert.Contains("class=\"rep-pick\"", html);
+        // The visitor can't send a request that names neither a photo nor anything about it.
+        Assert.Contains("Tap the photo you mean, or describe it", html);
+        Assert.Contains("class=\"btn wide rep-done\"", html);
+    }
+
+    [Fact]
     public void Every_font_pair_asks_google_for_weights_it_has()
     {
         var html = PortfolioPage.Render(Page(null) with { Font = "editorial" }, "n", "https://invites.blog", false);

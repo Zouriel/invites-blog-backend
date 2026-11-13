@@ -116,9 +116,13 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         var added = await DataAsync(await api.Client(studio.Token).PostAsJsonAsync("/api/me/portfolio/photos",
             new { photoIds = new[] { mine1, mine2, theirs, clip }, newCollectionTitle = "Weddings" }));
         Assert.Equal(2, added.GetProperty("added").GetInt32());
-        Assert.Equal(1, added.GetProperty("skippedGuest").GetInt32());
+        Assert.Equal(0, added.GetProperty("skippedGuest").GetInt32());
+        Assert.Equal(1, added.GetProperty("skippedOther").GetInt32());
         Assert.Equal(1, added.GetProperty("skippedVideo").GetInt32());
-        Assert.Equal("2 photos added. 1 was added by a guest and can't be used. Videos can't be added yet.", added.GetProperty("message").GetString());
+        Assert.Equal("2 photos added. 1 was added by someone else and can't be used. Videos can't be added yet.", added.GetProperty("message").GetString());
+        var skipped = added.GetProperty("skipped").EnumerateArray().ToDictionary(x => x.GetProperty("photoId").GetGuid(), x => x.GetProperty("reason").GetString());
+        Assert.Equal("other_account", skipped[theirs]);
+        Assert.Equal("video", skipped[clip]);
         var collection = added.GetProperty("portfolio").GetProperty("collections")[0];
         Assert.Equal("Weddings", collection.GetProperty("title").GetString());
         var photos = collection.GetProperty("photos").EnumerateArray().ToList();
@@ -355,6 +359,168 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         Assert.Null(await api.Storage.GetAsync(api.Storage.KeyFor(photo.GetProperty("url").GetString()!)!));
     }
 
+    [PostgresFact]
+    public async Task Old_host_uploads_count_as_the_studios_own_and_guest_link_uploads_never_do()
+    {
+        var studio = await StudioAsync("Legacy Studio");
+        var ev = await EventAsync(studio);
+        var guestRow = await GuestAsync(ev);
+        var old = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+        // Uploaded by the host through the dashboard before uploaders were recorded: no guest, no account.
+        var hostOld = await PhotoAsync(ev, null, createdAt: old);
+        // Through a guest link with no account: the guest's.
+        var guestOld = await PhotoAsync(ev, null, guestId: guestRow, createdAt: old);
+        // Through a guest link while signed in as the studio: the studio's.
+        var studioViaLink = await PhotoAsync(ev, studio.Id, guestId: guestRow);
+        // No guest, no account, but recent: not something we can vouch for.
+        var anonymousNew = await PhotoAsync(ev, null);
+        var c = api.Client(studio.Token);
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-consent", new { consented = true }));
+
+        var list = await DataAsync(await c.GetAsync($"/api/me/campaigns/{ev}/portfolio-photos"));
+        Assert.True(list.GetProperty("consented").GetBoolean());
+        var byId = list.GetProperty("photos").EnumerateArray().ToDictionary(x => x.GetProperty("id").GetGuid());
+        Assert.True(byId[hostOld].GetProperty("eligible").GetBoolean());
+        Assert.True(byId[studioViaLink].GetProperty("eligible").GetBoolean());
+        Assert.False(byId[guestOld].GetProperty("eligible").GetBoolean());
+        Assert.Equal("guest", byId[guestOld].GetProperty("reason").GetString());
+        Assert.Equal("Added by a guest", byId[guestOld].GetProperty("reasonText").GetString());
+        Assert.Equal("guest", byId[anonymousNew].GetProperty("reason").GetString());
+        Assert.Equal(2, list.GetProperty("eligibleCount").GetInt32());
+        Assert.Equal(2, list.GetProperty("guestCount").GetInt32());
+
+        // Only guests' photos chosen: refused with the reason, and no empty collection is left behind.
+        var none = await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { guestOld, anonymousNew }, newCollectionTitle = "Weddings" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, none.StatusCode);
+        var body = await none.Content.ReadAsStringAsync();
+        Assert.Contains("nothing_added", body);
+        Assert.Contains("None of these could be added: they were added by guests.", body);
+        Assert.Equal(0, await api.ReadAsync(db => db.PortfolioCollections.CountAsync(x => db.Portfolios.Any(p => p.Id == x.PortfolioId && p.UserId == studio.Id))));
+
+        var added = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/photos",
+            new { photoIds = new[] { hostOld, studioViaLink, guestOld }, newCollectionTitle = "Weddings" }));
+        Assert.Equal(2, added.GetProperty("added").GetInt32());
+        Assert.Equal(1, added.GetProperty("skippedGuest").GetInt32());
+        Assert.Equal("2 photos added. 1 was added by a guest and can't be used.", added.GetProperty("message").GetString());
+        // The collection page's "Add photos" (an existing collection) with only guests' photos: refused too.
+        var cid = added.GetProperty("collectionId").GetGuid();
+        var none2 = await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { guestOld }, collectionId = cid });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, none2.StatusCode);
+        Assert.Contains("nothing_added", await none2.Content.ReadAsStringAsync());
+        var after = await DataAsync(await c.GetAsync($"/api/me/campaigns/{ev}/portfolio-photos"));
+        Assert.True(after.GetProperty("photos").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == hostOld).GetProperty("inPortfolio").GetBoolean());
+
+        // An old host upload in someone else's event isn't this studio's.
+        var other = await StudioAsync("Other Organiser");
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Client(other.Token).GetAsync($"/api/me/campaigns/{ev}/portfolio-photos")).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task The_backfill_gives_old_host_uploads_in_Studio_events_their_organiser_and_nothing_else()
+    {
+        var studio = await StudioAsync("Backfill Studio");
+        var premium = await UserAsync("Not Studio", SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(5));
+        var ev = await EventAsync(studio);
+        var plain = await EventAsync(premium);
+        var guestRow = await GuestAsync(ev);
+        var old = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+        var host = await PhotoAsync(ev, null, createdAt: old);
+        var guest = await PhotoAsync(ev, null, guestId: guestRow, createdAt: old);
+        var recent = await PhotoAsync(ev, null);
+        var notStudio = await PhotoAsync(plain, null, createdAt: old);
+
+        await api.WriteAsync(async db => await db.Database.ExecuteSqlRawAsync(PortfolioBackfill.HostUploadsSql));
+
+        var rows = await api.ReadAsync(db => db.EventPhotos.Where(p => new[] { host, guest, recent, notStudio }.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.UploaderUserId));
+        Assert.Equal(studio.Id, rows[host]);
+        Assert.Null(rows[guest]);
+        Assert.Null(rows[recent]);
+        Assert.Null(rows[notStudio]);
+    }
+
+    [PostgresFact]
+    public async Task A_cover_picture_can_be_uploaded_shows_on_the_page_and_link_preview_and_a_chosen_photo_replaces_it()
+    {
+        var studio = await StudioAsync("Cover Studio");
+        var c = api.Client(studio.Token);
+        var ev = await EventAsync(studio);
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-consent", new { consented = true }));
+        var added = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { await PhotoAsync(ev, studio.Id) }, newCollectionTitle = "W" }));
+        Assert.Equal("auto", added.GetProperty("portfolio").GetProperty("coverSource").GetString());
+
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Jpeg(1600, 900));
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        form.Add(file, "file", "cover.jpg");
+        var p = await DataAsync(await c.PostAsync("/api/me/portfolio/cover", form));
+        Assert.Equal("upload", p.GetProperty("coverSource").GetString());
+        var uploaded = p.GetProperty("coverImageUrl").GetString()!;
+        Assert.Contains("/portfolios/", uploaded);
+        Assert.Contains("/cover-", uploaded);
+        Assert.Equal(uploaded, p.GetProperty("coverUrl").GetString());
+        Assert.NotNull(await api.Storage.GetAsync(api.Storage.KeyFor(uploaded)!));
+
+        var handle = await PublishedAsync(studio);
+        var html = await (await api.Client().GetAsync($"/@{handle}")).Content.ReadAsStringAsync();
+        Assert.Contains(uploaded, html);
+        Assert.Matches($"<meta property=\"og:image\" content=\"[^\"]*{System.Text.RegularExpressions.Regex.Escape(uploaded)}\">", html);
+
+        // Not an image: refused.
+        using var bad = new MultipartFormDataContent { { new ByteArrayContent("hello"u8.ToArray()), "file", "x.jpg" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsync("/api/me/portfolio/cover", bad)).StatusCode);
+
+        // Choosing one of the portfolio's photos replaces the uploaded picture (and its file goes).
+        var photoId = p.GetProperty("collections")[0].GetProperty("photos")[0].GetProperty("id").GetGuid();
+        var chosen = await DataAsync(await c.PutAsJsonAsync("/api/me/portfolio", new { coverPhotoId = photoId }));
+        Assert.Equal("photo", chosen.GetProperty("coverSource").GetString());
+        Assert.Equal(JsonValueKind.Null, chosen.GetProperty("coverImageUrl").ValueKind);
+        Assert.Null(await api.Storage.GetAsync(api.Storage.KeyFor(uploaded)!));
+
+        // Upload again, then remove it: back to the chosen/first photo.
+        using var form2 = new MultipartFormDataContent();
+        var file2 = new ByteArrayContent(Jpeg(1200, 700));
+        file2.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        form2.Add(file2, "file", "cover.jpg");
+        var again = await DataAsync(await c.PostAsync("/api/me/portfolio/cover", form2));
+        var second = again.GetProperty("coverImageUrl").GetString()!;
+        var removed = await DataAsync(await c.DeleteAsync("/api/me/portfolio/cover"));
+        Assert.Equal(JsonValueKind.Null, removed.GetProperty("coverImageUrl").ValueKind);
+        Assert.Equal("auto", removed.GetProperty("coverSource").GetString());
+        Assert.Null(await api.Storage.GetAsync(api.Storage.KeyFor(second)!));
+    }
+
+    [PostgresFact]
+    public async Task Every_remove_request_is_recorded_page_requests_need_a_description_and_mails_carry_whole_links()
+    {
+        var studio = await StudioAsync("Many Reports Studio");
+        var ev = await EventAsync(studio);
+        var c = api.Client(studio.Token);
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-consent", new { consented = true }));
+        await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { await PhotoAsync(ev, studio.Id) }, newCollectionTitle = "X" }));
+        var handle = await PublishedAsync(studio);
+        var portfolioId = await api.ReadAsync(db => db.Portfolios.Where(x => x.UserId == studio.Id).Select(x => x.Id).SingleAsync());
+
+        // Neither a photo nor a word about it: nothing to act on.
+        var empty = await api.Client().PostAsJsonAsync($"/api/portfolio/@{handle}/report", new { reason = "me" });
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+        Assert.Contains("photo_required", await empty.Content.ReadAsStringAsync());
+
+        var studioMailsBefore = api.Mail.Sent.Count(m => m.To == studio.Email);
+        await DataAsync(await api.Client().PostAsJsonAsync($"/api/portfolio/@{handle}/report", new { reason = "me", note = "The one by the sea" }));
+        await DataAsync(await api.Client().PostAsJsonAsync($"/api/portfolio/@{handle}/report", new { reason = "not_agreed", note = "Our cake photo", contact = "b@example.com" }));
+        var rows = await api.ReadAsync(db => db.ContentReports.Where(r => r.TargetId == portfolioId).ToListAsync());
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.Note!.Contains("Our cake photo") && r.Note.Contains("b@example.com"));
+        // The studio hears once per open request, the moderators every time.
+        Assert.Equal(studioMailsBefore + 1, api.Mail.Sent.Count(m => m.To == studio.Email));
+        Assert.Equal(2, api.Mail.Sent.Count(m => m.To == PostgresApiFixture.ReportInbox && (m.Html.Contains("Our cake photo") || m.Html.Contains("The one by the sea"))));
+
+        var admin = await UserAsync("Admin2", SubscriptionTier.None, null, Roles.Admin);
+        var queue = await DataAsync(await api.Client(admin.Token).GetAsync("/api/admin/reports"));
+        Assert.Equal(2, queue.EnumerateArray().Count(r => r.GetProperty("targetId").GetGuid() == portfolioId));
+    }
+
     // ---------- helpers ----------
 
     private static List<string> Kinds(JsonElement p) =>
@@ -421,6 +587,17 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         return id;
     }
 
+    private async Task<Guid> GuestAsync(Guid ev)
+    {
+        var id = Guid.NewGuid();
+        await api.WriteAsync(async db =>
+        {
+            db.Guests.Add(new Guest { Id = id, CampaignId = ev, Name = "A guest", Email = $"g-{id:N}@example.com", CreatedAt = DateTimeOffset.UtcNow });
+            await Task.CompletedTask;
+        });
+        return id;
+    }
+
     private static byte[] Jpeg(int w = 300, int h = 200)
     {
         using var image = new Image<Rgba32>(w, h, new Rgba32(120, 30, 40));
@@ -430,7 +607,7 @@ public sealed class PortfolioTests(PostgresApiFixture api)
     }
 
     /// <summary>An album photo with real files in storage (so it can be copied), uploaded by <paramref name="uploader"/>.</summary>
-    private async Task<Guid> PhotoAsync(Guid ev, Guid? uploader, bool video = false)
+    private async Task<Guid> PhotoAsync(Guid ev, Guid? uploader, bool video = false, Guid? guestId = null, DateTimeOffset? createdAt = null)
     {
         var id = Guid.NewGuid();
         var view = await api.Storage.PutAsync($"buckets/test/media/{id:N}.jpg", Jpeg(), "image/jpeg");
@@ -438,9 +615,9 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         {
             db.EventPhotos.Add(new EventPhoto
             {
-                Id = id, CampaignId = ev, UploaderUserId = uploader, UploaderName = "Someone",
+                Id = id, CampaignId = ev, UploaderUserId = uploader, GuestId = guestId, UploaderName = "Someone",
                 OriginalUrl = view, Url = view, ThumbUrl = view, ContentType = video ? "video/mp4" : "image/jpeg",
-                SizeBytes = 10, Width = 300, Height = 200, CreatedAt = DateTimeOffset.UtcNow,
+                SizeBytes = 10, Width = 300, Height = 200, CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             });
             await Task.CompletedTask;
         });

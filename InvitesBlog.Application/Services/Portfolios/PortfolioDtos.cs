@@ -19,7 +19,8 @@ public sealed record PortfolioDto(
     Guid Id, string? Handle, string? PublicUrl, string DisplayName, string? Tagline, string? LogoUrl,
     Guid? CoverPhotoId, string? CoverUrl, string Theme, string Accent, string Font, PortfolioContactDto Contact,
     bool Published, DateTimeOffset? PublishedAt, bool SetupDone, int PhotoCount, int PhotoLimit, int UnreadEnquiries,
-    IReadOnlyList<PortfolioSectionDto> Sections, IReadOnlyList<PortfolioCollectionDto> Collections);
+    IReadOnlyList<PortfolioSectionDto> Sections, IReadOnlyList<PortfolioCollectionDto> Collections,
+    string? CoverImageUrl = null, string CoverSource = "none");
 
 /// <summary>PUT /api/me/portfolio. Null = unchanged; "" clears a text.</summary>
 public sealed record UpdatePortfolioRequest(
@@ -45,8 +46,20 @@ public sealed record CollectionRequest(string? Title, string? Layout, Guid? Cove
 
 public sealed record AddPortfolioPhotosRequest(IReadOnlyList<Guid>? PhotoIds, Guid? CollectionId, string? NewCollectionTitle);
 
+/// <param name="Reason">guest | other_account | video | missing (the file couldn't be read).</param>
+public sealed record SkippedPortfolioPhotoDto(Guid PhotoId, string Reason);
+
 public sealed record AddPortfolioPhotosResultDto(
-    int Added, int AlreadyIn, int SkippedGuest, int SkippedVideo, Guid CollectionId, string Message, PortfolioDto Portfolio);
+    int Added, int AlreadyIn, int SkippedGuest, int SkippedVideo, Guid CollectionId, string Message, PortfolioDto Portfolio,
+    int SkippedOther = 0, int SkippedMissing = 0, IReadOnlyList<SkippedPortfolioPhotoDto>? Skipped = null);
+
+/// <summary>One album photo as the portfolio picker sees it: can it go in, and if not, why.</summary>
+/// <param name="Reason">null when eligible; guest | other_account | video.</param>
+public sealed record PortfolioEventPhotoDto(
+    Guid Id, string ThumbUrl, string Url, int Width, int Height, bool Eligible, string? Reason, string? ReasonText, bool InPortfolio);
+
+public sealed record PortfolioEventPhotosDto(
+    bool Consented, int EligibleCount, int GuestCount, int VideoCount, IReadOnlyList<PortfolioEventPhotoDto> Photos);
 
 public sealed record PublishRequest(bool Published);
 

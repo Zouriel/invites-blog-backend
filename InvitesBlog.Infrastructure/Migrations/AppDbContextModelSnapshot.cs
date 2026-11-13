@@ -2315,6 +2315,11 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDefaultValue("theme")
                         .HasColumnName("accent");
 
+                    b.Property<string>("CoverImageUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("cover_image_url");
+
                     b.Property<Guid?>("CoverPhotoId")
                         .HasColumnType("uuid")
                         .HasColumnName("cover_photo_id");
