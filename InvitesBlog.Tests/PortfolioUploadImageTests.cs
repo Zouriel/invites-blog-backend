@@ -15,14 +15,16 @@ public sealed class HeifFactAttribute : FactAttribute
 {
     public HeifFactAttribute()
     {
-        if (!HeifAvailable()) Skip = "heif-dec (libheif-examples) isn't installed here.";
+        if (!HeifAvailable()) Skip = "heif-dec / heif-convert (libheif-examples) isn't installed here.";
     }
 
-    internal static bool HeifAvailable()
+    internal static bool HeifAvailable() => Works("heif-dec") || Works("heif-convert");
+
+    private static bool Works(string tool)
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo("heif-dec", "--version")
+            using var p = Process.Start(new ProcessStartInfo(tool, "--version")
             {
                 RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
             });
@@ -163,6 +165,24 @@ public class PortfolioUploadImageTests
         using var img = Image.Load<Rgba32>(copies.Full.Content);
         Assert.True(img[45, 5].R > 150 && img[45, 5].B < 100, "red on top");
         Assert.True(img[45, 155].B > 150 && img[45, 155].R < 100, "blue at the bottom");
+    }
+
+    [HeifFact]
+    public async Task The_older_heif_convert_name_works_the_same_way()
+    {
+        // The API image (Ubuntu 24.04, libheif 1.17) only has heif-convert.
+        var heic = await File.ReadAllBytesAsync(Fixture("portrait-gps.heic"));
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Images:HeifDec"] = "heif-convert" }).Build();
+        var jpeg = await new HeifDecConverter(config, NullLogger<HeifDecConverter>.Instance).ToJpegAsync(heic);
+        Assert.NotNull(jpeg);
+        Assert.Equal((90, 160), (Image.Identify(jpeg).Width, Image.Identify(jpeg).Height));
+    }
+
+    [Fact]
+    public async Task No_decoder_installed_means_nothing_comes_back_not_a_crash()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Images:HeifDec"] = "no-such-heif-tool" }).Build();
+        Assert.Null(await new HeifDecConverter(config, NullLogger<HeifDecConverter>.Instance).ToJpegAsync([1, 2, 3]));
     }
 
     [HeifFact]

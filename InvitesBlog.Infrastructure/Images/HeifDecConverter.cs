@@ -6,8 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace InvitesBlog.Infrastructure.Images;
 
 /// <summary>
-/// <see cref="IHeicConverter"/> through libheif's <c>heif-dec</c> (Debian package libheif-examples, with the
-/// libheif-plugin-libde265 decoder), installed in the API image. It applies the picture's rotation and mirroring
+/// <see cref="IHeicConverter"/> through libheif's command-line decoder (package libheif-examples, with the
+/// libheif-plugin-libde265 decoder), installed in the API image. It is <c>heif-dec</c> from libheif 1.18 and
+/// <c>heif-convert</c> before that (the API image, Ubuntu 24.04, has 1.17), with the same arguments. It applies the picture's rotation and mirroring
 /// itself and writes a JPEG; libheif's security limits stay on. Each run gets its own empty folder, a time limit, and
 /// is killed when it runs over.
 /// </summary>
@@ -15,7 +16,7 @@ public sealed class HeifDecConverter(IConfiguration config, ILogger<HeifDecConve
 {
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(60);
 
-    private string Tool => config["Images:HeifDec"] ?? "heif-dec";
+    private IEnumerable<string> Tools => config["Images:HeifDec"] is { Length: > 0 } set ? [set] : ["heif-dec", "heif-convert"];
 
     public async Task<byte[]?> ToJpegAsync(byte[] heic, CancellationToken ct = default)
     {
@@ -26,12 +27,7 @@ public sealed class HeifDecConverter(IConfiguration config, ILogger<HeifDecConve
         try
         {
             await File.WriteAllBytesAsync(input, heic, ct);
-            var start = new ProcessStartInfo(Tool)
-            {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = dir,
-            };
-            foreach (var a in new[] { "-q", "95", input, output }) start.ArgumentList.Add(a);
-            using var p = Process.Start(start);
+            using var p = StartFirst(input, output, dir);
             if (p is null) return null;
             var stdout = p.StandardOutput.ReadToEndAsync(ct);
             var stderr = p.StandardError.ReadToEndAsync(ct);
@@ -67,5 +63,28 @@ public sealed class HeifDecConverter(IConfiguration config, ILogger<HeifDecConve
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
+    }
+
+    /// <summary>The first decoder that is installed, started; null when none is.</summary>
+    private Process? StartFirst(string input, string output, string dir)
+    {
+        foreach (var tool in Tools)
+        {
+            var start = new ProcessStartInfo(tool)
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = dir,
+            };
+            foreach (var a in new[] { "-q", "95", input, output }) start.ArgumentList.Add(a);
+            try
+            {
+                return Process.Start(start);
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Not installed under this name: try the next.
+            }
+        }
+        logger.LogWarning("No HEIC decoder (heif-dec or heif-convert) is installed, so HEIC uploads can't be read.");
+        return null;
     }
 }

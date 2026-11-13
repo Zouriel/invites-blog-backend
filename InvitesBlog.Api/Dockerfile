@@ -26,7 +26,8 @@ RUN mkdir -p /opt/gpu-libs && if [ "$GPU_LIBS" = "on" ]; then \
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 # For videos: checking what arrived, removing camera metadata, trimming (VideoTrimService).
-# heif-dec (libheif-examples + its HEVC decoder plugin): iPhone HEIC pictures uploaded into a portfolio (HeifDecConverter).
+# heif-convert (libheif-examples + its HEVC decoder plugin; verified on this noble base): iPhone HEIC pictures uploaded
+# into a portfolio (HeifDecConverter).
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tzdata libheif-examples libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
