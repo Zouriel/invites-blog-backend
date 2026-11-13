@@ -60,6 +60,12 @@ public sealed class EventPhoto
     public Guid? UploaderUserId { get; set; }
 
     /// <summary>
+    /// Set when a Studio organiser said "this is me" for the name this was uploaded under (a QR code or guest link
+    /// used without signing in), which also set <see cref="UploaderUserId"/>. Undoing the claim clears both.
+    /// </summary>
+    public Guid? ClaimId { get; set; }
+
+    /// <summary>
     /// Every pixel as uploaded, camera metadata stripped. Nothing in the app loads this — it exists to
     /// be downloaded. An event photo is somebody's own photograph and the copy they may want back is
     /// the one they took, so this box keeps it rather than only a copy sized for a screen.

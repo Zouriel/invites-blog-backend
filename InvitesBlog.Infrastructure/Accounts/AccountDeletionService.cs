@@ -329,6 +329,11 @@ public sealed class AccountDeletionService(
             queue.Prefix($"portfolios/{pid:N}/");
         await db.Portfolios.Where(p => p.UserId == me.Id).ExecuteDeleteAsync(ct);
         await db.PortfolioConsents.Where(c => c.UserId == me.Id).ExecuteDeleteAsync(ct);
+        // Their "These are mine" claims: the record goes, and photos they claimed stop pointing at it.
+        var claimIds = await db.PortfolioPhotoClaims.Where(c => c.UserId == me.Id).Select(c => (Guid?)c.Id).ToListAsync(ct);
+        if (claimIds.Count > 0)
+            await db.EventPhotos.Where(p => claimIds.Contains(p.ClaimId)).ExecuteUpdateAsync(u => u.SetProperty(p => p.ClaimId, (Guid?)null), ct);
+        await db.PortfolioPhotoClaims.Where(c => c.UserId == me.Id).ExecuteDeleteAsync(ct);
         await db.PassCredits.Where(p => p.OwnerUserId == me.Id).ExecuteDeleteAsync(ct);
         await HandleTemplatesAsync(me, scope, queue, now, ct);
         await KeepPaymentsWithoutThePersonAsync(me, scope.DeletedEvents, queue, ct);

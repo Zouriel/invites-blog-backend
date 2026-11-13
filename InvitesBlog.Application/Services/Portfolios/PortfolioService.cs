@@ -41,6 +41,8 @@ public interface IPortfolioService
     Task<IReadOnlyList<PortfolioDesignDto>> DesignsAsync(CancellationToken ct = default);
     Task<PortfolioConsentDto> GetConsentAsync(Guid campaignId, CancellationToken ct = default);
     Task<PortfolioConsentDto> SetConsentAsync(Guid campaignId, bool consented, CancellationToken ct = default);
+    /// <summary>Takes the copies of these album photos out of the caller's portfolio (with their files); how many went.</summary>
+    Task<int> RemoveSourcesAsync(IReadOnlyCollection<Guid> sourcePhotoIds, CancellationToken ct = default);
 }
 
 public sealed class PortfolioService(
@@ -508,10 +510,12 @@ public sealed class PortfolioService(
     internal static string? Ineligible(EventPhoto x, Guid me, IReadOnlySet<Guid> organised)
     {
         var mine = x.UploaderUserId == me
-                   // Host uploads from before uploaders were recorded (2026-11-03): no guest, no account. In an
-                   // event this studio organises, those were added through its own dashboard or app.
-                   || (x.UploaderUserId is null && x.GuestId is null && x.CreatedAt < UploaderRecordedFrom
-                       && x.CampaignId is { } cid && organised.Contains(cid));
+                   // Host uploads from before uploaders were recorded (2026-11-03): no guest, no account AND no name.
+                   // In an event this studio organises, those were added through its own dashboard or app. A name
+                   // without a guest is a QR code or invitation camera upload by whoever typed it: never assumed to
+                   // be the organiser's (they can say "This is me", see PortfolioClaimService).
+                   || (x.UploaderUserId is null && x.GuestId is null && string.IsNullOrWhiteSpace(x.UploaderName)
+                       && x.CreatedAt < UploaderRecordedFrom && x.CampaignId is { } cid && organised.Contains(cid));
         if (!mine) return x.GuestId is not null || x.UploaderUserId is null ? Reasons.Guest : Reasons.OtherAccount;
         return x.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? Reasons.Video : null;
     }
@@ -656,6 +660,17 @@ public sealed class PortfolioService(
             await DeleteFileAsync(r.Url, ct);
             await DeleteFileAsync(r.ThumbUrl, ct);
         }
+    }
+
+    public async Task<int> RemoveSourcesAsync(IReadOnlyCollection<Guid> sourcePhotoIds, CancellationToken ct = default)
+    {
+        var p = await MineAsync(ct);
+        if (sourcePhotoIds.Count == 0) return 0;
+        var ids = sourcePhotoIds.Select(x => (Guid?)x).ToList();
+        var rows = await photos.Query(tracking: true).Where(x => x.PortfolioId == p.Id && ids.Contains(x.SourcePhotoId)).ToListAsync(ct);
+        await RemovePhotoRowsAsync(rows, ct);
+        await uow.SaveChangesAsync(ct);
+        return rows.Count;
     }
 
     // ---------- publish ----------
