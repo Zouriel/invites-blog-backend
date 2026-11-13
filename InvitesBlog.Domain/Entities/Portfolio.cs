@@ -104,6 +104,24 @@ public sealed class PortfolioConsent
     public DateTimeOffset ConsentedAt { get; set; }
 }
 
+/// <summary>
+/// "These are mine": a Studio organiser said the photos uploaded in its event under one name (or one guest) were taken
+/// by the studio itself, so they become its own uploads. Kept after an undo (<see cref="UndoneAt"/>) as the record of
+/// who said so and when.
+/// </summary>
+public sealed class PortfolioPhotoClaim
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid CampaignId { get; set; }
+    /// <summary>"guest:{guid}" or "name:{lower-case name}".</summary>
+    public string Key { get; set; } = default!;
+    public string Name { get; set; } = default!;
+    public int PhotoCount { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? UndoneAt { get; set; }
+}
+
 /// <summary>A handle the studio changed away from: it redirects to the portfolio until <see cref="ExpiresAt"/>.</summary>
 public sealed class PortfolioHandleRedirect
 {

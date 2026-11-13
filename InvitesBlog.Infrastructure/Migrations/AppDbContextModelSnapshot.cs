@@ -1052,6 +1052,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("campaign_id");
 
+                    b.Property<Guid?>("ClaimId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("claim_id");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasColumnType("text")
@@ -2656,6 +2660,55 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("portfolio_photos", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioPhotoClaim", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("key");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("PhotoCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("photo_count");
+
+                    b.Property<DateTimeOffset?>("UndoneAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("undone_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CampaignId", "UserId")
+                        .HasDatabaseName("idx_portfolio_photo_claims_campaign_user");
+
+                    b.ToTable("portfolio_photo_claims", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioSection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3880,6 +3933,21 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
                         .WithMany()
                         .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioPhotoClaim", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.Campaign", null)
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

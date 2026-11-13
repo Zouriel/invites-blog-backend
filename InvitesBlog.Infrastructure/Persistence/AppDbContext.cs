@@ -72,6 +72,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PortfolioCollection> PortfolioCollections => Set<PortfolioCollection>();
     public DbSet<PortfolioPhoto> PortfolioPhotos => Set<PortfolioPhoto>();
     public DbSet<PortfolioConsent> PortfolioConsents => Set<PortfolioConsent>();
+    public DbSet<PortfolioPhotoClaim> PortfolioPhotoClaims => Set<PortfolioPhotoClaim>();
     public DbSet<PortfolioHandleRedirect> PortfolioHandleRedirects => Set<PortfolioHandleRedirect>();
     public DbSet<PortfolioEnquiry> PortfolioEnquiries => Set<PortfolioEnquiry>();
 
@@ -710,6 +711,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("portfolio_consents");
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.UserId, x.CampaignId }).IsUnique().HasDatabaseName("ux_portfolio_consents_user_campaign");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioPhotoClaim>(e =>
+        {
+            e.ToTable("portfolio_photo_claims");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Key).HasMaxLength(200);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.HasIndex(x => new { x.CampaignId, x.UserId }).HasDatabaseName("idx_portfolio_photo_claims_campaign_user");
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
         });

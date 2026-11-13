@@ -366,8 +366,11 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         var ev = await EventAsync(studio);
         var guestRow = await GuestAsync(ev);
         var old = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
-        // Uploaded by the host through the dashboard before uploaders were recorded: no guest, no account.
-        var hostOld = await PhotoAsync(ev, null, createdAt: old);
+        // Uploaded by the host through the dashboard before uploaders were recorded: no guest, no account, no name.
+        var hostOld = await PhotoAsync(ev, null, createdAt: old, name: null);
+        // Through the event's QR code or invitation camera before then: no guest, no account, but a typed name.
+        // Whoever typed it, never assumed to be the organiser (2026-11-13 night: Rani's photos showed as the owner's).
+        var qrOld = await PhotoAsync(ev, null, createdAt: old, name: "Rani");
         // Through a guest link with no account: the guest's.
         var guestOld = await PhotoAsync(ev, null, guestId: guestRow, createdAt: old);
         // Through a guest link while signed in as the studio: the studio's.
@@ -386,8 +389,10 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         Assert.Equal("guest", byId[guestOld].GetProperty("reason").GetString());
         Assert.Equal("Added by a guest", byId[guestOld].GetProperty("reasonText").GetString());
         Assert.Equal("guest", byId[anonymousNew].GetProperty("reason").GetString());
+        Assert.False(byId[qrOld].GetProperty("eligible").GetBoolean());
+        Assert.Equal("guest", byId[qrOld].GetProperty("reason").GetString());
         Assert.Equal(2, list.GetProperty("eligibleCount").GetInt32());
-        Assert.Equal(2, list.GetProperty("guestCount").GetInt32());
+        Assert.Equal(3, list.GetProperty("guestCount").GetInt32());
 
         // Only guests' photos chosen: refused with the reason, and no empty collection is left behind.
         var none = await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { guestOld, anonymousNew }, newCollectionTitle = "Weddings" });
@@ -424,7 +429,7 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         var plain = await EventAsync(premium);
         var guestRow = await GuestAsync(ev);
         var old = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
-        var host = await PhotoAsync(ev, null, createdAt: old);
+        var host = await PhotoAsync(ev, null, createdAt: old, name: null);
         var guest = await PhotoAsync(ev, null, guestId: guestRow, createdAt: old);
         var recent = await PhotoAsync(ev, null);
         var notStudio = await PhotoAsync(plain, null, createdAt: old);
@@ -526,6 +531,121 @@ public sealed class PortfolioTests(PostgresApiFixture api)
     private static List<string> Kinds(JsonElement p) =>
         p.GetProperty("sections").EnumerateArray().Select(s => s.GetProperty("kind").GetString()!).ToList();
 
+    [PostgresFact]
+    public async Task The_night_fix_gives_named_QR_uploads_back_and_keeps_the_organisers_own_name()
+    {
+        var studio = await StudioAsync("Mohamed Imdhah");
+        var ev = await EventAsync(studio);
+        var guestRow = await GuestAsync(ev);
+        var old = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+        // What the evening backfill left: every old no-guest upload owned by the organiser, named or not.
+        var rani = await PhotoAsync(ev, studio.Id, createdAt: old, name: "Rani");
+        var baamira = await PhotoAsync(ev, studio.Id, createdAt: old, name: " Baamira ");
+        var lastWord = await PhotoAsync(ev, studio.Id, createdAt: old, name: "Imdhah");
+        var fullName = await PhotoAsync(ev, studio.Id, createdAt: old, name: "mohamed  imdhah".Replace("  ", " "));
+        var firstWord = await PhotoAsync(ev, studio.Id, createdAt: old, name: "Mohamed");
+        var unnamed = await PhotoAsync(ev, studio.Id, createdAt: old, name: null);
+        var recent = await PhotoAsync(ev, studio.Id, name: "Rani");
+        var viaGuestLink = await PhotoAsync(ev, studio.Id, guestId: guestRow, createdAt: old, name: "Rani");
+        var claimId = Guid.NewGuid();
+        await api.WriteAsync(async db =>
+        {
+            db.PortfolioPhotoClaims.Add(new PortfolioPhotoClaim
+            {
+                Id = claimId, UserId = studio.Id, CampaignId = ev, Key = "name:rany", Name = "Rany", PhotoCount = 1, CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await Task.CompletedTask;
+        });
+        var claimed = await PhotoAsync(ev, studio.Id, createdAt: old, name: "Rany", claimId: claimId);
+
+        await api.WriteAsync(async db => await db.Database.ExecuteSqlRawAsync(PortfolioBackfill.NamedUploadsFixSql));
+
+        var all = new[] { rani, baamira, lastWord, fullName, firstWord, unnamed, recent, viaGuestLink, claimed };
+        var rows = await api.ReadAsync(db => db.EventPhotos.Where(p => all.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.UploaderUserId));
+        Assert.Null(rows[rani]);
+        Assert.Null(rows[baamira]);
+        // A first name is too common to vouch for: unsure stays unowned (the studio can still claim it).
+        Assert.Null(rows[firstWord]);
+        Assert.Equal(studio.Id, rows[lastWord]);
+        Assert.Equal(studio.Id, rows[fullName]);
+        Assert.Equal(studio.Id, rows[unnamed]);
+        Assert.Equal(studio.Id, rows[recent]);
+        Assert.Equal(studio.Id, rows[viaGuestLink]);
+        Assert.Equal(studio.Id, rows[claimed]);
+    }
+
+    [PostgresFact]
+    public async Task These_are_mine_lists_the_names_and_a_claim_makes_them_the_studios_until_undone()
+    {
+        var studio = await StudioAsync("Claim Studio");
+        var someoneSignedIn = await UserAsync("Signed In", SubscriptionTier.None, null);
+        var ev = await EventAsync(studio);
+        var immy = await GuestAsync(ev);
+        var immy1 = await PhotoAsync(ev, null, guestId: immy, name: "Immy");
+        var immy2 = await PhotoAsync(ev, null, guestId: immy, name: "Immy");
+        var immyClip = await PhotoAsync(ev, null, guestId: immy, name: "Immy", video: true);
+        var rany = await PhotoAsync(ev, null, name: "Rany");
+        var signedIn = await PhotoAsync(ev, someoneSignedIn.Id, name: "Signed In");
+        var c = api.Client(studio.Token);
+        var guestKey = $"guest:{immy}";
+
+        // Only the organiser, only a Studio.
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Client((await StudioAsync("Not Organiser")).Token).GetAsync($"/api/me/campaigns/{ev}/portfolio-uploaders")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Client(someoneSignedIn.Token).GetAsync($"/api/me/campaigns/{ev}/portfolio-uploaders")).StatusCode);
+
+        var list = await DataAsync(await c.GetAsync($"/api/me/campaigns/{ev}/portfolio-uploaders"));
+        Assert.False(list.GetProperty("consented").GetBoolean());
+        var groups = list.GetProperty("groups").EnumerateArray().ToList();
+        // Someone who was signed in is never claimable.
+        Assert.Equal([guestKey, "name:rany"], groups.Select(g => g.GetProperty("key").GetString()).ToList());
+        Assert.Equal("Immy", groups[0].GetProperty("name").GetString());
+        Assert.Equal(2, groups[0].GetProperty("photoCount").GetInt32());
+        Assert.Equal(1, groups[0].GetProperty("videoCount").GetInt32());
+        Assert.Equal(3, groups[0].GetProperty("thumbUrls").GetArrayLength());
+        Assert.False(groups[0].GetProperty("claimed").GetBoolean());
+
+        // Consent first.
+        var early = await c.PostAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-uploaders/claim", new { key = guestKey });
+        Assert.Equal(HttpStatusCode.Forbidden, early.StatusCode);
+        Assert.Contains("no_consent", await early.Content.ReadAsStringAsync());
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-consent", new { consented = true }));
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-uploaders/claim", new { key = "name:nobody" })).StatusCode);
+
+        var claim = await DataAsync(await c.PostAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-uploaders/claim", new { key = guestKey }));
+        Assert.Equal(3, claim.GetProperty("count").GetInt32());
+        Assert.Equal("3 photos are now yours. You can add them to your portfolio.", claim.GetProperty("message").GetString());
+        var after = claim.GetProperty("uploaders").GetProperty("groups").EnumerateArray().ToList();
+        Assert.True(after.Single(g => g.GetProperty("key").GetString() == guestKey).GetProperty("claimed").GetBoolean());
+        Assert.False(after.Single(g => g.GetProperty("key").GetString() == "name:rany").GetProperty("claimed").GetBoolean());
+        var record = await api.ReadAsync(db => db.PortfolioPhotoClaims.SingleAsync(x => x.CampaignId == ev));
+        Assert.Equal(studio.Id, record.UserId);
+        Assert.Equal("Immy", record.Name);
+        Assert.Null(record.UndoneAt);
+
+        // Now they're the studio's: selectable in the picker and addable (the clip still isn't, being a video).
+        var picker = await DataAsync(await c.GetAsync($"/api/me/campaigns/{ev}/portfolio-photos"));
+        var byId = picker.GetProperty("photos").EnumerateArray().ToDictionary(x => x.GetProperty("id").GetGuid());
+        Assert.True(byId[immy1].GetProperty("eligible").GetBoolean());
+        Assert.True(byId[immy2].GetProperty("eligible").GetBoolean());
+        Assert.Equal("video", byId[immyClip].GetProperty("reason").GetString());
+        Assert.Equal("guest", byId[rany].GetProperty("reason").GetString());
+        Assert.Equal("other_account", byId[signedIn].GetProperty("reason").GetString());
+        var added = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { immy1 }, newCollectionTitle = "Birthdays" }));
+        Assert.Equal(1, added.GetProperty("added").GetInt32());
+
+        // "Not me": back to the guest, and out of the portfolio.
+        var undo = await DataAsync(await c.PostAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-uploaders/unclaim", new { key = guestKey }));
+        Assert.Equal(3, undo.GetProperty("count").GetInt32());
+        Assert.Equal(1, undo.GetProperty("removedFromPortfolio").GetInt32());
+        var owners = await api.ReadAsync(db => db.EventPhotos.Where(p => new[] { immy1, immy2, immyClip }.Contains(p.Id)).Select(p => new { p.UploaderUserId, p.ClaimId }).ToListAsync());
+        Assert.All(owners, o => { Assert.Null(o.UploaderUserId); Assert.Null(o.ClaimId); });
+        Assert.Equal(0, await api.ReadAsync(db => db.PortfolioPhotos.CountAsync(x => x.SourcePhotoId == immy1)));
+        Assert.NotNull((await api.ReadAsync(db => db.PortfolioPhotoClaims.SingleAsync(x => x.CampaignId == ev))).UndoneAt);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-uploaders/unclaim", new { key = guestKey })).StatusCode);
+        Assert.False((await DataAsync(await c.GetAsync($"/api/me/campaigns/{ev}/portfolio-uploaders"))).GetProperty("groups")[0].GetProperty("claimed").GetBoolean());
+    }
+
+
     private async Task<string> PublishedAsync(Person studio)
     {
         var handle = "pp" + Guid.NewGuid().ToString("N")[..8];
@@ -607,7 +727,8 @@ public sealed class PortfolioTests(PostgresApiFixture api)
     }
 
     /// <summary>An album photo with real files in storage (so it can be copied), uploaded by <paramref name="uploader"/>.</summary>
-    private async Task<Guid> PhotoAsync(Guid ev, Guid? uploader, bool video = false, Guid? guestId = null, DateTimeOffset? createdAt = null)
+    private async Task<Guid> PhotoAsync(Guid ev, Guid? uploader, bool video = false, Guid? guestId = null, DateTimeOffset? createdAt = null,
+        string? name = "Someone", Guid? claimId = null)
     {
         var id = Guid.NewGuid();
         var view = await api.Storage.PutAsync($"buckets/test/media/{id:N}.jpg", Jpeg(), "image/jpeg");
@@ -615,7 +736,7 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         {
             db.EventPhotos.Add(new EventPhoto
             {
-                Id = id, CampaignId = ev, UploaderUserId = uploader, GuestId = guestId, UploaderName = "Someone",
+                Id = id, CampaignId = ev, UploaderUserId = uploader, GuestId = guestId, UploaderName = name, ClaimId = claimId,
                 OriginalUrl = view, Url = view, ThumbUrl = view, ContentType = video ? "video/mp4" : "image/jpeg",
                 SizeBytes = 10, Width = 300, Height = 200, CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             });
