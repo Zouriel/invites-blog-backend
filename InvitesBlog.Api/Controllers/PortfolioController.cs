@@ -53,6 +53,31 @@ public sealed class PortfolioController(IPortfolioService portfolio, IConfigurat
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> RemoveLogo(CancellationToken ct) => Success(await portfolio.RemoveLogoAsync(ct));
 
+    public const long MaxCoverBytes = 15 * 1024 * 1024;
+
+    /// <summary>A cover picture for the page itself (the client crops it first). Wins over a chosen portfolio photo.</summary>
+    [HttpPost("cover")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    [RequestSizeLimit(MaxCoverBytes + 64 * 1024)]
+    public async Task<IActionResult> SetCover(IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) throw new CodedRuleException("Choose a picture.", "not_an_image");
+        if (file.Length > MaxCoverBytes) throw new CodedRuleException("That picture is too big. Use one under 15 MB.", "too_big");
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct);
+        return Success(await portfolio.SetCoverAsync(ms.ToArray(), file.ContentType, ct));
+    }
+
+    [HttpDelete("cover")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    public async Task<IActionResult> RemoveCover(CancellationToken ct) => Success(await portfolio.RemoveCoverAsync(ct));
+
+    /// <summary>An event's album as the portfolio picker sees it: each photo says whether it can go in, and why not.</summary>
+    [HttpGet("/api/me/campaigns/{campaignId:guid}/portfolio-photos")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> EventPhotos(Guid campaignId, CancellationToken ct) =>
+        Success(await portfolio.EventPhotosAsync(campaignId, ct));
+
     [HttpPost("sections")]
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> AddSection([FromBody] SectionRequest req, CancellationToken ct) =>

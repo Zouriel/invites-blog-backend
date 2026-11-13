@@ -96,7 +96,7 @@ public static class PortfolioPage
         sb.Append(ReportDialog());
 
         sb.Append($"<script nonce=\"{nonce}\">window.__pf={{handle:{JsonString(p.Handle)},photos:[");
-        sb.Append(string.Join(',', allPhotos.Select(x => $"{{id:{JsonString(x.Id.ToString())},src:{JsonString(x.Url)}}}")));
+        sb.Append(string.Join(',', allPhotos.Select(x => $"{{id:{JsonString(x.Id.ToString())},src:{JsonString(x.Url)},t:{JsonString(x.ThumbUrl)}}}")));
         sb.Append("]};").Append(Script).Append("</script><!--/email_off--></body></html>");
         return sb.ToString();
     }
@@ -254,16 +254,20 @@ public static class PortfolioPage
         <form class="card rep" novalidate>
         <button type="button" class="lb-btn x" aria-label="Close" data-close>{PortfolioIcons.Close}</button>
         <h3 id="rep-h">Ask to remove a photo</h3>
+        <div class="rep-body">
         <p class="muted rep-which">Tell us which photo, and we'll pass it to the studio. No account needed.</p>
         <img class="rep-thumb" alt="" hidden>
+        <div class="rep-pick" role="group" aria-label="Which photo?" hidden></div>
         <fieldset><legend>Why?</legend>
         <label class="radio"><input type="radio" name="reason" value="me" checked> I'm in it and want it removed</label>
         <label class="radio"><input type="radio" name="reason" value="not_agreed"> We didn't agree to it being shown</label>
         <label class="radio"><input type="radio" name="reason" value="other"> Something else</label></fieldset>
         <label>More details <span class="opt">(optional)</span><textarea name="note" rows="3" maxlength="800"></textarea></label>
         <label>Your phone or email <span class="opt">(optional, so we can reply)</span><input name="contact" maxlength="120"></label>
-        <button class="btn wide" type="submit">Send request</button>
+        <button class="btn wide rep-send" type="submit">Send request</button>
+        </div>
         <p class="note" role="status" aria-live="polite"></p>
+        <button type="button" class="btn wide rep-done" hidden data-close>Close</button>
         </form></div>
         """;
 
@@ -343,6 +347,12 @@ public static class PortfolioPage
         .rep{position:relative;width:100%;max-width:460px;margin:auto;display:grid;gap:14px;color:var(--text)}
         .rep .x{top:12px;right:12px;background:transparent;color:var(--text)}
         .rep-thumb{width:96px;height:96px;object-fit:cover;border-radius:8px}
+        [hidden]{display:none!important}
+        .rep-body{display:grid;gap:14px}
+        .rep-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;max-height:208px;overflow-y:auto;padding:2px}
+        .rep-pick button{padding:0;border:2px solid transparent;border-radius:8px;background:none;cursor:pointer;aspect-ratio:1;overflow:hidden}
+        .rep-pick button[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+        .rep-pick img{width:100%;height:100%;object-fit:cover}
         fieldset{border:0;padding:0;margin:0;display:grid;gap:8px}legend{font-weight:600;font-size:.92rem;margin-bottom:6px}
         .radio{display:flex;align-items:center;gap:10px;font-weight:400;min-height:40px}.radio input{width:20px;height:20px;min-height:0}
         @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tile img{transition:none}}
@@ -368,27 +378,38 @@ public static class PortfolioPage
           if(lb.hidden)return;if(e.key==='Escape')close(lb);if(e.key==='ArrowLeft')show(cur-1);if(e.key==='ArrowRight')show(cur+1);});
         document.querySelectorAll('[data-show]').forEach(function(s){var t=s.querySelector('.show-track'),p=s.querySelector('.prev'),n=s.querySelector('.next');
           function go(d){t.scrollBy({left:d*t.clientWidth,behavior:'smooth'});}if(p)p.onclick=function(){go(-1);};if(n)n.onclick=function(){go(1);};});
-        function post(url,body,note,ok){note.className='note';note.textContent='Sending...';
+        function post(url,body,note,ok,fail){note.className='note';note.textContent='Sending...';fail=fail||function(){};
           fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
             return r.json().catch(function(){return {};}).then(function(j){
               if(r.ok){note.textContent=(j.data&&j.data.message)||'Sent.';ok();}
-              else{note.className='note err';note.textContent=r.status===429?'Too many messages. Please try again later.':(j.message||'That didn’t send. Please try again.');}});
-          }).catch(function(){note.className='note err';note.textContent='No connection. Please try again.';});}
+              else{note.className='note err';note.textContent=r.status===429?'Too many messages. Please try again later.':(j.message||'That didn’t send. Please try again.');fail();}});
+          }).catch(function(){note.className='note err';note.textContent='No connection. Please try again.';fail();});}
         var enq=document.getElementById('enq');
         if(enq)enq.addEventListener('submit',function(e){e.preventDefault();var f=new FormData(enq),note=enq.querySelector('.note');
           var b={name:f.get('name'),contact:f.get('contact'),eventDate:f.get('eventDate')||null,message:f.get('message'),website:f.get('website')};
           if(!b.name||!b.contact||!b.message){note.className='note err';note.textContent='Add your name, a phone or email, and a message.';return;}
           post(api+'/enquiries',b,note,function(){enq.reset();});});
-        var rep=document.getElementById('rep'),rf=rep.querySelector('form'),rthumb=rep.querySelector('.rep-thumb'),rid=null;
+        var rep=document.getElementById('rep'),rf=rep.querySelector('form'),rthumb=rep.querySelector('.rep-thumb'),rpick=rep.querySelector('.rep-pick'),
+          rbody=rep.querySelector('.rep-body'),rdone=rep.querySelector('.rep-done'),rsend=rep.querySelector('.rep-send'),rnote=rf.querySelector('.note'),rid=null;
+        function mark(){rpick.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.id===rid?'true':'false');});}
+        P.photos.forEach(function(x){var b=document.createElement('button');b.type='button';b.dataset.id=x.id;b.setAttribute('aria-label','This photo');
+          var im=document.createElement('img');im.alt='';im.loading='lazy';im.src=x.t||x.src;b.appendChild(im);
+          b.onclick=function(){rid=rid===x.id?null:x.id;mark();};rpick.appendChild(b);});
         function report(id){rid=id;var ph=id&&P.photos.find(function(x){return x.id===id;});
-          rthumb.hidden=!ph;if(ph)rthumb.src=ph.src;rep.querySelector('.rep-which').textContent=ph?'We’ll pass this to the studio. No account needed.':'Open the photo and use its link, or describe it below. No account needed.';
-          rf.querySelector('.note').textContent='';last=document.activeElement;rep.hidden=false;document.body.style.overflow='hidden';rep.querySelector('[data-close]').focus();}
+          rthumb.hidden=!ph;if(ph)rthumb.src=ph.t||ph.src;rpick.hidden=!!ph||!P.photos.length;mark();
+          rep.querySelector('.rep-which').textContent=ph?'We’ll pass this photo to the studio. No account needed.'
+            :P.photos.length?'Tap the photo you mean, then tell us why. No account needed.':'Tell us which photo below. No account needed.';
+          rbody.hidden=false;rdone.hidden=true;rsend.disabled=false;rnote.className='note';rnote.textContent='';
+          last=document.activeElement;rep.hidden=false;document.body.style.overflow='hidden';rep.querySelector('[data-close]').focus();}
         document.querySelectorAll('[data-report]').forEach(function(b){b.onclick=function(){report(null);};});
         lb.querySelector('[data-report-photo]').onclick=function(){var id=P.photos[cur].id;close(lb);report(id);};
-        rep.querySelector('[data-close]').onclick=function(){close(rep);};
+        rep.querySelectorAll('[data-close]').forEach(function(b){b.onclick=function(){close(rep);};});
         rep.addEventListener('click',function(e){if(e.target===rep)close(rep);});
-        rf.addEventListener('submit',function(e){e.preventDefault();var f=new FormData(rf);
-          post(api+'/report',{photoId:rid,reason:f.get('reason'),note:f.get('note'),contact:f.get('contact')},rf.querySelector('.note'),function(){rf.reset();});});
+        rf.addEventListener('submit',function(e){e.preventDefault();if(rsend.disabled)return;var f=new FormData(rf);
+          if(!rid&&!String(f.get('note')||'').trim()){rnote.className='note err';rnote.textContent=P.photos.length?'Tap the photo you mean, or describe it under More details.':'Describe the photo under More details.';return;}
+          rsend.disabled=true;
+          post(api+'/report',{photoId:rid,reason:f.get('reason'),note:f.get('note'),contact:f.get('contact')},rnote,
+            function(){rf.reset();rbody.hidden=true;rdone.hidden=false;rdone.focus();},function(){rsend.disabled=false;});});
         })();
         """;
 

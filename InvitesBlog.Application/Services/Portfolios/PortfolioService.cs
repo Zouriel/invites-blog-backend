@@ -22,6 +22,9 @@ public interface IPortfolioService
     Task<PortfolioDto> SetHandleAsync(string? handle, CancellationToken ct = default);
     Task<PortfolioDto> SetLogoAsync(byte[] content, string? contentType, CancellationToken ct = default);
     Task<PortfolioDto> RemoveLogoAsync(CancellationToken ct = default);
+    Task<PortfolioDto> SetCoverAsync(byte[] content, string? contentType, CancellationToken ct = default);
+    Task<PortfolioDto> RemoveCoverAsync(CancellationToken ct = default);
+    Task<PortfolioEventPhotosDto> EventPhotosAsync(Guid campaignId, CancellationToken ct = default);
     Task<PortfolioDto> AddSectionAsync(SectionRequest request, CancellationToken ct = default);
     Task<PortfolioDto> UpdateSectionAsync(Guid id, SectionRequest request, CancellationToken ct = default);
     Task<PortfolioDto> DeleteSectionAsync(Guid id, CancellationToken ct = default);
@@ -94,8 +97,19 @@ public sealed class PortfolioService(
             p.Accent = PortfolioChoices.Accents.Any(a => a.Key == r.Accent) ? r.Accent : throw Invalid("colour");
         if (r.Font is not null)
             p.Font = PortfolioChoices.Fonts.Any(f => f.Key == r.Font) ? r.Font : throw Invalid("font");
-        if (r.ClearCover == true) p.CoverPhotoId = null;
-        else if (r.CoverPhotoId is { } cover) p.CoverPhotoId = await OwnPhotoAsync(p, cover, ct);
+        if (r.ClearCover == true)
+        {
+            p.CoverPhotoId = null;
+            await DeleteFileAsync(p.CoverImageUrl, ct);
+            p.CoverImageUrl = null;
+        }
+        else if (r.CoverPhotoId is { } cover)
+        {
+            // Choosing one of the portfolio's photos replaces an uploaded cover: the latest choice wins.
+            p.CoverPhotoId = await OwnPhotoAsync(p, cover, ct);
+            await DeleteFileAsync(p.CoverImageUrl, ct);
+            p.CoverImageUrl = null;
+        }
         if (r.Contact is { } c)
         {
             if (c.WhatsApp is not null) p.WhatsApp = Phone(c.WhatsApp, me, "WhatsApp");
@@ -212,6 +226,37 @@ public sealed class PortfolioService(
         var p = await MineAsync(ct, tracking: true);
         await DeleteFileAsync(p.LogoUrl, ct);
         p.LogoUrl = null;
+        p.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+        return await DtoAsync(p, ct);
+    }
+
+    // ---------- cover picture ----------
+
+    public const int CoverEdge = 2400;
+
+    public async Task<PortfolioDto> SetCoverAsync(byte[] content, string? contentType, CancellationToken ct = default)
+    {
+        var p = await MineAsync(ct, tracking: true);
+        var type = ImageSniffer.Detect(content);
+        if (type is null || !ImageSniffer.IsPhoto(content, type))
+            throw new CodedRuleException(ImageSniffer.Refusal, "not_an_image");
+        var image = await Task.Run(() => images.OptimizeForDisplay(content, type, CoverEdge), ct);
+        var url = await storage.PutAsync(
+            $"portfolios/{p.Id:N}/cover-{Guid.NewGuid():N}{MediaFileTypes.ExtensionFor(image.ContentType)}", image.Content, image.ContentType, ct);
+        await DeleteFileAsync(p.CoverImageUrl, ct);
+        p.CoverImageUrl = url;
+        p.CoverPhotoId = null;
+        p.UpdatedAt = DateTimeOffset.UtcNow;
+        await uow.SaveChangesAsync(ct);
+        return await DtoAsync(p, ct);
+    }
+
+    public async Task<PortfolioDto> RemoveCoverAsync(CancellationToken ct = default)
+    {
+        var p = await MineAsync(ct, tracking: true);
+        await DeleteFileAsync(p.CoverImageUrl, ct);
+        p.CoverImageUrl = null;
         p.UpdatedAt = DateTimeOffset.UtcNow;
         await uow.SaveChangesAsync(ct);
         return await DtoAsync(p, ct);
@@ -384,12 +429,16 @@ public sealed class PortfolioService(
         var found = await eventPhotos.Query()
             .Where(x => ids.Contains(x.Id) && x.DeletedAt == null)
             .ToListAsync(ct);
-        var videos = found.Where(x => x.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)).ToList();
-        var stills = found.Except(videos).ToList();
-        // Only the Studio's own uploads (owner: never a guest's photo). A missing one counts as someone else's.
-        var own = stills.Where(x => x.UploaderUserId == me).ToList();
-        var skippedVideo = videos.Count(v => v.UploaderUserId == me);
-        var skippedGuest = ids.Count - own.Count - skippedVideo;
+        // Only the Studio's own uploads (owner: never a guest's photo); each one that can't be used says why.
+        var organised = await OrganisedAsync(found.Select(x => x.CampaignId), ct);
+        var skipped = new List<SkippedPortfolioPhotoDto>();
+        var own = new List<EventPhoto>();
+        foreach (var x in found)
+        {
+            if (Ineligible(x, me, organised) is { } why) skipped.Add(new SkippedPortfolioPhotoDto(x.Id, why));
+            else own.Add(x);
+        }
+        foreach (var gone in ids.Where(i => found.All(x => x.Id != i))) skipped.Add(new SkippedPortfolioPhotoDto(gone, Reasons.Missing));
 
         if (own.Count > 0)
         {
@@ -406,7 +455,7 @@ public sealed class PortfolioService(
         PortfolioCollection collection;
         if (r.CollectionId is { } cid) collection = await CollectionAsync(p, cid, ct);
         else if (!string.IsNullOrWhiteSpace(r.NewCollectionTitle) && own.Count > 0) collection = await NewCollectionAsync(p, r.NewCollectionTitle, "grid", ct);
-        else if (own.Count == 0) collection = null!;
+        else if (own.Count == 0) throw NothingAdded(0, skipped);
         else throw new CodedRuleException("Choose a collection or name a new one.", "collection_required");
 
         var already = 0;
@@ -431,8 +480,13 @@ public sealed class PortfolioService(
             var copies = new List<PortfolioPhoto?>();
             foreach (var batch in toAdd.Chunk(4))
                 copies.AddRange(await Task.WhenAll(batch.Select(x => CopyAsync(p, collection.Id, x, ct))));
-            foreach (var copy in copies.OfType<PortfolioPhoto>())
+            for (var i = 0; i < copies.Count; i++)
             {
+                if (copies[i] is not { } copy)
+                {
+                    skipped.Add(new SkippedPortfolioPhotoDto(toAdd[i].Id, Reasons.Missing));
+                    continue;
+                }
                 copy.Position = ++next;
                 await photos.AddAsync(copy, ct);
                 added++;
@@ -440,14 +494,104 @@ public sealed class PortfolioService(
             p = await portfolios.Query(tracking: true).FirstAsync(x => x.Id == p.Id, ct);
             p.UpdatedAt = DateTimeOffset.UtcNow;
         }
+        // Never a "success" with nothing in it: the caller shows why and lets them choose again.
+        if (added == 0 && already == 0) throw NothingAdded(0, skipped);
         await uow.SaveChangesAsync(ct);
 
-        var message = AddedMessage(added, already, skippedGuest, skippedVideo);
-        return new AddPortfolioPhotosResultDto(added, already, skippedGuest, skippedVideo,
-            collection?.Id ?? Guid.Empty, message, await DtoAsync(p, ct));
+        int Count(string reason) => skipped.Count(s => s.Reason == reason);
+        var message = AddedMessage(added, already, Count(Reasons.Guest), Count(Reasons.Video), Count(Reasons.OtherAccount), Count(Reasons.Missing));
+        return new AddPortfolioPhotosResultDto(added, already, Count(Reasons.Guest), Count(Reasons.Video),
+            collection.Id, message, await DtoAsync(p, ct), Count(Reasons.OtherAccount), Count(Reasons.Missing), skipped);
     }
 
-    public static string AddedMessage(int added, int already, int guest, int video)
+    /// <summary>Why a photo can't go in the portfolio (a code from <see cref="Reasons"/>), or null when it can.</summary>
+    internal static string? Ineligible(EventPhoto x, Guid me, IReadOnlySet<Guid> organised)
+    {
+        var mine = x.UploaderUserId == me
+                   // Host uploads from before uploaders were recorded (2026-11-03): no guest, no account. In an
+                   // event this studio organises, those were added through its own dashboard or app.
+                   || (x.UploaderUserId is null && x.GuestId is null && x.CreatedAt < UploaderRecordedFrom
+                       && x.CampaignId is { } cid && organised.Contains(cid));
+        if (!mine) return x.GuestId is not null || x.UploaderUserId is null ? Reasons.Guest : Reasons.OtherAccount;
+        return x.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? Reasons.Video : null;
+    }
+
+    /// <summary>Since this moment every upload records the account that made it (when signed in).</summary>
+    public static readonly DateTimeOffset UploaderRecordedFrom = new(2026, 11, 4, 0, 0, 0, TimeSpan.Zero);
+
+    public static class Reasons
+    {
+        public const string Guest = "guest";
+        public const string OtherAccount = "other_account";
+        public const string Video = "video";
+        public const string Missing = "missing";
+
+        public static string Text(string reason) => reason switch
+        {
+            Guest => "Added by a guest",
+            OtherAccount => "Added by someone else",
+            Video => "Videos can't be added",
+            _ => "This photo couldn't be read",
+        };
+    }
+
+    /// <summary>The events among <paramref name="ids"/> that the caller organises.</summary>
+    private async Task<IReadOnlySet<Guid>> OrganisedAsync(IEnumerable<Guid?> ids, CancellationToken ct)
+    {
+        var set = new HashSet<Guid>();
+        foreach (var id in ids.OfType<Guid>().Distinct())
+            if (await ownership.AccessAsync(id, ct) == CampaignAccess.Organiser) set.Add(id);
+        return set;
+    }
+
+    public static CodedRuleException NothingAdded(int added, IReadOnlyList<SkippedPortfolioPhotoDto> skipped)
+    {
+        int Count(string reason) => skipped.Count(s => s.Reason == reason);
+        var guest = Count(Reasons.Guest);
+        var other = Count(Reasons.OtherAccount);
+        var video = Count(Reasons.Video);
+        var missing = Count(Reasons.Missing);
+        const string rule = "Only photos you uploaded yourself can go in your portfolio.";
+        string message;
+        if (skipped.Count > 0 && guest == skipped.Count) message = $"None of these could be added: they were added by guests. {rule}";
+        else if (skipped.Count > 0 && other == skipped.Count) message = $"None of these could be added: they were added by someone else. {rule}";
+        else if (skipped.Count > 0 && video == skipped.Count) message = "None of these could be added: videos can't go in a portfolio yet. Choose photos.";
+        else if (skipped.Count > 0 && missing == skipped.Count) message = "None of these could be added: we couldn't read them. Try again, or choose other photos.";
+        else
+        {
+            var parts = new List<string>();
+            if (guest > 0) parts.Add(guest == 1 ? "1 was added by a guest" : $"{guest} were added by guests");
+            if (other > 0) parts.Add(other == 1 ? "1 was added by someone else" : $"{other} were added by someone else");
+            if (video > 0) parts.Add(video == 1 ? "1 is a video" : $"{video} are videos");
+            if (missing > 0) parts.Add(missing == 1 ? "1 couldn't be read" : $"{missing} couldn't be read");
+            message = parts.Count == 0 ? "None of these could be added. Choose your own photos." : $"None of these could be added: {string.Join(", ", parts)}. {rule}";
+        }
+        return new CodedRuleException(message, "nothing_added", HttpStatusCode.UnprocessableEntity);
+    }
+
+    public async Task<PortfolioEventPhotosDto> EventPhotosAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var p = await MineAsync(ct);
+        if (await ownership.AccessAsync(campaignId, ct) != CampaignAccess.Organiser)
+            throw new CodedRuleException("Only the event's organiser can do this.", "not_organiser", HttpStatusCode.Forbidden);
+        var organised = new HashSet<Guid> { campaignId };
+        var rows = await eventPhotos.Query().Where(x => x.CampaignId == campaignId && x.DeletedAt == null)
+            .OrderByDescending(x => x.CreatedAt).Take(5000).ToListAsync(ct);
+        var sources = rows.Select(x => (Guid?)x.Id).ToList();
+        var inPortfolio = (await photos.Query().Where(x => x.PortfolioId == p.Id && x.CampaignId == campaignId && x.SourcePhotoId != null)
+            .Select(x => x.SourcePhotoId!.Value).ToListAsync(ct)).ToHashSet();
+        var list = rows.Select(x =>
+        {
+            var why = Ineligible(x, p.UserId, organised);
+            return new PortfolioEventPhotoDto(x.Id, x.ThumbUrl, x.Url, x.Width, x.Height, why is null, why,
+                why is null ? null : Reasons.Text(why), inPortfolio.Contains(x.Id));
+        }).ToList();
+        var consented = await consents.AnyAsync(x => x.UserId == p.UserId && x.CampaignId == campaignId, ct);
+        return new PortfolioEventPhotosDto(consented, list.Count(x => x.Eligible),
+            list.Count(x => x.Reason is Reasons.Guest or Reasons.OtherAccount), list.Count(x => x.Reason == Reasons.Video), list);
+    }
+
+    public static string AddedMessage(int added, int already, int guest, int video, int other = 0, int missing = 0)
     {
         var parts = new List<string>
         {
@@ -455,7 +599,9 @@ public sealed class PortfolioService(
         };
         if (already > 0) parts.Add(already == 1 ? "1 was already there." : $"{already} were already there.");
         if (guest > 0) parts.Add(guest == 1 ? "1 was added by a guest and can't be used." : $"{guest} were added by guests and can't be used.");
+        if (other > 0) parts.Add(other == 1 ? "1 was added by someone else and can't be used." : $"{other} were added by someone else and can't be used.");
         if (video > 0) parts.Add(video == 1 ? "Videos can't be added yet." : $"{video} videos can't be added yet.");
+        if (missing > 0) parts.Add(missing == 1 ? "1 couldn't be read." : $"{missing} couldn't be read.");
         return string.Join(' ', parts);
     }
 
@@ -762,6 +908,10 @@ public sealed class PortfolioService(
     }
 
     /// <summary>The page's cover picture: the chosen one, else the first photo of the first collection.</summary>
+    /// <summary>The picture the page shows as its cover: an uploaded one, else the chosen/first photo.</summary>
+    internal static string? CoverUrl(Portfolio p, IReadOnlyList<PortfolioCollectionDto> cols, IReadOnlyList<PortfolioPhoto> photoRows) =>
+        p.CoverImageUrl ?? Cover(p, cols, photoRows)?.Url;
+
     internal static PortfolioPhotoDto? Cover(Portfolio p, IReadOnlyList<PortfolioCollectionDto> cols, IReadOnlyList<PortfolioPhoto> photoRows) =>
         photoRows.Where(x => x.Id == p.CoverPhotoId).Select(PhotoDto).FirstOrDefault()
         ?? cols.SelectMany(c => c.Photos).FirstOrDefault();
@@ -784,9 +934,11 @@ public sealed class PortfolioService(
         var cover = Cover(p, cols, photoRows);
         return new PortfolioDto(
             p.Id, p.Handle, p.Handle is null ? null : $"{siteBase}/@{p.Handle}", p.DisplayName, p.Tagline, p.LogoUrl,
-            cover is null ? null : p.CoverPhotoId, cover?.Url, p.Theme, p.Accent, p.Font,
+            p.CoverImageUrl is null && cover is not null ? p.CoverPhotoId : null, p.CoverImageUrl ?? cover?.Url, p.Theme, p.Accent, p.Font,
             new PortfolioContactDto(p.WhatsApp, p.Viber, p.Instagram, p.Phone, p.Email, p.EnquiriesOn),
-            p.IsPublished, p.PublishedAt, p.SetupDone, photoRows.Count, PhotoLimit, unread, sectionDtos, cols);
+            p.IsPublished, p.PublishedAt, p.SetupDone, photoRows.Count, PhotoLimit, unread, sectionDtos, cols,
+            p.CoverImageUrl,
+            p.CoverImageUrl is not null ? "upload" : cover is null ? "none" : p.CoverPhotoId is { } chosen && cover.Id == chosen ? "photo" : "auto");
     }
 }
 

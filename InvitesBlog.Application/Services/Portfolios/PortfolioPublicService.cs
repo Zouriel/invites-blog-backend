@@ -105,7 +105,7 @@ public sealed partial class PortfolioPublicService(
         var photoRows = await photos.Query().Where(x => x.PortfolioId == p.Id).OrderBy(x => x.Position).ToListAsync(ct);
         var cols = PortfolioService.Collections(sectionRows, collectionRows, photoRows).ToDictionary(c => c.Id);
         var byId = photoRows.ToDictionary(x => x.Id);
-        var cover = PortfolioService.Cover(p, [.. cols.Values], photoRows);
+        var coverUrl = PortfolioService.CoverUrl(p, [.. cols.Values], photoRows);
         var designs = await PortfolioService.PublishedDesigns(templates.Query(), p.UserId)
             .Select(t => new PortfolioDesignDto(t.Id, t.Name, t.PreviewImageUrl)).ToListAsync(ct);
         var contact = new PortfolioContactDto(p.WhatsApp, p.Viber, p.Instagram, p.Phone, p.Email, p.EnquiriesOn);
@@ -120,7 +120,7 @@ public sealed partial class PortfolioPublicService(
             switch (s.Kind)
             {
                 case PortfolioSectionKinds.Cover:
-                    list.Add(new PublicPortfolioSectionDto(s.Kind, null, null, cover?.Url, null, null, null, null));
+                    list.Add(new PublicPortfolioSectionDto(s.Kind, null, null, coverUrl, null, null, null, null));
                     break;
                 case PortfolioSectionKinds.Collection:
                     if (s.CollectionId is { } cid && cols.TryGetValue(cid, out var c) && c.Photos.Count > 0)
@@ -150,7 +150,7 @@ public sealed partial class PortfolioPublicService(
                     break;
             }
         }
-        return new PublicPortfolioDto(p.Handle!, $"{config.InviterBase()}/@{p.Handle}", p.DisplayName, p.Tagline, p.LogoUrl, cover?.Url,
+        return new PublicPortfolioDto(p.Handle!, $"{config.InviterBase()}/@{p.Handle}", p.DisplayName, p.Tagline, p.LogoUrl, coverUrl,
             PortfolioChoices.Theme(p.Theme).Key, p.Accent, PortfolioChoices.Font(p.Font).Key, contact, list);
     }
 
@@ -218,29 +218,35 @@ public sealed partial class PortfolioPublicService(
         var reason = Reasons.Contains(r.Reason) ? r.Reason! : "other";
         var note = PortfolioService.Clean(r.Note, 800, multiline: true);
         var contact = PortfolioService.Clean(r.Contact, 120);
+        if (photo is null && note is null)
+            throw new CodedRuleException("Tap the photo you mean, or describe it.", "photo_required");
         var kind = photo is null ? PortfolioReportKinds.Page : PortfolioReportKinds.Photo;
         var target = photo?.Id ?? p.Id;
 
-        // One open request per photo is enough for the queue; repeats only add noise.
-        if (!await reports.AnyAsync(x => x.Kind == kind && x.TargetId == target && x.Status == TemplateReportStatus.Open && x.ReporterUserId == null, ct))
+        // Every request is recorded (the queue groups them by photo, and each may carry its own details and contact);
+        // the studio is emailed once per open photo/page so repeats don't flood it. Rate limited per visitor.
+        var firstOpen = !await reports.AnyAsync(x => x.Kind == kind && x.TargetId == target && x.Status == TemplateReportStatus.Open, ct);
+        await reports.AddAsync(new ContentReport
         {
-            await reports.AddAsync(new ContentReport
-            {
-                Id = Guid.NewGuid(), ReporterUserId = null, Kind = kind, TargetId = target, CampaignId = photo?.CampaignId,
-                SubjectUserId = p.UserId, Reason = reason,
-                Note = string.Join("\n", new[] { note, contact is null ? null : $"Contact: {contact}" }.OfType<string>()) is { Length: > 0 } n ? n[..Math.Min(n.Length, 1000)] : null,
-                Snapshot = $"@{p.Handle}" + (photo is null ? "" : $" photo {photo.ThumbUrl}"),
-                Status = TemplateReportStatus.Open, CreatedAt = DateTimeOffset.UtcNow,
-            }, ct);
-            await uowSave(ct);
-            await reportMail.SendAsync("asked to remove a portfolio photo",
-                [("Portfolio", $"{config.InviterBase()}/@{p.Handle}"), ("Photo", photo?.Url), ("Reason", ReasonText(reason)), ("Note", note), ("Contact", contact)], ct);
+            Id = Guid.NewGuid(), ReporterUserId = null, Kind = kind, TargetId = target, CampaignId = photo?.CampaignId,
+            SubjectUserId = p.UserId, Reason = reason,
+            Note = string.Join("\n", new[] { note, contact is null ? null : $"Contact: {contact}" }.OfType<string>()) is { Length: > 0 } n ? n[..Math.Min(n.Length, 1000)] : null,
+            Snapshot = $"@{p.Handle}" + (photo is null ? "" : $" photo {photo.ThumbUrl}"),
+            Status = TemplateReportStatus.Open, CreatedAt = DateTimeOffset.UtcNow,
+        }, ct);
+        await uowSave(ct);
+        await reportMail.SendAsync(photo is null ? "asked to remove a photo from a portfolio" : "asked to remove a portfolio photo",
+            [("Portfolio", $"{config.InviterBase()}/@{p.Handle}"), ("Photo", photo is null ? null : Absolute(photo.Url)), ("Reason", ReasonText(reason)), ("Note", note), ("Contact", contact)], ct);
+        if (firstOpen)
             await MailStudioAsync(p, "Someone asked you to remove a photo",
-                [("Photo", photo?.Url ?? "(the page)"), ("Reason", ReasonText(reason)), ("Note", note), ("Their contact", contact)],
+                [("Photo", photo is null ? "(not named; see the note)" : Absolute(photo.Url)), ("Reason", ReasonText(reason)), ("Note", note), ("Their contact", contact)],
                 "Open your portfolio", $"{config.AppBase()}/portfolio", null, ct);
-        }
         return new PortfolioOkDto(true, done);
     }
+
+    /// <summary>Stored pictures are site-relative (/assets/...): an email needs the whole address.</summary>
+    private string Absolute(string url) =>
+        url.StartsWith('/') ? config.InviterBase().TrimEnd('/') + url : url;
 
     public static string ReasonText(string reason) => reason switch
     {

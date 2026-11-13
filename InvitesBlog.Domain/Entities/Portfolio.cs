@@ -18,6 +18,8 @@ public sealed class Portfolio
     public string? LogoUrl { get; set; }
     /// <summary>A <see cref="PortfolioPhoto"/> chosen as the cover; null = the first photo of the first collection.</summary>
     public Guid? CoverPhotoId { get; set; }
+    /// <summary>A cover picture uploaded for the page itself (not a portfolio photo). Wins over <see cref="CoverPhotoId"/>.</summary>
+    public string? CoverImageUrl { get; set; }
 
     /// <summary>Named choices (see PortfolioChoices).</summary>
     public string Theme { get; set; } = "oxblood";
