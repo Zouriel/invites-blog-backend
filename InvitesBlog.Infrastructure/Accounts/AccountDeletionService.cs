@@ -324,6 +324,11 @@ public sealed class AccountDeletionService(
         // Leftovers from the old venue page (no longer read anywhere): the person's own rows and logo go with them.
         await db.VenueStaff.Where(s => scope.Emails.Contains(s.Email)).ExecuteDeleteAsync(ct);
         await RemoveVenueAsync(me.Id, queue, ct);
+        // Their portfolio (rows cascade from the account) and every copy and logo it holds.
+        foreach (var pid in await db.Portfolios.Where(p => p.UserId == me.Id).Select(p => p.Id).ToListAsync(ct))
+            queue.Prefix($"portfolios/{pid:N}/");
+        await db.Portfolios.Where(p => p.UserId == me.Id).ExecuteDeleteAsync(ct);
+        await db.PortfolioConsents.Where(c => c.UserId == me.Id).ExecuteDeleteAsync(ct);
         await db.PassCredits.Where(p => p.OwnerUserId == me.Id).ExecuteDeleteAsync(ct);
         await HandleTemplatesAsync(me, scope, queue, now, ct);
         await KeepPaymentsWithoutThePersonAsync(me, scope.DeletedEvents, queue, ct);

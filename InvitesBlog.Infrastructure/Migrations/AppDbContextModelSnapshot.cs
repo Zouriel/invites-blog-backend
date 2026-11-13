@@ -838,7 +838,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("reason");
 
-                    b.Property<Guid>("ReporterUserId")
+                    b.Property<Guid?>("ReporterUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("reporter_user_id");
 
@@ -2300,6 +2300,407 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.ToTable("photo_faces", (string)null);
                 });
 
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.Portfolio", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Accent")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("theme")
+                        .HasColumnName("accent");
+
+                    b.Property<Guid?>("CoverPhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cover_photo_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasDefaultValue("")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("email");
+
+                    b.Property<bool>("EnquiriesOn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("enquiries_on");
+
+                    b.Property<string>("Font")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("classic")
+                        .HasColumnName("font");
+
+                    b.Property<string>("Handle")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("handle");
+
+                    b.Property<string>("Instagram")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("instagram");
+
+                    b.Property<bool>("IsPublished")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_published");
+
+                    b.Property<string>("LogoUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("logo_url");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("phone");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<bool>("SetupDone")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("setup_done");
+
+                    b.Property<DateTimeOffset?>("StudioEndedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("studio_ended_at");
+
+                    b.Property<string>("Tagline")
+                        .HasMaxLength(140)
+                        .HasColumnType("character varying(140)")
+                        .HasColumnName("tagline");
+
+                    b.Property<string>("Theme")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("oxblood")
+                        .HasColumnName("theme");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Viber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("viber");
+
+                    b.Property<string>("WhatsApp")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("whats_app");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Handle")
+                        .IsUnique()
+                        .HasDatabaseName("ux_portfolios_handle");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_portfolios_user_id");
+
+                    b.ToTable("portfolios", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioCollection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CoverPhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cover_photo_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Layout")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("grid")
+                        .HasColumnName("layout");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("portfolio_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("title");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PortfolioId")
+                        .HasDatabaseName("idx_portfolio_collections_portfolio_id");
+
+                    b.ToTable("portfolio_collections", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioConsent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("ConsentedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consented_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("UserId", "CampaignId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_portfolio_consents_user_campaign");
+
+                    b.ToTable("portfolio_consents", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioEnquiry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Contact")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("contact");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EventDate")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("event_date");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("message");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("portfolio_id");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PortfolioId", "CreatedAt")
+                        .HasDatabaseName("idx_portfolio_enquiries_portfolio_created");
+
+                    b.ToTable("portfolio_enquiries", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioHandleRedirect", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Handle")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("handle");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("portfolio_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Handle")
+                        .IsUnique()
+                        .HasDatabaseName("ux_portfolio_handle_redirects_handle");
+
+                    b.HasIndex("PortfolioId");
+
+                    b.ToTable("portfolio_handle_redirects", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioPhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("integer")
+                        .HasColumnName("height");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("portfolio_id");
+
+                    b.Property<int>("Position")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("position");
+
+                    b.Property<Guid?>("SourcePhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_photo_id");
+
+                    b.Property<string>("ThumbUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("thumb_url");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("url");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("integer")
+                        .HasColumnName("width");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId")
+                        .HasDatabaseName("idx_portfolio_photos_campaign_id");
+
+                    b.HasIndex("PortfolioId")
+                        .HasDatabaseName("idx_portfolio_photos_portfolio_id");
+
+                    b.HasIndex("CollectionId", "Position")
+                        .HasDatabaseName("idx_portfolio_photos_order");
+
+                    b.ToTable("portfolio_photos", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioSection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CollectionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_id");
+
+                    b.Property<string>("DataJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("data_json")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<bool>("Hidden")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("hidden");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("portfolio_id");
+
+                    b.Property<int>("Position")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("position");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionId");
+
+                    b.HasIndex("PortfolioId", "Position")
+                        .HasDatabaseName("idx_portfolio_sections_order");
+
+                    b.ToTable("portfolio_sections", (string)null);
+                });
+
             modelBuilder.Entity("InvitesBlog.Domain.Entities.PostComment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3294,8 +3695,7 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
                         .WithMany()
                         .HasForeignKey("ReporterUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.DesignAssistantMessage", b =>
@@ -3409,6 +3809,86 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasOne("InvitesBlog.Domain.Entities.EventPhoto", null)
                         .WithMany()
                         .HasForeignKey("PhotoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.Portfolio", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioCollection", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
+                        .WithMany()
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioConsent", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.Campaign", null)
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioEnquiry", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
+                        .WithMany()
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioHandleRedirect", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
+                        .WithMany()
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioPhoto", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.PortfolioCollection", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
+                        .WithMany()
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.PortfolioSection", b =>
+                {
+                    b.HasOne("InvitesBlog.Domain.Entities.PortfolioCollection", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("InvitesBlog.Domain.Entities.Portfolio", null)
+                        .WithMany()
+                        .HasForeignKey("PortfolioId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
