@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Common;
 using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
 using InvitesBlog.Api.Rendering;
@@ -41,7 +42,8 @@ public sealed class GuestController(
     InviteRenderService renderer,
     RenderedInvitations rendered,
     RenderTickets tickets,
-    ILogger<GuestController> logger) : ControllerBase
+    ILogger<GuestController> logger,
+    IConfiguration config) : ControllerBase
 {
     /// <summary>
     /// Every refused or stored upload, with why: a phone that can't add photos otherwise leaves no
@@ -850,7 +852,10 @@ public sealed class GuestController(
             await PaletteAsync(inviteId, ct),
             nonce,
             await invites.CreditForCampaignAsync(subject.Value.CampaignId, ct),
-            box.Photos.ToDictionary(p => p.Id, p => p.FavouriteCount));
+            box.Photos.ToDictionary(p => p.Id, p => p.FavouriteCount),
+            // Ten at a time unless the event's pass (or the visitor's own plan) allows all (pricing 2026-11).
+            box.DownloadAll ? null : box.DownloadLimit,
+            $"{config.InviterBase()}/pricing");
 
         // Mostly photographs, so it needs img-src; and it carries one nonced script so a deletion
         // can be confirmed and carried out without two page loads. Not sandboxed — it holds the

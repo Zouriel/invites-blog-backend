@@ -127,6 +127,30 @@ public class GuestPagesPhotoBarTests
         Assert.Equal(expected, GuestPages.DownloadName(Mine, url, video));
 
     /// <summary>A cancelled event's box is a read-only archive — neither door opens.</summary>
+    /// <summary>
+    /// Pricing 2026-11: without a pass on the event (or the visitor's own Premium) a guest chooses up to ten at a
+    /// time; the page carries the limit for its script and the offer it shows past it.
+    /// </summary>
+    [Fact]
+    public void Without_download_all_the_album_carries_the_limit_and_the_premium_offer()
+    {
+        var limited = GuestPages.Photos(
+            "/r/abc/photos", "/r/abc", "Party",
+            new List<(Guid, string, string, string, string?, bool, bool)> { (Mine, "t", "u", "/assets/o.jpg", "Ali", true, false) },
+            true, null, "/r/abc/camera", GuestPalette.Fallback, "n0nce", selectLimit: 10, premiumUrl: "https://invites.blog/pricing");
+        Assert.Contains("data-limit=\"10\"", limited);
+        Assert.Contains("id=\"limit\"", limited);
+        Assert.Contains("Up to 10 at a time", limited);
+        Assert.Contains("Download or share more than 10 at once with Premium.", limited);
+        Assert.Contains("href=\"https://invites.blog/pricing\"", limited);
+        Assert.Contains("Get Premium", limited);
+        Assert.Contains("const limit = Number(bar.dataset.limit) || 0;", limited);
+
+        var open = Album("n0nce");
+        Assert.DoesNotContain("data-limit", open);
+        Assert.DoesNotContain("id=\"limit\"", open);
+    }
+
     [Fact]
     public void A_closed_box_offers_neither()
     {

@@ -187,6 +187,14 @@
   const no = $('confirm-no');
   const chosen = new Set();
   let choosing = false;
+  // Without Premium or Studio (and on an event with no Gold or Platinum pass) the page carries a limit:
+  // up to that many at a time, and trying for more explains why (pricing 2026-11).
+  const limit = Number(bar.dataset.limit) || 0;
+  const limitAsk = $('limit');
+  function tooMany() {
+    if (limitAsk) limitAsk.hidden = false;
+  }
+  if (limitAsk) $('limit-no').addEventListener('click', () => { limitAsk.hidden = true; });
 
   const tiles = () => Array.from(grid.querySelectorAll('.tile'));
   const mineChosen = () => tiles().filter((t) => chosen.has(t.dataset.id) && t.dataset.mine === '1');
@@ -213,7 +221,7 @@
     count.textContent = narrow ? String(n) : `${n} selected`;
     count.setAttribute('aria-label', `${n} selected`);
     const total = tiles().length;
-    all.textContent = n === total && total > 0 ? 'Clear' : 'Select all';
+    all.textContent = (n === total && total > 0) || (limit && n >= limit) ? 'Clear' : (limit && total > limit ? `Select ${limit}` : 'Select all');
     shareBtn.hidden = !shareable;
     shareBtn.disabled = n === 0;
     removeBtn.hidden = mineChosen().length === 0;
@@ -231,7 +239,13 @@
     render();
   }
   function toggle(id) {
-    if (!chosen.delete(id)) chosen.add(id);
+    if (!chosen.delete(id)) {
+      if (limit && chosen.size >= limit) {
+        tooMany();
+        return;
+      }
+      chosen.add(id);
+    }
     render();
   }
   afterShare = stop;
@@ -243,8 +257,14 @@
   $('sel-cancel').addEventListener('click', stop);
   all.addEventListener('click', () => {
     const ids = tiles().map((t) => t.dataset.id);
-    if (chosen.size === ids.length) chosen.clear();
-    else ids.forEach((id) => chosen.add(id));
+    if (chosen.size === ids.length || (limit && chosen.size >= limit)) chosen.clear();
+    else {
+      for (const id of ids) {
+        if (limit && chosen.size >= limit) break;
+        chosen.add(id);
+      }
+      if (limit && ids.length > limit) tooMany();
+    }
     render();
   });
   shareBtn.addEventListener('click', () => {

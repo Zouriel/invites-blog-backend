@@ -168,6 +168,9 @@ public static class GuestPages
                             color:var(--on-accent); background:var(--accent); }
         .ask__card button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
         .ask__card button:disabled { opacity:.6; }
+        .ask__card a.go { display:block; box-sizing:border-box; width:100%; margin-top:.6rem; padding:.8rem 1rem;
+                          text-align:center; text-decoration:none; font-size:1rem; font-weight:600; border-radius:10px;
+                          color:var(--on-accent); background:var(--accent); }
         a { color:var(--accent); }
         """;
 
@@ -340,7 +343,7 @@ public static class GuestPages
             bool CanDelete, bool IsVideo)> photos,
         bool canUpload, string? error, string cameraPath, GuestPalette? palette = null,
         string? nonce = null, Application.Dtos.Invites.GuestCredit? credit = null,
-        IReadOnlyDictionary<Guid, int>? likes = null)
+        IReadOnlyDictionary<Guid, int>? likes = null, int? selectLimit = null, string? premiumUrl = null)
     {
         var tiles = photos.Count == 0
             ? """
@@ -392,7 +395,7 @@ public static class GuestPages
             </div>
             {bar}
             {(nonce is null ? "" : $"""
-              <div class="sel" id="sel" role="region" aria-label="Selected photos" hidden>
+              <div class="sel" id="sel" role="region" aria-label="Selected photos" hidden{(selectLimit is { } cap ? $" data-limit=\"{cap}\"" : "")}>
                 <button type="button" class="sel__x" id="sel-cancel" aria-label="Stop selecting">&#10005;</button>
                 <span class="sel__n" id="sel-count" aria-live="polite">0 selected</span>
                 <button type="button" class="sel__b" id="sel-all">Select all</button>
@@ -414,6 +417,16 @@ public static class GuestPages
                   <button type="button" class="ghost" id="ready-no">Not now</button>
                 </div>
               </div>
+              {(selectLimit is { } most ? $$"""
+              <div class="ask" id="limit" hidden>
+                <div class="ask__card" role="dialog" aria-labelledby="limit-title">
+                  <h2 id="limit-title">Up to {{most}} at a time</h2>
+                  <p>Download or share more than {{most}} at once with Premium.</p>
+                  {{(premiumUrl is null ? "" : $"<a class=\"go\" href=\"{E(premiumUrl)}\" target=\"_blank\" rel=\"noopener\">Get Premium</a>")}}
+                  <button type="button" class="ghost" id="limit-no">Not now</button>
+                </div>
+              </div>
+              """ : "")}
               <div class="ask" id="confirm" hidden>
                 <div class="ask__card">
                   <h2 id="confirm-title">Remove this photo?</h2>
