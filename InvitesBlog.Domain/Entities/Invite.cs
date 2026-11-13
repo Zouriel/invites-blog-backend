@@ -19,6 +19,13 @@ public sealed class Invite
     /// counted by: each guest once, so resending to someone already emailed costs nothing.
     /// </summary>
     public DateTimeOffset? FirstEmailedAt { get; set; }
+
+    /// <summary>
+    /// What paid for emailing this guest (2026-11-14). <see cref="EmailPaidBy.Event"/>: the event's pass or bought
+    /// emails, counted once per guest, so sending again is free. <see cref="EmailPaidBy.Monthly"/>: the organiser's
+    /// monthly allowance, where every email counts, sending again too (<see cref="MonthlyEmailSend"/>).
+    /// </summary>
+    public EmailPaidBy EmailPaidBy { get; set; }
     public DateTimeOffset? RespondedAt { get; set; }
 
     /// <summary>When the guest's phone was reminded the day before the event (EventReminderService); once.</summary>
@@ -56,5 +63,21 @@ public sealed class RsvpResponse
     /// keep their own columns because the dashboard and exports read them by name.
     /// </summary>
     public string AnswersJson { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// One email charged to an account's monthly allowance of emailed invitations (Premium, Photographer, Studio;
+/// 2026-11-14). The month is the calendar month in Maldives time (<c>EmailMonth</c>); the allowance is shared by
+/// every event the account organises. A row is written before the email goes and removed if it isn't sent.
+/// </summary>
+public sealed class MonthlyEmailSend
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    /// <summary>yyyymm, Maldives time.</summary>
+    public int Month { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid InviteId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

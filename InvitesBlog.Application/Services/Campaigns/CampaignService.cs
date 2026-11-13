@@ -66,7 +66,8 @@ public sealed class CampaignService(
     IRepository<EventPhoto> eventPhotos,
     IRepository<AppUser> users,
     IPushQueue push,
-    InviteShareLinks shareLinks) : ICampaignService
+    InviteShareLinks shareLinks,
+    IEmailAllowanceGate gate) : ICampaignService
 {
     public async Task<CreateCampaignResponse> CreateAsync(CreateCampaignRequest req, CancellationToken ct = default)
     {
@@ -365,8 +366,6 @@ public sealed class CampaignService(
 
         var emailed = 0;
         var heldBack = 0;
-        var allowance = await allowances.ForCampaignAsync(id, ct);
-        var left = allowance.Left;
         if (settings.Uses("email"))
         {
             // The same provider — and so the same email, §15.2 removal link included — that resends
@@ -380,16 +379,11 @@ public sealed class CampaignService(
             {
                 if (string.IsNullOrWhiteSpace(g.Email)) continue;
 
-                // Emailing is counted per guest, once: somebody already emailed is re-sent for free,
-                // and a new guest past what the event includes is left for the host to share a link
-                // with (or for more to be added). See SendingAllowanceService.
+                // Each email is taken from the allowance before it goes (IEmailAllowanceGate: the event's pass,
+                // then the organiser's month, then bought emails). A guest the event already paid for is re-sent
+                // for free; one with nothing left to pay for them is left for the host to share a link with (or
+                // for more emails to be added). See SendingAllowanceDto.
                 var existing = await invites.GetByGuestIdAsync(g.Id, ct);
-                var firstTime = existing?.FirstEmailedAt is null;
-                if (firstTime && left <= 0)
-                {
-                    heldBack++;
-                    continue;
-                }
 
                 // Emailed links are per-guest tokenized: clicking opens the invite directly — the raw
                 // token IS the key, no OTP. (The SHARE button link, by contrast, is the gated /e/{id}.)
@@ -405,7 +399,7 @@ public sealed class CampaignService(
                         GuestId = g.Id,
                         TokenHash = TokenService.Hash(rawToken),
                         RequiresOtp = campaign.IsSensitive, // sensitive campaigns still gate behind OTP
-                        Status = InviteStatus.Sent,
+                        Status = InviteStatus.Queued,
                         RsvpStatus = RsvpStatus.NoResponse,
                         CreatedAt = DateTimeOffset.UtcNow
                     };
@@ -415,9 +409,17 @@ public sealed class CampaignService(
                 {
                     invite.TokenHash = TokenService.Hash(rawToken);
                     invite.RequiresOtp = campaign.IsSensitive;
-                    if (invite.Status is InviteStatus.Created or InviteStatus.Queued or InviteStatus.NotSent)
-                        invite.Status = InviteStatus.Sent;
                 }
+
+                var charge = await gate.ChargeAsync(campaign, invite, ct);
+                if (charge is null)
+                {
+                    if (invite.Status is InviteStatus.Created or InviteStatus.Queued) invite.Status = InviteStatus.NotSent;
+                    heldBack++;
+                    continue;
+                }
+                if (invite.Status is InviteStatus.Created or InviteStatus.Queued or InviteStatus.NotSent)
+                    invite.Status = InviteStatus.Sent;
 
                 var letter = InviteLetter.For(
                     campaign, g, invite.Id, settings, inviteeBase, rawToken, inviter?.Name, inviter?.Email);
@@ -435,12 +437,11 @@ public sealed class CampaignService(
                     ErrorMessage = result?.Error,
                     AttemptedAt = DateTimeOffset.UtcNow,
                 }, ct);
-                emailed++;
-                if (firstTime)
-                {
-                    invite.FirstEmailedAt = DateTimeOffset.UtcNow;
-                    left--;
-                }
+                // Only emails actually sent are counted: a failed one gives its charge back.
+                if (result is { Success: false })
+                    await gate.RefundAsync(charge, invite, ct);
+                else
+                    emailed++;
             }
         }
 
@@ -451,7 +452,7 @@ public sealed class CampaignService(
         push.Enqueue(new InvitationsSent(id, guestList.Select(g => g.Id).ToList(), currentUser.UserId));
 
         return new FinalizeResponse(shareLink, guestList.Count, emailed, heldBack,
-            allowance with { Used = allowance.Used + (allowance.Left - left) });
+            await allowances.ForCampaignAsync(id, ct));
     }
 
     public async Task SetRolesAsync(Guid id, SetRolesRequest req, CancellationToken ct = default)

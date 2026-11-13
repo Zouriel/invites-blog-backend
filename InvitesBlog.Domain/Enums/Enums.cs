@@ -169,6 +169,15 @@ public enum MediaBucketTier
 /// The numbers are stored: 1 was Basic, retired in the 2026-09 plans; 2 was Premium, then Studio, and
 /// is Premium again since 2026-10.
 /// </summary>
+/// <summary>What paid for emailing a guest their invitation (<c>Invite.EmailPaidBy</c>).</summary>
+public enum EmailPaidBy
+{
+    /// <summary>The event's pass, or emails bought for it: each guest counted once.</summary>
+    Event = 0,
+    /// <summary>The organiser's monthly allowance: every email counted.</summary>
+    Monthly = 1,
+}
+
 public enum SubscriptionTier
 {
     None = 0,

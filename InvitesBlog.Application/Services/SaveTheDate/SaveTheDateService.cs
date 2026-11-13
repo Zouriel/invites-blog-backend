@@ -93,7 +93,7 @@ public sealed class SaveTheDateService(
 
         var emailedAt = (await invites.ListByCampaignAsync(std.Id, ct))
             .Where(i => i.FirstEmailedAt != null)
-            .ToDictionary(i => i.GuestId, i => i.FirstEmailedAt);
+            .ToDictionary(i => i.GuestId, i => (At: i.FirstEmailedAt, i.EmailPaidBy));
         var list = await guests.ListByCampaignAsync(std.Id, includeOptedOut: true, ct);
         foreach (var g in list)
         {
@@ -107,13 +107,13 @@ public sealed class SaveTheDateService(
 
             // The invite row exists only to carry the mark; finalize gives it a real token when the
             // invitation goes out, the same as for any guest added before sending.
-            if (emailedAt.GetValueOrDefault(g.Id) is { } at)
+            if (emailedAt.TryGetValue(g.Id, out var mark) && mark.At is { } at)
                 await invites.AddAsync(new Invite
                 {
                     Id = Guid.NewGuid(), CampaignId = invitation.Id, GuestId = copy.Id,
                     TokenHash = TokenService.Hash(TokenService.GenerateToken()),
                     RequiresOtp = invitation.IsSensitive, Status = InviteStatus.Created,
-                    RsvpStatus = RsvpStatus.NoResponse, FirstEmailedAt = at, CreatedAt = now,
+                    RsvpStatus = RsvpStatus.NoResponse, FirstEmailedAt = at, EmailPaidBy = mark.EmailPaidBy, CreatedAt = now,
                 }, ct);
         }
 

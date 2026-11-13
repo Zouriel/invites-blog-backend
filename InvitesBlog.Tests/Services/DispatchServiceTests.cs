@@ -73,8 +73,8 @@ public class DispatchServiceTests
     }
 
     private static DispatchService Sut(AppDbContext db, IInviteDeliveryProvider provider,
-        InvitesBlog.Application.Plans.ISendingAllowanceService? allowance = null) =>
-        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance, allowance ?? TestData.Allowance(), new RecordingPushQueue());
+        InvitesBlog.Application.Plans.IEmailAllowanceGate? gate = null) =>
+        new(db, new[] { provider }, Config(), NullLogger<DispatchService>.Instance, gate ?? TestData.Gate(), new RecordingPushQueue());
 
     [Fact]
     public async Task A_delivered_invitation_spends_the_dedicated_template()
@@ -134,7 +134,7 @@ public class DispatchServiceTests
         var (db, campaignId, _) = await SeedAsync();
         var provider = EmailProvider(succeeds: true);
 
-        await Sut(db, provider, TestData.Allowance(left: 0)).DispatchCampaignAsync(campaignId);
+        await Sut(db, provider, TestData.Gate(left: 0)).DispatchCampaignAsync(campaignId);
 
         await provider.DidNotReceive().SendAsync(Arg.Any<InviteDeliveryMessage>(), Arg.Any<CancellationToken>());
         var attempt = await db.DeliveryAttempts.SingleAsync();
@@ -149,12 +149,12 @@ public class DispatchServiceTests
         var (db, campaignId, _) = await SeedAsync();
         var provider = EmailProvider(succeeds: true);
 
-        await Sut(db, provider, TestData.Allowance(left: 1)).DispatchCampaignAsync(campaignId);
+        await Sut(db, provider, TestData.Gate(left: 1)).DispatchCampaignAsync(campaignId);
         var invite = await db.Invites.SingleAsync();
         Assert.NotNull(invite.FirstEmailedAt);
 
         // Now the event has nothing left, but this guest was already emailed: the resend goes out.
-        Assert.True(await Sut(db, provider, TestData.Allowance(left: 0)).ResendAsync(invite.GuestId));
+        Assert.True(await Sut(db, provider, TestData.Gate(left: 0)).ResendAsync(invite.GuestId));
         await provider.Received(2).SendAsync(Arg.Any<InviteDeliveryMessage>(), Arg.Any<CancellationToken>());
     }
 }
