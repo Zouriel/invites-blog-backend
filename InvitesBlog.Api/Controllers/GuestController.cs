@@ -925,6 +925,92 @@ public sealed class GuestController(
             : Admit(inviteId.Value);
     }
 
+    // ---------- the host's preview ("View invite") ----------
+
+    /// <summary>
+    /// Redeems the one-hop link GET /api/campaigns/{id}/preview-link minted after checking the caller may see
+    /// the event, into a cookie scoped to the preview path. The address bar then holds nothing that admits.
+    /// </summary>
+    [HttpGet("/h/preview/{handoff}")]
+    public IActionResult PreviewHandoff(string handoff)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var campaignId = tickets.ReadPreviewHandoff(handoff, now);
+        if (campaignId is null) return Html(GuestPages.PreviewExpired(), StatusCodes.Status401Unauthorized);
+
+        Response.Cookies.Append(
+            RenderTickets.PreviewCookieName,
+            tickets.AdmitPreview(Request.Cookies[RenderTickets.PreviewCookieName], campaignId.Value, now),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = RenderTickets.PreviewPath,
+                Expires = now.Add(RenderTickets.PreviewLifetime),
+            });
+        return Redirect($"{RenderTickets.PreviewPath}/{tickets.PreviewRenderId(campaignId.Value)}");
+    }
+
+    /// <summary>
+    /// The invitation exactly as a guest's page draws it (same renderer, CSP and floors), for a stand-in guest
+    /// who hasn't replied, with a small "Preview" ribbon. Read-only: nothing is written, nothing is counted.
+    /// </summary>
+    [HttpGet("/r/preview/{renderId}")]
+    public async Task<IActionResult> Preview(string renderId, CancellationToken ct)
+    {
+        var campaignId = AdmittedPreview(renderId);
+        if (campaignId is null) return Html(GuestPages.PreviewExpired(), StatusCodes.Status401Unauthorized);
+
+        var payload = await invites.RenderPreviewAsync(
+            campaignId.Value, PublicUrl($"{RenderTickets.PreviewPath}/{renderId}"), Render, ct);
+        if (payload is null) return Html(GuestPages.NotFound(), StatusCodes.Status404NotFound);
+
+        var html = await rendered.BuildAsync(payload.PackageUrl, payload.Data, ct);
+        if (html is null) return Html(GuestPages.Unavailable(), StatusCodes.Status500InternalServerError);
+        html = GuestCreditHtml.InjectIntoInvitation(html, payload.Credit);
+        html = GuestCalendarHtml.Inject(html, payload.Data);
+        html = WithPreviewRibbon(html);
+
+        Response.Headers["Content-Security-Policy"] = IsUploadedDesign(payload.PackageUrl)
+            ? TemplateRuntime.UploadedDesignContentSecurityPolicy
+            : TemplateRuntime.ContentSecurityPolicy;
+        Response.Headers["Referrer-Policy"] = TemplateRuntime.ReferrerPolicy;
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["X-Robots-Tag"] = "noindex";
+        Response.Headers.CacheControl = "private, no-store";
+        return Content(html, "text/html; charset=utf-8");
+    }
+
+    /// <summary>Every button inside a preview (reply, camera, album, calendar) lands here and records nothing.</summary>
+    [HttpGet("/r/preview/{renderId}/{**rest}")]
+    [HttpPost("/r/preview/{renderId}/{**rest}")]
+    public IActionResult PreviewOnly(string renderId) =>
+        AdmittedPreview(renderId) is null
+            ? Html(GuestPages.PreviewExpired(), StatusCodes.Status401Unauthorized)
+            : Html(GuestPages.PreviewOnly($"{RenderTickets.PreviewPath}/{renderId}"));
+
+    private Guid? AdmittedPreview(string renderId)
+    {
+        foreach (var id in tickets.ReadPreviews(Request.Cookies[RenderTickets.PreviewCookieName], DateTimeOffset.UtcNow))
+            if (string.Equals(tickets.PreviewRenderId(id), renderId, StringComparison.Ordinal)) return id;
+        return null;
+    }
+
+    /// <summary>A small label over the top of the page, so a screenshot of a preview is never taken for a guest's.</summary>
+    internal static string WithPreviewRibbon(string html)
+    {
+        const string ribbon = """
+            <div aria-hidden="true" style="position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;
+               transform:translateX(-50%);z-index:2147483001;pointer-events:none;
+               padding:6px 14px;border-radius:999px;background:rgba(20,16,22,.78);color:#fff;
+               font:600 12px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+               letter-spacing:.06em;text-transform:uppercase">Preview</div>
+            """;
+        var close = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return close < 0 ? html + ribbon : html[..close] + ribbon + html[close..];
+    }
+
     /// <summary>Issues the cookie and sends the guest on to a URL that authorizes nothing.</summary>
     private IActionResult Admit(Guid inviteId) => AdmitTo(inviteId, "");
 

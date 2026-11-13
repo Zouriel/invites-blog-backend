@@ -212,4 +212,39 @@ public class RenderTicketTests
         // This parses a cookie. Cookies arrive from anywhere, including from people trying things.
         Assert.Empty(Sut().ReadTicket(ticket, Now));
     }
+
+    // ---------- the host's preview ----------
+
+    [Fact]
+    public void A_preview_handoff_reads_back_for_two_minutes_and_never_as_a_guest_handoff_or_ticket()
+    {
+        var ev = Guid.NewGuid();
+        var sut = Sut();
+        var handoff = sut.IssuePreviewHandoff(ev, Now);
+
+        Assert.Equal(ev, sut.ReadPreviewHandoff(handoff, Now.AddSeconds(119)));
+        Assert.Null(sut.ReadPreviewHandoff(handoff, Now.AddMinutes(2)));
+        // A preview link can't be redeemed as a guest's admission, or the other way round.
+        Assert.Null(sut.ReadHandoff(handoff, Now));
+        Assert.Empty(sut.ReadTicket(handoff, Now));
+        Assert.Null(sut.ReadPreviewHandoff(sut.IssueHandoff(ev, Now), Now));
+    }
+
+    [Fact]
+    public void A_preview_cookie_admits_only_to_previews()
+    {
+        var ev = Guid.NewGuid();
+        var sut = Sut();
+        var cookie = sut.AdmitPreview(null, ev, Now);
+
+        Assert.Equal([ev], sut.ReadPreviews(cookie, Now));
+        Assert.Empty(sut.ReadPreviews(cookie, Now.AddHours(1)));
+        // Not a guest ticket, and a guest ticket is not a preview cookie.
+        Assert.Empty(sut.ReadTicket(cookie, Now));
+        Assert.Empty(sut.ReadPreviews(sut.IssueTicket([ev], Now), Now));
+        // The preview's address is neither the guest's nor the open link's.
+        Assert.NotEqual(sut.PreviewRenderId(ev), sut.RenderId(ev));
+        Assert.NotEqual(sut.PreviewRenderId(ev), sut.OpenRenderId(ev));
+    }
 }
+

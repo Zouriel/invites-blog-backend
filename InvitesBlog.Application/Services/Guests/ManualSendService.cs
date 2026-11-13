@@ -39,13 +39,16 @@ public sealed class ManualSendService(
     IRepository<DeliveryAttempt> deliveryAttempts,
     IUnitOfWork uow,
     InviteShareLinks shareLinks,
-    IConfiguration config) : IManualSendService
+    IConfiguration config,
+    InvitesBlog.Application.Services.MediaBuckets.IPhotoWindowService? windows = null) : IManualSendService
 {
     public async Task<ManualSendResultDto> RecordAsync(Guid campaignId, Guid guestId, ManualSendRequest req, CancellationToken ct = default)
     {
         // The same keyholders as a resend: the organiser (account or link token) or a manager.
         if (!await ownership.OwnsAsync(campaignId, ct)) throw new CampaignAccessDeniedException();
         var campaign = await campaigns.GetByIdAsync(campaignId, ct) ?? throw new CampaignNotFoundException(campaignId);
+        // No invitation links handed out once the event's photo window has ended (the links already sent still work).
+        if (windows is not null) await windows.EnsureNotClosedAsync(campaignId, ct);
 
         var app = ManualSends.ParseApp(req.Channel)
                   ?? throw new BusinessRuleException("Choose WhatsApp, Viber or Telegram.", "manual_send_channel");

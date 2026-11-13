@@ -665,6 +665,56 @@ public class MediaBucketServiceTests
         Assert.False(string.IsNullOrWhiteSpace(saved.ImageUrl));
     }
 
+    /// <summary>
+    /// Once the album's window has ended no new code is made: a fresh one would be printed and then refuse every
+    /// photo. Nothing is stored, no picture rendered. Before the event (cards printed weeks ahead) it is allowed.
+    /// </summary>
+    [Fact]
+    public async Task No_new_code_once_the_albums_window_has_ended()
+    {
+        var bucket = Mine();
+        bucket.EventDate = DateTimeOffset.UtcNow.AddDays(-10);
+        Stored(bucket);
+
+        var e = await Assert.ThrowsAsync<CodedRuleException>(() =>
+            Sut().CreateQrAsync(bucket.Id, new CreateMediaBucketQrRequest("Tables", true)));
+        Assert.Equal(("window_closed", System.Net.HttpStatusCode.Conflict), (e.ErrorCode, e.StatusCode));
+        await _qrs.DidNotReceive().AddAsync(Arg.Any<MediaBucketQr>(), Arg.Any<CancellationToken>());
+        await _storage.DidNotReceive().PutAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_code_is_still_made_weeks_before_the_event_and_after_the_window_is_lengthened()
+    {
+        var early = Mine();
+        early.EventDate = DateTimeOffset.UtcNow.AddDays(30);
+        Stored(early);
+        Assert.NotNull((await Sut().CreateQrAsync(early.Id, new CreateMediaBucketQrRequest(null, true))).Url);
+
+        // Two days after a one-day album closed, a pass stretched it to five days: codes come back.
+        var stretched = Mine();
+        stretched.EventDate = DateTimeOffset.UtcNow.AddDays(-3);
+        stretched.UploadWindowDays = 5;
+        Stored(stretched);
+        Assert.NotNull((await Sut().CreateQrAsync(stretched.Id, new CreateMediaBucketQrRequest(null, true))).Url);
+    }
+
+    [Fact]
+    public async Task The_album_says_when_its_window_ended()
+    {
+        var over = Mine();
+        over.EventDate = DateTimeOffset.UtcNow.AddDays(-10);
+        Stored(over);
+        var dto = await Sut().GetAsync(over.Id);
+        Assert.True(dto.WindowClosed);
+        Assert.NotNull(dto.WindowClosesAt);
+        Assert.True(dto.WindowClosesAt < DateTimeOffset.UtcNow);
+
+        var tonight = Mine();
+        Stored(tonight);
+        Assert.False((await Sut().GetAsync(tonight.Id)).WindowClosed);
+    }
+
     // ---------- several buckets on one event, and the longer window ----------
 
     /// <summary>

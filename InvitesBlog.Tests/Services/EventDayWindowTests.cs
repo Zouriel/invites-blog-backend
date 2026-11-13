@@ -110,4 +110,44 @@ public class EventDayWindowTests
         Assert.False(EventDayWindow.IsOpen(DateTimeOffset.MinValue, DateTimeOffset.UtcNow, 5));
         Assert.False(EventDayWindow.IsOpen(DateTimeOffset.MaxValue, DateTimeOffset.UtcNow, 5));
     }
+
+    // ---------- after the window: no new codes or links ----------
+
+    [Fact]
+    public void Has_closed_only_after_the_window_ends_never_before_it_opens()
+    {
+        // Weeks before: open for printing codes, even though the window itself isn't open yet.
+        Assert.False(EventDayWindow.HasClosed(Start, Start.AddDays(-30)));
+        Assert.False(EventDayWindow.HasClosed(Start, Start));
+        Assert.False(EventDayWindow.HasClosed(Start, DayAfterEnds.AddSeconds(-1)));
+        Assert.True(EventDayWindow.HasClosed(Start, DayAfterEnds));
+        Assert.Equal(DayAfterEnds, EventDayWindow.ClosesAt(Start));
+    }
+
+    [Fact]
+    public void A_longer_window_reopens_what_had_closed()
+    {
+        var later = DayAfterEnds.AddHours(12);
+        Assert.True(EventDayWindow.HasClosed(Start, later, windowDays: 1));
+        // A pass bought afterwards stretches the album to 3 days from the start: closed no more.
+        Assert.False(EventDayWindow.HasClosed(Start, later, windowDays: 3));
+    }
+
+    [Fact]
+    public void An_unset_date_never_counts_as_closed()
+    {
+        Assert.Null(EventDayWindow.ClosesAt(DateTimeOffset.MinValue));
+        Assert.False(EventDayWindow.HasClosed(DateTimeOffset.MinValue, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void The_refusal_is_a_409_window_closed_naming_the_last_open_day_on_the_event_clock()
+    {
+        var e = EventDayWindow.Closed(DayAfterEnds, "Indian/Maldives");
+        Assert.Equal("window_closed", e.ErrorCode);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, e.StatusCode);
+        // Ends at midnight going into the 30th in Malé, so the last open day is Saturday the 29th.
+        Assert.Contains("29 August 2026", e.Message);
+    }
 }
+

@@ -72,7 +72,14 @@ public sealed record MediaBucketDto(
     /// <summary>Whether this server can group faces at all (the models are installed).</summary>
     bool FaceGroupingAvailable = false,
     /// <summary>Whether the event's plan includes face grouping (any pass, Premium or Studio; not Free).</summary>
-    bool FaceGroupingIncluded = false);
+    bool FaceGroupingIncluded = false,
+    /// <summary>
+    /// The album's photo window has ENDED (false before it opens). From then on no new QR codes or links are
+    /// made (POST .../qr answers 409 window_closed); existing codes keep opening their view-only page.
+    /// </summary>
+    bool WindowClosed = false,
+    /// <summary>When the window ends or ended; null for an album with no real date.</summary>
+    DateTimeOffset? WindowClosesAt = null);
 
 /// <summary>
 /// The account's Studio plan: whether it is in force (<c>Tier</c> "Venue") and how much the events it

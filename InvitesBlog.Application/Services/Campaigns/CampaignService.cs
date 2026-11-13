@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Services.MediaBuckets;
 using InvitesBlog.Application.Push;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -323,6 +324,9 @@ public sealed class CampaignService(
     public async Task<FinalizeResponse> FinalizeAsync(Guid id, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);
+        // After the event's photo window has ended there is nothing left to invite anyone to: no link
+        // is handed out or emailed. Links already sent keep working (they open the finished event).
+        await Windows.EnsureNotClosedAsync(id, ct);
         var guestList = await guests.ListByCampaignAsync(id, includeOptedOut: false, ct);
 
         // A guest list is no longer the only way to have somebody to send to. An event with an open
@@ -884,6 +888,8 @@ public sealed class CampaignService(
                 share?.Text);
         }).ToList();
 
+        var window = (await Windows.ForCampaignsAsync([campaign], ct))
+            .GetValueOrDefault(campaign.Id, PhotoWindowState.None);
         return new DashboardResponse(
             new DashboardCampaignDto(
                 campaign.Id, campaign.Title, campaign.Status.ToString(), campaign.PaidInviteCapacity,
@@ -905,7 +911,11 @@ public sealed class CampaignService(
                 SaveTheDates.Name(campaign.Kind), campaign.AllDay, campaign.EventStartAt,
                 campaign.InvitationCampaignId,
                 campaign.OpenGuestList,
-                campaign.TimeZone),
+                campaign.TimeZone)
+            {
+                PhotoWindowClosed = window.Closed,
+                PhotoWindowClosesAt = window.ClosesAt,
+            },
             report, guestRows, questions, await allowances.ForCampaignAsync(campaign.Id, ct));
     }
 
@@ -1017,6 +1027,8 @@ public sealed class CampaignService(
         Guid id, SetOpenLinkRequest req, CancellationToken ct = default)
     {
         var campaign = await LoadOwnedAsync(id, ct);
+        // No new links once the event's photo window has ended. An open link already made keeps resolving.
+        await Windows.EnsureNotClosedAsync(id, ct);
 
         if (!req.AllowAnonymous)
         {
@@ -1090,7 +1102,18 @@ public sealed class CampaignService(
         await uow.SaveChangesAsync(ct);
     }
 
+    public async Task EnsurePreviewableAsync(Guid id, CancellationToken ct = default)
+    {
+        if (await ownership.AccessAsync(id, ct) < CampaignAccess.Celebrant) throw new CampaignAccessDeniedException();
+        var campaign = await campaigns.GetByIdAsync(id, ct) ?? throw new CampaignNotFoundException(id);
+        if (string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl))
+            throw new CodedRuleException("This event has no invitation to show, only an album.", "no_invitation", System.Net.HttpStatusCode.NotFound);
+    }
+
     private string OpenLinkUrl(string code) => $"{InviteeBase}/o/{code}";
+
+    /// <summary>The event's photo window, from the repositories this service already has.</summary>
+    private PhotoWindowService Windows => new(campaigns, mediaBuckets, plans);
 
     /// <summary>
     /// The link that is public but not anonymous: whoever follows it is asked for an email or phone

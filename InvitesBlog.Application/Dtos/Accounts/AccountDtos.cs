@@ -162,7 +162,11 @@ public sealed record MyCampaignDto(
     /// <summary>The organiser's display name while their Studio plan (tier Venue) covers the event, for the small badge on its tile; null otherwise.</summary>
     string? VenueName = null,
     /// <summary>The organiser's profile picture for that badge; null when they have none (show the first letter) or there is no badge.</summary>
-    string? VenueLogoUrl = null);
+    string? VenueLogoUrl = null,
+    /// <summary>Every album's photo window has ENDED: no new QR codes or links (see DashboardCampaignDto).</summary>
+    bool PhotoWindowClosed = false,
+    /// <summary>When the last album's window ends or ended; null for a save the date or no real date.</summary>
+    DateTimeOffset? PhotoWindowClosesAt = null);
 
 /// <summary>One bespoke-template request the signed-in customer made.</summary>
 public sealed record MyRequestDto(Guid Id, string Occasion, string Message, bool HasAttended, DateTimeOffset CreatedAt);

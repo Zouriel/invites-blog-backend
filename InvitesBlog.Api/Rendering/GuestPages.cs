@@ -614,6 +614,23 @@ public static class GuestPages
            message and it will let you straight back in.</p>
         """);
 
+    /// <summary>
+    /// Where every button inside a host's preview ("View invite") leads: the reply, camera, album and calendar
+    /// all belong to a real guest's own invitation, so nothing here records anything.
+    /// </summary>
+    public static string PreviewOnly(string back) => Shell("Preview", $"""
+        <h1>This is a preview</h1>
+        <p>It shows your invitation the way your guests see it. Replies, photos and the calendar work from each
+           guest's own invitation, so nothing you press here is recorded.</p>
+        <p><a href="{E(back)}">Back to the invitation</a></p>
+        """);
+
+    /// <summary>A preview link that has expired or was opened somewhere else: open it again from the event.</summary>
+    public static string PreviewExpired() => Shell("Open the preview again", """
+        <h1>Please open the preview again</h1>
+        <p>This preview link has expired. Press View invite on your event again.</p>
+        """);
+
     public static string Unavailable() => Shell("Invitation unavailable", """
         <h1>We couldn't open this invitation</h1>
         <p>Something went wrong preparing it. Please try again in a moment.</p>

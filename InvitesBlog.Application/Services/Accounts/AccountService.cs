@@ -50,7 +50,8 @@ public sealed class AccountService(
     InvitesBlog.Application.Plans.IPlanService plans,
     IProfilePictureService pictures,
     IEventInheritance? inheritance = null,
-    IAppleSignInTokens? appleTokens = null) : IAccountService
+    IAppleSignInTokens? appleTokens = null,
+    InvitesBlog.Application.Services.MediaBuckets.IPhotoWindowService? windows = null) : IAccountService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(14);
 
@@ -398,6 +399,11 @@ public sealed class AccountService(
         // covers the event: two queries at most for the page.
         var venueFaces = await plans.VenueFacesAsync(mine, ct);
 
+        // Whether each event's photo window has ended: the tile's menu stops offering codes and links then.
+        var photoWindows = windows is null
+            ? new Dictionary<Guid, InvitesBlog.Application.Services.MediaBuckets.PhotoWindowState>()
+            : await windows.ForCampaignsAsync(mine, ct);
+
         var result = new List<MyCampaignDto>(mine.Count);
         foreach (var c in mine)
         {
@@ -435,7 +441,9 @@ public sealed class AccountService(
                 Colours: InvitesBlog.Application.Campaigns.PosterColours.Of(c),
                 TimeZone: c.TimeZone,
                 VenueName: venue?.Name,
-                VenueLogoUrl: venue?.LogoUrl));
+                VenueLogoUrl: venue?.LogoUrl,
+                PhotoWindowClosed: photoWindows.TryGetValue(c.Id, out var window) && window.Closed,
+                PhotoWindowClosesAt: photoWindows.TryGetValue(c.Id, out var w2) ? w2.ClosesAt : null));
 
             bool IsHost(Campaign x) =>
                 x.CreatedByUserId == me.Id || (x.InviterId != null && inviterIds.Contains(x.InviterId.Value));
