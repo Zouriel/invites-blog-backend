@@ -76,6 +76,41 @@ public static class EventDayWindow
     }
 
     /// <summary>
+    /// When the window ENDS for good, or null for a date too near the ends of the calendar to have one
+    /// (a row whose date was never set reads as year 1; see <see cref="IsOpen"/>).
+    ///
+    /// <para>Only the far side counts here. Before the window opens nothing is closed: hosts print the
+    /// QR cards and send the links in the weeks before the event, and that is exactly when they need them.</para>
+    /// </summary>
+    public static DateTimeOffset? ClosesAt(DateTimeOffset eventStartAt, int windowDays = 1, string? timeZone = null)
+    {
+        var guard = TimeSpan.FromDays(MaxWindowDays + DaysBefore + DaysAfter + 1);
+        if (eventStartAt < DateTimeOffset.MinValue + guard || eventStartAt > DateTimeOffset.MaxValue - guard)
+            return null;
+        return Bounds(eventStartAt, windowDays, timeZone).Closes;
+    }
+
+    /// <summary>
+    /// Whether the window has ended: no new QR codes or links for adding photos (or for the invitation
+    /// itself) are made after this. Printed codes and sent links keep opening their closed, view-only page.
+    /// Lengthening the album's window or moving the date makes this false again.
+    /// </summary>
+    public static bool HasClosed(DateTimeOffset eventStartAt, DateTimeOffset now, int windowDays = 1, string? timeZone = null) =>
+        ClosesAt(eventStartAt, windowDays, timeZone) is { } closes && now >= closes;
+
+    /// <summary>The error code every refusal after the window carries (HTTP 409).</summary>
+    public const string ClosedCode = "window_closed";
+
+    /// <summary>
+    /// The refusal for making a new code or link once the window has ended, naming the last day it was open
+    /// on the event's own clock.
+    /// </summary>
+    public static InvitesBlog.Application.Exceptions.CodedRuleException Closed(DateTimeOffset closesAt, string? timeZone) =>
+        new($"The photo window closed on {EventTime.DateText(closesAt.AddSeconds(-1), timeZone)}. "
+            + "Guests can still view the album, but new QR codes and links can't be made.",
+            ClosedCode, System.Net.HttpStatusCode.Conflict);
+
+    /// <summary>
     /// When the window opens and closes, for pages that say so. The same arithmetic as
     /// <see cref="IsOpen"/>; callers pass a real event date (IsOpen guards the extremes).
     /// </summary>

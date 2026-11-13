@@ -17,8 +17,22 @@ namespace InvitesBlog.Api.Controllers;
 [Route("api/campaigns")]
 public sealed class CampaignsController(
     ICampaignService campaigns, IImportedDesignService designs, IMediaBucketService buckets,
-    IGuestColoursService colours, Application.Services.Guidance.IGuidanceService guidance) : BaseApiController
+    IGuestColoursService colours, Application.Services.Guidance.IGuidanceService guidance,
+    Api.Rendering.RenderTickets tickets, Microsoft.Extensions.Configuration.IConfiguration config) : BaseApiController
 {
+    /// <summary>
+    /// "View invite": a one-hop link (2 minutes) to the invitation exactly as a guest sees it, read-only — see
+    /// GuestController.Preview. For the organiser, a manager or a celebrant; 404 no_invitation for an album alone.
+    /// </summary>
+    [HttpGet("{id:guid}/preview-link")]
+    [HasPermission(Permissions.Dashboard.Read)]
+    public async Task<IActionResult> PreviewLink(Guid id, CancellationToken ct)
+    {
+        await campaigns.EnsurePreviewableAsync(id, ct);
+        var url = $"{Application.Common.AppUrls.InviteeBase(config)}/h/preview/{tickets.IssuePreviewHandoff(id, DateTimeOffset.UtcNow)}";
+        return Success(new { url });
+    }
+
     // Creation is open to anonymous callers: a brand-new visitor spins up a draft and receives a
     // possession token that grants Inviter rights thereafter. The Public role does NOT hold
     // Campaigns.Create, so this action is deliberately [AllowAnonymous] rather than permission-gated.

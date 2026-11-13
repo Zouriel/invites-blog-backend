@@ -26,6 +26,9 @@ public sealed class RenderTickets(IConfiguration config)
     private const string TicketContext = "render-ticket:";
     private const string HandoffContext = "render-handoff:";
     private const string JoinedContext = "open-joined:";
+    private const string PreviewRenderIdContext = "preview-render-id:";
+    private const string PreviewTicketContext = "preview-ticket:";
+    private const string PreviewHandoffContext = "preview-handoff:";
 
     /// <summary>How long a guest stays admitted before their link has to admit them again.</summary>
     public static readonly TimeSpan TicketLifetime = TimeSpan.FromDays(7);
@@ -165,6 +168,62 @@ public sealed class RenderTickets(IConfiguration config)
     public IReadOnlyList<Guid> ReadJoined(string? value, DateTimeOffset now)
     {
         var body = Verify(JoinedContext, value, now);
+        if (body is null) return [];
+        var ids = new List<Guid>();
+        foreach (var part in body.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            if (Guid.TryParseExact(part, "N", out var id)) ids.Add(id);
+        return ids;
+    }
+
+    // ---------- the host's preview ("View invite") ----------
+
+    /// <summary>The preview cookie. Host-only, HttpOnly and scoped to the preview path.</summary>
+    public const string PreviewCookieName = "ib_preview";
+
+    /// <summary>The path every preview lives under, on the guest host. Under /r/ so no proxy change is needed.</summary>
+    public const string PreviewPath = "/r/preview";
+
+    /// <summary>How long the app's one-hop link to a preview is good for: it is opened straight away.</summary>
+    public static readonly TimeSpan PreviewHandoffLifetime = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long a browser may keep reloading a preview it was let into.</summary>
+    public static readonly TimeSpan PreviewLifetime = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The id a host's preview of an event is served under. Its own context, so it can never be read back as a
+    /// guest's invitation or as the open link's page, and a preview cookie can never admit to either.
+    /// </summary>
+    public string PreviewRenderId(Guid campaignId)
+    {
+        var mac = HMACSHA256.HashData(Key, Encoding.UTF8.GetBytes(PreviewRenderIdContext + campaignId.ToString("N")));
+        return Base64Url(mac.AsSpan(0, 16).ToArray());
+    }
+
+    /// <summary>The one-hop link the app opens: minted only after the API has checked the caller may see the event.</summary>
+    public string IssuePreviewHandoff(Guid campaignId, DateTimeOffset now)
+    {
+        var body = $"{campaignId:N}.{now.Add(PreviewHandoffLifetime).ToUnixTimeSeconds()}";
+        return $"{body}.{Base64Url(Sign(PreviewHandoffContext, body))}";
+    }
+
+    public Guid? ReadPreviewHandoff(string? handoff, DateTimeOffset now)
+    {
+        var body = Verify(PreviewHandoffContext, handoff, now);
+        return body is not null && Guid.TryParseExact(body, "N", out var id) ? id : null;
+    }
+
+    /// <summary>Adds an event to the previews this browser may reload, newest first.</summary>
+    public string AdmitPreview(string? existing, Guid campaignId, DateTimeOffset now)
+    {
+        var ids = new[] { campaignId }.Concat(ReadPreviews(existing, now)).Distinct().Take(MaxAdmitted).ToList();
+        var body = $"{string.Join(',', ids.Select(i => i.ToString("N")))}.{now.Add(PreviewLifetime).ToUnixTimeSeconds()}";
+        return $"{body}.{Base64Url(Sign(PreviewTicketContext, body))}";
+    }
+
+    /// <summary>The events a preview cookie lets this browser see, or empty. Never throws.</summary>
+    public IReadOnlyList<Guid> ReadPreviews(string? value, DateTimeOffset now)
+    {
+        var body = Verify(PreviewTicketContext, value, now);
         if (body is null) return [];
         var ids = new List<Guid>();
         foreach (var part in body.Split(',', StringSplitOptions.RemoveEmptyEntries))

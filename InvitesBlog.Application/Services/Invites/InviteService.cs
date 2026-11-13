@@ -183,6 +183,40 @@ public sealed class InviteService(
             await CreditAsync(campaign, template, ct));
     }
 
+    public async Task<InviteRenderData?> RenderPreviewAsync(
+        Guid campaignId, string previewLink, InviteRenderer render, CancellationToken ct = default)
+    {
+        var campaign = await campaigns.GetByIdAsync(campaignId, ct);
+        // No pinned package is a photos-only event: there is no invitation to look at.
+        if (campaign is null || string.IsNullOrWhiteSpace(campaign.TemplatePackageUrl)) return null;
+
+        var template = await templates.GetByIdAsync(campaign.TemplateId, ct);
+        if (template is null) return null;
+
+        var inviter = campaign.InviterId is null
+            ? null : await inviters.GetByIdAsync(campaign.InviterId.Value, ct);
+
+        // Stand-ins, never saved, as for the open link (see RenderOpenAsync for why no placeholder row). The
+        // guest hasn't replied, so the page shows what a newly invited guest sees: the reply button included.
+        var guest = new Guest { Id = Guid.Empty, CampaignId = campaignId, Name = "Guest" };
+        var invite = new Invite
+        {
+            Id = Guid.Empty,
+            CampaignId = campaignId,
+            RsvpStatus = RsvpStatus.NoResponse,
+            RequiresOtp = false,
+        };
+
+        var payload = render(campaign, template, guest, invite, previewLink,
+            inviter?.Name, inviter?.PhoneE164, inviter?.Email,
+            await bucketService.WindowForCampaignAsync(campaign.Id, ct));
+        await AddCelebrantsAsync(campaign.Id, payload.Data, ct);
+
+        return new InviteRenderData(
+            payload.PackageUrl, payload.Data, false, campaign.Status.ToString(),
+            await CreditAsync(campaign, template, ct));
+    }
+
     /// <summary>
     /// What the guest's pages credit. A Free event carries "Made with invites.blog" — a pass, Premium or
     /// Studio takes it off; while the organiser's Studio plan covers it, their name and picture show. An invitation a Premium subscriber designed names them.

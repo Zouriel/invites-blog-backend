@@ -34,7 +34,8 @@ public sealed class GuestService(
     IUnitOfWork uow,
     GuestUploadParser parser,
     PhoneNormalizer phones,
-    IValidator<ConfirmUploadRequest> confirmValidator) : IGuestService
+    IValidator<ConfirmUploadRequest> confirmValidator,
+    InvitesBlog.Application.Services.MediaBuckets.IPhotoWindowService? windows = null) : IGuestService
 {
     public async Task<GuestUploadSummaryDto> UploadAsync(
         Guid campaignId, Stream fileStream, string fileName, string? defaultCountry, CancellationToken ct = default)
@@ -189,6 +190,8 @@ public sealed class GuestService(
     public async Task PrepareResendAsync(Guid campaignId, Guid guestId, CancellationToken ct = default)
     {
         await EnsureCampaignAsync(campaignId, ct);
+        // No invitation link emailed again once the event's photo window has ended; the one they have still works.
+        if (windows is not null) await windows.EnsureNotClosedAsync(campaignId, ct);
 
         if (!await guests.AnyAsync(g => g.Id == guestId && g.CampaignId == campaignId, ct))
             throw new GuestNotFoundException(guestId);

@@ -988,8 +988,16 @@ public sealed class MediaBucketService(
         Guid bucketId, CreateMediaBucketQrRequest req, CancellationToken ct = default)
     {
         var album = await OwnedAsync(bucketId, ct);
-        if (await campaigns.GetByIdAsync(album.CampaignId, ct) is { Status: CampaignStatus.Draft })
+        var owner = await campaigns.GetByIdAsync(album.CampaignId, ct);
+        if (owner is { Status: CampaignStatus.Draft })
             throw new BusinessRuleException(NotLiveMessage, "event_not_finished");
+
+        // No new codes once this album's window has ended: a fresh code would be printed or sent and
+        // then refuse every photo. The codes already made keep opening their closed, view-only page.
+        // Lengthening the album's window (a pass) or moving the date makes this pass again.
+        if (EventDayWindow.ClosesAt(owner?.EventStartAt ?? album.EventDate, album.UploadWindowDays, owner?.TimeZone) is { } closes
+            && DateTimeOffset.UtcNow >= closes)
+            throw EventDayWindow.Closed(closes, owner?.TimeZone);
 
         var token = TokenService.GenerateToken();
         var id = Guid.NewGuid();
@@ -1279,7 +1287,11 @@ public sealed class MediaBucketService(
                 PlanCatalog.FreeEventBytes,
                 b.FaceGroupingOn,
                 faceGrouping?.Available ?? false,
-                PlanRules.IncludesFaceGrouping(plan));
+                PlanRules.IncludesFaceGrouping(plan),
+                // Ended for good (not merely not yet open): no new codes or links from here, see CreateQrAsync.
+                EventDayWindow.HasClosed(Night(b, events), now, b.UploadWindowDays, zoned?.TimeZone),
+                EventDayWindow.ClosesAt(Night(b, events), b.UploadWindowDays, zoned?.TimeZone),
+                zoned?.TimeZone);
         }).ToList();
     }
 

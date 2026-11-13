@@ -82,6 +82,16 @@ public interface IInviteService
     /// <summary>What an event's guest-facing pages credit: see <see cref="GuestCredit"/>.</summary>
     Task<GuestCredit> CreditForCampaignAsync(Guid campaignId, CancellationToken ct = default);
 
+    /// <summary>
+    /// The invitation as a guest sees it, for its HOST ("View invite"): the same renderer, design and
+    /// event details, for a stand-in guest who hasn't replied. Writes nothing (no invite row, no view, no
+    /// reply); every link inside points under <paramref name="previewLink"/>, which only explains that this
+    /// is a preview. Null when the event has no invitation design (a photos-only album). The caller has
+    /// already checked who is asking.
+    /// </summary>
+    Task<InviteRenderData?> RenderPreviewAsync(
+        Guid campaignId, string previewLink, InviteRenderer render, CancellationToken ct = default);
+
     Task<InviteRenderData?> RenderOpenAsync(
         Guid campaignId, string inviteLink, InviteRenderer render, CancellationToken ct = default);
 

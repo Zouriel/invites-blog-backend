@@ -166,7 +166,17 @@ public sealed record DashboardCampaignDto(
     /// <summary>People who open the link can add themselves by replying (Campaign.OpenGuestList).</summary>
     bool OpenGuestList = false,
     /// <summary>The event's IANA time zone: EventStartAt (an instant) is shown on this clock.</summary>
-    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy);
+    string TimeZone = InvitesBlog.Domain.Events.EventZones.Legacy)
+{
+    /// <summary>
+    /// Every album's photo window has ENDED (false before it opens). From then on no new QR codes, open
+    /// links, hand-sent or re-sent invitation links are made (409 window_closed); existing ones keep working.
+    /// </summary>
+    public bool PhotoWindowClosed { get; init; }
+
+    /// <summary>When the last album's window ends or ended; null for a save the date or an event with no real date.</summary>
+    public DateTimeOffset? PhotoWindowClosesAt { get; init; }
+}
 
 public sealed record DashboardRsvpDto(int Going, int Maybe, int NotGoing);
 

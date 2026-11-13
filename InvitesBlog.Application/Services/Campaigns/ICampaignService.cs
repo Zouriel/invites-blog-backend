@@ -111,6 +111,12 @@ public interface ICampaignService
     Task DisableOpenLinkAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
+    /// Checks the caller may look at this event's invitation as its guests see it ("View invite"): the organiser,
+    /// a manager or a celebrant, by account or possession token. 404 <c>no_invitation</c> for a photos-only event.
+    /// </summary>
+    Task EnsurePreviewableAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Turns the open guest list on or off: whoever opens the anonymous link can reply with their
     /// name and so join the guest list. Uploaded designs only, never a save the date.
     /// </summary>
