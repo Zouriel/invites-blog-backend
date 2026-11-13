@@ -1514,6 +1514,10 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("EmailPaidBy")
+                        .HasColumnType("integer")
+                        .HasColumnName("email_paid_by");
+
                     b.Property<DateTimeOffset?>("FirstEmailedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("first_emailed_at");
@@ -1866,6 +1870,44 @@ namespace InvitesBlog.Infrastructure.Migrations
                     b.HasIndex("BucketId", "CreatedAt");
 
                     b.ToTable("media_bucket_qrs", (string)null);
+                });
+
+            modelBuilder.Entity("InvitesBlog.Domain.Entities.MonthlyEmailSend", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("InviteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invite_id");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer")
+                        .HasColumnName("month");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId")
+                        .HasDatabaseName("idx_monthly_email_sends_campaign");
+
+                    b.HasIndex("AccountId", "Month")
+                        .HasDatabaseName("idx_monthly_email_sends_account_month");
+
+                    b.ToTable("monthly_email_sends", (string)null);
                 });
 
             modelBuilder.Entity("InvitesBlog.Domain.Entities.OtpChallenge", b =>

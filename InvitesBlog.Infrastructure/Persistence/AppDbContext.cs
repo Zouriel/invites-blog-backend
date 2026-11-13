@@ -28,6 +28,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CommentLike> CommentLikes => Set<CommentLike>();
     public DbSet<Invite> Invites => Set<Invite>();
     public DbSet<InviteTrustedIp> InviteTrustedIps => Set<InviteTrustedIp>();
+    public DbSet<MonthlyEmailSend> MonthlyEmailSends => Set<MonthlyEmailSend>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<GooglePlayPurchase> GooglePlayPurchases => Set<GooglePlayPurchase>();
@@ -286,6 +287,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_invites_campaign_id");
             e.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("idx_invites_token_hash");
             e.HasIndex(x => x.GuestId);
+        });
+
+        b.Entity<MonthlyEmailSend>(e =>
+        {
+            e.ToTable("monthly_email_sends");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.AccountId, x.Month }).HasDatabaseName("idx_monthly_email_sends_account_month");
+            e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_monthly_email_sends_campaign");
         });
 
         b.Entity<DeliveryAttempt>(e =>

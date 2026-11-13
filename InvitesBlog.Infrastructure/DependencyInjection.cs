@@ -59,6 +59,9 @@ public static class DependencyInjection
         services.AddScoped<GuestUploadParser>();
         services.AddScoped<RbacSeeder>();
         services.AddScoped<Application.Plans.IPriceBook, Application.Plans.PriceBook>();
+        // Takes one email from an event's allowance before it goes (pass, then the month, then bought); race-safe.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<Application.Plans.IEmailAllowanceGate, Delivery.EmailAllowanceGate>();
 
         // Invitee JWT (issuer + validation params), exposed to Application via IInviteeTokenIssuer.
         services.AddSingleton<Security.InviteeJwt>();

@@ -30,6 +30,39 @@ internal static class TestData
         return s;
     }
 
+    /// <summary>
+    /// A gate that lets <paramref name="left"/> more guests be emailed (plenty, by default), with the real gate's
+    /// rule that a guest the event already paid for is sent again for free. The real one is tested on Postgres
+    /// (MonthlyEmailAllowanceTests).
+    /// </summary>
+    public static InvitesBlog.Application.Plans.IEmailAllowanceGate Gate(int left = 100_000) => new CountingGate(left);
+
+    private sealed class CountingGate(int left) : InvitesBlog.Application.Plans.IEmailAllowanceGate
+    {
+        private int _left = left;
+
+        public Task<InvitesBlog.Application.Plans.EmailCharge?> ChargeAsync(Campaign campaign, Invite invite, CancellationToken ct = default)
+        {
+            var before = new InvitesBlog.Application.Plans.EmailCharge(null, null, invite.FirstEmailedAt, invite.EmailPaidBy);
+            if (invite.FirstEmailedAt is not null && invite.EmailPaidBy == EmailPaidBy.Event)
+                return Task.FromResult<InvitesBlog.Application.Plans.EmailCharge?>(before);
+            if (_left <= 0) return Task.FromResult<InvitesBlog.Application.Plans.EmailCharge?>(null);
+            _left--;
+            invite.FirstEmailedAt ??= DateTimeOffset.UtcNow;
+            invite.EmailPaidBy = EmailPaidBy.Event;
+            return Task.FromResult<InvitesBlog.Application.Plans.EmailCharge?>(before with { PaidBy = EmailPaidBy.Event });
+        }
+
+        public Task RefundAsync(InvitesBlog.Application.Plans.EmailCharge charge, Invite invite, CancellationToken ct = default)
+        {
+            if (charge.PaidBy is null) return Task.CompletedTask;
+            _left++;
+            invite.FirstEmailedAt = charge.PreviousFirstEmailedAt;
+            invite.EmailPaidBy = charge.PreviousPaidBy;
+            return Task.CompletedTask;
+        }
+    }
+
     /// <summary>A price book holding <paramref name="prices"/>, or the defaults in code.</summary>
     public static InvitesBlog.Application.Plans.IPriceBook PriceBook(InvitesBlog.Application.Plans.Prices? prices = null)
     {

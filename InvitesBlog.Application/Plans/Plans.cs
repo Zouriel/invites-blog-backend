@@ -79,6 +79,24 @@ public static class PlanCatalog
     public const int PlatinumIncludedInvites = 500;
 
     /// <summary>
+    /// Emailed invitations a subscription includes each calendar month (Maldives time), shared by every event the
+    /// account organises and not carried over (owner, 2026-11-14; Studio capped at 500 the same day). Every email
+    /// counts, sending again too. An event uses its pass's own first, then these, then emails bought for it.
+    /// </summary>
+    public const int PremiumMonthlyEmails = 100;
+    public const int PhotographerMonthlyEmails = 500;
+    public const int VenueMonthlyEmails = 500;
+
+    /// <summary>The monthly emailed invitations a subscription tier includes; 0 for none.</summary>
+    public static int MonthlyEmails(SubscriptionTier tier) => tier switch
+    {
+        SubscriptionTier.Premium => PremiumMonthlyEmails,
+        SubscriptionTier.Photographer => PhotographerMonthlyEmails,
+        SubscriptionTier.Venue => VenueMonthlyEmails,
+        _ => 0,
+    };
+
+    /// <summary>
     /// The least a pass event is covered, counted from the event day (a pass's own year always runs
     /// longer). Free events are no longer covered by days at all: they are kept for good.
     /// </summary>
@@ -169,16 +187,16 @@ public static class PlanCatalog
                 // is an add-on (AddOns below), not one of its perks.
                 new PlanDto("Premium", "Premium", p.PremiumMonthly, "per month",
                     PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
-                    Perks: PlanPerks.For(PlanKind.Premium)),
+                    Perks: PlanPerks.For(PlanKind.Premium), MonthlyEmails: PremiumMonthlyEmails),
                 // Studio without the AI designer (owner, 2026-11-13), between Premium and Studio.
                 new PlanDto("Photographer", "Photographer", p.PhotographerMonthly, "per month",
                     VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
-                    Perks: PlanPerks.For(PlanKind.Photographer)),
+                    Perks: PlanPerks.For(PlanKind.Photographer), MonthlyEmails: PhotographerMonthlyEmails),
                 // Every event its subscriber organises, kept while it lasts (no retention days), like Premium with 10 GB.
                 // Shown as "Studio" (owner, 2026-11-12); the kind stays "Venue" for shipped apps and stored data.
                 new PlanDto("Venue", "Studio", p.VenueMonthly, "per month",
                     VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
-                    Perks: PlanPerks.For(PlanKind.Venue)),
+                    Perks: PlanPerks.For(PlanKind.Venue), MonthlyEmails: VenueMonthlyEmails),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
             new SendingPriceDto(p.SendingPerBlock, PricingCalculator.BlockSize),
@@ -199,11 +217,12 @@ public static class PlanCatalog
 /// <param name="Branded">Whether the invitation and album carry a small "Made with invites.blog".</param>
 /// <param name="From">The price is the smallest; larger ones are quoted.</param>
 /// <param name="Perks">The card's bullets, written here so the website and both apps show the same list (<see cref="PlanPerks"/>).</param>
+/// <param name="MonthlyEmails">Emailed invitations a subscription includes each month across its events; 0 for passes and Free.</param>
 public sealed record PlanDto(
     string Kind, string Name, decimal Price, string Billing,
     long? EventBytes, int? MaxBuckets, int? MaxWindowDays, int? RetentionDays,
     int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false, decimal? ExtensionPrice = null,
-    IReadOnlyList<string>? Perks = null);
+    IReadOnlyList<string>? Perks = null, int MonthlyEmails = 0);
 
 /// <summary>"Keep your photos": how much a year, and how many months each one adds.</summary>
 public sealed record KeepPhotosDto(decimal Price, int Months);

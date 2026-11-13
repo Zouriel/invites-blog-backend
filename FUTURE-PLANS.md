@@ -713,6 +713,12 @@ Supersedes the subscriber notes above and the Free/Basic/Event pass/Premium plan
   event may email what its plan includes (0 / 100 / 500) plus `PaidInviteCapacity`, which now means
   only what was added on top — by an admin until payments are live. Past that, a new guest is held
   back with a reason; a resend to someone already emailed is free. Sharing links is never counted.
+- **Subscriptions include emailed invitations (owner, 2026-11-14).** Premium 100, Photographer 500, Studio 500 a
+  month per account, shared by every event it organises, counted in the calendar month in Maldives time (resets on
+  the 1st at 00:00 MVT), not carried over; a lapsed subscription has none. An event takes each email from its pass
+  first (per guest, resends free), then the organiser's month (every email counts, resends too:
+  `monthly_email_sends`, one row per email), then emails bought for it. `invites.email_paid_by` records which paid.
+  `EmailAllowanceGate` charges before sending under a Postgres advisory lock per organiser and refunds a failed send.
 - **A host can hold their own event at a venue** by the venue's code (`Venue.Code`, on the Venue
   page); the organiser only, since it gives the venue's staff access. The event then gets the venue's
   plan and its albums are lengthened to it.

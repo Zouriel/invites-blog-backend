@@ -20,6 +20,9 @@ public static class PlanPerks
     public const string Portfolio = "Your own portfolio page at invites.blog/@you";
     public const string BadgeOnEvents = "Your picture and name on your events' albums";
 
+    /// <summary>"100 emailed invitations a month, across your events": the monthly allowance (2026-11-14).</summary>
+    public static string MonthlyEmails(int count) => $"{count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} emailed invitations a month, across your events";
+
     public static IReadOnlyList<string> For(PlanKind kind) => kind switch
     {
         PlanKind.Free =>
@@ -56,6 +59,7 @@ public static class PlanPerks
         PlanKind.Premium =>
         [
             $"{Size(PlanCatalog.PremiumEventBytes)} for every event you organise",
+            MonthlyEmails(PlanCatalog.PremiumMonthlyEmails),
             NoMarkOnEvents,
             KeptWhileSubscribed,
             FacesOnEvents,
@@ -68,6 +72,7 @@ public static class PlanPerks
             $"{Size(PlanCatalog.VenueEventBytes)} for every event you organise",
             BadgeOnEvents,
             Portfolio,
+            MonthlyEmails(PlanCatalog.VenueMonthlyEmails),
             NoMarkOnEvents,
             KeptWhileSubscribed,
             FacesOnEvents,
@@ -75,12 +80,13 @@ public static class PlanPerks
             DownloadAnywhere,
             FavouritesDownload,
         ],
-        // Studio without the AI designer (owner, 2026-11-13).
+        // The Photographer plan (owner, 2026-11-13): described by what it has, never as Studio minus something.
         PlanKind.Photographer =>
         [
             $"{Size(PlanCatalog.VenueEventBytes)} for every event you organise",
             BadgeOnEvents,
             Portfolio,
+            MonthlyEmails(PlanCatalog.PhotographerMonthlyEmails),
             NoMarkOnEvents,
             KeptWhileSubscribed,
             FacesOnEvents,

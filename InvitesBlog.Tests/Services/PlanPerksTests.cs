@@ -32,6 +32,7 @@ public class PlanPerksTests
         Assert.Equal(
         [
             "2 GB for every event you organise",
+            "100 emailed invitations a month, across your events",
             "No \"Made with invites.blog\" on your events",
             "Everything kept while you're subscribed",
             "Group photos by face on your events",
@@ -49,6 +50,18 @@ public class PlanPerksTests
         Assert.Contains(PlanPerks.DesignerAiIncluded, studio);
         Assert.Contains(PlanPerks.DownloadAnywhere, studio);
         Assert.Contains("10 GB for every event you organise", studio);
+    }
+
+    [Fact]
+    public void Subscriptions_include_emailed_invitations_a_month_and_passes_keep_theirs_per_event()
+    {
+        // Owner, 2026-11-14 (Studio capped at 500 the same day).
+        Assert.Equal((100, 500, 500), (Plan("Premium").MonthlyEmails, Plan("Photographer").MonthlyEmails, Plan("Venue").MonthlyEmails));
+        Assert.Contains("500 emailed invitations a month, across your events", Plan("Photographer").Perks!);
+        Assert.Contains("500 emailed invitations a month, across your events", Plan("Venue").Perks!);
+        Assert.Contains("100 emailed invitations", Plan("GoldPass").Perks!);
+        Assert.Contains("500 emailed invitations", Plan("PlatinumPass").Perks!);
+        Assert.Equal((0, 0, 0), (Plan("Free").MonthlyEmails, Plan("GoldPass").MonthlyEmails, Plan("PlatinumPass").MonthlyEmails));
     }
 
     [Fact]
