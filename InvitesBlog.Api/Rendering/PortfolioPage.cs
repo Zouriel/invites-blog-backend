@@ -394,7 +394,9 @@ public static class PortfolioPage
         function mark(){rpick.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.id===rid?'true':'false');});}
         P.photos.forEach(function(x){var b=document.createElement('button');b.type='button';b.dataset.id=x.id;b.setAttribute('aria-label','This photo');
           var im=document.createElement('img');im.alt='';im.loading='lazy';im.src=x.t||x.src;b.appendChild(im);
-          b.onclick=function(){rid=rid===x.id?null:x.id;mark();};rpick.appendChild(b);});
+          b.onclick=function(){rid=rid===x.id?null:x.id;mark();clearErr();};rpick.appendChild(b);});
+        function clearErr(){if(rnote.className.indexOf('err')>=0){rnote.className='note';rnote.textContent='';}}
+        rf.querySelector('textarea[name=note]').addEventListener('input',clearErr);
         function report(id){rid=id;var ph=id&&P.photos.find(function(x){return x.id===id;});
           rthumb.hidden=!ph;if(ph)rthumb.src=ph.t||ph.src;rpick.hidden=!!ph||!P.photos.length;mark();
           rep.querySelector('.rep-which').textContent=ph?'We’ll pass this photo to the studio. No account needed.'
