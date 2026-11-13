@@ -693,6 +693,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.PortfolioId).HasDatabaseName("idx_portfolio_collections_portfolio_id");
             e.Property(x => x.Title).HasMaxLength(80);
             e.Property(x => x.Layout).HasMaxLength(16).HasDefaultValue("grid");
+            e.Property(x => x.Kind).HasMaxLength(16).HasDefaultValue("events");
             e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
         });
 

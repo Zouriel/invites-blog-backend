@@ -34,6 +34,8 @@ public interface IPortfolioService
     Task<PortfolioDto> DeleteCollectionAsync(Guid id, CancellationToken ct = default);
     Task<PortfolioDto> OrderPhotosAsync(Guid collectionId, IReadOnlyList<Guid>? photoIds, CancellationToken ct = default);
     Task<AddPortfolioPhotosResultDto> AddPhotosAsync(AddPortfolioPhotosRequest request, CancellationToken ct = default);
+    /// <summary>One picture uploaded straight into an uploads collection (past work): stored as web copies, metadata gone.</summary>
+    Task<UploadPortfolioPhotoResultDto> UploadPhotoAsync(Guid collectionId, byte[] content, CancellationToken ct = default);
     Task<PortfolioDto> RemovePhotoAsync(Guid id, CancellationToken ct = default);
     Task<PortfolioDto> PublishAsync(bool published, CancellationToken ct = default);
     Task<IReadOnlyList<PortfolioEnquiryDto>> EnquiriesAsync(CancellationToken ct = default);
@@ -60,6 +62,7 @@ public sealed class PortfolioService(
     ICampaignOwnershipService ownership,
     IStorageService storage,
     IImageOptimizer images,
+    IHeicConverter heic,
     PhoneNormalizer phones,
     IConfiguration config,
     IUnitOfWork uow) : IPortfolioService
@@ -363,17 +366,20 @@ public sealed class PortfolioService(
     public async Task<PortfolioDto> AddCollectionAsync(CollectionRequest r, CancellationToken ct = default)
     {
         var p = await MineAsync(ct);
-        await NewCollectionAsync(p, r.Title, r.Layout, ct);
+        var kind = r.Kind ?? PortfolioCollectionKinds.Events;
+        if (!PortfolioCollectionKinds.IsKnown(kind)) throw Invalid("kind of collection");
+        await NewCollectionAsync(p, r.Title, r.Layout, ct, kind);
         await uow.SaveChangesAsync(ct);
         return await DtoAsync(p, ct);
     }
 
-    private async Task<PortfolioCollection> NewCollectionAsync(Portfolio p, string? title, string? layout, CancellationToken ct)
+    private async Task<PortfolioCollection> NewCollectionAsync(Portfolio p, string? title, string? layout, CancellationToken ct,
+        string kind = PortfolioCollectionKinds.Events)
     {
         var c = new PortfolioCollection
         {
             Id = Guid.NewGuid(), PortfolioId = p.Id, Title = Clean(title, 80) ?? "My work",
-            Layout = Layout(layout ?? "grid"), CreatedAt = DateTimeOffset.UtcNow,
+            Layout = Layout(layout ?? "grid"), Kind = kind, CreatedAt = DateTimeOffset.UtcNow,
         };
         await collections.AddAsync(c, ct);
         await sections.AddAsync(new PortfolioSection
@@ -459,7 +465,15 @@ public sealed class PortfolioService(
         }
 
         PortfolioCollection collection;
-        if (r.CollectionId is { } cid) collection = await CollectionAsync(p, cid, ct);
+        if (r.CollectionId is { } cid)
+        {
+            collection = await CollectionAsync(p, cid, ct);
+            // Picks and uploads never mix (owner): an uploads collection only takes pictures uploaded into it.
+            if (collection.Kind != PortfolioCollectionKinds.Events)
+                throw new CodedRuleException(
+                    "That collection is for pictures you upload. Choose one of your event collections or make a new one.",
+                    "wrong_kind", HttpStatusCode.Conflict);
+        }
         else if (!string.IsNullOrWhiteSpace(r.NewCollectionTitle) && own.Count > 0) collection = await NewCollectionAsync(p, r.NewCollectionTitle, "grid", ct);
         else if (own.Count == 0) throw NothingAdded(0, skipped);
         else throw new CodedRuleException("Choose a collection or name a new one.", "collection_required");
@@ -508,6 +522,99 @@ public sealed class PortfolioService(
         var message = AddedMessage(added, already, Count(Reasons.Guest), Count(Reasons.Video), Count(Reasons.OtherAccount), Count(Reasons.Missing));
         return new AddPortfolioPhotosResultDto(added, already, Count(Reasons.Guest), Count(Reasons.Video),
             collection.Id, message, await DtoAsync(p, ct), Count(Reasons.OtherAccount), Count(Reasons.Missing), skipped);
+    }
+
+    // ---------- uploads (past work, straight into an uploads collection) ----------
+
+    /// <summary>Largest file taken (the controller refuses bigger ones before reading them).</summary>
+    public const long MaxUploadBytes = 30L * 1024 * 1024;
+    /// <summary>Largest picture decoded: 80 megapixels is beyond any camera a studio uses, and about 320 MB to hold.</summary>
+    public const long MaxUploadPixels = 80_000_000;
+    /// <summary>Decoding a big picture takes a lot of memory; at most two at once in this API.</summary>
+    private static readonly SemaphoreSlim UploadGate = new(2, 2);
+    /// <summary>The last count-and-insert of an upload, one at a time, so uploads sent side by side can't pass the cap together.</summary>
+    private static readonly SemaphoreSlim UploadSaveGate = new(1, 1);
+
+    public const string UploadRefusal = "That file isn't a picture we can use. Upload a JPEG, PNG, WebP or HEIC photo.";
+
+    public async Task<UploadPortfolioPhotoResultDto> UploadPhotoAsync(Guid collectionId, byte[] content, CancellationToken ct = default)
+    {
+        var p = await MineAsync(ct);
+        var c = await CollectionAsync(p, collectionId, ct);
+        if (c.Kind != PortfolioCollectionKinds.Uploads)
+            throw new CodedRuleException(
+                "This collection holds photos picked from your events. Make an upload collection for pictures from your device.",
+                "wrong_kind", HttpStatusCode.Conflict);
+        var have = await photos.Query().CountAsync(x => x.PortfolioId == p.Id, ct);
+        if (have >= PhotoLimit) throw LimitReached(have);
+        if (content.LongLength > MaxUploadBytes)
+            throw new CodedRuleException("That picture is too big. Use one under 30 MB.", "too_big", HttpStatusCode.RequestEntityTooLarge);
+
+        // The file's own bytes say what it is; its name and label are whatever the device said.
+        var type = ImageSniffer.Detect(content);
+        if (type is not ("image/jpeg" or "image/png" or "image/webp" or "image/heic"))
+            throw new CodedRuleException(UploadRefusal, "not_an_image");
+
+        WebCopies? copies;
+        WebCopyProblem problem;
+        await UploadGate.WaitAsync(ct);
+        try
+        {
+            var bytes = type == "image/heic" ? await heic.ToJpegAsync(content, ct) : content;
+            if (bytes is null) (copies, problem) = (null, WebCopyProblem.Unreadable);
+            else
+                (copies, problem) = await Task.Run(() =>
+                {
+                    var made = images.MakeWebCopies(bytes, FullEdge, ThumbEdge, MaxUploadPixels, out var why);
+                    return (made, why);
+                }, ct);
+        }
+        finally
+        {
+            UploadGate.Release();
+        }
+        if (problem == WebCopyProblem.TooManyPixels)
+            throw new CodedRuleException("That picture has too many pixels. Use one under 80 megapixels.", "too_many_pixels");
+        if (copies is null)
+            throw new CodedRuleException("We couldn't open that picture. Try it again, or save it as a JPEG first.", "unreadable", HttpStatusCode.UnprocessableEntity);
+
+        var id = Guid.NewGuid();
+        var stem = $"portfolios/{p.Id:N}/{id:N}";
+        var fullUrl = storage.PutAsync($"{stem}{MediaFileTypes.ExtensionFor(copies.Full.ContentType)}", copies.Full.Content, copies.Full.ContentType, ct);
+        var thumbUrl = storage.PutAsync($"{stem}_m{MediaFileTypes.ExtensionFor(copies.Thumb.ContentType)}", copies.Thumb.Content, copies.Thumb.ContentType, ct);
+        await Task.WhenAll(fullUrl, thumbUrl);
+
+        // Uploads run side by side: count again, one at a time, now the slow part is done, so the cap holds.
+        PortfolioPhoto row;
+        Portfolio tracked;
+        await UploadSaveGate.WaitAsync(ct);
+        try
+        {
+            have = await photos.Query().CountAsync(x => x.PortfolioId == p.Id, ct);
+            if (have >= PhotoLimit)
+            {
+                await DeleteFileAsync(fullUrl.Result, ct);
+                await DeleteFileAsync(thumbUrl.Result, ct);
+                throw LimitReached(have);
+            }
+            var next = await photos.Query().Where(x => x.CollectionId == c.Id).Select(x => (int?)x.Position).MaxAsync(ct) ?? -1;
+            row = new PortfolioPhoto
+            {
+                Id = id, PortfolioId = p.Id, CollectionId = c.Id, SourcePhotoId = null, CampaignId = null,
+                Url = fullUrl.Result, ThumbUrl = thumbUrl.Result, Width = copies.Full.Width, Height = copies.Full.Height,
+                Position = next + 1, CreatedAt = DateTimeOffset.UtcNow,
+            };
+            await photos.AddAsync(row, ct);
+            tracked = await portfolios.Query(tracking: true).FirstAsync(x => x.Id == p.Id, ct);
+            tracked.UpdatedAt = DateTimeOffset.UtcNow;
+            await uow.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            UploadSaveGate.Release();
+        }
+        var dto = await DtoAsync(tracked, ct);
+        return new UploadPortfolioPhotoResultDto(PhotoDto(row), dto.PhotoCount, PhotoLimit, Math.Max(0, PhotoLimit - dto.PhotoCount), dto);
     }
 
     /// <summary>Why a photo can't go in the portfolio (a code from <see cref="Reasons"/>), or null when it can.</summary>
@@ -922,7 +1029,7 @@ public sealed class PortfolioService(
             {
                 var list = photoRows.Where(x => x.CollectionId == c.Id).OrderBy(x => x.Position).Select(PhotoDto).ToList();
                 var cover = list.FirstOrDefault(x => x.Id == c.CoverPhotoId) ?? list.FirstOrDefault();
-                return new PortfolioCollectionDto(c.Id, c.Title, c.Layout, c.CoverPhotoId, cover?.ThumbUrl, list);
+                return new PortfolioCollectionDto(c.Id, c.Title, c.Layout, c.CoverPhotoId, cover?.ThumbUrl, list, c.Kind);
             }).ToList();
     }
 

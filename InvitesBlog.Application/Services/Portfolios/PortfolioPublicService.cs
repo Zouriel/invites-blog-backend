@@ -150,7 +150,7 @@ public sealed partial class PortfolioPublicService(
                 case PortfolioSectionKinds.Collection:
                     if (s.CollectionId is { } cid && cols.TryGetValue(cid, out var c) && c.Photos.Count > 0)
                         list.Add(new PublicPortfolioSectionDto(s.Kind, c.Title, null, null,
-                            new PublicCollectionDto(c.Id, c.Title, c.Layout, c.CoverUrl, c.Photos), null, null, null));
+                            new PublicCollectionDto(c.Id, c.Title, c.Layout, c.CoverUrl, c.Photos, c.Kind), null, null, null));
                     break;
                 case PortfolioSectionKinds.About:
                     if (!string.IsNullOrWhiteSpace(d.Body) || photoUrl is not null)

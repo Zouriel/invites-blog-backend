@@ -12,6 +12,9 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\InvitesBlog.Application\InvitesBlog.Application.csproj" />
     <ProjectReference Include="..\InvitesBlog.Infrastructure\InvitesBlog.Infrastructure.csproj" />
     <ProjectReference Include="..\InvitesBlog.TemplateCompiler\InvitesBlog.TemplateCompiler.csproj" />

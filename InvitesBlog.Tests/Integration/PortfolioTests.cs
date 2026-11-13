@@ -646,6 +646,244 @@ public sealed class PortfolioTests(PostgresApiFixture api)
     }
 
 
+    // ---------- uploads collections (2026-11-13) ----------
+
+    private static MultipartFormDataContent FileForm(byte[] bytes, string name, string type)
+    {
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
+        form.Add(file, "file", name);
+        return form;
+    }
+
+    private static byte[] Png(int w, int h, bool clear)
+    {
+        using var image = new Image<Rgba32>(w, h, clear ? new Rgba32(0, 0, 0, 0) : new Rgba32(40, 160, 90, 255));
+        for (var y = h / 4; y < h * 3 / 4; y++) for (var x = w / 4; x < w * 3 / 4; x++) image[x, y] = new Rgba32(200, 40, 40, 255);
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    [PostgresFact]
+    public async Task An_uploads_collection_takes_pictures_from_the_device_as_clean_web_copies_and_the_page_shows_them()
+    {
+        var studio = await StudioAsync("Past Work");
+        var c = api.Client(studio.Token);
+        var p = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Before invites.blog", kind = "uploads" }));
+        var col = p.GetProperty("collections").EnumerateArray().Single();
+        Assert.Equal("uploads", col.GetProperty("kind").GetString());
+        var id = col.GetProperty("id").GetGuid();
+
+        // A camera JPEG with a GPS position, sent with a misleading name; a PNG labelled as a JPEG.
+        using var jpegForm = FileForm(PortfolioUploadImageTests.CameraJpeg(), "holiday.png", "image/png");
+        var one = await DataAsync(await c.PostAsync($"/api/me/portfolio/collections/{id}/photos", jpegForm));
+        using var pngForm = FileForm(Png(900, 600, clear: false), "logo.jpg", "image/jpeg");
+        var two = await DataAsync(await c.PostAsync($"/api/me/portfolio/collections/{id}/photos", pngForm));
+
+        Assert.Equal(2, two.GetProperty("photoCount").GetInt32());
+        Assert.Equal(500, two.GetProperty("photoLimit").GetInt32());
+        Assert.Equal(498, two.GetProperty("photosLeft").GetInt32());
+        var photo = one.GetProperty("photo");
+        Assert.Equal(JsonValueKind.Null, photo.GetProperty("campaignId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, photo.GetProperty("sourcePhotoId").ValueKind);
+        // 3000x2000 stored sideways: shown upright, at most 2048px.
+        Assert.Equal((1365, 2048), (photo.GetProperty("width").GetInt32(), photo.GetProperty("height").GetInt32()));
+        var url = photo.GetProperty("url").GetString()!;
+        var thumb = photo.GetProperty("thumbUrl").GetString()!;
+        Assert.Contains("/portfolios/", url);
+        foreach (var u in new[] { url, thumb })
+        {
+            var stored = await api.Storage.GetAsync(api.Storage.KeyFor(u)!);
+            Assert.NotNull(stored);
+            PortfolioUploadImageTests.AssertNoMetadata(stored!);
+        }
+        var list = two.GetProperty("portfolio").GetProperty("collections")[0].GetProperty("photos");
+        Assert.Equal(2, list.GetArrayLength());
+        Assert.Equal(one.GetProperty("photo").GetProperty("id").GetGuid(), list[0].GetProperty("id").GetGuid());
+
+        // The public page shows them like any collection; "Ask to remove a photo" works for an uploaded one.
+        var handle = await PublishedAsync(studio);
+        var html = await (await api.Client().GetAsync($"/@{handle}")).Content.ReadAsStringAsync();
+        Assert.Contains(thumb, html);
+        var pub = await DataAsync(await api.Client().GetAsync($"/api/portfolio/@{handle}"));
+        Assert.Contains(pub.GetProperty("sections").EnumerateArray(),
+            x => x.GetProperty("kind").GetString() == "collection" && x.GetProperty("collection").GetProperty("kind").GetString() == "uploads");
+        var photoId = photo.GetProperty("id").GetGuid();
+        await DataAsync(await api.Client().PostAsJsonAsync($"/api/portfolio/@{handle}/report", new { photoId, reason = "me", note = "Me" }));
+        var report = await api.ReadAsync(db => db.ContentReports.SingleAsync(r => r.TargetId == photoId));
+        Assert.Equal(PortfolioReportKinds.Photo, report.Kind);
+        Assert.Null(report.CampaignId);
+
+        // Removing it removes its files.
+        await DataAsync(await c.DeleteAsync($"/api/me/portfolio/photos/{photoId}"));
+        Assert.Null(await api.Storage.GetAsync(api.Storage.KeyFor(url)!));
+        Assert.Null(await api.Storage.GetAsync(api.Storage.KeyFor(thumb)!));
+    }
+
+    [PostgresFact]
+    public async Task Uploads_refuse_files_that_are_not_photos_and_picks_and_uploads_never_mix()
+    {
+        var studio = await StudioAsync("Strict Kinds");
+        var c = api.Client(studio.Token);
+        var uploads = (await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Mine", kind = "uploads" })))
+            .GetProperty("collections")[0].GetProperty("id").GetGuid();
+        // No kind = events (what every collection was before).
+        var events = (await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Weddings" })))
+            .GetProperty("collections").EnumerateArray().Single(x => x.GetProperty("id").GetGuid() != uploads);
+        Assert.Equal("events", events.GetProperty("kind").GetString());
+        var eventsId = events.GetProperty("id").GetGuid();
+        var bad = await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "X", kind = "mixed" });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Contains("invalid_choice", await bad.Content.ReadAsStringAsync());
+
+        // Not photos, whatever they're called: text, a GIF, a video.
+        using var gif = new Image<Rgba32>(10, 10);
+        using var gifMs = new MemoryStream();
+        gif.SaveAsGif(gifMs);
+        var notPhotos = new (byte[] Bytes, string Name, string Type)[]
+        {
+            ("<svg xmlns='http://www.w3.org/2000/svg'/>"u8.ToArray(), "a.jpg", "image/jpeg"),
+            (gifMs.ToArray(), "b.jpg", "image/jpeg"),
+            ([0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', (byte)'m', (byte)'p', (byte)'4', (byte)'2', 0, 0, 0, 0], "c.heic", "image/heic"),
+        };
+        foreach (var (bytes, name, type) in notPhotos)
+        {
+            using var form = FileForm(bytes, name, type);
+            var r = await c.PostAsync($"/api/me/portfolio/collections/{uploads}/photos", form);
+            Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+            Assert.Contains("not_an_image", await r.Content.ReadAsStringAsync());
+        }
+        // A JPEG header with nothing after it: recognised, but can't be opened.
+        using (var broken = FileForm(PortfolioUploadImageTests.CameraJpeg().Take(300).ToArray(), "x.jpg", "image/jpeg"))
+        {
+            var r = await c.PostAsync($"/api/me/portfolio/collections/{uploads}/photos", broken);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, r.StatusCode);
+            Assert.Contains("unreadable", await r.Content.ReadAsStringAsync());
+        }
+
+        // Uploading into an events collection: refused.
+        using (var form = FileForm(Jpeg(), "a.jpg", "image/jpeg"))
+        {
+            var r = await c.PostAsync($"/api/me/portfolio/collections/{eventsId}/photos", form);
+            Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+            Assert.Contains("wrong_kind", await r.Content.ReadAsStringAsync());
+        }
+        // Picking event photos into an uploads collection: refused, nothing copied.
+        var ev = await EventAsync(studio);
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/campaigns/{ev}/portfolio-consent", new { consented = true }));
+        var mine = await PhotoAsync(ev, studio.Id);
+        var pick = await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { mine }, collectionId = uploads });
+        Assert.Equal(HttpStatusCode.Conflict, pick.StatusCode);
+        Assert.Contains("wrong_kind", await pick.Content.ReadAsStringAsync());
+        Assert.Equal(0, await api.ReadAsync(db => db.PortfolioPhotos.CountAsync(x => x.CollectionId == uploads)));
+        // A new collection made while picking is an events one; picks into an events collection still work.
+        var made = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/photos", new { photoIds = new[] { mine }, newCollectionTitle = "Picked" }));
+        var picked = made.GetProperty("portfolio").GetProperty("collections").EnumerateArray().Single(x => x.GetProperty("title").GetString() == "Picked");
+        Assert.Equal("events", picked.GetProperty("kind").GetString());
+        Assert.Equal(1, made.GetProperty("added").GetInt32());
+        // The kind never changes.
+        await DataAsync(await c.PutAsJsonAsync($"/api/me/portfolio/collections/{uploads}", new { title = "Renamed", kind = "events" }));
+        Assert.Equal("uploads", await api.ReadAsync(db => db.PortfolioCollections.Where(x => x.Id == uploads).Select(x => x.Kind).SingleAsync()));
+    }
+
+    [PostgresFact]
+    public async Task Uploads_count_toward_the_500_photo_cap()
+    {
+        var studio = await StudioAsync("Full Up");
+        var c = api.Client(studio.Token);
+        var p = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Mine", kind = "uploads" }));
+        var col = p.GetProperty("collections")[0].GetProperty("id").GetGuid();
+        var portfolioId = p.GetProperty("id").GetGuid();
+        await api.WriteAsync(async db =>
+        {
+            for (var i = 0; i < 499; i++)
+                db.PortfolioPhotos.Add(new PortfolioPhoto
+                {
+                    Id = Guid.NewGuid(), PortfolioId = portfolioId, CollectionId = col, Url = "/assets/x.jpg", ThumbUrl = "/assets/x_m.jpg",
+                    Width = 10, Height = 10, Position = i, CreatedAt = DateTimeOffset.UtcNow,
+                });
+            await Task.CompletedTask;
+        });
+        using (var last = FileForm(Jpeg(), "a.jpg", "image/jpeg"))
+        {
+            var ok = await DataAsync(await c.PostAsync($"/api/me/portfolio/collections/{col}/photos", last));
+            Assert.Equal(500, ok.GetProperty("photoCount").GetInt32());
+            Assert.Equal(0, ok.GetProperty("photosLeft").GetInt32());
+        }
+        using var over = FileForm(Jpeg(), "b.jpg", "image/jpeg");
+        var r = await c.PostAsync($"/api/me/portfolio/collections/{col}/photos", over);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("photo_limit", await r.Content.ReadAsStringAsync());
+        Assert.Equal(500, await api.ReadAsync(db => db.PortfolioPhotos.CountAsync(x => x.PortfolioId == portfolioId)));
+    }
+
+    [PostgresFact]
+    public async Task Uploads_sent_side_by_side_at_the_cap_never_pass_it_together()
+    {
+        var studio = await StudioAsync("Race Full");
+        var c = api.Client(studio.Token);
+        var p = await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Mine", kind = "uploads" }));
+        var col = p.GetProperty("collections")[0].GetProperty("id").GetGuid();
+        var portfolioId = p.GetProperty("id").GetGuid();
+        await api.WriteAsync(async db =>
+        {
+            for (var i = 0; i < 498; i++)
+                db.PortfolioPhotos.Add(new PortfolioPhoto
+                {
+                    Id = Guid.NewGuid(), PortfolioId = portfolioId, CollectionId = col, Url = "/assets/x.jpg", ThumbUrl = "/assets/x_m.jpg",
+                    Width = 10, Height = 10, Position = i, CreatedAt = DateTimeOffset.UtcNow,
+                });
+            await Task.CompletedTask;
+        });
+        // Six at once with room for two: each passes the first count, so only the last count can stop the rest.
+        var big = PortfolioUploadImageTests.CameraJpeg(2400, 1600);
+        var sends = Enumerable.Range(0, 6).Select(async i =>
+        {
+            using var form = FileForm(big, $"{i}.jpg", "image/jpeg");
+            return (await c.PostAsync($"/api/me/portfolio/collections/{col}/photos", form)).StatusCode;
+        }).ToList();
+        var codes = await Task.WhenAll(sends);
+        Assert.Equal(2, codes.Count(x => x == HttpStatusCode.OK));
+        Assert.Equal(4, codes.Count(x => x == HttpStatusCode.Conflict));
+        Assert.Equal(500, await api.ReadAsync(db => db.PortfolioPhotos.CountAsync(x => x.PortfolioId == portfolioId)));
+    }
+
+    [PostgresFact]
+    public async Task An_iphone_heic_upload_is_stored_as_an_upright_jpeg_without_its_gps()
+    {
+        if (!HeifFactAttribute.HeifAvailable())
+            throw new Xunit.Sdk.XunitException("heif-dec isn't installed: HEIC uploads can't work here (install libheif-examples).");
+        var studio = await StudioAsync("Iphone Shooter");
+        var c = api.Client(studio.Token);
+        var col = (await DataAsync(await c.PostAsJsonAsync("/api/me/portfolio/collections", new { title = "Phone", kind = "uploads" })))
+            .GetProperty("collections")[0].GetProperty("id").GetGuid();
+        using var form = FileForm(await File.ReadAllBytesAsync(PortfolioUploadImageTests.Fixture("portrait-gps.heic")), "IMG_0001.HEIC", "application/octet-stream");
+        var r = await DataAsync(await c.PostAsync($"/api/me/portfolio/collections/{col}/photos", form));
+        var photo = r.GetProperty("photo");
+        Assert.Equal((90, 160), (photo.GetProperty("width").GetInt32(), photo.GetProperty("height").GetInt32()));
+        var url = photo.GetProperty("url").GetString()!;
+        Assert.EndsWith(".jpg", url);
+        var stored = await api.Storage.GetAsync(api.Storage.KeyFor(url)!);
+        PortfolioUploadImageTests.AssertNoMetadata(stored!);
+    }
+
+    [PostgresFact]
+    public async Task Someone_who_is_not_a_studio_cant_upload_and_one_studio_cant_upload_into_anothers_collection()
+    {
+        var a = await StudioAsync("Studio A");
+        var b = await StudioAsync("Studio B");
+        var premium = await UserAsync("Prem Up", SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(10));
+        var col = (await DataAsync(await api.Client(a.Token).PostAsJsonAsync("/api/me/portfolio/collections", new { title = "A", kind = "uploads" })))
+            .GetProperty("collections")[0].GetProperty("id").GetGuid();
+        using (var f1 = FileForm(Jpeg(), "a.jpg", "image/jpeg"))
+            Assert.Equal(HttpStatusCode.NotFound, (await api.Client(b.Token).PostAsync($"/api/me/portfolio/collections/{col}/photos", f1)).StatusCode);
+        using (var f2 = FileForm(Jpeg(), "a.jpg", "image/jpeg"))
+            Assert.Equal(HttpStatusCode.Forbidden, (await api.Client(premium.Token).PostAsync($"/api/me/portfolio/collections/{col}/photos", f2)).StatusCode);
+        Assert.Equal(0, await api.ReadAsync(db => db.PortfolioPhotos.CountAsync(x => x.CollectionId == col)));
+    }
+
     private async Task<string> PublishedAsync(Person studio)
     {
         var handle = "pp" + Guid.NewGuid().ToString("N")[..8];

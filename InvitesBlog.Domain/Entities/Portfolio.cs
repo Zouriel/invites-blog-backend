@@ -71,6 +71,11 @@ public sealed class PortfolioCollection
     public string Title { get; set; } = default!;
     /// <summary>grid | masonry | slideshow.</summary>
     public string Layout { get; set; } = "grid";
+    /// <summary>
+    /// events (picks copied from event albums, with consent) | uploads (pictures the studio uploaded straight into
+    /// it). Chosen when made and never changed: the two are never mixed (owner, 2026-11-13).
+    /// </summary>
+    public string Kind { get; set; } = "events";
     public Guid? CoverPhotoId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

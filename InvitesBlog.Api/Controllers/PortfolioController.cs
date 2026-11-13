@@ -116,6 +116,24 @@ public sealed class PortfolioController(IPortfolioService portfolio, IConfigurat
     public async Task<IActionResult> OrderPhotos(Guid id, [FromBody] PhotoOrderRequest req, CancellationToken ct) =>
         Success(await portfolio.OrderPhotosAsync(id, req.PhotoIds, ct));
 
+    /// <summary>
+    /// One picture uploaded straight into an uploads collection (past work that was never on invites.blog). One file per
+    /// request, so a client shows each file's progress and retries just the one that failed.
+    /// </summary>
+    [HttpPost("collections/{id:guid}/photos")]
+    [HasPermission(Permissions.Campaigns.Write)]
+    [RequestSizeLimit(PortfolioService.MaxUploadBytes + 256 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = PortfolioService.MaxUploadBytes + 256 * 1024)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) throw new CodedRuleException("Choose a picture.", "not_an_image");
+        if (file.Length > PortfolioService.MaxUploadBytes)
+            throw new CodedRuleException("That picture is too big. Use one under 30 MB.", "too_big", System.Net.HttpStatusCode.RequestEntityTooLarge);
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct);
+        return Success(await portfolio.UploadPhotoAsync(id, ms.ToArray(), ct));
+    }
+
     [HttpPost("photos")]
     [HasPermission(Permissions.Campaigns.Write)]
     public async Task<IActionResult> AddPhotos([FromBody] AddPortfolioPhotosRequest req, CancellationToken ct) =>

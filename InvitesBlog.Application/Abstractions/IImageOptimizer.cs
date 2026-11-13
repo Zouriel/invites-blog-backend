@@ -84,4 +84,28 @@ public interface IImageOptimizer
     /// <see cref="OptimizedImage.ContentType"/> for what came back.
     /// </summary>
     OptimizedImage OptimizeForDisplay(byte[] content, string contentType, int? maxEdge = null);
+
+    /// <summary>
+    /// The two web copies of a picture someone uploaded straight into a portfolio (past work): a <paramref name="fullEdge"/>
+    /// copy and a <paramref name="thumbEdge"/> thumb, turned the right way up and ALWAYS re-encoded, so no metadata
+    /// survives (EXIF with GPS, IPTC, XMP): unlike <see cref="Optimize"/>, nothing is ever passed through as it came.
+    /// Opaque pictures become JPEG; one with transparent pixels stays PNG. Null when the bytes can't be decoded
+    /// (<see cref="WebCopyProblem.Unreadable"/>) or the picture has more than <paramref name="maxPixels"/> pixels.
+    /// </summary>
+    WebCopies? MakeWebCopies(byte[] content, int fullEdge, int thumbEdge, long maxPixels, out WebCopyProblem problem);
+}
+
+public sealed record WebCopies(OptimizedImage Full, OptimizedImage Thumb);
+
+public enum WebCopyProblem { None, Unreadable, TooManyPixels }
+
+/// <summary>
+/// Turns a HEIC/HEIF photo (what iPhones take) into a JPEG the rest of the pipeline can read: the image library here
+/// can't decode HEIC. The picture comes back the right way up; its metadata is still in it, so the caller must strip
+/// it (MakeWebCopies does).
+/// </summary>
+public interface IHeicConverter
+{
+    /// <summary>The JPEG, or null when the converter isn't installed or the file couldn't be decoded.</summary>
+    Task<byte[]?> ToJpegAsync(byte[] heic, CancellationToken ct = default);
 }

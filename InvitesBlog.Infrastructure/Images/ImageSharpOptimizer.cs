@@ -210,6 +210,65 @@ public sealed class ImageSharpOptimizer(ILogger<ImageSharpOptimizer> logger) : I
         }
     }
 
+    /// <summary>Quality of an uploaded portfolio picture's full copy: it is the studio's showcase, so a little above the
+    /// default; the thumb uses the default.</summary>
+    private const int ShowcaseJpegQuality = 88;
+
+    /// <inheritdoc />
+    public WebCopies? MakeWebCopies(byte[] content, int fullEdge, int thumbEdge, long maxPixels, out WebCopyProblem problem)
+    {
+        problem = WebCopyProblem.None;
+        try
+        {
+            // Read the size from the header before decoding: a 30 MB file can still describe a picture far too big
+            // to hold in memory.
+            var info = Image.Identify(content);
+            if (info is null) { problem = WebCopyProblem.Unreadable; return null; }
+            if ((long)info.Width * info.Height > maxPixels) { problem = WebCopyProblem.TooManyPixels; return null; }
+
+            using var image = Image.Load<Rgba32>(content);
+            // Turn it the right way up first (the tag that says how is about to go), then drop every note the
+            // camera wrote: GPS above all. Re-encoding below is what guarantees none of it is written back.
+            image.Mutate(x => x.AutoOrient());
+            image.Metadata.ExifProfile = null;
+            image.Metadata.IptcProfile = null;
+            image.Metadata.XmpProfile = null;
+            var opaque = IsOpaque(image);
+
+            OptimizedImage Copy(int edge, int quality)
+            {
+                using var copy = image.Clone(x =>
+                {
+                    var longest = Math.Max(x.GetCurrentSize().Width, x.GetCurrentSize().Height);
+                    if (longest <= edge) return;
+                    var scale = (double)edge / longest;
+                    x.Resize(new ResizeOptions
+                    {
+                        Mode = ResizeMode.Max,
+                        Size = new Size(Math.Max(1, (int)Math.Round(image.Width * scale)), Math.Max(1, (int)Math.Round(image.Height * scale))),
+                        Sampler = KnownResamplers.Lanczos3,
+                    });
+                });
+                using var output = new MemoryStream();
+                if (opaque) copy.Save(output, new JpegEncoder { Quality = quality });
+                else copy.Save(output, new PngEncoder { CompressionLevel = PngCompressionLevel.BestCompression });
+                return new OptimizedImage(output.ToArray(), opaque ? "image/jpeg" : "image/png", copy.Width, copy.Height, true);
+            }
+
+            var full = Copy(fullEdge, ShowcaseJpegQuality);
+            var thumb = Copy(thumbEdge, JpegQuality);
+            logger.LogInformation("Portfolio upload: {OldKb} KB {W}x{H} -> {FullKb} KB + {ThumbKb} KB thumb.",
+                content.Length / 1024, info.Width, info.Height, full.Content.Length / 1024, thumb.Content.Length / 1024);
+            return new WebCopies(full, thumb);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidImageContentException or ImageFormatException or ArgumentException)
+        {
+            logger.LogWarning("Could not read an uploaded portfolio picture: {Error}", ex.Message);
+            problem = WebCopyProblem.Unreadable;
+            return null;
+        }
+    }
+
     /// <summary>Writes the image back in the SAME format it arrived as. Changing it would invalidate
     /// the content type and extension already chosen by the caller.</summary>
     /// <param name="png">
