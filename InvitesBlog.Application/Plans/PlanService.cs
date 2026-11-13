@@ -34,7 +34,8 @@ public interface IPlanService
 /// The name and picture an event's albums, QR cards and posts carry while its organiser is on Studio: the
 /// organiser's own display name and profile picture (served as venueName / venueLogoUrl).
 /// </summary>
-public sealed record VenueFace(string Name, string? LogoUrl);
+/// <param name="Kind">The organiser's plan as an event plan kind: "Venue" (Studio) or "Photographer".</param>
+public sealed record VenueFace(string Name, string? LogoUrl, string Kind = "Venue");
 
 public sealed class PlanService(
     ICampaignRepository campaigns,
@@ -125,11 +126,13 @@ public sealed class PlanService(
         var userIds = owners.Values.Distinct().ToList();
         var now = DateTimeOffset.UtcNow;
         var faces = (await users.Query()
-                .Where(u => userIds.Contains(u.Id) && u.SubscriptionTier == SubscriptionTier.Venue)
+                .Where(u => userIds.Contains(u.Id)
+                            && (u.SubscriptionTier == SubscriptionTier.Venue || u.SubscriptionTier == SubscriptionTier.Photographer))
                 .Select(u => new { u.Id, u.DisplayName, u.AvatarUrl, u.SubscriptionTier, u.SubscriptionEndsAt })
                 .ToListAsync(ct))
             .Where(u => PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, now))
-            .ToDictionary(u => u.Id, u => new VenueFace(u.DisplayName, u.AvatarUrl));
+            .ToDictionary(u => u.Id, u => new VenueFace(u.DisplayName, u.AvatarUrl,
+                u.SubscriptionTier == SubscriptionTier.Photographer ? nameof(PlanKind.Photographer) : nameof(PlanKind.Venue)));
 
         foreach (var (campaignId, ownerId) in owners)
             if (faces.TryGetValue(ownerId, out var face)) result[campaignId] = face;
@@ -155,8 +158,10 @@ public sealed class PlanService(
         // The organiser's Studio plan (tier Venue) lifts every event they organise while it lasts, the way
         // Premium does. Once it has ended, the photos' lapse counts from when it did. An organiser since moved
         // to another plan is on that plan instead (the admin switch, or a new purchase).
+        // Photographer (owner, 2026-11-13) does the same, only the event's kind says Photographer.
         (bool, DateTimeOffset?)? venue = null;
-        if (organiser is { Tier: SubscriptionTier.Venue } v)
+        var photographer = organiser is { Tier: SubscriptionTier.Photographer };
+        if (organiser is { } v && SubscriptionTiers.IsStudioClass(v.Tier))
         {
             var active = PlanRules.IsActive(v.Tier, v.EndsAt, now);
             venue = (active, active ? null : v.EndsAt);
@@ -193,7 +198,8 @@ public sealed class PlanService(
             campaign.MediaDeletedAt,
             ownerId,
             premium,
-            campaign.MediaTrimmedAt);
+            campaign.MediaTrimmedAt,
+            photographer);
     }
 
     public async Task<bool> IsPremiumAsync(Guid userId, CancellationToken ct = default) =>

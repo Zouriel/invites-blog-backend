@@ -238,6 +238,7 @@ public sealed partial class DesignAssistantService(
         {
             "premium" => new ForbiddenException("The AI designer comes with Studio, or as an add-on to Premium.", "assistant_premium_only"),
             "addon" => new ForbiddenException("The AI designer is an add-on to Premium. Add it from Billing.", "assistant_premium_only"),
+            "photographer" => new ForbiddenException("The AI designer comes with Studio.", "assistant_premium_only"),
             "allowance" => new BusinessRuleException(StopNote(status), "assistant_allowance_used"),
             _ => new InvalidStateException("The design assistant isn't available right now.", "assistant_unavailable"),
         };
@@ -266,13 +267,16 @@ public sealed partial class DesignAssistantService(
 
     /// <summary>
     /// Null when the account may use it: Studio (Venue) in force, Premium with the AI designer add-on in force
-    /// (owner, 2026-11-13), or an admin. Otherwise why not: "addon" (Premium without the add-on) or "premium".
+    /// (owner, 2026-11-13), or an admin. Otherwise why not: "addon" (Premium without the add-on), "photographer"
+    /// (Photographer, which doesn't include it) or "premium".
     /// </summary>
     private async Task<string?> EligibleAsync(Guid me, DateTimeOffset now, CancellationToken ct)
     {
         if (currentUser.HasPermission(Permissions.Templates.Manage)) return null;
         var user = await users.GetByIdAsync(me, ct);
         if (user is not null && AddOns.HasDesignerAi(user, now)) return null;
+        // Photographer is Studio without the AI designer (owner, 2026-11-13): nothing to buy on top of it.
+        if (user is not null && AddOns.PhotographerActive(user, now)) return "photographer";
         return user is not null && AddOns.PremiumActive(user, now) ? "addon" : "premium";
     }
 

@@ -7,7 +7,7 @@ public sealed class AdminUserFilter : PaginationRequest
 {
     public bool? IsActive { get; set; }
 
-    /// <summary>"Premium" or "Venue" for accounts on that plan (ended or not).</summary>
+    /// <summary>"Premium", "Photographer" or "Venue" for accounts on that plan (ended or not).</summary>
     public string? Plan { get; set; }
 }
 

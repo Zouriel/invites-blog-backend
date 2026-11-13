@@ -243,7 +243,9 @@ public sealed class MediaRetentionService(
 
         // The organiser's Studio plan is what ended: they, and everyone the event is for, are told, by the organiser's name.
         var venue = plan.VenueEnded && plan.OwnerUserId is { } organiserId
-            ? await db.Users.Where(u => u.Id == organiserId).Select(u => new VenueContact(u.DisplayName)).FirstOrDefaultAsync(ct)
+            ? await db.Users.Where(u => u.Id == organiserId)
+                .Select(u => new VenueContact(u.DisplayName, u.SubscriptionTier == SubscriptionTier.Photographer ? "Photographer" : "Studio"))
+                .FirstOrDefaultAsync(ct)
             : null;
         var recipients = await RecipientsAsync(db, campaign, plan, venue, ct);
         if (recipients.Count == 0 && plan.OwnerUserId is null)
@@ -265,7 +267,7 @@ public sealed class MediaRetentionService(
 
         var offer = offers is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
         var extension = campaign.EventPass != EventPassKind.None ? offer?.ExtensionPrice(campaign.EventPass) : null;
-        var (subject, body) = Notice(stage, campaign, trimAt.Value, cut.RemoveBytes, extension, venue?.Name, offer?.PlatinumPass);
+        var (subject, body) = Notice(stage, campaign, trimAt.Value, cut.RemoveBytes, extension, venue?.Name, offer?.PlatinumPass, venue?.Plan ?? "Studio");
         foreach (var to in recipients)
             await email.SendAsync(new EmailMessage(
                 To: to, Subject: subject, Html: body, Stream: EmailStream.System,
@@ -284,7 +286,8 @@ public sealed class MediaRetentionService(
     }
 
     /// <summary>The organiser whose Studio plan covered the event and has ended, as its warnings need them.</summary>
-    private sealed record VenueContact(string Name);
+    /// <param name="Plan">The plan's shown name: "Studio" or "Photographer".</param>
+    private sealed record VenueContact(string Name, string Plan = "Studio");
 
     /// <summary>The event's live photos and videos, and what of them doesn't fit in Free's space.</summary>
     private static async Task<MediaTrim.Plan> PlanCutAsync(AppDbContext db, Campaign campaign, CancellationToken ct)
@@ -479,7 +482,7 @@ public sealed class MediaRetentionService(
     /// <param name="venueName">The organiser, when their ended Studio plan covered the event. With no pass, that
     /// plan is what covered the event, and the way to keep everything is a Platinum pass at <paramref name="platinum"/>.</param>
     private (string Subject, string Html) Notice(int stage, Campaign campaign, DateTimeOffset trimAt, long bytes, decimal? extension,
-        string? venueName = null, decimal? platinum = null)
+        string? venueName = null, decimal? platinum = null, string venuePlan = "Studio")
     {
         var baseUrl = config.AppBase();
         var dashboard = $"{baseUrl}/dashboard/{campaign.Id}";
@@ -497,7 +500,7 @@ public sealed class MediaRetentionService(
                 ? $"get a Platinum pass for the event{(platinum is { } pp ? $" ({PlanCatalog.Currency} {pp:0})" : "")}, which keeps it for a year"
                 : "subscribe to Premium again";
         var ended = pass is not null ? $"The {pass} for <strong>{title}</strong>"
-            : venue is not null ? $"{venue}'s Studio plan, which covered <strong>{title}</strong>,"
+            : venue is not null ? $"{venue}'s {venuePlan} plan, which covered <strong>{title}</strong>,"
             : "Your Premium";
 
         var (subject, lead) = stage switch

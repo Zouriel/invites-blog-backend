@@ -243,6 +243,7 @@ public sealed class AccountDeletionService(
         if (PlanRules.IsActive(me.SubscriptionTier, me.SubscriptionEndsAt, now))
         {
             if (me.SubscriptionTier == SubscriptionTier.Venue) paid.Add("Studio plan");
+            else if (me.SubscriptionTier == SubscriptionTier.Photographer) paid.Add("Photographer plan");
             else if (me.SubscriptionTier == SubscriptionTier.Premium) paid.Add("Premium");
         }
 

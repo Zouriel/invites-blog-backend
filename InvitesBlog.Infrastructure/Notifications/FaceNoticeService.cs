@@ -210,7 +210,7 @@ public sealed class FaceNoticeService(
         // while it is in force): the same reading as Premium's, from the same account.
         DateTimeOffset? venueEnd = null;
         var venueForever = false;
-        if (plan.VenueAccountId is not null && organiser is { SubscriptionTier: SubscriptionTier.Venue })
+        if (plan.VenueAccountId is not null && organiser is not null && SubscriptionTiers.IsStudioClass(organiser.SubscriptionTier))
         {
             venueEnd = organiser.SubscriptionEndsAt is { } ve && organiser.AutoRenewKind is null ? ve : null;
             venueForever = venueEnd is null;
@@ -225,7 +225,7 @@ public sealed class FaceNoticeService(
                 if (premium && premiumEnd > latest) latest = premiumEnd;
                 if (venueEnd > latest) latest = venueEnd;
                 return latest;
-            case PlanKind.Venue:
+            case PlanKind.Venue or PlanKind.Photographer:
                 if (venueForever || premiumForever) return null;
                 return premium && premiumEnd > venueEnd ? premiumEnd : venueEnd;
             case PlanKind.Premium:

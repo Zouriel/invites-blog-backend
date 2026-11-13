@@ -18,6 +18,8 @@ public enum PlanKind
     PlatinumPass,
     Venue,
     Premium,
+    /// <summary>The organiser's Photographer plan: like <see cref="Venue"/> in every limit (owner, 2026-11-13).</summary>
+    Photographer,
 }
 
 /// <summary>
@@ -127,6 +129,9 @@ public static class PlanCatalog
     /// <summary>A Studio account (tier Venue), a month (owner, 2026-11-12: about $50).</summary>
     public const decimal VenueMonthly = 775m;
 
+    /// <summary>A Photographer account, a month (owner, 2026-11-13: $35; 35 x 15.42 = 539.7, so 540).</summary>
+    public const decimal PhotographerMonthly = 540m;
+
     /// <summary>
     /// No longer a discount (owner, 2026-11-12): venues pay normal pass prices. Still served as 0 where
     /// older pages read it.
@@ -165,6 +170,10 @@ public static class PlanCatalog
                 new PlanDto("Premium", "Premium", p.PremiumMonthly, "per month",
                     PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
                     Perks: PlanPerks.For(PlanKind.Premium)),
+                // Studio without the AI designer (owner, 2026-11-13), between Premium and Studio.
+                new PlanDto("Photographer", "Photographer", p.PhotographerMonthly, "per month",
+                    VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
+                    Perks: PlanPerks.For(PlanKind.Photographer)),
                 // Every event its subscriber organises, kept while it lasts (no retention days), like Premium with 10 GB.
                 // Shown as "Studio" (owner, 2026-11-12); the kind stays "Venue" for shipped apps and stored data.
                 new PlanDto("Venue", "Studio", p.VenueMonthly, "per month",
@@ -256,6 +265,8 @@ public static class PlanRules
     /// as well, the best of both, limit by limit. Once it ends the event goes back to Free like an ended
     /// Premium: uploads close, then the warnings and the cut (owner, 2026-11-12).
     /// </param>
+    /// <param name="photographer">The <paramref name="venue"/> plan is Photographer, not Studio: the same in every
+    /// limit, only the event's kind differs so it is labelled right.</param>
     /// <param name="legacyCoverUntil">The latest date anything from before the plans is covered to.</param>
     /// <param name="trimmedAt">When the event was cut down to Free's space after its last cover ended, if it was.</param>
     /// <param name="premium">
@@ -274,7 +285,8 @@ public static class PlanRules
         DateTimeOffset? mediaDeletedAt,
         Guid? ownerUserId,
         (bool Active, DateTimeOffset? EndsAt)? premium = null,
-        DateTimeOffset? trimmedAt = null)
+        DateTimeOffset? trimmedAt = null,
+        bool photographer = false)
     {
         var passActive = pass != EventPassKind.None && passUntil is { } until && until > now;
         var premiumActive = premium is { Active: true };
@@ -283,7 +295,7 @@ public static class PlanRules
         // The pass shows when there is one (it adds the most); its limits are raised to the venue's below.
         var kind = passActive && pass == EventPassKind.Platinum ? PlanKind.PlatinumPass
             : passActive && pass == EventPassKind.Gold ? PlanKind.GoldPass
-            : venueActive ? PlanKind.Venue
+            : venueActive ? (photographer ? PlanKind.Photographer : PlanKind.Venue)
             : premiumActive ? PlanKind.Premium
             : PlanKind.Free;
 
@@ -291,7 +303,7 @@ public static class PlanRules
         {
             PlanKind.GoldPass => PlanCatalog.GoldEventBytes,
             PlanKind.PlatinumPass => PlanCatalog.PlatinumEventBytes,
-            PlanKind.Venue => PlanCatalog.VenueEventBytes,
+            PlanKind.Venue or PlanKind.Photographer => PlanCatalog.VenueEventBytes,
             PlanKind.Premium => PlanCatalog.PremiumEventBytes,
             _ => PlanCatalog.FreeEventBytes,
         };

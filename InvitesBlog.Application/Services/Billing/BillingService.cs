@@ -19,7 +19,8 @@ namespace InvitesBlog.Application.Services.Billing;
 public sealed record BillingPricesDto(
     decimal GoldPass, decimal PlatinumPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
     decimal PremiumMonthly, int VenueDiscountPercent,
-    decimal GoldExtension, decimal PlatinumExtension, decimal VenueMonthly, decimal DesignerAiMonthly = PlanCatalog.DesignerAiMonthly)
+    decimal GoldExtension, decimal PlatinumExtension, decimal VenueMonthly, decimal DesignerAiMonthly = PlanCatalog.DesignerAiMonthly,
+    decimal PhotographerMonthly = PlanCatalog.PhotographerMonthly)
 {
     // The same prices under their names before the rename, read by web tabs still open from before
     // that deploy. Nothing current reads them; remove them a release later.
@@ -218,7 +219,7 @@ public sealed class BillingService(
             new BillingPricesDto(p.GoldPass, p.PlatinumPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 // The venue discount is gone: 0 whatever a saved price list holds.
                 p.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
-                p.GoldExtension, p.PlatinumExtension, p.VenueMonthly, p.DesignerAiMonthly),
+                p.GoldExtension, p.PlatinumExtension, p.VenueMonthly, p.DesignerAiMonthly, p.PhotographerMonthly),
             await AccountWithStoreAsync(user, now, ct),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
@@ -318,6 +319,7 @@ public sealed class BillingService(
         PaymentKind.PremiumMonthly => (PaymentKind.PremiumMonthly, p.PremiumMonthly),
         PaymentKind.PremiumAiMonthly => (PaymentKind.PremiumAiMonthly, p.PremiumMonthly + p.DesignerAiMonthly),
         PaymentKind.VenueMonthly => (PaymentKind.VenueMonthly, p.VenueMonthly),
+        PaymentKind.PhotographerMonthly => (PaymentKind.PhotographerMonthly, p.PhotographerMonthly),
         // Added to a Premium that renews by card: the renewal carries it from then on.
         PaymentKind.DesignerAiAdd when priced.Account is { AutoRenewKind: not null, SubscriptionEndsAt: not null } =>
             (PaymentKind.PremiumAiMonthly, p.PremiumMonthly + p.DesignerAiMonthly),
@@ -455,6 +457,7 @@ public sealed class BillingService(
             PaymentKind.PremiumAiMonthly => p.PremiumMonthly + p.DesignerAiMonthly,
             PaymentKind.DesignerAiAdd => AddOns.ProratedDesignerAi(p, account!.SubscriptionEndsAt, now),
             PaymentKind.VenueMonthly => p.VenueMonthly,
+            PaymentKind.PhotographerMonthly => p.PhotographerMonthly,
             _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
         };
         var description = Describe(kind, quantity, campaign);
@@ -472,7 +475,7 @@ public sealed class BillingService(
         if (kind == PaymentKind.PremiumAiMonthly && AddOns.PremiumActive(user, now) && !AddOns.DesignerAiActive(user, now))
             throw new CodedRuleException("You're on Premium already: add the AI designer from Billing.", "designer_ai_use_add");
         if (kind != PaymentKind.DesignerAiAdd) return;
-        if (AddOns.StudioActive(user, now))
+        if (AddOns.VenueActive(user, now))
             throw new CodedRuleException("Studio has the AI designer included.", "designer_ai_included");
         if (!AddOns.PremiumActive(user, now))
             throw new CodedRuleException("The AI designer is an add-on to Premium. Get Premium with it.", "designer_ai_needs_premium");
@@ -511,11 +514,16 @@ public sealed class BillingService(
     public static void EnsureAccountCanHave(PaymentKind kind, AppUser user, DateTimeOffset now)
     {
         var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-        if (kind is PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly
-            && active && user.SubscriptionTier == SubscriptionTier.Venue)
-            throw new BusinessRuleException("This account is on Studio. Talk to us about changing it.", "billing_venue_account");
-        if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Premium)
-            throw new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account");
+        if (!active || TierOf(kind) is not { } wanted || wanted == user.SubscriptionTier) return;
+        // Premium, Photographer and Studio are one at a time; changing between them is done by us (admin), as
+        // Premium <-> Studio always was. Renewing the plan one is on is fine.
+        // Buying Premium with or without the AI designer is the same plan (Premium), so it falls through above.
+        throw user.SubscriptionTier switch
+        {
+            SubscriptionTier.Venue => new BusinessRuleException("This account is on Studio. Talk to us about changing it.", "billing_venue_account"),
+            SubscriptionTier.Photographer => new BusinessRuleException("This account is on Photographer. Talk to us about changing it.", "billing_photographer_account"),
+            _ => new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account"),
+        };
     }
 
     public async Task FulfilAsync(Guid paymentId, CancellationToken ct = default)
@@ -568,10 +576,11 @@ public sealed class BillingService(
             case PaymentKind.PremiumAiMonthly:
             case PaymentKind.StudioYearly:
             case PaymentKind.VenueMonthly:
+            case PaymentKind.PhotographerMonthly:
                 if (payment.UserId is not { } buyer) break;
                 var user = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == buyer, ct);
                 if (user is null) break;
-                var tier = payment.Kind == PaymentKind.VenueMonthly ? SubscriptionTier.Venue : SubscriptionTier.Premium;
+                var tier = TierOf(payment.Kind) ?? SubscriptionTier.Premium;
                 var running = user.SubscriptionTier == tier
                               && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
                 // A plan given with no end date stays open-ended; otherwise the new period follows the old.
@@ -734,7 +743,16 @@ public sealed class BillingService(
     }
 
     public static bool IsSubscription(PaymentKind kind) =>
-        kind is PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly or PaymentKind.VenueMonthly;
+        kind is PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly or PaymentKind.VenueMonthly or PaymentKind.PhotographerMonthly;
+
+    /// <summary>The account plan a subscription item gives; null for everything else.</summary>
+    public static SubscriptionTier? TierOf(PaymentKind kind) => kind switch
+    {
+        PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly or PaymentKind.StudioYearly => SubscriptionTier.Premium,
+        PaymentKind.VenueMonthly => SubscriptionTier.Venue,
+        PaymentKind.PhotographerMonthly => SubscriptionTier.Photographer,
+        _ => null,
+    };
 
     private Guid RequireUser() => currentUser.UserId ?? throw new ForbiddenException("Sign in to see your billing.");
 
@@ -756,6 +774,7 @@ public sealed class BillingService(
         "premium-ai-monthly" => PaymentKind.PremiumAiMonthly,
         "designer-ai-add" => PaymentKind.DesignerAiAdd,
         "venue-monthly" => PaymentKind.VenueMonthly,
+        "photographer-monthly" => PaymentKind.PhotographerMonthly,
         "gold-extension" or "party-extension" => PaymentKind.GoldExtension,
         "platinum-extension" or "wedding-extension" => PaymentKind.PlatinumExtension,
         _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
@@ -772,6 +791,7 @@ public sealed class BillingService(
         PaymentKind.DesignerAiAdd => "designer-ai-add",
         PaymentKind.StudioYearly => "studio-yearly",
         PaymentKind.VenueMonthly => "venue-monthly",
+        PaymentKind.PhotographerMonthly => "photographer-monthly",
         PaymentKind.GoldExtension => "gold-extension",
         PaymentKind.PlatinumExtension => "platinum-extension",
         PaymentKind.StudioGoldCredits => "studio-gold-credits",
@@ -796,6 +816,7 @@ public sealed class BillingService(
             // StudioYearly was Premium's yearly payment when Premium was called Studio: not today's Studio.
             PaymentKind.StudioYearly => "Premium, a year",
             PaymentKind.VenueMonthly => "Studio, a month",
+            PaymentKind.PhotographerMonthly => "Photographer, a month",
             PaymentKind.StudioGoldCredits => $"{quantity} Gold pass{(quantity == 1 ? "" : "es")} for clients",
             PaymentKind.StudioPlatinumCredits => $"{quantity} Platinum pass{(quantity == 1 ? "" : "es")} for clients",
             _ => kind.ToString(),

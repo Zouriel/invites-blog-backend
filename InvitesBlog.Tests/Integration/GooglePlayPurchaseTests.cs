@@ -738,10 +738,11 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     [PostgresFact]
     public async Task Premium_and_Venue_are_offered_only_to_an_account_without_a_plan()
     {
-        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await OffersAsync(await UserAsync()));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], await OffersAsync(await UserAsync()));
         Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(3))));
         Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Venue, DateTimeOffset.UtcNow.AddDays(3))));
-        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
+        Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Photographer, DateTimeOffset.UtcNow.AddDays(3))));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
     }
 
     /// <summary>Owner, 2026-11-12: the people an event is for may buy its passes, not its invitations.</summary>
@@ -807,6 +808,45 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         Assert.Equal(SubscriptionTier.Venue, account.SubscriptionTier);
         Assert.True(account.SubscriptionEndsAt <= DateTimeOffset.UtcNow);
         Assert.False(Application.Plans.PlanRules.IsActive(account.SubscriptionTier, account.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>Photographer (owner, 2026-11-13) through Play: given until Google's expiry, renewed, and ended with it.</summary>
+    [PostgresFact]
+    public async Task A_photographer_monthly_subscription_gives_Photographer_until_Googles_expiry_and_its_end_ends_it()
+    {
+        var user = await UserAsync();
+        var expiry = DateTimeOffset.UtcNow.AddDays(30);
+        var token = Subscribed(user.Id, expiry, product: "photographer_monthly");
+
+        var (status, body) = await RedeemAsync(user, "photographer_monthly", token);
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("applied", body.Data!.State);
+        var account = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Photographer, account.SubscriptionTier);
+        Assert.Equal(expiry.ToUnixTimeSeconds(), account.SubscriptionEndsAt!.Value.ToUnixTimeSeconds());
+        Assert.Equal(PaymentKind.PhotographerMonthly, Assert.Single(await PaymentsAsync(user.Id)).Kind);
+        Assert.Empty(await OffersAsync(user));
+
+        var row = (await RowAsync(token))!;
+        var renewed = expiry.AddDays(30);
+        UpdateSub(token, user.Id, renewed, "SUBSCRIPTION_STATE_ACTIVE", $"GPA.{Guid.NewGuid():N}"[..28], product: "photographer_monthly");
+        await NotifyAsync(new { version = "1.0", packageName = Config["GooglePlay:PackageName"], subscriptionNotification = new { version = "1.0", notificationType = 2, purchaseToken = token } });
+        Assert.Equal(renewed.ToUnixTimeSeconds(), (await AccountAsync(user.Id)).SubscriptionEndsAt!.Value.ToUnixTimeSeconds());
+        Assert.Equal(SubscriptionTier.Photographer, (await AccountAsync(user.Id)).SubscriptionTier);
+
+        UpdateSub(token, user.Id, DateTimeOffset.UtcNow.AddMinutes(-5), "SUBSCRIPTION_STATE_EXPIRED", row.OrderId!, autoRenew: false, product: "photographer_monthly");
+        await NotifyAsync(new { version = "1.0", packageName = Config["GooglePlay:PackageName"], subscriptionNotification = new { version = "1.0", notificationType = 13, purchaseToken = token } });
+        account = await AccountAsync(user.Id);
+        Assert.False(Application.Plans.PlanRules.IsActive(account.SubscriptionTier, account.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+    }
+
+    [PostgresFact]
+    public async Task A_Premium_account_cant_turn_into_a_photographer_through_the_store()
+    {
+        var user = await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(20));
+        var (status, _) = await RedeemAsync(user, "photographer_monthly", Subscribed(user.Id, DateTimeOffset.UtcNow.AddDays(30), product: "photographer_monthly"));
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Equal(SubscriptionTier.Premium, (await AccountAsync(user.Id)).SubscriptionTier);
     }
 
     [PostgresFact]
@@ -1366,17 +1406,17 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     [Fact]
     public void Every_product_is_a_billing_item_and_studio_is_sold_on_both_stores()
     {
-        Assert.Equal(9, GooglePlayCatalog.All.Count);
+        Assert.Equal(10, GooglePlayCatalog.All.Count);
         foreach (var p in GooglePlayCatalog.All)
             Assert.NotEqual("other", BillingService.ItemName(p.Kind));
         Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
-        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
         Assert.Equal(PaymentKind.PremiumAiMonthly, GooglePlayCatalog.Find("premium_ai_monthly")!.Kind);
         Assert.Equal(PaymentKind.VenueMonthly, GooglePlayCatalog.Find("venue_monthly")!.Kind);
         // On the iPhone too (owner, 2026-11-12), in Premium's subscription group.
         Assert.Equal(PaymentKind.VenueMonthly, AppStoreCatalog.Find("venue_monthly")!.Kind);
-        Assert.Equal(9, AppStoreCatalog.All.Count);
-        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], AppStoreCatalog.Subscriptions);
+        Assert.Equal(10, AppStoreCatalog.All.Count);
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "photographer_monthly", "venue_monthly"], AppStoreCatalog.Subscriptions);
     }
 
     // ----- Account deletion ----------------------------------------------------------------------

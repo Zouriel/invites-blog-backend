@@ -76,7 +76,7 @@ public sealed class PortfolioService(
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static CodedRuleException StudioRequired() =>
-        new("The portfolio comes with Studio.", "studio_required", HttpStatusCode.Forbidden);
+        new("The portfolio comes with Studio or Photographer.", "studio_required", HttpStatusCode.Forbidden);
 
     // ---------- the portfolio itself ----------
 
