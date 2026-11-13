@@ -1290,7 +1290,8 @@ public sealed class MediaBucketService(
                 PlanRules.IncludesFaceGrouping(plan),
                 // Ended for good (not merely not yet open): no new codes or links from here, see CreateQrAsync.
                 EventDayWindow.HasClosed(Night(b, events), now, b.UploadWindowDays, zoned?.TimeZone),
-                EventDayWindow.ClosesAt(Night(b, events), b.UploadWindowDays, zoned?.TimeZone));
+                EventDayWindow.ClosesAt(Night(b, events), b.UploadWindowDays, zoned?.TimeZone),
+                zoned?.TimeZone);
         }).ToList();
     }
 

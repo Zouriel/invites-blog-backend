@@ -79,7 +79,9 @@ public sealed record MediaBucketDto(
     /// </summary>
     bool WindowClosed = false,
     /// <summary>When the window ends or ended; null for an album with no real date.</summary>
-    DateTimeOffset? WindowClosesAt = null);
+    DateTimeOffset? WindowClosesAt = null,
+    /// <summary>The event's IANA time zone, for saying which day the window closed on.</summary>
+    string? TimeZone = null);
 
 /// <summary>
 /// The account's Studio plan: whether it is in force (<c>Tier</c> "Venue") and how much the events it
