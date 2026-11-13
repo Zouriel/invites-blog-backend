@@ -35,6 +35,7 @@ public sealed class ContactLinksController(IContactLinkService links) : BaseApiC
         Success(new { challengeId = await links.RequestLinkCodeAsync(req.Masked, ct) });
 
     [HttpPost("verify")]
+    [EnableRateLimiting(RateLimiting.RateLimitPolicies.OtpVerify)]
     [HasPermission(Permissions.Inbox.Read)]
     public async Task<IActionResult> Verify(
         [FromBody] VerifyContactLinkRequest req, CancellationToken ct) =>

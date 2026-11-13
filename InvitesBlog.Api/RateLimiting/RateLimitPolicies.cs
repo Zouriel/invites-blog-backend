@@ -9,6 +9,14 @@ public static class RateLimitPolicies
     /// <summary>Creating an event: the three doors a visitor may use without signing in.</summary>
     public const string CreateEvent = "create-event";
 
+    /// <summary>
+    /// Every endpoint that checks a one-time code: 30 guesses per visitor per 10 minutes, across all codes.
+    /// Each code also ends after 5 wrong guesses (OtpService); this stops one visitor asking for code after
+    /// code and guessing at all of them.
+    /// </summary>
+    public const string OtpVerify = "otp-verify";
+    public const int OtpVerifyPerWindow = 30;
+
     public const int AnonymousCreatesPerWindow = 10;
     public const int AccountCreatesPerWindow = 60;
     public static readonly TimeSpan CreateWindow = TimeSpan.FromMinutes(10);

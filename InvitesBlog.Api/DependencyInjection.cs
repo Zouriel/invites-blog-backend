@@ -92,6 +92,9 @@ public static class DependencyInjection
             // Every policy is keyed on ClientAddress, never on RemoteIpAddress directly: behind
             // Cloudflare the remote address is an edge server that can change from request to request,
             // which gives every request its own quota. See ClientAddress.
+            options.AddPolicy(RateLimiting.RateLimitPolicies.OtpVerify, ctx => RateLimitPartition.GetFixedWindowLimiter(
+                RateLimiting.ClientAddress.PartitionKey(ctx),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = RateLimiting.RateLimitPolicies.OtpVerifyPerWindow, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
             options.AddPolicy("otp", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 RateLimiting.ClientAddress.PartitionKey(ctx),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10) }));

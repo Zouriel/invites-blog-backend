@@ -98,8 +98,8 @@ public abstract class OpenIdConnectAuthProvider : IExternalAuthProvider
     protected virtual bool RequiresEmail => true;
 
     /// <summary>
-    /// What an absent <c>email_verified</c> means. Google and Microsoft: verified (unchanged). Apple
-    /// always states it, so for Apple absent means not verified and the email won't link an account.
+    /// What an absent <c>email_verified</c> means. Google: verified (unchanged). Apple always states it, so
+    /// absent means not verified; Microsoft never does (see its override): neither links an account by email then.
     /// </summary>
     protected virtual bool EmailVerifiedWhenUnstated => true;
 
@@ -331,6 +331,13 @@ public sealed class MicrosoftAuthProvider : OpenIdConnectAuthProvider
 
         throw new SecurityTokenInvalidIssuerException($"Unexpected Microsoft issuer '{issuer}'.");
     }
+
+    /// <summary>
+    /// Microsoft's tokens never say <c>email_verified</c>, and in a work or school tenant the <c>email</c> claim is
+    /// whatever that tenant's admin typed in, so it is never taken as proof of an address: a Microsoft sign-in
+    /// links to an existing account only through its own link, never by matching the email.
+    /// </summary>
+    protected override bool EmailVerifiedWhenUnstated => false;
 
     /// <summary>Personal Microsoft accounts often carry only <c>preferred_username</c>.</summary>
     protected override string? DisplayName(IReadOnlyDictionary<string, string> claims) =>

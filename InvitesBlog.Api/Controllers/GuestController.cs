@@ -117,6 +117,7 @@ public sealed class GuestController(
 
     /// <summary>Verifies the code, trusts this network for the invite, and admits the guest.</summary>
     [HttpPost("/i/{token}/verify")]
+    [EnableRateLimiting(RateLimiting.RateLimitPolicies.OtpVerify)]
     public async Task<IActionResult> Verify(string token, [FromForm] string? code, CancellationToken ct)
     {
         if (!Guid.TryParse(Request.Cookies[ChallengeCookie], out var challengeId))
