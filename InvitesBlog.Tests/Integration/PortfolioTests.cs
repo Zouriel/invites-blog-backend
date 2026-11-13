@@ -718,6 +718,80 @@ public sealed class PortfolioTests(PostgresApiFixture api)
         return id;
     }
 
+    [PostgresFact]
+    public async Task The_logo_position_and_size_are_named_choices_saved_and_shown_on_the_page()
+    {
+        var studio = await StudioAsync("Logo Place");
+        var c = api.Client(studio.Token);
+        var p = await DataAsync(await c.GetAsync("/api/me/portfolio"));
+        // The original look until they choose.
+        Assert.Equal("bottom-left", p.GetProperty("logoPosition").GetString());
+        Assert.Equal("medium", p.GetProperty("logoSize").GetString());
+
+        var options = await DataAsync(await api.Client().GetAsync("/api/portfolio/options"));
+        Assert.Equal(["bottom-left", "bottom-center", "center", "top-left", "top-center"],
+            options.GetProperty("logoPositions").EnumerateArray().Select(x => x.GetProperty("key").GetString()!).ToList());
+        Assert.Equal(["small", "medium", "large"], options.GetProperty("logoSizes").EnumerateArray().Select(x => x.GetProperty("key").GetString()!).ToList());
+        Assert.All(options.GetProperty("logoPositions").EnumerateArray(), x => Assert.False(string.IsNullOrEmpty(x.GetProperty("label").GetString())));
+
+        p = await DataAsync(await c.PutAsJsonAsync("/api/me/portfolio", new { logoPosition = "top-center", logoSize = "large" }));
+        Assert.Equal("top-center", p.GetProperty("logoPosition").GetString());
+        Assert.Equal("large", p.GetProperty("logoSize").GetString());
+        // Leaving them out of a later save keeps them.
+        p = await DataAsync(await c.PutAsJsonAsync("/api/me/portfolio", new { tagline = "Hi" }));
+        Assert.Equal("top-center", p.GetProperty("logoPosition").GetString());
+
+        foreach (var bad in new object[] { new { logoPosition = "sideways" }, new { logoSize = "huge" } })
+        {
+            var r = await c.PutAsJsonAsync("/api/me/portfolio", bad);
+            Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+            Assert.Contains("invalid_choice", await r.Content.ReadAsStringAsync());
+        }
+
+        var handle = await PublishedAsync(studio);
+        var html = await (await api.Client().GetAsync($"/@{handle}")).Content.ReadAsStringAsync();
+        Assert.Contains("pos-top-center logo-large", html);
+    }
+
+    [PostgresFact]
+    public async Task A_transparent_logo_keeps_its_transparency()
+    {
+        var studio = await StudioAsync("Clear Logo");
+        var c = api.Client(studio.Token);
+        foreach (var (type, bytes) in new[] { ("image/png", ClearLogo(png: true)), ("image/webp", ClearLogo(png: false)) })
+        {
+            using var form = new MultipartFormDataContent();
+            var file = new ByteArrayContent(bytes);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
+            form.Add(file, "file", type == "image/png" ? "logo.png" : "logo.webp");
+            var p = await DataAsync(await c.PostAsync("/api/me/portfolio/logo", form));
+            var url = p.GetProperty("logoUrl").GetString()!;
+            Assert.DoesNotContain(".jpg", url);
+            var stored = await api.Storage.GetAsync(api.Storage.KeyFor(url)!);
+            Assert.NotNull(stored);
+            using var image = Image.Load<Rgba32>(stored!);
+            // The corner was see-through when uploaded and still is: no white or black box behind the logo.
+            Assert.True(image[0, 0].A < 16, $"{type}: corner alpha {image[0, 0].A}");
+            Assert.Equal(255, image[image.Width / 2, image.Height / 2].A);
+        }
+    }
+
+    /// <summary>
+    /// A 1000x500 logo: a detailed (noisy) opaque mark, fully transparent around it. Detailed on purpose: a JPEG of it
+    /// is smaller than the PNG, so a "turn it into JPEG" path would really be taken and the test would see the box.
+    /// </summary>
+    private static byte[] ClearLogo(bool png)
+    {
+        var rnd = new Random(7);
+        using var image = new Image<Rgba32>(1000, 500, new Rgba32(0, 0, 0, 0));
+        for (var y = 60; y < 440; y++)
+            for (var x = 60; x < 940; x++)
+                image[x, y] = new Rgba32((byte)rnd.Next(256), (byte)rnd.Next(256), (byte)rnd.Next(256), 255);
+        using var ms = new MemoryStream();
+        if (png) image.SaveAsPng(ms); else image.SaveAsWebp(ms);
+        return ms.ToArray();
+    }
+
     private static byte[] Jpeg(int w = 300, int h = 200)
     {
         using var image = new Image<Rgba32>(w, h, new Rgba32(120, 30, 40));

@@ -57,6 +57,9 @@ public static class PortfolioPage
         }
         if (p.CoverUrl is not null) sb.Append($"<link rel=\"preload\" as=\"image\" href=\"{E(p.CoverUrl)}\">");
         sb.Append(JsonLd(p, nonce, Abs));
+        // Motion: things wait hidden for their reveal only once this has run, and only until the page script takes
+        // over. If that script never starts (blocked, broken), the class comes off again and everything shows.
+        sb.Append($"<script nonce=\"{nonce}\">{HeadScript}</script>");
         sb.Append("<style>");
         sb.Append($":root{{color-scheme:{(theme.Dark ? "dark" : "light")};--bg:{theme.Bg};--surface:{theme.Surface};--text:{theme.Text};--muted:{theme.Muted};");
         sb.Append($"--accent:{accent};--on-accent:{onAccent};--line:{line};--head:{FontStack(font.Heading, serif: font.Heading != font.Body)};--body:{FontStack(font.Body, serif: false)};--head-weight:{(SingleWeight(font.Heading) ? 400 : 600)};}}");
@@ -122,11 +125,16 @@ public static class PortfolioPage
     {
         var hasContact = p.Sections.Any(x => x.Kind == PortfolioSectionKinds.Contact);
         var firstCollection = p.Sections.FirstOrDefault(x => x.Collection is not null)?.Collection;
-        sb.Append(s.PhotoUrl is null ? "<header class=\"hero plain\">" : "<header class=\"hero\">");
+        var pos = PortfolioChoices.LogoPosition(p.LogoPosition);
+        var size = PortfolioChoices.LogoSize(p.LogoSize);
+        sb.Append($"<header class=\"hero{(s.PhotoUrl is null ? " plain" : "")} pos-{pos} logo-{size}\">");
         if (s.PhotoUrl is not null)
             sb.Append($"<img class=\"hero-img\" src=\"{E(s.PhotoUrl)}\" alt=\"\" fetchpriority=\"high\" decoding=\"async\">");
+        // The logo as drawn: no crop, no plate behind it, so a transparent one stays transparent.
+        var logo = p.LogoUrl is null ? "" : $"<img class=\"logo\" src=\"{E(p.LogoUrl)}\" alt=\"{E(p.DisplayName)} logo\">";
+        if (pos.StartsWith("top-", StringComparison.Ordinal) && logo.Length > 0) sb.Append($"<div class=\"hero-top\">{logo}</div>");
         sb.Append("<div class=\"hero-in\">");
-        if (p.LogoUrl is not null) sb.Append($"<img class=\"logo\" src=\"{E(p.LogoUrl)}\" alt=\"{E(p.DisplayName)} logo\" width=\"88\" height=\"88\">");
+        if (!pos.StartsWith("top-", StringComparison.Ordinal)) sb.Append(logo);
         sb.Append($"<h1>{E(p.DisplayName)}</h1>");
         if (p.Tagline is not null) sb.Append($"<p class=\"tag\">{E(p.Tagline)}</p>");
         sb.Append("<div class=\"hero-cta\">");
@@ -137,11 +145,11 @@ public static class PortfolioPage
 
     private static void Collection(StringBuilder sb, PublicCollectionDto c, ref int index, List<PortfolioPhotoDto> all)
     {
-        sb.Append($"<section class=\"sec\" id=\"c-{c.Id:N}\"><h2>{E(c.Title)}</h2>");
+        sb.Append($"<section class=\"sec\" id=\"c-{c.Id:N}\"><h2 class=\"rv\">{E(c.Title)}</h2>");
         var layout = c.Layout is "masonry" or "slideshow" ? c.Layout : "grid";
         if (layout == "slideshow")
         {
-            sb.Append("<div class=\"show\" data-show><div class=\"show-track\">");
+            sb.Append("<div class=\"show rv\" data-show><div class=\"show-track\">");
             foreach (var ph in c.Photos)
             {
                 sb.Append($"<button type=\"button\" class=\"slide\" data-i=\"{index++}\" aria-label=\"Open photo\">")
@@ -151,7 +159,8 @@ public static class PortfolioPage
             sb.Append("</div>");
             if (c.Photos.Count > 1)
                 sb.Append($"<button type=\"button\" class=\"show-btn prev\" aria-label=\"Previous\">{PortfolioIcons.Prev}</button>")
-                  .Append($"<button type=\"button\" class=\"show-btn next\" aria-label=\"Next\">{PortfolioIcons.Next}</button>");
+                  .Append($"<button type=\"button\" class=\"show-btn next\" aria-label=\"Next\">{PortfolioIcons.Next}</button>")
+                  .Append($"<span class=\"show-count\" aria-live=\"polite\">1 / {c.Photos.Count}</span>");
             sb.Append("</div>");
         }
         else
@@ -159,7 +168,7 @@ public static class PortfolioPage
             sb.Append($"<div class=\"{layout}\">");
             foreach (var ph in c.Photos)
             {
-                sb.Append($"<button type=\"button\" class=\"tile\" data-i=\"{index++}\" aria-label=\"Open photo\">")
+                sb.Append($"<button type=\"button\" class=\"tile rv\" data-i=\"{index++}\" aria-label=\"Open photo\">")
                   .Append($"<img src=\"{E(ph.ThumbUrl)}\" alt=\"\" loading=\"lazy\" decoding=\"async\" width=\"{ph.Width}\" height=\"{ph.Height}\"></button>");
                 all.Add(ph);
             }
@@ -171,8 +180,8 @@ public static class PortfolioPage
     private static void About(StringBuilder sb, PublicPortfolioSectionDto s)
     {
         sb.Append($"<section class=\"sec about{(s.PhotoUrl is null ? " solo" : "")}\" id=\"about\">");
-        if (s.PhotoUrl is not null) sb.Append($"<img class=\"about-img\" src=\"{E(s.PhotoUrl)}\" alt=\"\" loading=\"lazy\" decoding=\"async\">");
-        sb.Append($"<div><h2>{E(s.Title)}</h2>");
+        if (s.PhotoUrl is not null) sb.Append($"<img class=\"about-img rv\" src=\"{E(s.PhotoUrl)}\" alt=\"\" loading=\"lazy\" decoding=\"async\">");
+        sb.Append($"<div class=\"rv\"><h2>{E(s.Title)}</h2>");
         foreach (var para in (s.Body ?? "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
             sb.Append($"<p>{E(para).Replace("\n", "<br>")}</p>");
         sb.Append("</div></section>");
@@ -180,10 +189,10 @@ public static class PortfolioPage
 
     private static void Designs(StringBuilder sb, PublicPortfolioSectionDto s)
     {
-        sb.Append($"<section class=\"sec\" id=\"designs\"><h2>{E(s.Title)}</h2><div class=\"designs\">");
+        sb.Append($"<section class=\"sec\" id=\"designs\"><h2 class=\"rv\">{E(s.Title)}</h2><div class=\"designs\">");
         foreach (var d in s.Designs ?? [])
         {
-            sb.Append("<figure class=\"design\">");
+            sb.Append("<figure class=\"design rv\">");
             if (d.PreviewUrl is not null) sb.Append($"<img src=\"{E(d.PreviewUrl)}\" alt=\"\" loading=\"lazy\" decoding=\"async\">");
             sb.Append($"<figcaption>{E(d.Name)}</figcaption></figure>");
         }
@@ -192,10 +201,10 @@ public static class PortfolioPage
 
     private static void Packages(StringBuilder sb, PublicPortfolioSectionDto s)
     {
-        sb.Append($"<section class=\"sec\" id=\"packages\"><h2>{E(s.Title)}</h2><div class=\"cards\">");
+        sb.Append($"<section class=\"sec\" id=\"packages\"><h2 class=\"rv\">{E(s.Title)}</h2><div class=\"cards\">");
         foreach (var pk in s.Packages ?? [])
         {
-            sb.Append($"<article class=\"card pack\"><h3>{E(pk.Name)}</h3>");
+            sb.Append($"<article class=\"card pack rv\"><h3>{E(pk.Name)}</h3>");
             if (pk.Price is not null) sb.Append($"<p class=\"price\">{E(pk.Price)}</p>");
             if (pk.Lines is { Count: > 0 })
             {
@@ -210,10 +219,10 @@ public static class PortfolioPage
 
     private static void Reviews(StringBuilder sb, PublicPortfolioSectionDto s)
     {
-        sb.Append($"<section class=\"sec\" id=\"reviews\"><h2>{E(s.Title)}</h2><div class=\"cards\">");
+        sb.Append($"<section class=\"sec\" id=\"reviews\"><h2 class=\"rv\">{E(s.Title)}</h2><div class=\"cards\">");
         foreach (var r in s.Reviews ?? [])
         {
-            sb.Append($"<figure class=\"card quote\"><blockquote>{E(r.Quote).Replace("\n", "<br>")}</blockquote>");
+            sb.Append($"<figure class=\"card quote rv\"><blockquote>{E(r.Quote).Replace("\n", "<br>")}</blockquote>");
             if (r.Name is not null) sb.Append($"<figcaption>{E(r.Name)}</figcaption>");
             sb.Append("</figure>");
         }
@@ -223,7 +232,10 @@ public static class PortfolioPage
     private static void Contact(StringBuilder sb, PublicPortfolioDto p, PublicPortfolioSectionDto s)
     {
         var c = p.Contact;
-        sb.Append($"<section class=\"sec contact\" id=\"contact\"><h2>{E(s.Title)}</h2><div class=\"buttons\">");
+        var buttons = Digits(c.WhatsApp).Length > 0 || Digits(c.Viber).Length > 0 || !string.IsNullOrEmpty(c.Instagram)
+                      || !string.IsNullOrEmpty(c.Phone) || !string.IsNullOrEmpty(c.Email);
+        var shape = c.Enquiries && buttons ? "split" : "solo";
+        sb.Append($"<section class=\"band\" id=\"contact\"><div class=\"contact {shape}\"><div class=\"contact-side rv\"><h2>{E(s.Title)}</h2><p class=\"lead\">Ask about a date, or just say hello.</p><div class=\"buttons\">");
         if (Digits(c.WhatsApp) is { Length: > 0 } wa)
             sb.Append($"<a class=\"cbtn\" style=\"background:{PortfolioIcons.WhatsAppFill};color:{PortfolioIcons.WhatsAppInk}\" href=\"https://wa.me/{wa}\" target=\"_blank\" rel=\"noopener\">{PortfolioIcons.WhatsApp}WhatsApp</a>");
         if (Digits(c.Viber) is { Length: > 0 } vb)
@@ -234,10 +246,10 @@ public static class PortfolioPage
             sb.Append($"<a class=\"cbtn line\" href=\"tel:{E(ph)}\">{PortfolioIcons.Phone}Call</a>");
         if (c.Email is { Length: > 0 } em)
             sb.Append($"<a class=\"cbtn line\" href=\"mailto:{E(em)}\">{PortfolioIcons.Mail}Email</a>");
-        sb.Append("</div>");
+        sb.Append("</div></div>");
         if (c.Enquiries)
         {
-            sb.Append("<form class=\"enq card\" id=\"enq\" novalidate><h3>Send a message</h3>")
+            sb.Append("<form class=\"enq card rv\" id=\"enq\" novalidate><h3>Send a message</h3>")
               .Append("<label>Your name<input name=\"name\" autocomplete=\"name\" maxlength=\"80\" required></label>")
               .Append("<label>Phone or email<input name=\"contact\" autocomplete=\"email\" maxlength=\"120\" required></label>")
               .Append($"<label>Event date <span class=\"opt\">(if you know it)</span><input name=\"eventDate\" type=\"date\"></label>")
@@ -246,7 +258,7 @@ public static class PortfolioPage
               .Append($"<button class=\"btn wide\" type=\"submit\">{PortfolioIcons.Send}Send</button>")
               .Append("<p class=\"note\" role=\"status\" aria-live=\"polite\"></p></form>");
         }
-        sb.Append("</section>");
+        sb.Append("</div></section>");
     }
 
     private static string ReportDialog() => $"""
@@ -281,13 +293,31 @@ public static class PortfolioPage
         h2{font-size:clamp(1.6rem,4.5vw,2.4rem);margin-bottom:24px}h3{font-size:1.2rem}
         a{color:inherit}
         .preview{position:sticky;top:0;z-index:20;background:var(--accent);color:var(--on-accent);text-align:center;font-size:.9rem;padding:8px 16px;font-weight:600}
-        .hero{position:relative;min-height:min(78vh,760px);display:flex;align-items:flex-end;overflow:hidden;color:#fff;background:#111}
+        .hero{position:relative;min-height:min(78vh,760px);display:flex;flex-direction:column;overflow:hidden;color:#fff;background:#111}
         .hero-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
         .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.62) 100%)}
         .hero.plain{min-height:auto;background:var(--surface);color:var(--text);border-bottom:1px solid var(--line)}
         .hero.plain::after{display:none}
-        .hero-in{position:relative;z-index:1;width:100%;max-width:1120px;margin:0 auto;padding:clamp(48px,10vw,96px) 20px 40px}
-        .logo{width:88px;height:88px;border-radius:50%;object-fit:cover;background:var(--surface);border:3px solid rgba(255,255,255,.85);margin-bottom:16px}
+        .hero.pos-top-left::after,.hero.pos-top-center::after{background:linear-gradient(180deg,rgba(0,0,0,.42) 0,rgba(0,0,0,0) 28%,rgba(0,0,0,0) 40%,rgba(0,0,0,.62) 100%)}
+        .hero.pos-center::after{background:radial-gradient(ellipse at center,rgba(0,0,0,.5) 0,rgba(0,0,0,.28) 60%,rgba(0,0,0,.38) 100%)}
+        .hero-top{position:relative;z-index:1;width:100%;max-width:1120px;margin:0 auto;padding:max(24px,env(safe-area-inset-top)) 20px 0}
+        .hero-top .logo{margin:0;animation:rise .8s cubic-bezier(.2,.7,.2,1) both}
+        .hero.pos-top-center .logo,.hero.pos-bottom-center .logo,.hero.pos-center .logo{margin-inline:auto}
+        .hero.pos-top-center .hero-in,.hero.pos-bottom-center .hero-in,.hero.pos-center .hero-in{text-align:center}
+        .hero.pos-top-center .tag,.hero.pos-bottom-center .tag,.hero.pos-center .tag{margin-inline:auto}
+        .hero.pos-top-center .hero-cta,.hero.pos-bottom-center .hero-cta,.hero.pos-center .hero-cta{justify-content:center}
+        .hero.pos-center .hero-in{margin-block:auto;padding-block:clamp(56px,10vw,104px)}
+        .hero-in{position:relative;z-index:1;width:100%;max-width:1120px;margin:auto auto 0;padding:clamp(48px,10vw,96px) 20px 40px}
+        .hero-img{animation:hero-img 2.4s cubic-bezier(.2,.7,.2,1) both}
+        .hero-in>*{animation:rise .8s cubic-bezier(.2,.7,.2,1) both}
+        .hero-in>:nth-child(2){animation-delay:.08s}.hero-in>:nth-child(3){animation-delay:.16s}.hero-in>:nth-child(4){animation-delay:.24s}
+        @keyframes hero-img{from{opacity:0;transform:scale(1.07)}to{opacity:1;transform:none}}
+        @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+        .js .rv:not(.in){opacity:0}
+        .rv.in{animation:rise .7s cubic-bezier(.2,.7,.2,1) var(--d,0ms) backwards}
+        .logo{display:block;height:var(--logo-h);width:auto;max-width:min(72vw,360px);object-fit:contain;margin-bottom:16px}
+        .logo-small{--logo-h:clamp(44px,11vw,56px)}.logo-medium{--logo-h:clamp(64px,17vw,88px)}.logo-large{--logo-h:clamp(88px,26vw,140px)}
+        .hero:not(.plain) .logo{filter:drop-shadow(0 2px 14px rgba(0,0,0,.35))}
         .hero h1{font-size:clamp(2.2rem,8vw,4.4rem)}
         .tag{font-size:clamp(1rem,2.6vw,1.25rem);margin:12px 0 0;max-width:40ch;opacity:.92}
         .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
@@ -302,12 +332,23 @@ public static class PortfolioPage
         .masonry{columns:2 160px;column-gap:8px}@media(min-width:900px){.masonry{columns:3}}
         .masonry .tile{margin-bottom:8px;break-inside:avoid;width:100%}.masonry .tile img{width:100%;height:auto}
         .tile,.slide{display:block;padding:0;border:0;background:var(--surface);cursor:zoom-in;border-radius:6px;overflow:hidden;width:100%}
-        .tile img{transition:transform .5s cubic-bezier(.2,.7,.2,1)}@media(hover:hover){.tile:hover img{transform:scale(1.03)}}
-        .show{position:relative}.show-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px;scrollbar-width:none;border-radius:8px}
+        .tile img{transition:transform .5s cubic-bezier(.2,.7,.2,1)}
+        .tile,.card,.design img{transition:transform .3s ease,box-shadow .3s ease}
+        @media(hover:hover) and (pointer:fine){.tile:hover img{transform:scale(1.03)}
+          .tile:hover,.card:hover,.design:hover img{transform:translateY(-4px);box-shadow:0 14px 30px -14px rgba(0,0,0,.4)}}
+        .show{position:relative}.show-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px;scrollbar-width:none}
         .show-track::-webkit-scrollbar{display:none}
-        .slide{flex:0 0 100%;scroll-snap-align:center;border-radius:8px;background:#0c0c0d}.slide img{width:100%;height:min(72vh,640px);object-fit:contain}
-        .show-btn{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:0;display:grid;place-items:center;
-          background:rgba(0,0,0,.45);color:#fff;cursor:pointer}.show-btn.prev{left:12px}.show-btn.next{right:12px}
+        /* The letterbox is the page itself: no plate around a photo that doesn't fill the frame. */
+        .slide{flex:0 0 100%;scroll-snap-align:center;border-radius:0;background:transparent;cursor:zoom-in}
+        .slide img{width:100%;height:min(72vh,640px,max(260px,70vw));object-fit:contain}
+        /* With the script: photos lie on top of each other and cross-fade; a swipe or the arrows change them. */
+        .js .show-track{display:grid;overflow:hidden;touch-action:pan-y}
+        .js .slide{grid-area:1/1;opacity:0;visibility:hidden;transition:opacity .6s ease-in-out,visibility 0s linear .6s}
+        .js .slide.on{opacity:1;visibility:visible;transition:opacity .6s ease-in-out,visibility 0s}
+        .show-btn{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;
+          background:var(--surface);color:var(--text);cursor:pointer;box-shadow:0 6px 18px -8px rgba(0,0,0,.35);transition:transform .2s ease}
+        .show-btn:active{transform:translateY(-50%) scale(.94)}.show-btn.prev{left:12px}.show-btn.next{right:12px}
+        .show-count{display:none}.js .show-count{display:block;text-align:center;margin-top:12px;font-size:.88rem;color:var(--muted);font-variant-numeric:tabular-nums}
         .about{display:grid;gap:32px;align-items:center}@media(min-width:800px){.about{grid-template-columns:5fr 6fr}.about.solo{grid-template-columns:1fr}}
         .about.solo>div{max-width:68ch}
         .about-img{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:8px}.about p{color:var(--muted);font-size:1.08rem;margin:0 0 16px}
@@ -320,7 +361,13 @@ public static class PortfolioPage
         .pack ul{margin:0;padding-left:20px;color:var(--muted)}.pack li{margin:4px 0}
         .quote{margin:0}.quote blockquote{margin:0;font:400 1.15rem/1.55 var(--head)}.quote blockquote::before{content:"\201C"}.quote blockquote::after{content:"\201D"}
         .quote figcaption{margin-top:12px;color:var(--muted);font-size:.95rem}
-        .buttons{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+        .band{margin-top:clamp(56px,9vw,104px);background:var(--surface);border-block:1px solid var(--line)}
+        .contact{max-width:1120px;margin:0 auto;padding:clamp(48px,8vw,88px) 20px;display:grid;gap:32px}
+        .contact h2{margin-bottom:12px}.lead{margin:0 0 24px;color:var(--muted);font-size:1.08rem}.band .card{background:var(--bg)}
+        .contact.solo{justify-items:center;text-align:center}.contact.solo .buttons{justify-content:center}.contact.solo .enq{text-align:start;width:100%}
+        @media(min-width:900px){.contact.split{grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:64px;align-items:start}
+          .contact.split .contact-side{position:sticky;top:32px}.contact.split .enq{max-width:none}}
+        .buttons{display:flex;flex-wrap:wrap;gap:12px}
         .cbtn{display:inline-flex;align-items:center;gap:10px;min-height:52px;padding:0 20px;border-radius:14px;font-weight:600;text-decoration:none}
         .cbtn.line{background:var(--surface);color:var(--text);border:1px solid var(--line)}
         .ic{flex:none}
@@ -331,12 +378,14 @@ public static class PortfolioPage
         .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
         .note{margin:0;min-height:1.4em;font-size:.95rem;color:var(--muted)}.note.err{color:#c0392b}
         .muted{color:var(--muted)}
-        .foot{max-width:1120px;margin:0 auto;padding:72px 20px 40px;display:flex;flex-wrap:wrap;gap:16px 24px;justify-content:space-between;align-items:center;
+        .foot{max-width:1120px;margin:0 auto;padding:40px 20px;display:flex;flex-wrap:wrap;gap:16px 24px;justify-content:space-between;align-items:center;
           color:var(--muted);font-size:.9rem}
         .linkish{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:8px 0;color:inherit;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
         .linkish .ic{width:18px;height:18px}
         .made{color:var(--muted);text-decoration:none;font-size:.85rem}.made:hover{text-decoration:underline}
-        .lb{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center}
+        .lb{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;animation:fade .2s ease-out}
+        @keyframes fade{from{opacity:0}}
+        .btn{transition:transform .15s ease}.btn:active{transform:scale(.97)}
         .lb[hidden]{display:none}
         .lb-img{max-width:100vw;max-height:calc(100vh - 96px);object-fit:contain;touch-action:pan-y}
         .lb-btn{position:absolute;width:48px;height:48px;border-radius:50%;border:0;display:grid;place-items:center;background:rgba(255,255,255,.12);color:#fff;cursor:pointer}
@@ -355,12 +404,24 @@ public static class PortfolioPage
         .rep-pick img{width:100%;height:100%;object-fit:cover}
         fieldset{border:0;padding:0;margin:0;display:grid;gap:8px}legend{font-weight:600;font-size:.92rem;margin-bottom:6px}
         .radio{display:flex;align-items:center;gap:10px;font-weight:400;min-height:40px}.radio input{width:20px;height:20px;min-height:0}
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tile img{transition:none}}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}
+          .hero-img,.hero-in>*,.rv.in,.lb{animation:none}.js .rv:not(.in){opacity:1}
+          .tile,.tile img,.card,.design img,.btn,.show-btn,.js .slide,.js .slide.on{transition:none}
+          .tile:hover,.card:hover,.design:hover img,.tile:hover img{transform:none}}
         """;
 
     /// <summary>Viewer, slideshow buttons, enquiry and remove-request forms. Small and dependency-free.</summary>
     private const string Script = """
         (function(){
+        // First, so nothing later can leave things waiting hidden. A slow page may have dropped the class: take it back.
+        // Reveal on scroll: what comes into view together rises in one after another.
+        document.documentElement.classList.add('js');
+        var rv=[].slice.call(document.querySelectorAll('.rv'));
+        if(!('IntersectionObserver' in window)||matchMedia('(prefers-reduced-motion: reduce)').matches)rv.forEach(function(el){el.classList.add('in');});
+        else{var io=new IntersectionObserver(function(es){var k=0;es.forEach(function(e){if(!e.isIntersecting)return;
+            e.target.style.setProperty('--d',Math.min(k++,8)*60+'ms');e.target.classList.add('in');io.unobserve(e.target);});},
+            {rootMargin:'0px 0px -6% 0px',threshold:0.08});rv.forEach(function(el){io.observe(el);});}
+        window.__rv=1;
         var P=window.__pf,api='/api/portfolio/@'+encodeURIComponent(P.handle);
         var lb=document.getElementById('lb'),img=lb.querySelector('.lb-img'),cur=0,last=null;
         function show(i){cur=(i+P.photos.length)%P.photos.length;img.src=P.photos[cur].src;}
@@ -376,8 +437,18 @@ public static class PortfolioPage
         document.addEventListener('keydown',function(e){
           if(!rep.hidden){if(e.key==='Escape')close(rep);return;}
           if(lb.hidden)return;if(e.key==='Escape')close(lb);if(e.key==='ArrowLeft')show(cur-1);if(e.key==='ArrowRight')show(cur+1);});
-        document.querySelectorAll('[data-show]').forEach(function(s){var t=s.querySelector('.show-track'),p=s.querySelector('.prev'),n=s.querySelector('.next');
-          function go(d){t.scrollBy({left:d*t.clientWidth,behavior:'smooth'});}if(p)p.onclick=function(){go(-1);};if(n)n.onclick=function(){go(1);};});
+        document.querySelectorAll('[data-show]').forEach(function(s){var sl=[].slice.call(s.querySelectorAll('.slide')),p=s.querySelector('.prev'),n=s.querySelector('.next'),
+          c=s.querySelector('.show-count'),at=0;
+          // Stacked, every photo would be "in view" and load at once: only the shown one and its neighbours load.
+          sl.forEach(function(b,i){var im=b.querySelector('img');if(i>1&&!im.complete){im.dataset.src=im.getAttribute('src');im.removeAttribute('src');}});
+          function load(i){var im=sl[(i+sl.length)%sl.length].querySelector('img');if(im.dataset.src){im.src=im.dataset.src;delete im.dataset.src;}}
+          function to(i){sl[at].classList.remove('on');at=(i+sl.length)%sl.length;load(at);load(at+1);load(at-1);sl[at].classList.add('on');
+            sl.forEach(function(b,k){b.tabIndex=k===at?0:-1;b.setAttribute('aria-hidden',k===at?'false':'true');});if(c)c.textContent=(at+1)+' / '+sl.length;}
+          to(0);if(p)p.onclick=function(){to(at-1);};if(n)n.onclick=function(){to(at+1);};
+          var x0=null,y0=0;s.addEventListener('touchstart',function(e){x0=e.touches[0].clientX;y0=e.touches[0].clientY;},{passive:true});
+          s.addEventListener('touchend',function(e){if(x0===null)return;var dx=e.changedTouches[0].clientX-x0,dy=e.changedTouches[0].clientY-y0;x0=null;
+            if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){to(at+(dx<0?1:-1));s.dataset.swiped='1';setTimeout(function(){delete s.dataset.swiped;},400);}},{passive:true});
+          s.addEventListener('click',function(e){if(s.dataset.swiped){e.stopPropagation();e.preventDefault();}},true);});
         function post(url,body,note,ok,fail){note.className='note';note.textContent='Sending...';fail=fail||function(){};
           fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
             return r.json().catch(function(){return {};}).then(function(j){
@@ -414,6 +485,10 @@ public static class PortfolioPage
             function(){rf.reset();rbody.hidden=true;rdone.hidden=false;rdone.focus();},function(){rsend.disabled=false;});});
         })();
         """;
+
+    /// <summary>Runs in the head: turns the motion states on, and off again if the page script hasn't started in 2.5 s.</summary>
+    private const string HeadScript =
+        "document.documentElement.classList.add('js');setTimeout(function(){if(!window.__rv)document.documentElement.classList.remove('js');},2500);";
 
     // ---------- helpers ----------
 

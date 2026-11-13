@@ -20,12 +20,12 @@ public sealed record PortfolioDto(
     Guid? CoverPhotoId, string? CoverUrl, string Theme, string Accent, string Font, PortfolioContactDto Contact,
     bool Published, DateTimeOffset? PublishedAt, bool SetupDone, int PhotoCount, int PhotoLimit, int UnreadEnquiries,
     IReadOnlyList<PortfolioSectionDto> Sections, IReadOnlyList<PortfolioCollectionDto> Collections,
-    string? CoverImageUrl = null, string CoverSource = "none");
+    string? CoverImageUrl = null, string CoverSource = "none", string LogoPosition = "bottom-left", string LogoSize = "medium");
 
 /// <summary>PUT /api/me/portfolio. Null = unchanged; "" clears a text.</summary>
 public sealed record UpdatePortfolioRequest(
     string? DisplayName, string? Tagline, string? Theme, string? Accent, string? Font, Guid? CoverPhotoId,
-    bool? ClearCover, UpdatePortfolioContact? Contact, bool? SetupDone);
+    bool? ClearCover, UpdatePortfolioContact? Contact, bool? SetupDone, string? LogoPosition = null, string? LogoSize = null);
 
 public sealed record UpdatePortfolioContact(string? WhatsApp, string? Viber, string? Instagram, string? Phone, string? Email, bool? Enquiries);
 
@@ -82,7 +82,8 @@ public sealed record PublicCollectionDto(Guid Id, string Title, string Layout, s
 
 public sealed record PublicPortfolioDto(
     string Handle, string Url, string DisplayName, string? Tagline, string? LogoUrl, string? CoverUrl,
-    string Theme, string Accent, string Font, PortfolioContactDto Contact, IReadOnlyList<PublicPortfolioSectionDto> Sections);
+    string Theme, string Accent, string Font, PortfolioContactDto Contact, IReadOnlyList<PublicPortfolioSectionDto> Sections,
+    string LogoPosition = "bottom-left", string LogoSize = "medium");
 
 /// <summary>What the public page/endpoint finds for a handle.</summary>
 public sealed record PortfolioLookup(PublicPortfolioDto? Portfolio, string? RedirectTo);

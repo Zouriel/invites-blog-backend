@@ -660,6 +660,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Theme).HasMaxLength(32).HasDefaultValue("oxblood");
             e.Property(x => x.Accent).HasMaxLength(32).HasDefaultValue("theme");
             e.Property(x => x.Font).HasMaxLength(32).HasDefaultValue("classic");
+            e.Property(x => x.LogoPosition).HasMaxLength(16).HasDefaultValue("bottom-left");
+            e.Property(x => x.LogoSize).HasMaxLength(16).HasDefaultValue("medium");
             e.Property(x => x.WhatsApp).HasMaxLength(32);
             e.Property(x => x.Viber).HasMaxLength(32);
             e.Property(x => x.Instagram).HasMaxLength(64);

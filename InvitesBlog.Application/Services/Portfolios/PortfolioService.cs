@@ -99,6 +99,10 @@ public sealed class PortfolioService(
             p.Accent = PortfolioChoices.Accents.Any(a => a.Key == r.Accent) ? r.Accent : throw Invalid("colour");
         if (r.Font is not null)
             p.Font = PortfolioChoices.Fonts.Any(f => f.Key == r.Font) ? r.Font : throw Invalid("font");
+        if (r.LogoPosition is not null)
+            p.LogoPosition = PortfolioChoices.LogoPositions.Any(x => x.Key == r.LogoPosition) ? r.LogoPosition : throw Invalid("logo position");
+        if (r.LogoSize is not null)
+            p.LogoSize = PortfolioChoices.LogoSizes.Any(x => x.Key == r.LogoSize) ? r.LogoSize : throw Invalid("logo size");
         if (r.ClearCover == true)
         {
             p.CoverPhotoId = null;
@@ -953,7 +957,8 @@ public sealed class PortfolioService(
             new PortfolioContactDto(p.WhatsApp, p.Viber, p.Instagram, p.Phone, p.Email, p.EnquiriesOn),
             p.IsPublished, p.PublishedAt, p.SetupDone, photoRows.Count, PhotoLimit, unread, sectionDtos, cols,
             p.CoverImageUrl,
-            p.CoverImageUrl is not null ? "upload" : cover is null ? "none" : p.CoverPhotoId is { } chosen && cover.Id == chosen ? "photo" : "auto");
+            p.CoverImageUrl is not null ? "upload" : cover is null ? "none" : p.CoverPhotoId is { } chosen && cover.Id == chosen ? "photo" : "auto",
+            PortfolioChoices.LogoPosition(p.LogoPosition), PortfolioChoices.LogoSize(p.LogoSize));
     }
 }
 

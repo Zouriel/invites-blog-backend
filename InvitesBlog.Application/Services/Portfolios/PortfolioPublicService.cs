@@ -151,7 +151,8 @@ public sealed partial class PortfolioPublicService(
             }
         }
         return new PublicPortfolioDto(p.Handle!, $"{config.InviterBase()}/@{p.Handle}", p.DisplayName, p.Tagline, p.LogoUrl, coverUrl,
-            PortfolioChoices.Theme(p.Theme).Key, p.Accent, PortfolioChoices.Font(p.Font).Key, contact, list);
+            PortfolioChoices.Theme(p.Theme).Key, p.Accent, PortfolioChoices.Font(p.Font).Key, contact, list,
+            PortfolioChoices.LogoPosition(p.LogoPosition), PortfolioChoices.LogoSize(p.LogoSize));
     }
 
     // ---------- enquiries ----------
