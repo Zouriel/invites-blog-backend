@@ -26,6 +26,9 @@ public static class PushKinds
     /// <summary>Things that are about to happen to an album: photos above Free removed, face grouping ending.</summary>
     public const string Album = "album";
 
+    /// <summary>An enquiry from the studio's portfolio page.</summary>
+    public const string Enquiry = "enquiry";
+
     /// <summary>Data keys every push carries next to <c>path</c>.</summary>
     public const string KindKey = "kind";
     public const string ThreadKey = "thread";

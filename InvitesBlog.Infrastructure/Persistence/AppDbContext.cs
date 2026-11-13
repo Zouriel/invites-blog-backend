@@ -67,6 +67,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserExternalLogin> UserExternalLogins => Set<UserExternalLogin>();
     public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
     public DbSet<Favourite> Favourites => Set<Favourite>();
+    public DbSet<Portfolio> Portfolios => Set<Portfolio>();
+    public DbSet<PortfolioSection> PortfolioSections => Set<PortfolioSection>();
+    public DbSet<PortfolioCollection> PortfolioCollections => Set<PortfolioCollection>();
+    public DbSet<PortfolioPhoto> PortfolioPhotos => Set<PortfolioPhoto>();
+    public DbSet<PortfolioConsent> PortfolioConsents => Set<PortfolioConsent>();
+    public DbSet<PortfolioHandleRedirect> PortfolioHandleRedirects => Set<PortfolioHandleRedirect>();
+    public DbSet<PortfolioEnquiry> PortfolioEnquiries => Set<PortfolioEnquiry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -635,6 +642,96 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.PhotoId).HasDatabaseName("idx_favourites_photo_id");
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<EventPhoto>().WithMany().HasForeignKey(x => x.PhotoId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ----- Studio portfolio (docs/PORTFOLIO.md) -----
+        b.Entity<Portfolio>(e =>
+        {
+            e.ToTable("portfolios");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.UserId).IsUnique().HasDatabaseName("ux_portfolios_user_id");
+            // Stored lowercase, so a plain unique index is the case-insensitive rule.
+            e.HasIndex(x => x.Handle).IsUnique().HasDatabaseName("ux_portfolios_handle");
+            e.Property(x => x.Handle).HasMaxLength(30);
+            e.Property(x => x.DisplayName).HasMaxLength(80).HasDefaultValue("");
+            e.Property(x => x.Tagline).HasMaxLength(140);
+            e.Property(x => x.Theme).HasMaxLength(32).HasDefaultValue("oxblood");
+            e.Property(x => x.Accent).HasMaxLength(32).HasDefaultValue("theme");
+            e.Property(x => x.Font).HasMaxLength(32).HasDefaultValue("classic");
+            e.Property(x => x.WhatsApp).HasMaxLength(32);
+            e.Property(x => x.Viber).HasMaxLength(32);
+            e.Property(x => x.Instagram).HasMaxLength(64);
+            e.Property(x => x.Phone).HasMaxLength(32);
+            e.Property(x => x.Email).HasMaxLength(254);
+            e.Property(x => x.EnquiriesOn).HasDefaultValue(true);
+            e.Property(x => x.IsPublished).HasDefaultValue(false);
+            e.Property(x => x.SetupDone).HasDefaultValue(false);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioSection>(e =>
+        {
+            e.ToTable("portfolio_sections");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.PortfolioId, x.Position }).HasDatabaseName("idx_portfolio_sections_order");
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Position).HasDefaultValue(0);
+            e.Property(x => x.Hidden).HasDefaultValue(false);
+            e.Property(x => x.DataJson).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PortfolioCollection>().WithMany().HasForeignKey(x => x.CollectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioCollection>(e =>
+        {
+            e.ToTable("portfolio_collections");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.PortfolioId).HasDatabaseName("idx_portfolio_collections_portfolio_id");
+            e.Property(x => x.Title).HasMaxLength(80);
+            e.Property(x => x.Layout).HasMaxLength(16).HasDefaultValue("grid");
+            e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioPhoto>(e =>
+        {
+            e.ToTable("portfolio_photos");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.CollectionId, x.Position }).HasDatabaseName("idx_portfolio_photos_order");
+            e.HasIndex(x => x.PortfolioId).HasDatabaseName("idx_portfolio_photos_portfolio_id");
+            e.HasIndex(x => x.CampaignId).HasDatabaseName("idx_portfolio_photos_campaign_id");
+            e.Property(x => x.Position).HasDefaultValue(0);
+            e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PortfolioCollection>().WithMany().HasForeignKey(x => x.CollectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioConsent>(e =>
+        {
+            e.ToTable("portfolio_consents");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.CampaignId }).IsUnique().HasDatabaseName("ux_portfolio_consents_user_campaign");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Campaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioHandleRedirect>(e =>
+        {
+            e.ToTable("portfolio_handle_redirects");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Handle).IsUnique().HasDatabaseName("ux_portfolio_handle_redirects_handle");
+            e.Property(x => x.Handle).HasMaxLength(30);
+            e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PortfolioEnquiry>(e =>
+        {
+            e.ToTable("portfolio_enquiries");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.PortfolioId, x.CreatedAt }).HasDatabaseName("idx_portfolio_enquiries_portfolio_created");
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.Contact).HasMaxLength(120);
+            e.Property(x => x.EventDate).HasMaxLength(40);
+            e.Property(x => x.Message).HasMaxLength(2000);
+            e.HasOne<Portfolio>().WithMany().HasForeignKey(x => x.PortfolioId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<DeviceToken>(e =>

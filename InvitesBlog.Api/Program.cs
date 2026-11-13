@@ -30,6 +30,7 @@ builder.Services.AddHostedService<InvitesBlog.Infrastructure.Notifications.FaceN
 // Free events have no end and are never touched.
 builder.Services.AddHostedService<MediaRetentionService>();
 builder.Services.AddHostedService<PassReminderSweeper>();
+builder.Services.AddHostedService<InvitesBlog.Infrastructure.Portfolios.PortfolioRetentionService>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Photos.DirectUploadProcessor>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Video.VideoTrimService>();
 builder.Services.AddHostedService<InvitesBlog.Infrastructure.Faces.FaceIndexService>();

@@ -38,6 +38,9 @@ public enum FacesOffReason
 /// <summary>Face grouping in an album was switched off automatically and its face data deleted: the host hears why.</summary>
 public sealed record FacesSwitchedOff(Guid BucketId, FacesOffReason Reason) : PushJob((Guid?)null);
 
+/// <summary>A visitor sent an enquiry from a Studio's portfolio page: the studio hears at once.</summary>
+public sealed record PortfolioEnquiryReceived(Guid EnquiryId) : PushJob((Guid?)null);
+
 /// <summary>
 /// Hands a job to the background push worker. Never blocks, never throws, never touches the database:
 /// whatever raised the job has already happened and must not be failed or slowed by its notification.

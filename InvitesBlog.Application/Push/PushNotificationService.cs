@@ -35,7 +35,9 @@ public sealed class PushNotificationService(
     IRepository<MediaBucket> buckets,
     IUnitOfWork uow,
     IPushSender sender,
-    Moderation.IModerationViewService? moderation = null)
+    Moderation.IModerationViewService? moderation = null,
+    IRepository<PortfolioEnquiry>? portfolioEnquiries = null,
+    IRepository<Portfolio>? portfolios = null)
 {
     /// <summary>Longest stretch of a comment quoted in a notification.</summary>
     public const int QuoteLength = 80;
@@ -61,6 +63,7 @@ public sealed class PushNotificationService(
         CommentAdded j => await CommentAsync(j, ct),
         CelebrantAdded j => await CelebrantAsync(j, ct),
         FacesSwitchedOff j => await FacesOffAsync(j, ct),
+        PortfolioEnquiryReceived j => await EnquiryAsync(j, ct),
         _ => [],
     };
 
@@ -204,6 +207,18 @@ public sealed class PushNotificationService(
             .Select(id => new PushNote(id, $"Face grouping is off in {album}", body, $"/buckets/{bucket.Id}",
                 PushKinds.Album, bucket.Id.ToString(), $"faces-end-{bucket.Id:N}"))
             .ToList();
+    }
+
+    private async Task<IReadOnlyList<PushNote>> EnquiryAsync(PortfolioEnquiryReceived job, CancellationToken ct)
+    {
+        if (portfolioEnquiries is null || portfolios is null) return [];
+        var enquiry = await portfolioEnquiries.GetByIdAsync(job.EnquiryId, ct);
+        if (enquiry is null) return [];
+        var portfolio = await portfolios.GetByIdAsync(enquiry.PortfolioId, ct);
+        if (portfolio is null) return [];
+        var body = enquiry.Message.Length > QuoteLength ? enquiry.Message[..QuoteLength].TrimEnd() + "..." : enquiry.Message;
+        return [new PushNote(portfolio.UserId, $"New enquiry from {enquiry.Name}", body, "/portfolio/enquiries",
+            PushKinds.Enquiry, "portfolio", $"enquiry-{enquiry.Id:N}")];
     }
 
     /// <summary>What a notification calls an album: its event's title, else its own name.</summary>

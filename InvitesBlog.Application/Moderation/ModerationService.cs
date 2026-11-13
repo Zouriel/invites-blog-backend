@@ -77,7 +77,10 @@ public sealed class ModerationService(
     IMediaBucketService buckets,
     IEventPhotoService photoService,
     IReportMailService mail,
-    IUnitOfWork uow) : IModerationService
+    IUnitOfWork uow,
+    IRepository<PortfolioPhoto>? portfolioPhotos = null,
+    IRepository<Portfolio>? portfolios = null,
+    IStorageService? storage = null) : IModerationService
 {
     public static readonly string[] Reasons = ["abusive", "hateful", "sexual", "violent", "spam", "other"];
 
@@ -349,6 +352,21 @@ public sealed class ModerationService(
             case ContentReportKinds.Photo:
                 await photoService.RemoveForModerationAsync(report.TargetId, ct);
                 break;
+            case Services.Portfolios.PortfolioReportKinds.Photo when portfolioPhotos is not null:
+                // "Ask to remove a photo" on a Studio portfolio: the copy and its files go; the studio's event album is untouched.
+                var copy = await portfolioPhotos.Query(tracking: true).FirstOrDefaultAsync(x => x.Id == report.TargetId, ct);
+                if (copy is not null)
+                {
+                    portfolioPhotos.Remove(copy);
+                    foreach (var url in new[] { copy.Url, copy.ThumbUrl })
+                        if (storage?.KeyFor(url) is { } key) await storage.DeleteAsync(key, ct);
+                }
+                break;
+            case Services.Portfolios.PortfolioReportKinds.Page when portfolios is not null:
+                // A complaint about the page as a whole: it is taken offline until the studio publishes it again.
+                var page = await portfolios.Query(tracking: true).FirstOrDefaultAsync(x => x.Id == report.TargetId, ct);
+                if (page is not null) page.IsPublished = false;
+                break;
             case ContentReportKinds.User:
                 // A person's name or picture: the picture goes and the name is reset. They can choose
                 // new ones, which the next report would catch.
@@ -378,7 +396,7 @@ public sealed class ModerationService(
 
     private async Task<IReadOnlyList<AdminContentReportDto>> ToDtosAsync(IReadOnlyList<ContentReport> rows, CancellationToken ct)
     {
-        var userIds = rows.Select(r => r.ReporterUserId)
+        var userIds = rows.Select(r => r.ReporterUserId).OfType<Guid>()
             .Concat(rows.Select(r => r.SubjectUserId).OfType<Guid>())
             .Concat(rows.Where(r => r.Kind == ContentReportKinds.User).Select(r => r.TargetId))
             .Distinct().ToList();
@@ -407,6 +425,16 @@ public sealed class ModerationService(
             .Select(p => new { p.Id, p.ThumbUrl, p.DeletedAt })
             .ToDictionaryAsync(p => p.Id, ct);
 
+        var portfolioPhotoIds = rows.Where(r => r.Kind == Services.Portfolios.PortfolioReportKinds.Photo).Select(r => r.TargetId).ToList();
+        var portfolioPhotoRows = portfolioPhotos is null || portfolioPhotoIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await portfolioPhotos.Query().Where(p => portfolioPhotoIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.ThumbUrl, ct);
+        var pageIds = rows.Where(r => r.Kind == Services.Portfolios.PortfolioReportKinds.Page).Select(r => r.TargetId).ToList();
+        var pageRows = portfolios is null || pageIds.Count == 0
+            ? new Dictionary<Guid, (string? Handle, bool Published)>()
+            : (await portfolios.Query().Where(p => pageIds.Contains(p.Id)).Select(p => new { p.Id, p.Handle, p.IsPublished }).ToListAsync(ct))
+                .ToDictionary(p => p.Id, p => (Handle: p.Handle, Published: p.IsPublished));
+
         var targets = rows.Select(r => r.TargetId).Distinct().ToList();
         var counts = (await reports.Query()
                 .Where(r => targets.Contains(r.TargetId))
@@ -417,7 +445,7 @@ public sealed class ModerationService(
 
         return rows.Select(r =>
         {
-            people.TryGetValue(r.ReporterUserId, out var reporter);
+            var reporter = r.ReporterUserId is { } rid && people.TryGetValue(rid, out var rp) ? rp : null;
             var subjectId = r.SubjectUserId;
             var subject = subjectId is { } s && people.TryGetValue(s, out var p) ? p : null;
             string? text = null, image = null;
@@ -436,6 +464,15 @@ public sealed class ModerationService(
                     if (photoRows.TryGetValue(r.TargetId, out var ph)) { image = ph.ThumbUrl; gone = ph.DeletedAt is not null; }
                     else gone = true;
                     break;
+                case Services.Portfolios.PortfolioReportKinds.Photo:
+                    text = r.Snapshot;
+                    if (portfolioPhotoRows.TryGetValue(r.TargetId, out var thumb)) image = thumb;
+                    else gone = true;
+                    break;
+                case Services.Portfolios.PortfolioReportKinds.Page:
+                    if (pageRows.TryGetValue(r.TargetId, out var pg)) { text = $"@{pg.Handle}"; gone = !pg.Published; }
+                    else gone = true;
+                    break;
                 case ContentReportKinds.User:
                     if (people.TryGetValue(r.TargetId, out var u)) { text = u.DisplayName; image = u.AvatarUrl; }
                     else gone = true;
@@ -445,7 +482,7 @@ public sealed class ModerationService(
             return new AdminContentReportDto(
                 r.Id, r.Kind, r.TargetId, r.CampaignId, title, r.Reason, r.Note, r.Snapshot,
                 r.Status.ToString(), r.Resolution, r.ResolutionNote, r.CreatedAt, r.ResolvedAt,
-                reporter?.DisplayName ?? "(deleted account)", reporter?.Email ?? reporter?.PhoneE164,
+                reporter?.DisplayName ?? (r.ReporterUserId is null ? "Visitor (no account)" : "(deleted account)"), reporter?.Email ?? reporter?.PhoneE164,
                 subjectId, subject?.DisplayName, subject?.Email ?? subject?.PhoneE164, subject?.IsActive ?? false,
                 text, image, gone, counts.GetValueOrDefault((r.Kind, r.TargetId)));
         }).ToList();
@@ -456,6 +493,8 @@ public sealed class ModerationService(
         ContentReportKinds.Post => "an event's post",
         ContentReportKinds.Comment => "a comment",
         ContentReportKinds.Photo => "a photo or video",
+        Services.Portfolios.PortfolioReportKinds.Photo => "a portfolio photo",
+        Services.Portfolios.PortfolioReportKinds.Page => "a portfolio",
         _ => "a person",
     };
 

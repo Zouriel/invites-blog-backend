@@ -14,8 +14,11 @@ public sealed class ContentReport
 {
     public Guid Id { get; set; }
 
-    /// <summary>Always a signed-in account: anonymous reports would be a way to hide nothing and flood the queue.</summary>
-    public Guid ReporterUserId { get; set; }
+    /// <summary>
+    /// The signed-in account that reported it. Null only for a visitor's "Ask to remove a photo" on a Studio portfolio
+    /// (no account needed there: the person in the photo may have none); those are rate limited by address instead.
+    /// </summary>
+    public Guid? ReporterUserId { get; set; }
 
     /// <summary>post | comment | photo | user. See <c>ContentReportKinds</c>.</summary>
     public string Kind { get; set; } = default!;
