@@ -233,6 +233,24 @@ public sealed class PortfolioPublicController(IPortfolioPublicService pages, ICo
         return Content(PortfolioPage.Render(p, nonce, site, isPreview), "text/html; charset=utf-8");
     }
 
+    /// <summary>
+    /// The published portfolios for search engines (robots.txt lists it next to the site's own sitemap.xml, which is
+    /// written at build time and can't know them). Caddy sends invites.blog/sitemap-portfolios.xml here.
+    /// </summary>
+    [HttpGet("/sitemap-portfolios.xml")]
+    public async Task<IActionResult> Sitemap(CancellationToken ct)
+    {
+        var site = config.InviterBase().TrimEnd('/');
+        var list = await pages.PublishedAsync(ct);
+        var urls = string.Join("\n", list.Select(e =>
+            $"  <url><loc>{System.Security.SecurityElement.Escape($"{site}/@{e.Handle}")}</loc><lastmod>{e.UpdatedAt.UtcDateTime:yyyy-MM-dd}</lastmod></url>"));
+        Response.Headers.CacheControl = "public, max-age=3600";
+        return Content(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n"
+            + urls + (list.Count > 0 ? "\n" : "") + "</urlset>\n",
+            "application/xml; charset=utf-8");
+    }
+
     [HttpGet("/api/portfolio/options")]
     public IActionResult Options()
     {

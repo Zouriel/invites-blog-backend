@@ -75,6 +75,17 @@ public sealed class PhotographerPlanTests(PostgresApiFixture api)
         var page = await api.Client().GetAsync($"/@{handle}");
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         Assert.Contains("Lens Photographer", await page.Content.ReadAsStringAsync());
+        // Listed for search engines while it is open; an unpublished one isn't.
+        var other = await UserAsync(SubscriptionTier.Venue, DateTimeOffset.UtcNow.AddDays(20), "Draft Studio");
+        var draftHandle = $"draft{Guid.NewGuid():N}"[..16];
+        await DataAsync(await api.Client(other.Token).GetAsync("/api/me/portfolio"));
+        await DataAsync(await api.Client(other.Token).PutAsJsonAsync("/api/me/portfolio/handle", new { handle = draftHandle }));
+        var map = await api.Client().GetAsync("/sitemap-portfolios.xml");
+        Assert.Equal("application/xml", map.Content.Headers.ContentType?.MediaType);
+        var xml = await map.Content.ReadAsStringAsync();
+        System.Xml.Linq.XDocument.Parse(xml);
+        Assert.Contains($"/@{handle}</loc>", xml);
+        Assert.DoesNotContain(draftHandle, xml);
 
         // Lapsed: the controls refuse and the page is unavailable (kept 90 days, as for Studio).
         await api.WriteAsync(db => db.Users.Where(u => u.Id == who.Id)
@@ -86,6 +97,7 @@ public sealed class PhotographerPlanTests(PostgresApiFixture api)
         Application.Services.Portfolios.PortfolioPublicService.ClearCache();
         Assert.Equal(HttpStatusCode.NotFound, (await api.Client().GetAsync($"/api/portfolio/@{handle}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await api.Client().GetAsync($"/@{handle}")).StatusCode);
+        Assert.DoesNotContain(handle, await api.Client().GetStringAsync("/sitemap-portfolios.xml"));
     }
 
     [PostgresFact]

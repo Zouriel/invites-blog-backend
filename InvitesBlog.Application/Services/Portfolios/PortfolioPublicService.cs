@@ -28,7 +28,16 @@ public interface IPortfolioPublicService
 
     Task<PortfolioOkDto> EnquireAsync(string? handle, PortfolioEnquiryRequest request, CancellationToken ct = default);
     Task<PortfolioOkDto> ReportAsync(string? handle, PortfolioReportRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every portfolio a visitor can open now (published, with a handle, its owner active and on Studio or Photographer),
+    /// for the search engines' sitemap: handle and when it last changed.
+    /// </summary>
+    Task<IReadOnlyList<PortfolioSitemapEntry>> PublishedAsync(CancellationToken ct = default);
 }
+
+/// <summary>One public portfolio in the sitemap.</summary>
+public sealed record PortfolioSitemapEntry(string Handle, DateTimeOffset UpdatedAt);
 
 public static class PortfolioReportKinds
 {
@@ -59,6 +68,22 @@ public sealed partial class PortfolioPublicService(
     public static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(45);
 
     private static readonly ConcurrentDictionary<string, (DateTimeOffset At, PortfolioLookup Value)> Cache = new();
+
+    public async Task<IReadOnlyList<PortfolioSitemapEntry>> PublishedAsync(CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var rows = await portfolios.Query()
+            .Where(p => p.IsPublished && p.Handle != null)
+            .Join(users.Query(), p => p.UserId, u => u.Id, (p, u) => new { p.Handle, p.UpdatedAt, User = u })
+            .Where(x => x.User.IsActive
+                        && (x.User.SubscriptionTier == SubscriptionTier.Venue || x.User.SubscriptionTier == SubscriptionTier.Photographer))
+            .ToListAsync(ct);
+        // The same test the page itself makes (StudioActive), so the sitemap never lists a page that says "not available".
+        return rows.Where(x => AddOns.StudioActive(x.User, now))
+            .Select(x => new PortfolioSitemapEntry(x.Handle!, x.UpdatedAt))
+            .OrderBy(x => x.Handle, StringComparer.Ordinal)
+            .ToList();
+    }
 
     /// <summary>Drops every cached answer (tests; a studio's own edits simply wait out <see cref="CacheFor"/>).</summary>
     public static void ClearCache() => Cache.Clear();
