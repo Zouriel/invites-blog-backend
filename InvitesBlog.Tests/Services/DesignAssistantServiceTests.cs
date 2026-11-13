@@ -142,7 +142,7 @@ public class DesignAssistantServiceTests
         Assert.Equal("photographer", chat.Status.Reason);
         var e = await Assert.ThrowsAsync<ForbiddenException>(() => Sut().SendAsync(_design, Say("hi")));
         Assert.Equal("assistant_premium_only", e.ErrorCode);
-        Assert.Contains("Photographer", e.Message);
+        Assert.Equal("The AI designer comes with Studio.", e.Message);
         Assert.Empty(_model.Requests);
     }
 

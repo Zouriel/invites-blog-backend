@@ -238,7 +238,7 @@ public sealed partial class DesignAssistantService(
         {
             "premium" => new ForbiddenException("The AI designer comes with Studio, or as an add-on to Premium.", "assistant_premium_only"),
             "addon" => new ForbiddenException("The AI designer is an add-on to Premium. Add it from Billing.", "assistant_premium_only"),
-            "photographer" => new ForbiddenException("The AI designer isn't part of Photographer. It comes with Studio.", "assistant_premium_only"),
+            "photographer" => new ForbiddenException("The AI designer comes with Studio.", "assistant_premium_only"),
             "allowance" => new BusinessRuleException(StopNote(status), "assistant_allowance_used"),
             _ => new InvalidStateException("The design assistant isn't available right now.", "assistant_unavailable"),
         };
