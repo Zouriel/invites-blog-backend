@@ -2473,6 +2473,14 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("events")
+                        .HasColumnName("kind");
+
                     b.Property<string>("Layout")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

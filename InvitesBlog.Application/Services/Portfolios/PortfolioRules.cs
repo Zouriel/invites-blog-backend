@@ -91,7 +91,8 @@ public sealed record PortfolioOptionsDto(
     IReadOnlyList<PortfolioNamedChoice> Layouts,
     IReadOnlyList<PortfolioSectionKindChoice> SectionKinds,
     IReadOnlyList<PortfolioNamedChoice> LogoPositions,
-    IReadOnlyList<PortfolioNamedChoice> LogoSizes);
+    IReadOnlyList<PortfolioNamedChoice> LogoSizes,
+    IReadOnlyList<PortfolioNamedChoice>? CollectionKinds = null);
 
 /// <summary>
 /// The look, as named choices (plain-defaults rule: no colour codes to type). Theme colours are the UI library's
@@ -157,7 +158,11 @@ public static class PortfolioChoices
     public static readonly IReadOnlyList<PortfolioNamedChoice> LogoSizes =
         [new("small", "Small"), new("medium", "Medium"), new("large", "Large")];
 
-    public static readonly PortfolioOptionsDto Options = new(Themes, Accents, Fonts, Layouts, SectionKinds, LogoPositions, LogoSizes);
+    /// <summary>What a collection holds, chosen when it is made (PortfolioCollectionKinds).</summary>
+    public static readonly IReadOnlyList<PortfolioNamedChoice> CollectionKinds =
+        [new(PortfolioCollectionKinds.Uploads, "Upload your work"), new(PortfolioCollectionKinds.Events, "Pick from an event")];
+
+    public static readonly PortfolioOptionsDto Options = new(Themes, Accents, Fonts, Layouts, SectionKinds, LogoPositions, LogoSizes, CollectionKinds);
 
     public static string LogoPosition(string? key) => LogoPositions.FirstOrDefault(x => x.Key == key)?.Key ?? LogoPositions[0].Key;
     public static string LogoSize(string? key) => LogoSizes.FirstOrDefault(x => x.Key == key)?.Key ?? "medium";
@@ -168,6 +173,18 @@ public static class PortfolioChoices
     /// <summary>The colour buttons and links use: the chosen accent, or the theme's own.</summary>
     public static string AccentColour(string? theme, string? accent) =>
         Accents.FirstOrDefault(a => a.Key == accent)?.Color ?? Theme(theme).Accent;
+}
+
+/// <summary>
+/// What a collection holds, fixed when it is made (owner, 2026-11-13): picks copied from the studio's event albums
+/// (with the per-event consent), or pictures uploaded straight into it (past work that was never on invites.blog).
+/// </summary>
+public static class PortfolioCollectionKinds
+{
+    public const string Events = "events";
+    public const string Uploads = "uploads";
+
+    public static bool IsKnown(string? kind) => kind is Events or Uploads;
 }
 
 public static class PortfolioSectionKinds

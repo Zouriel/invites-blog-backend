@@ -8,7 +8,9 @@ public sealed record PortfolioReviewDto(string Quote, string? Name);
 
 public sealed record PortfolioPhotoDto(Guid Id, string Url, string ThumbUrl, int Width, int Height, Guid? CampaignId, Guid? SourcePhotoId);
 
-public sealed record PortfolioCollectionDto(Guid Id, string Title, string Layout, Guid? CoverPhotoId, string? CoverUrl, IReadOnlyList<PortfolioPhotoDto> Photos);
+/// <param name="Kind">events (picks from event albums) | uploads (uploaded straight into it). Fixed when made.</param>
+public sealed record PortfolioCollectionDto(Guid Id, string Title, string Layout, Guid? CoverPhotoId, string? CoverUrl, IReadOnlyList<PortfolioPhotoDto> Photos,
+    string Kind = PortfolioCollectionKinds.Events);
 
 public sealed record PortfolioSectionDto(
     Guid Id, string Kind, bool Hidden, bool Locked, Guid? CollectionId,
@@ -42,7 +44,11 @@ public sealed record OrderRequest(IReadOnlyList<Guid>? Ids);
 
 public sealed record PhotoOrderRequest(IReadOnlyList<Guid>? PhotoIds);
 
-public sealed record CollectionRequest(string? Title, string? Layout, Guid? CoverPhotoId, bool? ClearCover);
+/// <param name="Kind">Only read when the collection is made (events | uploads, default events); never changes after.</param>
+public sealed record CollectionRequest(string? Title, string? Layout, Guid? CoverPhotoId, bool? ClearCover, string? Kind = null);
+
+/// <summary>POST /api/me/portfolio/collections/{id}/photos: one uploaded picture, stored.</summary>
+public sealed record UploadPortfolioPhotoResultDto(PortfolioPhotoDto Photo, int PhotoCount, int PhotoLimit, int PhotosLeft, PortfolioDto Portfolio);
 
 public sealed record AddPortfolioPhotosRequest(IReadOnlyList<Guid>? PhotoIds, Guid? CollectionId, string? NewCollectionTitle);
 
@@ -78,7 +84,8 @@ public sealed record PublicPortfolioSectionDto(
     PublicCollectionDto? Collection, IReadOnlyList<PortfolioDesignDto>? Designs,
     IReadOnlyList<PortfolioPackageDto>? Packages, IReadOnlyList<PortfolioReviewDto>? Reviews);
 
-public sealed record PublicCollectionDto(Guid Id, string Title, string Layout, string? CoverUrl, IReadOnlyList<PortfolioPhotoDto> Photos);
+public sealed record PublicCollectionDto(Guid Id, string Title, string Layout, string? CoverUrl, IReadOnlyList<PortfolioPhotoDto> Photos,
+    string Kind = PortfolioCollectionKinds.Events);
 
 public sealed record PublicPortfolioDto(
     string Handle, string Url, string DisplayName, string? Tagline, string? LogoUrl, string? CoverUrl,
