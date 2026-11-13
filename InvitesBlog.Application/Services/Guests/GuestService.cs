@@ -122,6 +122,14 @@ public sealed class GuestService(
     {
         var campaign = await EnsureCampaignAsync(campaignId, ct);
 
+        // "Send now" after the event's photo window has ended would email a new invitation link, which is no
+        // longer made then. The WHOLE request is refused (409 window_closed) before anything is written, so a
+        // client never sees an error for a guest that was in fact added and retries into a duplicate; adding the
+        // same guest without SendNow still works (being on the list is what lets them see the album).
+        if (req.SendNow == true && windows is not null
+            && campaign.Status is CampaignStatus.Dispatched or CampaignStatus.PartiallyDispatched)
+            await windows.EnsureNotClosedAsync(campaignId, ct);
+
         var phone = string.IsNullOrWhiteSpace(req.Phone)
             ? null
             : await UsablePhoneAsync(req.Phone, req.PhoneCountry ?? req.DefaultCountry, ct);

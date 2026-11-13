@@ -42,6 +42,12 @@ public sealed class WindowAndPreviewTests(PostgresApiFixture api)
         await AssertClosedAsync(await client.PostAsync($"/api/campaigns/{ev}/guests/{guest}/resend", null));
         await AssertClosedAsync(await client.PostAsync($"/api/campaigns/{ev}/finalize", null));
 
+        // Adding a guest with Send now is refused whole (nothing added); without it the guest is added, nothing sent.
+        await AssertClosedAsync(await client.PostAsJsonAsync($"/api/campaigns/{ev}/guests", new { name = "Late", phone = "+9607779999", sendNow = true }));
+        Assert.Equal(0, await api.ReadAsync(db => db.Guests.CountAsync(g => g.CampaignId == ev && g.Name == "Late")));
+        Assert.True((await client.PostAsJsonAsync($"/api/campaigns/{ev}/guests", new { name = "Late", phone = "+9607779999", sendNow = false })).IsSuccessStatusCode);
+        Assert.Equal(1, await api.ReadAsync(db => db.Guests.CountAsync(g => g.CampaignId == ev && g.Name == "Late")));
+
         // Nothing was made by the refusals.
         Assert.Equal(0, await api.ReadAsync(db => db.MediaBucketQrs.CountAsync(q => q.BucketId == bucket)));
         Assert.Equal(0, await api.ReadAsync(db => db.DeliveryAttempts.CountAsync(a => db.Invites.Any(i => i.Id == a.InviteId && i.CampaignId == ev))));
@@ -72,6 +78,7 @@ public sealed class WindowAndPreviewTests(PostgresApiFixture api)
         Assert.True((await client.PostAsJsonAsync($"/api/media-buckets/{bucket}/qr", new { label = (string?)null, allowAnonymous = true })).IsSuccessStatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/campaigns/{ev}/open-link", new { allowAnonymous = false })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/campaigns/{ev}/guests/{guest}/manual-send", new { channel = "viber" })).StatusCode);
+        Assert.True((await client.PostAsJsonAsync($"/api/campaigns/{ev}/guests", new { name = "Early", phone = "+9607778888", sendNow = true })).IsSuccessStatusCode);
         var dash = await DataAsync(await client.GetAsync($"/api/me/campaigns/{ev}/dashboard"));
         Assert.False(dash.GetProperty("campaign").GetProperty("photoWindowClosed").GetBoolean());
 
