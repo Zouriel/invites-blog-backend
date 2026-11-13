@@ -115,7 +115,14 @@ public static class PlanCatalog
     /// <summary>Another year of a pass, without invitations: half the pass.</summary>
     public const decimal GoldExtension = 99m;
     public const decimal PlatinumExtension = 349m;
-    public const decimal PremiumMonthly = 200m;
+    /// <summary>Premium a month (owner, 2026-11-13: 77, was 200; the AI designer became an add-on).</summary>
+    public const decimal PremiumMonthly = 77m;
+
+    /// <summary>The AI designer add-on to Premium, a month (owner, 2026-11-13). Studio has it included.</summary>
+    public const decimal DesignerAiMonthly = 77m;
+
+    /// <summary>How many photos anyone may download or share at once without "Download all" (pricing 2026-11).</summary>
+    public const int DownloadLimit = DownloadRules.Limit;
 
     /// <summary>A Studio account (tier Venue), a month (owner, 2026-11-12: about $50).</summary>
     public const decimal VenueMonthly = 775m;
@@ -145,26 +152,32 @@ public static class PlanCatalog
             [
                 // Kept for good: no retention days.
                 new PlanDto("Free", "Free", 0m, "every event",
-                    FreeEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, true),
+                    FreeEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, true,
+                    Perks: PlanPerks.For(PlanKind.Free)),
                 new PlanDto("GoldPass", "Gold pass", p.GoldPass, "per event",
                     GoldEventBytes, GoldBuckets, GoldWindowDays, 365, GoldIncludedInvites, false, false,
-                    ExtensionPrice: p.GoldExtension),
+                    ExtensionPrice: p.GoldExtension, Perks: PlanPerks.For(PlanKind.GoldPass)),
                 new PlanDto("PlatinumPass", "Platinum pass", p.PlatinumPass, "per event",
                     PlatinumEventBytes, PlatinumBuckets, PlatinumWindowDays, 365, PlatinumIncludedInvites, true, false,
-                    ExtensionPrice: p.PlatinumExtension),
-                // Every event its subscriber organises, kept while it lasts (no retention days).
-                new PlanDto("Premium", "Premium pass", p.PremiumMonthly, "per month",
-                    PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
+                    ExtensionPrice: p.PlatinumExtension, Perks: PlanPerks.For(PlanKind.PlatinumPass)),
+                // Every event its subscriber organises, kept while it lasts (no retention days). The AI designer
+                // is an add-on (AddOns below), not one of its perks.
+                new PlanDto("Premium", "Premium", p.PremiumMonthly, "per month",
+                    PremiumEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
+                    Perks: PlanPerks.For(PlanKind.Premium)),
                 // Every event its subscriber organises, kept while it lasts (no retention days), like Premium with 10 GB.
                 // Shown as "Studio" (owner, 2026-11-12); the kind stays "Venue" for shipped apps and stored data.
                 new PlanDto("Venue", "Studio", p.VenueMonthly, "per month",
-                    VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false),
+                    VenueEventBytes, FreeBuckets, FreeWindowDays, null, 0, false, false,
+                    Perks: PlanPerks.For(PlanKind.Venue)),
             ],
             new KeepPhotosDto(p.KeepPhotosYearly, KeepPhotosMonths),
             new SendingPriceDto(p.SendingPerBlock, PricingCalculator.BlockSize),
             new LapseDto(ReminderDay, OrganiserOnlyDay, FinalNoticeDay, DeleteDay),
             // The venue discount is gone: always 0, whatever an old saved price list says.
-            VenuePassDiscountPercent);
+            VenuePassDiscountPercent,
+            AddOns.Describe(p),
+            DownloadLimit);
     }
 }
 
@@ -176,10 +189,12 @@ public static class PlanCatalog
 /// <param name="PrivateAlbums">Whether an album can be closed to some guests.</param>
 /// <param name="Branded">Whether the invitation and album carry a small "Made with invites.blog".</param>
 /// <param name="From">The price is the smallest; larger ones are quoted.</param>
+/// <param name="Perks">The card's bullets, written here so the website and both apps show the same list (<see cref="PlanPerks"/>).</param>
 public sealed record PlanDto(
     string Kind, string Name, decimal Price, string Billing,
     long? EventBytes, int? MaxBuckets, int? MaxWindowDays, int? RetentionDays,
-    int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false, decimal? ExtensionPrice = null);
+    int IncludedInvites, bool PrivateAlbums, bool Branded, bool From = false, decimal? ExtensionPrice = null,
+    IReadOnlyList<string>? Perks = null);
 
 /// <summary>"Keep your photos": how much a year, and how many months each one adds.</summary>
 public sealed record KeepPhotosDto(decimal Price, int Months);
@@ -189,9 +204,12 @@ public sealed record SendingPriceDto(decimal PerBlock, int BlockSize);
 
 public sealed record LapseDto(int ReminderDay, int OrganiserOnlyDay, int FinalNoticeDay, int DeleteDay);
 
+/// <param name="AddOns">What can be added to a plan (today the AI designer, to Premium).</param>
+/// <param name="DownloadLimit">How many photos may be downloaded or shared at once without "Download all".</param>
 public sealed record PlanCatalogDto(
     string Currency, decimal MvrPerUsd, IReadOnlyList<PlanDto> Plans, KeepPhotosDto KeepPhotos,
-    SendingPriceDto Sending, LapseDto Lapse, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent);
+    SendingPriceDto Sending, LapseDto Lapse, int VenueDiscountPercent = PlanCatalog.VenuePassDiscountPercent,
+    IReadOnlyList<AddOnDto>? AddOns = null, int DownloadLimit = DownloadRules.Limit);
 
 /// <summary>What one event may do right now, and how long it is covered for.</summary>
 /// <param name="AccountBytes">No longer set by any plan (it was a venue's space across its events); always null.</param>

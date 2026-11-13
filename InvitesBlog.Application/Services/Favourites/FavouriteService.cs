@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Plans;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Abstractions.Persistence;
 using InvitesBlog.Application.Dtos.Favourites;
@@ -43,7 +44,8 @@ public sealed class FavouriteService(
     IEventPhotoService albums,
     IInviteService invites,
     ICurrentUser currentUser,
-    IUnitOfWork uow) : IFavouriteService
+    IUnitOfWork uow,
+    ICampaignRepository? campaigns = null) : IFavouriteService
 {
     public const int MaxPageSize = 200;
 
@@ -105,8 +107,22 @@ public sealed class FavouriteService(
         var chosen = (await VisibleAsync(ct)).Where(f => wanted is null || wanted.Contains(f.Id)).ToList();
         if (chosen.Count == 0)
             throw new BusinessRuleException("There are no favourites to download.", "no_photos");
+        // Up to ten at a time; all of them, or more, with the account's own Premium or Studio, or when every one
+        // chosen is in an event with a Gold or Platinum pass in force (each of those may be downloaded whole).
+        if (!DownloadRules.WithinLimit(ids) && !await MayDownloadAllAsync(chosen, ct))
+            throw DownloadRules.Refusal();
         return new PhotoArchive(Guid.Empty, "favourites.zip",
             chosen.OrderBy(f => f.CreatedAt).Select(f => f.Id).ToList(), chosen.Sum(f => f.SizeBytes));
+    }
+
+    private async Task<bool> MayDownloadAllAsync(IReadOnlyList<FavouriteDto> chosen, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (DownloadRules.AccountAllows(await users.GetByIdAsync(Me, ct), now)) return true;
+        if (campaigns is null || chosen.Any(f => f.CampaignId is null)) return false;
+        var ids = chosen.Select(f => f.CampaignId!.Value).Distinct().ToList();
+        var events = await campaigns.Query().Where(c => ids.Contains(c.Id)).ToListAsync(ct);
+        return events.Count == ids.Count && events.All(c => DownloadRules.EventAllows(c, now));
     }
 
     /// <summary>Every favourite the caller can still see, newest heart first. Each album's door is asked once.</summary>

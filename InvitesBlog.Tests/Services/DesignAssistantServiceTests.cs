@@ -1,3 +1,4 @@
+using InvitesBlog.Application.Plans;
 using System.Text.Json;
 using InvitesBlog.Application.Abstractions;
 using InvitesBlog.Application.Exceptions;
@@ -34,7 +35,9 @@ public class DesignAssistantServiceTests
     {
         _currentUser.UserId.Returns(_me);
         _currentUser.IsAuthenticated.Returns(true);
-        _db.Users.Add(new AppUser { Id = _me, Email = "maker@example.com", DisplayName = "Maker", IsActive = true, SubscriptionTier = SubscriptionTier.Premium });
+        _db.Users.Add(new AppUser { Id = _me, Email = "maker@example.com", DisplayName = "Maker", IsActive = true, SubscriptionTier = SubscriptionTier.Premium,
+            // Premium with the AI designer add-on (pricing 2026-11): Premium alone no longer includes it.
+            AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = null, Renews = true, Source = "bml" }] });
         _db.TemplateDesigns.Add(new TemplateDesign { Id = _design, OwnerUserId = _me, Name = "Mine", SceneJson = "{}", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
         _db.SaveChanges();
     }
@@ -86,6 +89,35 @@ public class DesignAssistantServiceTests
     {
         SetTier(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-1));
         Assert.Equal("premium", (await Sut().GetAsync(_design)).Status.Reason);
+    }
+
+    [Fact]
+    public async Task Premium_without_the_ai_designer_add_on_is_told_to_add_it_and_nothing_reaches_claude()
+    {
+        var user = _db.Users.Single(u => u.Id == _me);
+        user.AddOns = [];
+        _db.SaveChanges();
+
+        var chat = await Sut().GetAsync(_design);
+        Assert.False(chat.Status.Allowed);
+        Assert.Equal("addon", chat.Status.Reason);
+        var e = await Assert.ThrowsAsync<ForbiddenException>(() => Sut().SendAsync(_design, Say("hi")));
+        Assert.Equal("assistant_premium_only", e.ErrorCode);
+        Assert.Empty(_model.Requests);
+    }
+
+    [Fact]
+    public async Task An_ai_designer_add_on_past_its_end_no_longer_counts_and_one_still_paid_does()
+    {
+        var user = _db.Users.Single(u => u.Id == _me);
+        user.SubscriptionEndsAt = DateTimeOffset.UtcNow.AddDays(20);
+        user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = DateTimeOffset.UtcNow.AddMinutes(-1), Source = "carried-over" }];
+        _db.SaveChanges();
+        Assert.Equal("addon", (await Sut().GetAsync(_design)).Status.Reason);
+
+        user.AddOns = [new AccountAddOn { Key = AddOns.DesignerAi, EndsAt = DateTimeOffset.UtcNow.AddDays(3), Source = "carried-over" }];
+        _db.SaveChanges();
+        Assert.True((await Sut().GetAsync(_design)).Status.Allowed);
     }
 
     [Fact]

@@ -738,10 +738,10 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     [PostgresFact]
     public async Task Premium_and_Venue_are_offered_only_to_an_account_without_a_plan()
     {
-        Assert.Equal(["premium_monthly", "venue_monthly"], await OffersAsync(await UserAsync()));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await OffersAsync(await UserAsync()));
         Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(3))));
         Assert.Empty(await OffersAsync(await UserAsync(SubscriptionTier.Venue, DateTimeOffset.UtcNow.AddDays(3))));
-        Assert.Equal(["premium_monthly", "venue_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], await OffersAsync(await UserAsync(SubscriptionTier.Premium, DateTimeOffset.UtcNow.AddDays(-3))));
     }
 
     /// <summary>Owner, 2026-11-12: the people an event is for may buy its passes, not its invitations.</summary>
@@ -892,6 +892,92 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
         version = "1.0", packageName = GooglePlayStub.Package, eventTimeMillis = "1",
         subscriptionNotification = new { version = "1.0", notificationType = type, purchaseToken = token },
     };
+
+    // ----- The AI designer add-on (pricing 2026-11) ---------------------------------------------
+
+    private Task<AccountAddOn?> AiAsync(Guid id) =>
+        api.ReadAsync(async db => (await db.Users.AsNoTracking().FirstAsync(u => u.Id == id)).AddOns.FirstOrDefault(a => a.Key == "designer-ai"));
+
+    /// <summary>A replacement: Play's new token for the other product, linked to the one it replaces.</summary>
+    private string Replacing(string old, Guid account, DateTimeOffset expiry, string product)
+    {
+        var token = Subscribed(account, expiry, product: product);
+        ((Dictionary<string, object?>)api.Google.Subscriptions[token])["linkedPurchaseToken"] = old;
+        return token;
+    }
+
+    private static DateTimeOffset Ms(DateTimeOffset t) => DateTimeOffset.FromUnixTimeMilliseconds(t.ToUnixTimeMilliseconds());
+
+    [PostgresFact]
+    public async Task Adding_the_ai_designer_replaces_premium_and_the_replaced_token_ending_does_not_end_premium()
+    {
+        var user = await UserAsync();
+        var end = DateTimeOffset.UtcNow.AddDays(20);
+        var premium = Subscribed(user.Id, end);
+        await RedeemAsync(user, "premium_monthly", premium);
+        Assert.Equal(["premium_ai_monthly"], await OffersAsync(user));
+
+        // Play charges the difference now and keeps the billing date.
+        var withAi = Replacing(premium, user.Id, end, "premium_ai_monthly");
+        Assert.Equal(HttpStatusCode.OK, (await RedeemAsync(user, "premium_ai_monthly", withAi)).Status);
+        var ai = await AiAsync(user.Id);
+        Assert.Equal(Ms(end), ai!.EndsAt);
+        Assert.True(ai.Renews);
+        Assert.Equal("google_play", ai.Source);
+
+        // The old token ends at once, replaced. Premium (and the add-on) carry on under the new one.
+        UpdateSub(premium, user.Id, DateTimeOffset.UtcNow.AddMinutes(-1), "SUBSCRIPTION_STATE_EXPIRED", "GPA.old-order-0000000000000");
+        Assert.True((await NotifyAsync(SubscriptionNote(premium, 13))).IsSuccessStatusCode);
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Premium, u.SubscriptionTier);
+        Assert.Equal(Ms(end), u.SubscriptionEndsAt);
+        Assert.True((await AiAsync(user.Id))!.EndsAt > DateTimeOffset.UtcNow);
+        Assert.Equal([PaymentKind.PremiumMonthly, PaymentKind.PremiumAiMonthly], (await PaymentsAsync(user.Id)).Select(p => p.Kind));
+        Assert.Equal(["premium_monthly"], await OffersAsync(user));
+    }
+
+    [PostgresFact]
+    public async Task Turning_the_ai_designer_off_on_play_lets_it_end_with_the_paid_month_while_premium_goes_on()
+    {
+        var user = await UserAsync();
+        var end = DateTimeOffset.UtcNow.AddDays(1);
+        const string order = "GPA.ai-first-0000000000000";
+        var withAi = Subscribed(user.Id, end, order: order, product: "premium_ai_monthly");
+        await RedeemAsync(user, "premium_ai_monthly", withAi);
+        Assert.True((await AiAsync(user.Id))!.Renews);
+
+        // Cancelled in Play (or a deferred replacement waiting): it no longer renews, still on until the end.
+        UpdateSub(withAi, user.Id, end, "SUBSCRIPTION_STATE_CANCELED", order, autoRenew: false, product: "premium_ai_monthly");
+        Assert.True((await NotifyAsync(SubscriptionNote(withAi, 3))).IsSuccessStatusCode);
+        Assert.False((await AiAsync(user.Id))!.Renews);
+
+        // At the renewal date the replacement as plain Premium starts, and the AI token ends.
+        var next = DateTimeOffset.UtcNow.AddDays(31);
+        var premium = Replacing(withAi, user.Id, next, "premium_monthly");
+        Assert.True((await NotifyAsync(SubscriptionNote(premium, 4))).IsSuccessStatusCode);
+        UpdateSub(withAi, user.Id, DateTimeOffset.UtcNow.AddMinutes(-1), "SUBSCRIPTION_STATE_EXPIRED", "GPA.ai-order-00000000000000",
+            autoRenew: false, product: "premium_ai_monthly");
+        Assert.True((await NotifyAsync(SubscriptionNote(withAi, 13))).IsSuccessStatusCode);
+
+        var u = await AccountAsync(user.Id);
+        Assert.Equal(SubscriptionTier.Premium, u.SubscriptionTier);
+        Assert.Equal(Ms(next), u.SubscriptionEndsAt);
+        var ai = await AiAsync(user.Id);
+        Assert.True(ai!.EndsAt <= DateTimeOffset.UtcNow);
+        Assert.False(ai.Renews);
+    }
+
+    [PostgresFact]
+    public async Task A_lone_premium_token_that_ends_still_ends_premium()
+    {
+        // The replacement check must not keep a plan alive that nothing replaced.
+        var user = await UserAsync();
+        var premium = Subscribed(user.Id, DateTimeOffset.UtcNow.AddDays(5));
+        await RedeemAsync(user, "premium_monthly", premium);
+        UpdateSub(premium, user.Id, DateTimeOffset.UtcNow.AddMinutes(-1), "SUBSCRIPTION_STATE_EXPIRED", "GPA.lone-order-000000000000");
+        Assert.True((await NotifyAsync(SubscriptionNote(premium, 13))).IsSuccessStatusCode);
+        Assert.True((await AccountAsync(user.Id)).SubscriptionEndsAt <= DateTimeOffset.UtcNow);
+    }
 
     [PostgresFact]
     public async Task A_renewal_notification_adds_one_paid_period_however_often_it_arrives()
@@ -1280,16 +1366,17 @@ public sealed class GooglePlayPurchaseTests(PostgresApiFixture api)
     [Fact]
     public void Every_product_is_a_billing_item_and_studio_is_sold_on_both_stores()
     {
-        Assert.Equal(8, GooglePlayCatalog.All.Count);
+        Assert.Equal(9, GooglePlayCatalog.All.Count);
         foreach (var p in GooglePlayCatalog.All)
             Assert.NotEqual("other", BillingService.ItemName(p.Kind));
         Assert.DoesNotContain(GooglePlayCatalog.All, p => p.Kind is PaymentKind.StudioYearly or PaymentKind.StudioGoldCredits or PaymentKind.StudioPlatinumCredits);
-        Assert.Equal(["premium_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], GooglePlayCatalog.All.Where(p => p.IsSubscription).Select(p => p.Id));
+        Assert.Equal(PaymentKind.PremiumAiMonthly, GooglePlayCatalog.Find("premium_ai_monthly")!.Kind);
         Assert.Equal(PaymentKind.VenueMonthly, GooglePlayCatalog.Find("venue_monthly")!.Kind);
         // On the iPhone too (owner, 2026-11-12), in Premium's subscription group.
         Assert.Equal(PaymentKind.VenueMonthly, AppStoreCatalog.Find("venue_monthly")!.Kind);
-        Assert.Equal(8, AppStoreCatalog.All.Count);
-        Assert.Equal(["premium_monthly", "venue_monthly"], AppStoreCatalog.Subscriptions);
+        Assert.Equal(9, AppStoreCatalog.All.Count);
+        Assert.Equal(["premium_monthly", "premium_ai_monthly", "venue_monthly"], AppStoreCatalog.Subscriptions);
     }
 
     // ----- Account deletion ----------------------------------------------------------------------

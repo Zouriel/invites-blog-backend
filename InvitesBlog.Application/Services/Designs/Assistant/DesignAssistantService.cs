@@ -236,7 +236,8 @@ public sealed partial class DesignAssistantService(
         if (status.Allowed) return;
         throw status.Reason switch
         {
-            "premium" => new ForbiddenException("The design assistant comes with Premium.", "assistant_premium_only"),
+            "premium" => new ForbiddenException("The AI designer comes with Studio, or as an add-on to Premium.", "assistant_premium_only"),
+            "addon" => new ForbiddenException("The AI designer is an add-on to Premium. Add it from Billing.", "assistant_premium_only"),
             "allowance" => new BusinessRuleException(StopNote(status), "assistant_allowance_used"),
             _ => new InvalidStateException("The design assistant isn't available right now.", "assistant_unavailable"),
         };
@@ -252,7 +253,9 @@ public sealed partial class DesignAssistantService(
         var usedUsd = Math.Round(used / 1_000_000m, 2);
 
         string? reason = null;
-        if (!await EligibleAsync(me, now, ct)) reason = "premium";
+        var eligible = await EligibleAsync(me, now, ct);
+        // "addon": on Premium without the AI designer add-on (pricing 2026-11); "premium": no plan that can have it.
+        if (eligible is not null) reason = eligible;
         else if (!model.Configured) reason = "unavailable";
         // The owner has no allowance; their use is still recorded.
         else if (!Options.IsOwner(me) && used >= (long)(Options.MonthlyAllowanceUsd * 1_000_000m)) reason = "allowance";
@@ -261,13 +264,16 @@ public sealed partial class DesignAssistantService(
         return new AssistantStatusDto(reason is null, reason, usedUsd, allowance, resets);
     }
 
-    /// <summary>Premium or Studio (Venue) in force, or an admin (who supports both).</summary>
-    private async Task<bool> EligibleAsync(Guid me, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// Null when the account may use it: Studio (Venue) in force, Premium with the AI designer add-on in force
+    /// (owner, 2026-11-13), or an admin. Otherwise why not: "addon" (Premium without the add-on) or "premium".
+    /// </summary>
+    private async Task<string?> EligibleAsync(Guid me, DateTimeOffset now, CancellationToken ct)
     {
-        if (currentUser.HasPermission(Permissions.Templates.Manage)) return true;
+        if (currentUser.HasPermission(Permissions.Templates.Manage)) return null;
         var user = await users.GetByIdAsync(me, ct);
-        return user is { SubscriptionTier: SubscriptionTier.Premium or SubscriptionTier.Venue }
-            && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
+        if (user is not null && AddOns.HasDesignerAi(user, now)) return null;
+        return user is not null && AddOns.PremiumActive(user, now) ? "addon" : "premium";
     }
 
     private static string StopNote(AssistantStatusDto status) => status.Reason == "allowance"

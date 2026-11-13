@@ -82,10 +82,14 @@ public sealed class AppStorePurchaseService(
             // group (Apple moves the same subscription up to Studio at once, or down to Premium at renewal).
             // A plan from anywhere else: nothing here (the website or Play renews it).
             if (!hasPlan) return new AppStoreOffersDto(true, [.. AppStoreCatalog.Subscriptions]);
-            var current = AppStoreCatalog.SubscriptionFor(user.SubscriptionTier);
-            var throughApple = current is not null && await db.AppStorePurchases.AsNoTracking().AnyAsync(p =>
-                p.UserId == me && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null
-                && p.ExpiresAt > now && p.ProductId == current, ct);
+            // Which product of the group the account's Apple subscription is on now (Premium with or without the
+            // AI designer, or Studio): the others are the moves Apple can make within the group.
+            var current = await db.AppStorePurchases.AsNoTracking()
+                .Where(p => p.UserId == me && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
+                .OrderByDescending(p => p.ExpiresAt)
+                .Select(p => p.ProductId)
+                .FirstOrDefaultAsync(ct);
+            var throughApple = current is not null && AppStoreCatalog.Subscriptions.Contains(current);
             return new AppStoreOffersDto(true, throughApple ? AppStoreCatalog.Subscriptions.Where(p => p != current).ToList() : []);
         }
 
@@ -339,14 +343,27 @@ public sealed class AppStorePurchaseService(
                 else if (user.SubscriptionEndsAt is { } ends && ends == row.ExpiresAt && ends != expiry)
                 {
                     user.SubscriptionEndsAt = expiry;   // moved by Apple (grace period, extension)
+                    if (product.Kind == PaymentKind.PremiumAiMonthly && AddOns.Find(user, AddOns.DesignerAi) is { EndsAt: { } aiEnds } && aiEnds == ends)
+                        AddOns.Set(user, AddOns.DesignerAi, expiry, AddOns.Find(user, AddOns.DesignerAi)!.Renews, AddOns.Sources.AppStore);
                 }
+                // With the AI designer: it renews while Apple will renew this subscription AS premium_ai_monthly. Turning
+                // it off is a downgrade, which Apple shows as the next product until the renewal applies it.
+                if (product.Kind == PaymentKind.PremiumAiMonthly && AddOns.Find(user, AddOns.DesignerAi) is not null)
+                    AddOns.SetRenews(user, AddOns.DesignerAi, status.Renewal is { AutoRenew: true } r
+                        && (r.AutoRenewProductId ?? product.Id) == product.Id);
             }
-            else if (row.ExpiresAt is { } mine && user.SubscriptionEndsAt == mine)
+            else
             {
-                // Expired, in billing retry, or revoked: what this subscription gave stops. A plan that came
-                // from somewhere else has a different date and stays.
-                user.SubscriptionEndsAt = expiry is { } e && e < now ? e : now;
-                logger.LogInformation("App Store subscription {PurchaseId} no longer covers its account ({Status}).", row.Id, status.Status);
+                var end = expiry is { } e && e < now ? e : now;
+                // The whole subscription has stopped: the AI designer it carried stops with it.
+                if (product.Kind == PaymentKind.PremiumAiMonthly) AddOns.EndBy(user, AddOns.DesignerAi, end);
+                if (row.ExpiresAt is { } mine && user.SubscriptionEndsAt == mine)
+                {
+                    // Expired, in billing retry, or revoked: what this subscription gave stops. A plan that came
+                    // from somewhere else has a different date and stays.
+                    user.SubscriptionEndsAt = end;
+                    logger.LogInformation("App Store subscription {PurchaseId} no longer covers its account ({Status}).", row.Id, status.Status);
+                }
             }
 
             row.ExpiresAt = expiry ?? row.ExpiresAt;

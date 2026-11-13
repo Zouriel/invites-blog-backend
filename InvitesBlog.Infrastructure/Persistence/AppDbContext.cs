@@ -611,6 +611,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.PushMuted).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.GuidanceTipsOff).HasDefaultValue(false);
             e.Property(x => x.GuidanceSeen).HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
+            // Add-ons (pricing 2026-11) as one jsonb list; "[]" for every account that has none.
+            e.Property(x => x.AddOns).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb")
+                .HasConversion(AddOnsJson.Converter, AddOnsJson.Comparer);
         });
 
         b.Entity<UserExternalLogin>(e =>

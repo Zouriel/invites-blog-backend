@@ -89,6 +89,12 @@ public sealed class AppUser
     public bool AiPicturesAllowed { get; set; }
 
     /// <summary>
+    /// Add-ons on the account's plan (pricing 2026-11): today only "designer-ai" on Premium. A list so a later
+    /// add-on (vector generation) needs no new columns. Stored as one jsonb column, "[]" when none.
+    /// </summary>
+    public List<AccountAddOn> AddOns { get; set; } = [];
+
+    /// <summary>
     /// Kinds of phone notification this account turned off in the app (Settings › Notifications): the mute
     /// groups in <c>PushKinds.Mutable</c>. Every push sender honours it, for every device of the account.
     /// </summary>

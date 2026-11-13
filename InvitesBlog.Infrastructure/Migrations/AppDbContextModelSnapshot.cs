@@ -208,6 +208,13 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AddOns")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("add_ons")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.Property<bool>("AiPicturesAllowed")
                         .HasColumnType("boolean")
                         .HasColumnName("ai_pictures_allowed");

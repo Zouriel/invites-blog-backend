@@ -216,7 +216,8 @@ public sealed class AdminService(
         u.UserRoles.Select(ur => ur.Role?.Name).OfType<string>().OrderBy(n => n).ToList(),
         u.SubscriptionTier.ToString(),
         u.SubscriptionEndsAt,
-        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow));
+        PlanRules.IsActive(u.SubscriptionTier, u.SubscriptionEndsAt, DateTimeOffset.UtcNow),
+        AddOns.HasDesignerAi(u, DateTimeOffset.UtcNow));
 
     /// <summary>
     /// Sets an account's plan by hand: Premium (2 GB events, kept while it lasts), or Venue for a
@@ -254,13 +255,18 @@ public sealed class AdminService(
             user.SubscriptionTier = tier;
             user.SubscriptionEndsAt = req.EndsAt;
         }
+        // The AI designer add-on, given or taken by hand (Premium only; Studio has it included).
+        if (req.DesignerAi == true && tier == SubscriptionTier.Premium)
+            AddOns.Set(user, AddOns.DesignerAi, req.EndsAt, false, AddOns.Sources.Admin);
+        else if (req.DesignerAi == false)
+            AddOns.EndBy(user, AddOns.DesignerAi, now);
 
         await auditLogs.AddAsync(new AuditLog
         {
             Id = Guid.NewGuid(),
             Action = "admin.subscription.set",
             Actor = currentUser.UserId?.ToString() ?? "admin",
-            DataJson = JsonSerializer.Serialize(new { user = user.Id, tier = tier.ToString(), endsAt = user.SubscriptionEndsAt }),
+            DataJson = JsonSerializer.Serialize(new { user = user.Id, tier = tier.ToString(), endsAt = user.SubscriptionEndsAt, designerAi = req.DesignerAi }),
             CreatedAt = now,
         }, ct);
 

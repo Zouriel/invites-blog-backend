@@ -28,6 +28,16 @@ public sealed class BillingController(IBillingService billing) : BaseApiControll
     [HasPermission(Permissions.Campaigns.Read)]
     public async Task<IActionResult> StopAutoRenew(CancellationToken ct) => Success(await billing.StopAutoRenewAsync(ct));
 
+    /// <summary>The AI designer stops renewing with Premium: on until the paid month ends, then Premium renews alone.</summary>
+    [HttpPost("designer-ai-off")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> DesignerAiOff(CancellationToken ct) => Success(await billing.SetDesignerAiRenewalAsync(false, ct));
+
+    /// <summary>The AI designer renews with Premium again (only while it is still on; otherwise buy designer-ai-add).</summary>
+    [HttpPost("designer-ai-on")]
+    [HasPermission(Permissions.Campaigns.Read)]
+    public async Task<IActionResult> DesignerAiOn(CancellationToken ct) => Success(await billing.SetDesignerAiRenewalAsync(true, ct));
+
     /// <summary>What an item would cost and what it is: the review step shown before paying.</summary>
     [HttpPost("quote")]
     [HasPermission(Permissions.Campaigns.Read)]

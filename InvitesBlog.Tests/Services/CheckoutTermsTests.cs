@@ -60,7 +60,7 @@ public class CheckoutTermsTests
 
         Assert.True(quote.Available);
         Assert.Equal("premium-monthly", quote.Item);
-        Assert.Equal("Premium pass, a month", quote.Description);
+        Assert.Equal("Premium, a month", quote.Description);
         Assert.Equal(Prices.Defaults.PremiumMonthly, quote.Amount);
         Assert.Equal("MVR", quote.Currency);
         Assert.Equal(LegalTerms.Version, quote.TermsVersion);
@@ -142,7 +142,7 @@ public class CheckoutTermsTests
         Assert.True(payment.AutoRenew);
         Assert.Equal("cus_7", _user.PaymentCustomerId);
         await _provider.Received(1).CreateCheckoutSessionAsync(Arg.Is<CreateCheckoutSessionRequest>(r =>
-            r.SaveCard && r.CustomerId == "cus_7" && r.PaymentId == payment.Id && r.Description == "Premium pass, a month"),
+            r.SaveCard && r.CustomerId == "cus_7" && r.PaymentId == payment.Id && r.Description == "Premium, a month"),
             Arg.Any<CancellationToken>());
     }
 

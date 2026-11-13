@@ -67,10 +67,19 @@ public sealed class GooglePlayPurchaseService(
         if (eventId is not { } id)
         {
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == me, ct);
-            var hasPlan = user is not null && PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
+            if (user is null) return new GooglePlayOffersDto(true, [], account, null);
+            var hasPlan = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now)
                           && user.SubscriptionTier != SubscriptionTier.None;
-            // Premium or Studio (Venue), while the account has none (the App Store sells both too).
-            return new GooglePlayOffersDto(true, user is null || hasPlan ? [] : ["premium_monthly", "venue_monthly"], account, null);
+            // Premium (with or without the AI designer) or Studio (Venue), while the account has none.
+            if (!hasPlan) return new GooglePlayOffersDto(true, ["premium_monthly", "premium_ai_monthly", "venue_monthly"], account, null);
+            // Premium held through Play: the AI designer on or off, by replacing the subscription (pricing 2026-11).
+            var current = await CurrentSubscriptionAsync(me, now, ct);
+            return new GooglePlayOffersDto(true, current switch
+            {
+                "premium_monthly" => ["premium_ai_monthly"],
+                "premium_ai_monthly" => ["premium_monthly"],
+                _ => [],
+            }, account, null);
         }
 
         var campaign = await db.Campaigns.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -79,6 +88,14 @@ public sealed class GooglePlayPurchaseService(
             return new GooglePlayOffersDto(true, [], account, Ids.Of(id));
         return new GooglePlayOffersDto(true, EventProducts(campaign, access, now), account, Ids.Of(id));
     }
+
+    /// <summary>The product of the account's Play subscription in force, if its plan runs on one.</summary>
+    private Task<string?> CurrentSubscriptionAsync(Guid userId, DateTimeOffset now, CancellationToken ct) =>
+        db.GooglePlayPurchases.AsNoTracking()
+            .Where(p => p.UserId == userId && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now)
+            .OrderByDescending(p => p.ExpiresAt)
+            .Select(p => p.ProductId)
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>
     /// What a store sells for one event to someone with this access to it. Every buyer pays the same
@@ -335,15 +352,28 @@ public sealed class GooglePlayPurchaseService(
                 else if (user.SubscriptionEndsAt is { } ends && ends == row.ExpiresAt && ends != line.ExpiryTime)
                 {
                     user.SubscriptionEndsAt = line.ExpiryTime;   // moved by Google (deferred, grace period)
+                    if (product.Kind == PaymentKind.PremiumAiMonthly && AddOns.Find(user, AddOns.DesignerAi) is { EndsAt: { } aiEnds } && aiEnds == ends)
+                        AddOns.Set(user, AddOns.DesignerAi, line.ExpiryTime, line.AutoRenewEnabled, AddOns.Sources.GooglePlay);
                 }
+                // With the AI designer: it renews with this subscription while this one renews (turning it off is a
+                // replacement by premium_monthly, which Play applies at the renewal: a new token, a new period).
+                if (product.Kind == PaymentKind.PremiumAiMonthly && AddOns.Find(user, AddOns.DesignerAi) is not null)
+                    AddOns.SetRenews(user, AddOns.DesignerAi, line.AutoRenewEnabled);
             }
-            else if (row.ExpiresAt is { } mine && user.SubscriptionEndsAt == mine)
+            else
             {
-                // On hold, paused, ended or revoked: what this subscription gave stops. A plan that came
-                // from somewhere else (an admin, time paid another way) has a different date and stays.
                 var end = line.ExpiryTime is { } e && e < now ? e : now;
-                user.SubscriptionEndsAt = end;
-                logger.LogInformation("Google Play subscription {PurchaseId} no longer covers its account ({State}).", row.Id, g.State);
+                // Replaced (the AI designer switched on or off) or ended: the add-on this one carried stops with it.
+                if (product.Kind == PaymentKind.PremiumAiMonthly) AddOns.EndBy(user, AddOns.DesignerAi, end);
+                // On hold, paused, ended or revoked: what this subscription gave stops. A plan that came from
+                // somewhere else (an admin, time paid another way) has a different date and stays, and so does one
+                // carried on by the subscription that replaced this one.
+                if (row.ExpiresAt is { } mine && user.SubscriptionEndsAt == mine
+                    && !await ReplacedByLiveAsync(account, token, now, ct))
+                {
+                    user.SubscriptionEndsAt = end;
+                    logger.LogInformation("Google Play subscription {PurchaseId} no longer covers its account ({State}).", row.Id, g.State);
+                }
             }
 
             row.ExpiresAt = line.ExpiryTime ?? row.ExpiresAt;
@@ -357,6 +387,12 @@ public sealed class GooglePlayPurchaseService(
         if (row.SettledAt is null && row.FulfilledAt is not null) await SettleSubscriptionAsync(row, g.Acknowledged, ct);
         return new GooglePlayResultDto(Applied, product.Id, null, row.IsTest);
     }
+
+    /// <summary>Another of the account's Play subscriptions is in force (the one that replaced this token).</summary>
+    private Task<bool> ReplacedByLiveAsync(Guid account, string token, DateTimeOffset now, CancellationToken ct) =>
+        db.GooglePlayPurchases.AsNoTracking().AnyAsync(p => p.UserId == account && p.PurchaseToken != token
+            && p.CampaignId == null && p.FulfilledAt != null && p.VoidedAt == null && p.ExpiresAt > now
+            && (p.SubscriptionState == null || Entitled.Contains(p.SubscriptionState)), ct);
 
     private async Task SettleSubscriptionAsync(GooglePlayPurchase row, bool alreadyAcknowledged, CancellationToken ct)
     {

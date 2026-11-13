@@ -85,6 +85,10 @@ public enum PaymentKind
     GoldExtension,
     PlatinumExtension,
     VenueMonthly,
+    /// <summary>Premium with the AI designer add-on, a month (pricing 2026-11: 77 + 77).</summary>
+    PremiumAiMonthly,
+    /// <summary>The AI designer added to a running Premium for the rest of its paid month (prorated).</summary>
+    DesignerAiAdd,
 }
 
 public enum PaymentStatus

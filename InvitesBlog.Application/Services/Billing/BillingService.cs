@@ -19,7 +19,7 @@ namespace InvitesBlog.Application.Services.Billing;
 public sealed record BillingPricesDto(
     decimal GoldPass, decimal PlatinumPass, decimal KeepPhotos, decimal SendingPerBlock, int SendingBlockSize,
     decimal PremiumMonthly, int VenueDiscountPercent,
-    decimal GoldExtension, decimal PlatinumExtension, decimal VenueMonthly)
+    decimal GoldExtension, decimal PlatinumExtension, decimal VenueMonthly, decimal DesignerAiMonthly = PlanCatalog.DesignerAiMonthly)
 {
     // The same prices under their names before the rename, read by web tabs still open from before
     // that deploy. Nothing current reads them; remove them a release later.
@@ -35,8 +35,10 @@ public sealed record BillingPricesDto(
 /// <param name="Store">"google_play" or "app_store" when the plan runs on a store subscription: it is managed in the
 /// store, and our own "turn off automatic renewal" doesn't reach it.</param>
 /// <param name="StoreAutoRenew">That subscription will renew by itself.</param>
+/// <param name="AddOns">The plan's add-ons (the AI designer), one row per known add-on (<see cref="Plans.AddOns.ForAccount"/>).</param>
+/// <param name="CanDownloadAll">The account itself may download or share any number of photos at once (Premium or Studio).</param>
 public sealed record BillingAccountDto(string Tier, DateTimeOffset? EndsAt, bool Active, string? AutoRenew = null,
-    string? Store = null, bool StoreAutoRenew = false);
+    string? Store = null, bool StoreAutoRenew = false, IReadOnlyList<AccountAddOnDto>? AddOns = null, bool CanDownloadAll = false);
 
 /// <summary>Where one payment stands, for the page the buyer lands on after the gateway.</summary>
 /// <param name="Status">Pending, Paid or Failed.</param>
@@ -81,7 +83,8 @@ public sealed record BillingOverviewDto(
     IReadOnlyList<BillingEventDto> ForYou);
 
 /// <param name="Item">gold-pass, platinum-pass, gold-extension, platinum-extension, keep-photos, sending,
-/// premium-monthly or venue-monthly.</param>
+/// premium-monthly, premium-ai-monthly (Premium with the AI designer), designer-ai-add (the AI designer added to a
+/// running Premium for the rest of its month) or venue-monthly.</param>
 /// <param name="Quantity">Blocks of emails. 1 for the rest.</param>
 /// <param name="ReturnPath">A path on this site to come back to after paying (the plan step); the billing page by default.</param>
 /// <param name="AcceptedTerms">The buyer ticked "I agree" on the review step. Required to pay.</param>
@@ -99,9 +102,14 @@ public sealed record CheckoutRequest(
 /// <param name="Amount">The price, in <paramref name="Currency"/> (rufiyaa).</param>
 /// <param name="ChargeAmount">What the card is charged, in <paramref name="ChargeCurrency"/>: the same as
 /// the price in production; in dollars where the gateway account only takes dollars (<see cref="ChargeCurrency"/>).</param>
+/// <param name="RenewsAmount">What renews by itself each month after this (rufiyaa), for a plan or an add-on to one
+/// that renews; null when nothing renews.</param>
+/// <param name="RenewsItem">What that renewal is: premium-monthly, premium-ai-monthly or venue-monthly.</param>
+/// <param name="PeriodEndsAt">For designer-ai-add: the end of the paid month it covers.</param>
 public sealed record CheckoutQuoteDto(
     bool Available, string Item, string Description, decimal Amount, string Currency, decimal MvrPerUsd,
-    string TermsVersion, string? Message, string? InquireTopic, decimal ChargeAmount, string ChargeCurrency);
+    string TermsVersion, string? Message, string? InquireTopic, decimal ChargeAmount, string ChargeCurrency,
+    decimal? RenewsAmount = null, string? RenewsItem = null, DateTimeOffset? PeriodEndsAt = null);
 
 /// <summary>
 /// Where to pay, or — while online payment isn't switched on — that it isn't yet, and which
@@ -127,6 +135,12 @@ public interface IBillingService
 
     /// <summary>Stops the account's plan renewing by itself. It runs to the end of what's paid.</summary>
     Task<BillingAccountDto> StopAutoRenewAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether the AI designer add-on is part of the next card renewal (designer-ai-on / designer-ai-off). Off: it
+    /// stays until the paid month ends and Premium renews alone. On: only while it is still in force.
+    /// </summary>
+    Task<BillingAccountDto> SetDesignerAiRenewalAsync(bool renew, CancellationToken ct = default);
 
     /// <summary>Applies what a paid payment bought, once. Called after the gateway confirms payment.</summary>
     Task FulfilAsync(Guid paymentId, CancellationToken ct = default);
@@ -204,7 +218,7 @@ public sealed class BillingService(
             new BillingPricesDto(p.GoldPass, p.PlatinumPass, p.KeepPhotosYearly, p.SendingPerBlock, PricingCalculator.BlockSize,
                 // The venue discount is gone: 0 whatever a saved price list holds.
                 p.PremiumMonthly, PlanCatalog.VenuePassDiscountPercent,
-                p.GoldExtension, p.PlatinumExtension, p.VenueMonthly),
+                p.GoldExtension, p.PlatinumExtension, p.VenueMonthly, p.DesignerAiMonthly),
             await AccountWithStoreAsync(user, now, ct),
             events,
             history.Select(x => new BillingPaymentDto(x.Id, ItemName(x.Kind), x.Description ?? ItemName(x.Kind),
@@ -291,16 +305,31 @@ public sealed class BillingService(
         var priced = await PriceAsync(me, req, ct);
         var p = await priceBook.CurrentAsync(ct);
         var (charge, chargeCurrency) = ChargeCurrency.For(config, priced.Amount, p.MvrPerUsd);
+        var (renewsItem, renewsAmount) = Renewal(priced, p);
         return new CheckoutQuoteDto(Enabled, ItemName(priced.Kind), priced.Description, priced.Amount, PlanCatalog.Currency,
-            p.MvrPerUsd, LegalTerms.Version, Enabled ? null : NotYetMessage, InquireTopic(priced.Kind), charge, chargeCurrency);
+            p.MvrPerUsd, LegalTerms.Version, Enabled ? null : NotYetMessage, InquireTopic(priced.Kind), charge, chargeCurrency,
+            renewsAmount, renewsItem is { } k ? ItemName(k) : null,
+            priced.Kind == PaymentKind.DesignerAiAdd ? priced.Account?.SubscriptionEndsAt : null);
     }
+
+    /// <summary>What renews each month after buying this, and for how much: the review step says it.</summary>
+    private static (PaymentKind? Kind, decimal? Amount) Renewal(Priced priced, Prices p) => priced.Kind switch
+    {
+        PaymentKind.PremiumMonthly => (PaymentKind.PremiumMonthly, p.PremiumMonthly),
+        PaymentKind.PremiumAiMonthly => (PaymentKind.PremiumAiMonthly, p.PremiumMonthly + p.DesignerAiMonthly),
+        PaymentKind.VenueMonthly => (PaymentKind.VenueMonthly, p.VenueMonthly),
+        // Added to a Premium that renews by card: the renewal carries it from then on.
+        PaymentKind.DesignerAiAdd when priced.Account is { AutoRenewKind: not null, SubscriptionEndsAt: not null } =>
+            (PaymentKind.PremiumAiMonthly, p.PremiumMonthly + p.DesignerAiMonthly),
+        _ => (null, null),
+    };
 
     private const string NotYetMessage = "Online payment is being set up. Ask us and we'll add it for you.";
 
     public async Task<CheckoutResultDto> CheckoutAsync(CheckoutRequest req, CancellationToken ct = default)
     {
         var me = RequireUser();
-        var (kind, quantity, campaign, price, description) = await PriceAsync(me, req, ct);
+        var (kind, quantity, campaign, price, description, _) = await PriceAsync(me, req, ct);
         var now = DateTimeOffset.UtcNow;
         // What the card is charged, which is what the payment records and the gateway must confirm.
         var (amount, currency) = ChargeCurrency.For(config, price, (await priceBook.CurrentAsync(ct)).MvrPerUsd);
@@ -378,7 +407,7 @@ public sealed class BillingService(
         return new CheckoutResultDto(true, session.CheckoutUrl, null, null, payment.Id);
     }
 
-    private sealed record Priced(PaymentKind Kind, int Quantity, Campaign? Campaign, decimal Amount, string Description);
+    private sealed record Priced(PaymentKind Kind, int Quantity, Campaign? Campaign, decimal Amount, string Description, AppUser? Account = null);
 
     /// <summary>
     /// What an item is and costs for this buyer, after every check that decides whether they may buy it.
@@ -393,6 +422,7 @@ public sealed class BillingService(
         var quantity = kind == PaymentKind.Sending ? Math.Clamp(req.Quantity ?? 1, 1, 50) : 1;
 
         Campaign? campaign = null;
+        AppUser? account = null;
         if (IsEventItem(kind))
         {
             if (req.CampaignId is not { } id) throw new BusinessRuleException("Choose which event it's for.", "billing_event_required");
@@ -405,9 +435,10 @@ public sealed class BillingService(
         }
         else
         {
-            var user = await users.Query().FirstOrDefaultAsync(u => u.Id == me, ct)
+            account = await users.Query().FirstOrDefaultAsync(u => u.Id == me, ct)
                        ?? throw new NotFoundException("That account no longer exists.");
-            EnsureAccountCanHave(kind, user, now);
+            EnsureAccountCanHave(kind, account, now);
+            await EnsureCardCanHaveAsync(kind, account, now, ct);
         }
 
         var offer = campaign is null ? null : await offers.ForCampaignAsync(campaign.Id, ct);
@@ -420,12 +451,34 @@ public sealed class BillingService(
             PaymentKind.KeepPhotos => p.KeepPhotosYearly,
             PaymentKind.Sending => p.SendingPerBlock * quantity,
             PaymentKind.PremiumMonthly => p.PremiumMonthly,
+            PaymentKind.PremiumAiMonthly => p.PremiumMonthly + p.DesignerAiMonthly,
+            PaymentKind.DesignerAiAdd => AddOns.ProratedDesignerAi(p, account!.SubscriptionEndsAt, now),
             PaymentKind.VenueMonthly => p.VenueMonthly,
             _ => throw new BusinessRuleException("That can't be bought here.", "billing_item_unknown"),
         };
         var description = Describe(kind, quantity, campaign);
 
-        return new Priced(kind, quantity, campaign, amount, description);
+        return new Priced(kind, quantity, campaign, amount, description, account);
+    }
+
+    /// <summary>
+    /// What only the website's card checkout refuses (a store sells the same things its own way): Premium with the
+    /// AI designer bought on top of a running Premium (that is the prorated add-on), and the add-on itself unless
+    /// the account is on a Premium the card renews, without it yet.
+    /// </summary>
+    private async Task EnsureCardCanHaveAsync(PaymentKind kind, AppUser user, DateTimeOffset now, CancellationToken ct)
+    {
+        if (kind == PaymentKind.PremiumAiMonthly && AddOns.PremiumActive(user, now) && !AddOns.DesignerAiActive(user, now))
+            throw new CodedRuleException("You're on Premium already: add the AI designer from Billing.", "designer_ai_use_add");
+        if (kind != PaymentKind.DesignerAiAdd) return;
+        if (AddOns.StudioActive(user, now))
+            throw new CodedRuleException("Studio has the AI designer included.", "designer_ai_included");
+        if (!AddOns.PremiumActive(user, now))
+            throw new CodedRuleException("The AI designer is an add-on to Premium. Get Premium with it.", "designer_ai_needs_premium");
+        if (AddOns.DesignerAiActive(user, now))
+            throw new CodedRuleException("The AI designer is already on.", "designer_ai_already_on");
+        if (await StoreOfAsync(user, now, ct) is not null)
+            throw new CodedRuleException("Your Premium is billed by the app store. Add the AI designer in the app.", "designer_ai_store");
     }
 
     /// <summary>
@@ -457,7 +510,8 @@ public sealed class BillingService(
     public static void EnsureAccountCanHave(PaymentKind kind, AppUser user, DateTimeOffset now)
     {
         var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
-        if (kind == PaymentKind.PremiumMonthly && active && user.SubscriptionTier == SubscriptionTier.Venue)
+        if (kind is PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly
+            && active && user.SubscriptionTier == SubscriptionTier.Venue)
             throw new BusinessRuleException("This account is on Studio. Talk to us about changing it.", "billing_venue_account");
         if (kind == PaymentKind.VenueMonthly && active && user.SubscriptionTier == SubscriptionTier.Premium)
             throw new BusinessRuleException("This account is on Premium. Talk to us about changing it.", "billing_premium_account");
@@ -498,7 +552,19 @@ public sealed class BillingService(
                 if (campaign is null) break;
                 campaign.PaidInviteCapacity += payment.Quantity * PricingCalculator.BlockSize;
                 break;
+            case PaymentKind.DesignerAiAdd:
+            {
+                if (payment.UserId is not { } adder) break;
+                var account = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == adder, ct);
+                if (account is null) break;
+                // For the rest of the paid month (a month when Premium has no end), and with every card renewal
+                // after it while Premium renews by card.
+                var renewsByCard = account.AutoRenewKind is not null && account.SubscriptionEndsAt is not null;
+                AddOns.Set(account, AddOns.DesignerAi, account.SubscriptionEndsAt ?? now.AddMonths(1), renewsByCard, AddOnSource(payment));
+                break;
+            }
             case PaymentKind.PremiumMonthly:
+            case PaymentKind.PremiumAiMonthly:
             case PaymentKind.StudioYearly:
             case PaymentKind.VenueMonthly:
                 if (payment.UserId is not { } buyer) break;
@@ -519,12 +585,18 @@ public sealed class BillingService(
                 // The store renews it from here on, so a card saved earlier must not be charged as well.
                 if (payment.PeriodEndsAt is not null) user.AutoRenewKind = null;
                 user.SubscriptionTier = tier;
-                // Bought with the card saved (or renewed with it): it goes on renewing the same way.
+                // Bought with the card saved (or renewed with it): it goes on renewing the same way. The AI
+                // designer renews as an add-on to Premium (below), so the plan itself renews as Premium.
                 if (payment.AutoRenew)
                 {
-                    user.AutoRenewKind = payment.Kind;
+                    user.AutoRenewKind = payment.Kind == PaymentKind.PremiumAiMonthly ? PaymentKind.PremiumMonthly : payment.Kind;
                     user.RenewalFailures = 0;
                 }
+                // With the AI designer: the add-on runs to the same end. A store subscription's own sync then
+                // records whether it renews with it; a card renews it while the card renews Premium.
+                if (payment.Kind == PaymentKind.PremiumAiMonthly)
+                    AddOns.Set(user, AddOns.DesignerAi, user.SubscriptionEndsAt,
+                        payment.PeriodEndsAt is not null || payment.AutoRenew, AddOnSource(payment));
                 break;
         }
 
@@ -543,6 +615,13 @@ public sealed class BillingService(
 
         if (raiseWindows && campaign is not null) await buckets.RaiseWindowsToPlanAsync(campaign.Id, ct);
     }
+
+    private static string AddOnSource(Payment payment) => payment.Provider switch
+    {
+        PaymentProviders.GooglePlay => AddOns.Sources.GooglePlay,
+        PaymentProviders.AppStore => AddOns.Sources.AppStore,
+        _ => AddOns.Sources.Bml,
+    };
 
     public async Task<PaymentStatusDto> PaymentStatusAsync(Guid paymentId, CancellationToken ct = default)
     {
@@ -586,10 +665,35 @@ public sealed class BillingService(
         return await AccountWithStoreAsync(user, now, ct);
     }
 
-    private async Task<BillingAccountDto> AccountWithStoreAsync(AppUser user, DateTimeOffset now, CancellationToken ct)
+    public async Task<BillingAccountDto> SetDesignerAiRenewalAsync(bool renew, CancellationToken ct = default)
     {
-        var account = Account(user, now);
-        if (!account.Active) return account;
+        var me = RequireUser();
+        var user = await users.Query(tracking: true).FirstOrDefaultAsync(u => u.Id == me, ct)
+                   ?? throw new NotFoundException("That account no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+        if (!AddOns.DesignerAiActive(user, now))
+            throw new CodedRuleException(renew
+                    ? "The AI designer isn't on. Add it from Billing."
+                    : "The AI designer isn't on.", "designer_ai_not_on");
+        if (await StoreOfAsync(user, now, ct) is not null)
+            throw new CodedRuleException("Your Premium is billed by the app store. Change the AI designer in the app.", "designer_ai_store");
+        var was = AddOns.Find(user, AddOns.DesignerAi)!.Renews;
+        if (was != renew)
+        {
+            AddOns.SetRenews(user, AddOns.DesignerAi, renew);
+            await auditLogs.AddAsync(new AuditLog
+            {
+                Id = Guid.NewGuid(), Action = renew ? "billing.designer_ai.on" : "billing.designer_ai.off", Actor = me.ToString(), CreatedAt = now,
+                DataJson = JsonSerializer.Serialize(new { endsAt = AddOns.Find(user, AddOns.DesignerAi)!.EndsAt }),
+            }, ct);
+            await uow.SaveChangesAsync(ct);
+        }
+        return await AccountWithStoreAsync(user, now, ct);
+    }
+
+    /// <summary>The store whose subscription the account's plan runs on, with whether it renews; null for none.</summary>
+    private async Task<(string Store, bool AutoRenew)?> StoreOfAsync(AppUser user, DateTimeOffset now, CancellationToken ct)
+    {
         if (playPurchases is not null)
         {
             var store = await playPurchases.Query()
@@ -597,7 +701,7 @@ public sealed class BillingService(
                 .OrderByDescending(p => p.ExpiresAt)
                 .Select(p => new { p.AutoRenewing })
                 .FirstOrDefaultAsync(ct);
-            if (store is not null) return account with { Store = PaymentProviders.GooglePlay, StoreAutoRenew = store.AutoRenewing };
+            if (store is not null) return (PaymentProviders.GooglePlay, store.AutoRenewing);
         }
         if (appStorePurchases is not null)
         {
@@ -606,20 +710,30 @@ public sealed class BillingService(
                 .OrderByDescending(p => p.ExpiresAt)
                 .Select(p => new { p.AutoRenewing })
                 .FirstOrDefaultAsync(ct);
-            if (store is not null) return account with { Store = PaymentProviders.AppStore, StoreAutoRenew = store.AutoRenewing };
+            if (store is not null) return (PaymentProviders.AppStore, store.AutoRenewing);
         }
-        return account;
+        return null;
+    }
+
+    private async Task<BillingAccountDto> AccountWithStoreAsync(AppUser user, DateTimeOffset now, CancellationToken ct)
+    {
+        var account = Account(user, now);
+        if (!account.Active) return account;
+        return await StoreOfAsync(user, now, ct) is { } store
+            ? account with { Store = store.Store, StoreAutoRenew = store.AutoRenew }
+            : account;
     }
 
     private static BillingAccountDto Account(AppUser user, DateTimeOffset now)
     {
         var active = PlanRules.IsActive(user.SubscriptionTier, user.SubscriptionEndsAt, now);
         return new BillingAccountDto(user.SubscriptionTier.ToString(), user.SubscriptionEndsAt, active,
-            active && user.AutoRenewKind is { } k ? ItemName(k) : null);
+            active && user.AutoRenewKind is { } k ? ItemName(k) : null,
+            AddOns: AddOns.ForAccount(user, now), CanDownloadAll: DownloadRules.AccountAllows(user, now));
     }
 
     public static bool IsSubscription(PaymentKind kind) =>
-        kind is PaymentKind.PremiumMonthly or PaymentKind.VenueMonthly;
+        kind is PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly or PaymentKind.VenueMonthly;
 
     private Guid RequireUser() => currentUser.UserId ?? throw new ForbiddenException("Sign in to see your billing.");
 
@@ -638,6 +752,8 @@ public sealed class BillingService(
         "keep-photos" => PaymentKind.KeepPhotos,
         "sending" => PaymentKind.Sending,
         "premium-monthly" => PaymentKind.PremiumMonthly,
+        "premium-ai-monthly" => PaymentKind.PremiumAiMonthly,
+        "designer-ai-add" => PaymentKind.DesignerAiAdd,
         "venue-monthly" => PaymentKind.VenueMonthly,
         "gold-extension" or "party-extension" => PaymentKind.GoldExtension,
         "platinum-extension" or "wedding-extension" => PaymentKind.PlatinumExtension,
@@ -651,6 +767,8 @@ public sealed class BillingService(
         PaymentKind.KeepPhotos => "keep-photos",
         PaymentKind.Sending or PaymentKind.Initial or PaymentKind.TopUp => "sending",
         PaymentKind.PremiumMonthly => "premium-monthly",
+        PaymentKind.PremiumAiMonthly => "premium-ai-monthly",
+        PaymentKind.DesignerAiAdd => "designer-ai-add",
         PaymentKind.StudioYearly => "studio-yearly",
         PaymentKind.VenueMonthly => "venue-monthly",
         PaymentKind.GoldExtension => "gold-extension",
@@ -671,9 +789,11 @@ public sealed class BillingService(
             PaymentKind.PlatinumExtension => $"Platinum pass, another year{on}",
             PaymentKind.KeepPhotos => $"Keep your photos, a year{on}",
             PaymentKind.Sending => $"{quantity * PricingCalculator.BlockSize} emailed invitations{on}",
-            PaymentKind.PremiumMonthly => "Premium pass, a month",
+            PaymentKind.PremiumMonthly => "Premium, a month",
+            PaymentKind.PremiumAiMonthly => "Premium with the AI designer, a month",
+            PaymentKind.DesignerAiAdd => "AI designer, the rest of this month",
             // StudioYearly was Premium's yearly payment when Premium was called Studio: not today's Studio.
-            PaymentKind.StudioYearly => "Premium pass, a year",
+            PaymentKind.StudioYearly => "Premium, a year",
             PaymentKind.VenueMonthly => "Studio, a month",
             PaymentKind.StudioGoldCredits => $"{quantity} Gold pass{(quantity == 1 ? "" : "es")} for clients",
             PaymentKind.StudioPlatinumCredits => $"{quantity} Platinum pass{(quantity == 1 ? "" : "es")} for clients",
@@ -687,7 +807,7 @@ public sealed class BillingService(
         PaymentKind.PlatinumPass or PaymentKind.PlatinumExtension => "platinum",
         PaymentKind.KeepPhotos => "keep",
         PaymentKind.Sending => "sending",
-        PaymentKind.PremiumMonthly => "premium",
+        PaymentKind.PremiumMonthly or PaymentKind.PremiumAiMonthly or PaymentKind.DesignerAiAdd => "premium",
         _ => "venue",
     };
 }

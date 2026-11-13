@@ -41,6 +41,24 @@ public class PriceBookTests
         Assert.Equal(Prices.Defaults.PlatinumPass, p.PlatinumPass);
     }
 
+    [Fact]
+    public async Task A_row_saved_before_the_ai_designer_add_on_reads_it_at_77_and_a_saved_one_wins()
+    {
+        var before = new AppSetting { Key = PriceBook.Key, ValueJson = """{"GoldPass":249,"PremiumMonthly":77}""" };
+        Assert.Equal(77m, (await Sut(before).CurrentAsync()).DesignerAiMonthly);
+        PriceBook.ClearCache();
+
+        var saved = new AppSetting { Key = PriceBook.Key, ValueJson = """{"PremiumMonthly":80,"DesignerAiMonthly":90}""" };
+        var p = await Sut(saved).CurrentAsync();
+        Assert.Equal((80m, 90m), (p.PremiumMonthly, p.DesignerAiMonthly));
+    }
+
+    [Fact]
+    public void An_ai_designer_price_of_nothing_cannot_be_saved()
+    {
+        Assert.Contains("The AI designer a month must be more than 0.", (Prices.Defaults with { DesignerAiMonthly = 0m }).Problems());
+    }
+
     // ----- A row saved before Party and Wedding became Gold and Platinum --------------------------
 
     private const string OldRow = """

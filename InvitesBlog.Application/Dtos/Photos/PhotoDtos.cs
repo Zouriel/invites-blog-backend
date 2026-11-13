@@ -65,7 +65,14 @@ public sealed record EventPhotoBoxDto(
     /// Face grouping, when any album in the box has it on: the notice to show, the People filter's groups, and
     /// whether this caller may name them. Null when it's off everywhere.
     /// </summary>
-    FaceGroupingDto? Faces = null);
+    FaceGroupingDto? Faces = null,
+    /// <summary>
+    /// Whether THIS caller may download or share any number at once ("Download all"): their own account is on
+    /// Premium or Studio, or the event has a Gold or Platinum pass in force. Otherwise at most
+    /// <paramref name="DownloadLimit"/> at a time, which the server enforces (pricing 2026-11).
+    /// </summary>
+    bool DownloadAll = false,
+    int DownloadLimit = InvitesBlog.Application.Plans.DownloadRules.Limit);
 
 /// <summary>
 /// Face grouping in a box. <c>People</c> are the groups worth filtering by (named, or in more than one photo),

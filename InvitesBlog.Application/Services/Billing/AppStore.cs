@@ -16,7 +16,10 @@ public static class AppStoreCatalog
 {
     public static IReadOnlyList<PlayProduct> All { get; } = GooglePlayCatalog.All;
 
-    /// <summary>The subscription group (Premium, Studio): one at a time.</summary>
+    /// <summary>
+    /// The subscription group, one at a time. Levels in App Store Connect, highest first: venue_monthly (Studio),
+    /// premium_ai_monthly (Premium with the AI designer), premium_monthly. Up is at once, down at the next renewal.
+    /// </summary>
     public static IReadOnlyList<string> Subscriptions { get; } =
         All.Where(p => p.IsSubscription).Select(p => p.Id).ToList();
 
@@ -57,7 +60,8 @@ public sealed record AppStoreTransaction(
 }
 
 /// <summary>A subscription's renewal state (<c>JWSRenewalInfoDecodedPayload</c>), verified.</summary>
-public sealed record AppStoreRenewalInfo(bool AutoRenew, DateTimeOffset? GracePeriodExpiresDate);
+/// <param name="AutoRenewProductId">The product it renews as next (a downgrade shows here until the renewal).</param>
+public sealed record AppStoreRenewalInfo(bool AutoRenew, DateTimeOffset? GracePeriodExpiresDate, string? AutoRenewProductId = null);
 
 /// <summary>
 /// One subscription's status from Get All Subscription Statuses: 1 active, 2 expired, 3 billing retry,
