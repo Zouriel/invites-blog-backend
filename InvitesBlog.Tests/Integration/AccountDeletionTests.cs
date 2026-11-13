@@ -814,9 +814,9 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
             return rows;
         });
         // ai_picture_usage, assistant_usage and design_assistant_messages are deleted explicitly by the service
-        // (and cascade); portfolios and portfolio_consents too (with the portfolio's files); the rest are handled as described in DeleteEverythingAsync.
+        // (and cascade); portfolios, portfolio_consents and portfolio_photo_claims too (with the portfolio's files); the rest are handled as described in DeleteEverythingAsync.
         Assert.Equal(
-            new[] { "ai_picture_usage.user_id", "assistant_usage.user_id", "comment_likes.user_id", "content_reports.reporter_user_id", "design_assistant_messages.user_id", "device_tokens.user_id", "favourites.user_id", "pass_credits.owner_user_id", "portfolio_consents.user_id", "portfolios.user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_blocks.blocked_user_id", "user_blocks.blocker_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
+            new[] { "ai_picture_usage.user_id", "assistant_usage.user_id", "comment_likes.user_id", "content_reports.reporter_user_id", "design_assistant_messages.user_id", "device_tokens.user_id", "favourites.user_id", "pass_credits.owner_user_id", "portfolio_consents.user_id", "portfolio_photo_claims.user_id", "portfolios.user_id", "post_comments.user_id", "post_likes.user_id", "template_designs.owner_user_id", "user_blocks.blocked_user_id", "user_blocks.blocker_user_id", "user_external_logins.user_id", "user_roles.user_id", "venues.owner_user_id" },
             found.Order(StringComparer.Ordinal));
     }
 
