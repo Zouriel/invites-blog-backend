@@ -58,7 +58,7 @@ public sealed class PassReminderService(
             var passName = c.EventPass == EventPassKind.Platinum ? "Platinum pass" : "Gold pass";
             var facesOn = buckets is not null && await buckets.Query().AnyAsync(b => b.CampaignId == c.Id && b.FaceGroupingOn, ct);
             await email.SendAsync(PassEmails.EndingSoon(to, c.Title, passName, c.EventPassUntil!.Value,
-                offer.ExtensionPrice(c.EventPass), $"{config.InviterBase()}/dashboard/{c.Id}", c.TimeZone, facesOn), ct);
+                offer.ExtensionPrice(c.EventPass), $"{config.AppBase()}/dashboard/{c.Id}", c.TimeZone, facesOn), ct);
             sent++;
         }
         if (due.Count > 0) await uow.SaveChangesAsync(ct);

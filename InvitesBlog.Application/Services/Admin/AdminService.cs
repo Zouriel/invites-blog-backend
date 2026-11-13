@@ -380,7 +380,7 @@ public sealed class AdminService(
             && campaign.CreatedByUserId is { } hostId
             && await users.Query().Where(u => u.Id == hostId).Select(u => u.Email).FirstOrDefaultAsync(ct) is { Length: > 0 } hostEmail)
         {
-            var link = $"{InvitesBlog.Application.Common.AppUrls.InviterBase(config)}/create/{campaign.Id}/photos";
+            var link = $"{InvitesBlog.Application.Common.AppUrls.AppBase(config)}/create/{campaign.Id}/photos";
             await email.SendAsync(PassEmails.Ready(hostEmail, campaign.Title, kind == EventPassKind.Platinum ? "Platinum pass" : "Gold pass", link), ct);
         }
         return await DescribeEventAsync(campaign, ct);

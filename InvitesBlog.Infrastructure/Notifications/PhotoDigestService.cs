@@ -150,7 +150,7 @@ public sealed class PhotoDigestService(
         var inviter = campaign.InviterId is { } id ? await db.Inviters.FindAsync([id], ct) : null;
         if (!string.IsNullOrWhiteSpace(inviter?.Email))
         {
-            var hostLink = $"{config.InviterBase()}/dashboard/{campaign.Id}";
+            var hostLink = $"{config.AppBase()}/dashboard/{campaign.Id}";
             var result = await email.SendAsync(inviter.Email!, subject, Body(title, count, hostLink), ct);
             if (result.Success) sentCount++;
         }
