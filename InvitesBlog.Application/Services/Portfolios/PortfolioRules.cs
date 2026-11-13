@@ -89,7 +89,9 @@ public sealed record PortfolioOptionsDto(
     IReadOnlyList<PortfolioAccentChoice> Accents,
     IReadOnlyList<PortfolioFontChoice> Fonts,
     IReadOnlyList<PortfolioNamedChoice> Layouts,
-    IReadOnlyList<PortfolioSectionKindChoice> SectionKinds);
+    IReadOnlyList<PortfolioSectionKindChoice> SectionKinds,
+    IReadOnlyList<PortfolioNamedChoice> LogoPositions,
+    IReadOnlyList<PortfolioNamedChoice> LogoSizes);
 
 /// <summary>
 /// The look, as named choices (plain-defaults rule: no colour codes to type). Theme colours are the UI library's
@@ -145,7 +147,20 @@ public static class PortfolioChoices
         new(PortfolioSectionKinds.Contact, "Contact", false),
     ];
 
-    public static readonly PortfolioOptionsDto Options = new(Themes, Accents, Fonts, Layouts, SectionKinds);
+    /// <summary>Where the logo sits on the cover. The first is the original look (logo above the name, bottom left).</summary>
+    public static readonly IReadOnlyList<PortfolioNamedChoice> LogoPositions =
+    [
+        new("bottom-left", "With the name"), new("bottom-center", "With the name, centred"), new("center", "Middle"),
+        new("top-left", "Top corner"), new("top-center", "Top, centred"),
+    ];
+
+    public static readonly IReadOnlyList<PortfolioNamedChoice> LogoSizes =
+        [new("small", "Small"), new("medium", "Medium"), new("large", "Large")];
+
+    public static readonly PortfolioOptionsDto Options = new(Themes, Accents, Fonts, Layouts, SectionKinds, LogoPositions, LogoSizes);
+
+    public static string LogoPosition(string? key) => LogoPositions.FirstOrDefault(x => x.Key == key)?.Key ?? LogoPositions[0].Key;
+    public static string LogoSize(string? key) => LogoSizes.FirstOrDefault(x => x.Key == key)?.Key ?? "medium";
 
     public static PortfolioThemeChoice Theme(string? key) => Themes.FirstOrDefault(t => t.Key == key) ?? Themes[0];
     public static PortfolioFontChoice Font(string? key) => Fonts.FirstOrDefault(f => f.Key == key) ?? Fonts[0];

@@ -25,6 +25,10 @@ public sealed class Portfolio
     public string Theme { get; set; } = "oxblood";
     public string Accent { get; set; } = "theme";
     public string Font { get; set; } = "classic";
+    /// <summary>Where the logo sits on the cover (PortfolioChoices.LogoPositions); default = the original look.</summary>
+    public string LogoPosition { get; set; } = "bottom-left";
+    /// <summary>small | medium | large (PortfolioChoices.LogoSizes).</summary>
+    public string LogoSize { get; set; } = "medium";
 
     public string? WhatsApp { get; set; }
     public string? Viber { get; set; }

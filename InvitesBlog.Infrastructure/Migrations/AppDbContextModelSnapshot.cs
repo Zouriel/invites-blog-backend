@@ -2375,6 +2375,22 @@ namespace InvitesBlog.Infrastructure.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_published");
 
+                    b.Property<string>("LogoPosition")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("bottom-left")
+                        .HasColumnName("logo_position");
+
+                    b.Property<string>("LogoSize")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("medium")
+                        .HasColumnName("logo_size");
+
                     b.Property<string>("LogoUrl")
                         .HasColumnType("text")
                         .HasColumnName("logo_url");
