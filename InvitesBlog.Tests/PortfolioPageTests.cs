@@ -41,6 +41,8 @@ public sealed class PortfolioPageTests
         // The visitor can't send a request that names neither a photo nor anything about it.
         Assert.Contains("Tap the photo you mean, or describe it", html);
         Assert.Contains("class=\"btn wide rep-done\"", html);
+        // Picking a photo or typing clears the "tap the photo" hint, so it doesn't sit there after they did.
+        Assert.Contains("function clearErr()", html);
     }
 
     [Fact]
