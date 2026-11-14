@@ -336,6 +336,8 @@ public sealed class AccountDeletionService(
             await db.EventPhotos.Where(p => claimIds.Contains(p.ClaimId)).ExecuteUpdateAsync(u => u.SetProperty(p => p.ClaimId, (Guid?)null), ct);
         await db.PortfolioPhotoClaims.Where(c => c.UserId == me.Id).ExecuteDeleteAsync(ct);
         await db.PassCredits.Where(p => p.OwnerUserId == me.Id).ExecuteDeleteAsync(ct);
+        // What their monthly emailed invitations were spent on (no foreign key: the table holds ids only).
+        await db.MonthlyEmailSends.Where(m => m.AccountId == me.Id).ExecuteDeleteAsync(ct);
         await HandleTemplatesAsync(me, scope, queue, now, ct);
         await KeepPaymentsWithoutThePersonAsync(me, scope.DeletedEvents, queue, ct);
 

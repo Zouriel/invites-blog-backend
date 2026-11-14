@@ -391,6 +391,34 @@ public sealed class AccountDeletionTests(PostgresApiFixture api)
         });
     }
 
+    [PostgresFact]
+    public async Task What_a_subscriber_spent_of_their_monthly_emails_goes_with_the_account_and_nobody_elses()
+    {
+        // monthly_email_sends (2026-11-14) has no foreign key to users, so nothing cascades: the deletion removes it.
+        var person = await UserAsync();
+        var other = await UserAsync();
+        var month = InvitesBlog.Application.Plans.EmailMonth.Of(DateTimeOffset.UtcNow);
+        await api.WriteAsync(async db =>
+        {
+            foreach (var who in new[] { person.Id, person.Id, other.Id })
+                db.MonthlyEmailSends.Add(new MonthlyEmailSend
+                {
+                    Id = Guid.NewGuid(), AccountId = who, Month = month, CampaignId = Guid.NewGuid(),
+                    InviteId = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow,
+                });
+            await Task.CompletedTask;
+        });
+
+        await DeleteThroughApiAsync(api.Client(person.Token), person.Email!);
+
+        await api.ReadAsync(async db =>
+        {
+            Assert.False(await db.MonthlyEmailSends.AnyAsync(m => m.AccountId == person.Id));
+            Assert.Equal(1, await db.MonthlyEmailSends.CountAsync(m => m.AccountId == other.Id));
+            return true;
+        });
+    }
+
     // ----- Refusals, nothing changed -----------------------------------------------------------
 
     [PostgresFact]
